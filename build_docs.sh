@@ -5,4 +5,7 @@
 cp examples/*.png docs/python/example_outputs
 
 # Build the top-level documentation (including the python docs)
-mkdocs build
+if [[ -z "$READTHEDOCS_OUTPUT" ]]; then
+    # This is not a readthedocs build
+    mkdocs build;
+fi

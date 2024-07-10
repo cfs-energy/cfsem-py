@@ -1,6 +1,6 @@
 # cfsem
 
-[Docs - Rust](https://docs.rs/cfsem) | [Docs - Python](https://cfsem.readthedocs.io/)
+[Docs - Rust](https://docs.rs/cfsem) | [Docs - Python](https://cfsem-py.readthedocs.io/)
 
 Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov.
 

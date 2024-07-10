@@ -1,5 +1,5 @@
 site_name: cfsem
-site_url: https://cfsem.readthedocs.io
+site_url: https://cfsem-py.readthedocs.io
 theme:
   name: material
 

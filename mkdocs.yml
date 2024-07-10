@@ -1,6 +1,5 @@
-site_name: cfsem electromagnetics
-# TODO set the site url once we know where it will be hosted.
-# site_url:
+site_name: cfsem
+site_url: https://cfsem.readthedocs.io
 theme:
   name: material
 

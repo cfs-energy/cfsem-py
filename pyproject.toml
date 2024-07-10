@@ -1,0 +1,47 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cfsem"
+version = "2.0.4"
+description = "Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov."
+authors = [{author = "Commonwealth Fusion Systems", email = "jlogan@cfs.energy"}]
+requires-python = ">=3.9, <3.13"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dynamic = ["version"]
+dependencies = [
+    "numpy >= 2",
+    "interpn >= 0.2.2",
+]
+license = "MIT"
+
+[project.optional-dependencies]
+dev = [
+    # Tests
+    "pytest >= 7.1.3",
+    "coverage >= 6.5.0",
+    "ruff >= 0.4.2",
+    "pyright >= 1.1.331",
+    "scipy >= 1.8",
+    # Docs
+    "mkdocs >= 1.6.0",
+    "mkdocs-material >= 9.5.25",
+    "mkdocstrings[python] >= 0.25.1",
+    # Examples
+    "matplotlib >= 3.9",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "cfsem._cfsem"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.coverage.report]
+fail_under = 100

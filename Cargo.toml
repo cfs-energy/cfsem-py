@@ -1,0 +1,27 @@
+[package]
+name = "_cfsem"
+version = "0.1.0"  # Version is controlled by python project
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "_cfsem"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "0.21.2"
+numpy = "0.21.0"  # This must match pyo3 version!
+cfsem = "1.0.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+overflow-checks = true
+
+[profile.dev]
+# Nearly full optimizations for debug builds to test for perf regressions
+# when using maturin develop
+opt-level = 3
+lto = true
+codegen-units = 1

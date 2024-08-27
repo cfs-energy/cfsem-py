@@ -39,12 +39,13 @@ def test_self_inductance_piecewise_linear_filaments(r, z, h):
 @mark.parametrize("r1", [0.5, np.pi])
 @mark.parametrize("r2", [0.1, np.pi / 10.0])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
-def test_mutual_inductance_piecewise_linear_filaments(r1, r2, z):
+@mark.parametrize("par", [True, False])
+def test_mutual_inductance_piecewise_linear_filaments(r1, r2, z, par):
     # Test against calc for mutual inductance of circular filaments
     rzn1 = np.array([[r1], [z], [1.0]])
     rzn2 = np.array([[r2], [-z / np.e], [1.0]])
 
-    m_circular = cfsem.mutual_inductance_of_circular_filaments(rzn1, rzn2)
+    m_circular = cfsem.mutual_inductance_of_circular_filaments(rzn1, rzn2, par)
 
     n = 100
 
@@ -126,7 +127,7 @@ def test_biot_savart_against_flux_density_circular_filament(r, z, par):
     # Circular filament calc
     # [T]
     Br_circular, Bz_circular = cfsem.flux_density_circular_filament(
-        np.ones(1), np.array([r]), np.array([z]), rprime, zprime
+        np.ones(1), np.array([r]), np.array([z]), rprime, zprime, par
     )
 
     # Biot-Savart calc
@@ -149,7 +150,10 @@ def test_biot_savart_against_flux_density_circular_filament(r, z, par):
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
-def test_flux_circular_filament_against_mutual_inductance_of_cylindrical_coils(r, z):
+@mark.parametrize("par", [True, False])
+def test_flux_circular_filament_against_mutual_inductance_of_cylindrical_coils(
+    r, z, par
+):
     # Two single-turn coils with irrelevant cross-section,
     # each discretized into a single filament
     rc1 = r  # Coil center radii
@@ -165,7 +169,7 @@ def test_flux_circular_filament_against_mutual_inductance_of_cylindrical_coils(r
     # Calculate mutual inductance between these two filaments
     f1 = np.array((r1, z1, n1))
     f2 = np.array((r2, z2, n2))
-    m_filaments = cfsem.mutual_inductance_of_cylindrical_coils(f1, f2)
+    m_filaments = cfsem.mutual_inductance_of_cylindrical_coils(f1, f2, par)
 
     # Calculate mutual inductance via python test calc
     # and test the mutual inductance of coils calc.
@@ -175,8 +179,8 @@ def test_flux_circular_filament_against_mutual_inductance_of_cylindrical_coils(r
     assert abs(1 - m_filaments / m_filaments_test) < 1e-6
 
     # Do flux calcs
-    psi_2to1 = np.sum(n1 * cfsem.flux_circular_filament(n2, r2, z2, r1, z1))
-    psi_1to2 = np.sum(n2 * cfsem.flux_circular_filament(n1, r1, z1, r2, z2))
+    psi_2to1 = np.sum(n1 * cfsem.flux_circular_filament(n2, r2, z2, r1, z1, par))
+    psi_1to2 = np.sum(n2 * cfsem.flux_circular_filament(n1, r1, z1, r2, z2, par))
 
     # Because the integrated poloidal flux at a given location is the same as mutual inductance,
     # we should get the same number using our mutual inductance calc
@@ -191,7 +195,8 @@ def test_flux_circular_filament_against_mutual_inductance_of_cylindrical_coils(r
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
-def test_flux_density_circular_filament_against_flux_circular_filament(r, z):
+@mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_against_flux_circular_filament(r, z, par):
     rzn1 = cfsem.filament_coil(r, z, 0.05, 0.05, 1.0, 4, 4)
     rfil, zfil, _ = rzn1.T
     ifil = np.ones_like(rfil)
@@ -204,7 +209,7 @@ def test_flux_density_circular_filament_against_flux_circular_filament(r, z):
     zprime = Z.flatten()
 
     Br, Bz = cfsem.flux_density_circular_filament(
-        ifil, rfil, zfil, rprime, zprime
+        ifil, rfil, zfil, rprime, zprime, par
     )  # [T]
 
     # We can also get B from the derivative of the flux function (Wesson eqn 3.2.2),
@@ -216,12 +221,12 @@ def test_flux_density_circular_filament_against_flux_circular_filament(r, z):
 
     dr = 1e-4
     dz = 1e-4
-    psi = cfsem.flux_circular_filament(ifil, rfil, zfil, rprime, zprime)
+    psi = cfsem.flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
     dpsidz = (
-        cfsem.flux_circular_filament(ifil, rfil, zfil, rprime, zprime + dz) - psi
+        cfsem.flux_circular_filament(ifil, rfil, zfil, rprime, zprime + dz, par) - psi
     ) / dz
     dpsidr = (
-        cfsem.flux_circular_filament(ifil, rfil, zfil, rprime + dr, zprime) - psi
+        cfsem.flux_circular_filament(ifil, rfil, zfil, rprime + dr, zprime, par) - psi
     ) / dr
 
     Br_from_psi = -dpsidz / rprime / (2.0 * np.pi)  # [T]
@@ -232,7 +237,8 @@ def test_flux_density_circular_filament_against_flux_circular_filament(r, z):
 
 
 @mark.parametrize("r", [np.e / 100, 0.775, np.pi])
-def test_flux_density_circular_filament_against_ideal_solenoid(r):
+@mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_against_ideal_solenoid(r, par):
     # We can also check against the ideal solenoid calc to make sure we don't have a systematic
     # offset or scaling error
 
@@ -245,14 +251,15 @@ def test_flux_density_circular_filament_against_ideal_solenoid(r):
         current=1.0, num_turns=ifil.size, length=length
     )  # [T] ideal solenoid Bz at origin
     _, bz_origin = cfsem.flux_density_circular_filament(
-        ifil, rfil, zfil, np.zeros(1), np.zeros(1)
+        ifil, rfil, zfil, np.zeros(1), np.zeros(1), par
     )
 
     assert np.allclose(np.array([b_ideal]), bz_origin, rtol=1e-2)
 
 
 @mark.parametrize("r", [np.e / 100, 0.775, np.pi])
-def test_flux_density_circular_filament_against_ideal_loop(r):
+@mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_against_ideal_loop(r, par):
     # We can also check against an ideal current loop calc
     # http://hyperphysics.phy-astr.gsu.edu/hbase/magnetic/curloo.html
 
@@ -263,7 +270,7 @@ def test_flux_density_circular_filament_against_ideal_loop(r):
 
     b_ideal = cfsem.MU_0 * current / (2.0 * r)  # [T] ideal loop Bz at origin
     _, bz_origin = cfsem.flux_density_circular_filament(
-        ifil, rfil, zfil, np.zeros(1), np.zeros(1)
+        ifil, rfil, zfil, np.zeros(1), np.zeros(1), par
     )
 
     assert np.allclose(np.array([b_ideal]), bz_origin, rtol=1e-6)
@@ -271,7 +278,8 @@ def test_flux_density_circular_filament_against_ideal_loop(r):
 
 @mark.parametrize("a", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
-def test_flux_density_circular_filament_against_numerical(a, z):
+@mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_against_numerical(a, z, par):
     # Test the elliptic-integral calc for B-field of a loop against numerical integration
 
     n = 10
@@ -286,7 +294,7 @@ def test_flux_density_circular_filament_against_numerical(a, z):
 
     # Calc using elliptic integral fits
     Br, Bz = cfsem.flux_density_circular_filament(
-        np.array([I]), np.array([a]), np.array([z]), rprime, zprime
+        np.array([I]), np.array([a]), np.array([z]), rprime, zprime, par
     )  # [T]
 
     # Calc using numerical integration around the loop
@@ -302,7 +310,8 @@ def test_flux_density_circular_filament_against_numerical(a, z):
     assert np.allclose(Bz, Bz_num)
 
 
-def test_self_inductance_lyle6_against_filamentization_and_distributed():
+@mark.parametrize("par", [True, False])
+def test_self_inductance_lyle6_against_filamentization_and_distributed(par):
     # Test that the Lyle approximation gives a similar result to
     # a case done by brute-force filamentization w/ a heuristic for self-inductance of a loop
     r, z, dr, dz, nt, nr, nz = (0.8, 0.0, 0.5, 2.0, 3.0, 20, 20)
@@ -323,11 +332,11 @@ def test_self_inductance_lyle6_against_filamentization_and_distributed():
     #  Do filamentized psi and B calcs for convenience,
     #  although ideally we'd do a grad-shafranov solve here for a smoother field
     psi = cfsem.flux_circular_filament(
-        current, rfil, zfil, rmesh.flatten(), zmesh.flatten()
+        current, rfil, zfil, rmesh.flatten(), zmesh.flatten(), par
     )
     psi = psi.reshape(rmesh.shape)
     br, bz = cfsem.flux_density_circular_filament(
-        current, rfil, zfil, rmesh.flatten(), zmesh.flatten()
+        current, rfil, zfil, rmesh.flatten(), zmesh.flatten(), par
     )
     br = br.reshape(rmesh.shape)
     bz = bz.reshape(rmesh.shape)
@@ -505,3 +514,77 @@ def test_self_inductance_annular_ring(major_radius, a, b):
     with raises(ValueError):
         # Larger outer than major
         cfsem.self_inductance_annular_ring(0.1, 0.01, 0.11)
+
+
+@mark.parametrize("r", [0.775, 1.51])
+@mark.parametrize("z", [0.0, np.pi])
+@mark.parametrize("par", [True, False])
+def test_vector_potential_axisymmetric(r, z, par):
+    # Spot-check vector potential against inductance calcs.
+    # More detailed three-way tests against both B-field and inductance
+    # are done in the Rust library.
+
+    # Filament
+    ifil = np.atleast_1d([1.0])  # [A] 1A total reference current
+    rfil = np.atleast_1d([r])
+    zfil = np.atleast_1d([z])
+
+    # Observation points
+    rgrid = np.arange(0.5, 2.0, 0.05)
+    zgrid = np.arange(-3.0, 3.0, 0.05)
+    rmesh, zmesh = np.meshgrid(rgrid, zgrid, indexing="ij")
+
+    psi = cfsem.flux_circular_filament(
+        ifil, rfil, zfil, rmesh.flatten(), zmesh.flatten(), par
+    )
+    a_phi = cfsem.vector_potential_circular_filament(
+        ifil, rfil, zfil, rmesh.flatten(), zmesh.flatten(), par
+    )
+
+    # Integrate vector potential around a loop to get the flux
+    psi_from_a = 2.0 * np.pi * rmesh.flatten() * a_phi  # [Wb]
+
+    # We should not be able to tell the difference above a single roundoff
+    assert np.allclose(psi, psi_from_a, rtol=1e-16, atol=1e-16)
+
+
+@mark.parametrize("r", [0.775, np.pi])
+@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("par", [True, False])
+def test_vector_potential_linear_against_circular_filament(r, z, par):
+    # Note we are mapping between (x, y, z) and (r, phi, z) coordinates here
+
+    # Biot-Savart filaments in cartesian coords
+    n_filaments = int(1e4)
+    phi = np.linspace(0.0, 2.0 * np.pi, n_filaments)
+    xfils = r * np.cos(phi)
+    yfils = r * np.sin(phi)
+    zfils = np.ones_like(xfils) * z
+
+    # Observation grid
+    rs = np.linspace(0.01, r - 0.1, 10)
+    zs = np.linspace(-1.0, 1.0, 10)
+
+    rmesh, zmesh = np.meshgrid(rs, zs, indexing="ij")
+    rprime = rmesh.flatten()
+    zprime = zmesh.flatten()
+
+    # Circular filament calc
+    a_phi = cfsem.vector_potential_circular_filament(
+        np.ones(1), np.array([r]), np.array([z]), rprime, zprime, par
+    )  # [V-s/m]
+
+    # Biot-Savart calc
+    xyzp = (rprime, np.zeros_like(zprime), zprime)
+    xyzfil = (xfils[1:], yfils[1:], zfils[1:])
+    dlxyzfil = (xfils[1:] - xfils[:-1], yfils[1:] - yfils[:-1], zfils[1:] - zfils[:-1])
+    ifil = np.ones_like(xfils[1:])
+    ax, ay, az = cfsem.vector_potential_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, par
+    )  # [T]
+
+    assert np.allclose(a_phi, ay, rtol=1e-12, atol=1e-12)  # Should match circular calc
+    assert np.allclose(
+        az, np.zeros_like(az), atol=1e-9
+    )  # Should sum to zero everywhere
+    assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...

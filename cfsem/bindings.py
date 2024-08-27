@@ -11,7 +11,7 @@ from numpy import ascontiguousarray, float64, zeros_like
 from numpy.typing import NDArray
 
 from ._cfsem import flux_circular_filament as em_flux_circular_filament
-from ._cfsem import flux_density_biot_savart as em_flux_density_biot_savart
+from ._cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from ._cfsem import flux_density_circular_filament as em_flux_density_circular_filament
 from ._cfsem import gs_operator_order2 as em_gs_operator_order2
 from ._cfsem import gs_operator_order4 as em_gs_operator_order4
@@ -20,6 +20,12 @@ from ._cfsem import (
 )
 from ._cfsem import filament_helix_path as em_filament_helix_path
 from ._cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
+from ._cfsem import (
+    vector_potential_circular_filament as em_vector_potential_circular_filament,
+)
+from ._cfsem import (
+    vector_potential_linear_filament as em_vector_potential_linear_filament,
+)
 
 
 def flux_circular_filament(
@@ -28,6 +34,7 @@ def flux_circular_filament(
     zfil: NDArray[float64],
     rprime: NDArray[float64],
     zprime: NDArray[float64],
+    par: bool = True,
 ) -> NDArray[float64]:
     """
     Flux contributions from some circular filaments to some observation points,
@@ -37,17 +44,11 @@ def flux_circular_filament(
     (`rprime`, `zprime`) observation location with $\\hat{n}$ oriented parallel to the z-axis.
 
     A convenient interpretation of the flux is as the mutual inductance
-    per secondary coil current between a filament at (`rfil`, `zfil`) and a secondary
+    between a circular filament at (`rfil`, `zfil`) and a second circular
     filament at (`rprime`, `zprime`); this can be used to get the mutual inductance
-    between two filamentized coils as the sum of I1 * I2 * flux_from_coil_1_to_coil_2.
+    between two filamentized coils as the sum of flux contributions between each coil's filaments.
     Because mutual inductance is reflexive, the order of the coils can be reversed and
     the same result is obtained.
-
-    This function is fairly well-optimized and runs about >10x faster than an
-    equivalent implementation in numpy+scipy, with lower RAM usage
-    (O(n) in number of observation locations) than what would be required
-    for a tiled implementation. Numba does not have an implementation of
-    elliptic integrals and will not accept scipy's.
 
     Args:
         ifil: [A] filament current
@@ -57,15 +58,58 @@ def flux_circular_filament(
         zprime: [m] Observation point Z-coord
 
     Returns:
-        [T-m^2] or [V-s] psi, poloidal flux at each observation point
+        [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
     """
     ifil = ascontiguousarray(ifil)
     rfil = ascontiguousarray(rfil)
     zfil = ascontiguousarray(zfil)
     rprime = ascontiguousarray(rprime)
     zprime = ascontiguousarray(zprime)
-    psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime)
-    return psi  # [T-m^2] or [V-s]
+    psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    return psi  # [Wb] or [T-m^2] or [V-s]
+
+
+def vector_potential_circular_filament(
+    ifil: NDArray[float64],
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    rprime: NDArray[float64],
+    zprime: NDArray[float64],
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    Vector potential contributions from some circular filaments to some observation points.
+    Off-axis A_phi component for a circular current filament in vacuum.
+
+    The vector potential of a loop has zero r- and z- components due to symmetry,
+    and does not vary in the phi-direction.
+
+    Note that to recover the B-field as the curl of A, the curl operator for cylindrical
+    coordinates must be used with the output of this function incorporated into a full
+    3D A-field like [A_r, A_phi, A_z].
+
+    References:
+        [1] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
+            “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
+            Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+
+    Args:
+        ifil: [A] filament current
+        rfil: [m] filament R-coord
+        zfil: [m] filament Z-coord
+        rprime: [m] Observation point R-coord
+        zprime: [m] Observation point Z-coord
+
+    Returns:
+        [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
+    """
+    ifil = ascontiguousarray(ifil)
+    rfil = ascontiguousarray(rfil)
+    zfil = ascontiguousarray(zfil)
+    rprime = ascontiguousarray(rprime)
+    zprime = ascontiguousarray(zprime)
+    a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    return a_phi  # [Wb/m] or [V-s/m]
 
 
 def flux_density_circular_filament(
@@ -74,6 +118,7 @@ def flux_density_circular_filament(
     zfil: NDArray[float64],
     rprime: NDArray[float64],
     zprime: NDArray[float64],
+    par: bool = True,
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """
     Off-axis Br,Bz components for a circular current filament in vacuum.
@@ -114,11 +159,11 @@ def flux_density_circular_filament(
     zfil = ascontiguousarray(zfil)
     rprime = ascontiguousarray(rprime)
     zprime = ascontiguousarray(zprime)
-    Br, Bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime)
+    Br, Bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
     return Br, Bz  # [T]
 
 
-def flux_density_biot_savart(
+def flux_density_linear_filament(
     xyzp: Array3xN,
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
@@ -128,11 +173,6 @@ def flux_density_biot_savart(
     """
     Biot-Savart law calculation for B-field contributions from many filament segments
     to many observation points.
-
-    This calc is fairly well-optimized under the constraint to keep peak RAM usage to
-    O(n) in n observation points, which precludes tiling. It comes out about 20% faster
-    than an equivalent implementation in numba, which is about 4x faster than an
-    equivalent implementation in numpy.
 
     Args:
         xyzp: [m] x,y,z coords of observation points
@@ -160,7 +200,50 @@ def flux_density_biot_savart(
         ascontiguousarray(dlxyzfil[2]),
     )
     ifil = ascontiguousarray(ifil)
-    return em_flux_density_biot_savart(xyzp, xyzfil, dlxyzfil, ifil, par)
+    return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
+
+
+flux_density_biot_savart = flux_density_linear_filament  # For backwards-compatibility
+
+
+def vector_potential_linear_filament(
+    xyzp: Array3xN,
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    ifil: NDArray[float64],
+    par: bool = True,
+) -> Array3xN:
+    """
+    Vector potential calculation for A-field contribution from many current filament
+    segments to many observation points.
+
+    Args:
+        xyzp: [m] x,y,z coords of observation points
+        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
+        dlxyzfil: [m] x,y,z length delta of current filaments
+        ifil: [A] current in each filament segment
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
+    """
+    xyzp = (
+        ascontiguousarray(xyzp[0]),
+        ascontiguousarray(xyzp[1]),
+        ascontiguousarray(xyzp[2]),
+    )
+    xyzfil = (
+        ascontiguousarray(xyzfil[0]),
+        ascontiguousarray(xyzfil[1]),
+        ascontiguousarray(xyzfil[2]),
+    )
+    dlxyzfil = (
+        ascontiguousarray(dlxyzfil[0]),
+        ascontiguousarray(dlxyzfil[1]),
+        ascontiguousarray(dlxyzfil[2]),
+    )
+    ifil = ascontiguousarray(ifil)
+    return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
 def inductance_piecewise_linear_filaments(
@@ -200,10 +283,10 @@ def inductance_piecewise_linear_filaments(
     References:
         [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
             Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
-        
+
         [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
             Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
-        
+
         [3] R. Dengler, “Self inductance of a wire loop as a curve integral,”
             AEM, vol. 5, no. 1, p. 1, Jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331)
 

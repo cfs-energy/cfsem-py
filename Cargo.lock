@@ -46,9 +46,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cfsem"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5cbed55153f04ab37ca424a26fcce4bd6fe8f482bca97bd3d5052bfba620466"
+checksum = "2b3e27e61569347c86debb5a8032a62c7acb3b6da51d14f68dd948cf7625dd79"
 dependencies = [
  "nalgebra",
  "rayon",

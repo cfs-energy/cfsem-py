@@ -581,7 +581,7 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
     ifil = np.ones_like(xfils[1:])
     ax, ay, az = cfsem.vector_potential_linear_filament(
         xyzp, xyzfil, dlxyzfil, ifil, par
-    )  # [T]
+    )  # [V-s/m]
 
     assert np.allclose(a_phi, ay, rtol=1e-12, atol=1e-12)  # Should match circular calc
     assert np.allclose(

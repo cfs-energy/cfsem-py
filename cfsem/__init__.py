@@ -259,7 +259,7 @@ def mutual_inductance_of_circular_filaments(
     Args:
         rzn1 (array): 3x1 array (r [m], z [m], n []) coordinates and number of turns
         rzn2 (array): 3x1 array (r [m], z [m], n []) coordinates and number of turns
-        par: Whether to use the parallel variant
+        par: Whether to use CPU parallelism
 
     Returns:
         float: [H] mutual inductance
@@ -285,7 +285,7 @@ def mutual_inductance_of_cylindrical_coils(
     Args:
         f1: 3 x N array of filament definitions like (r [m], z [m], n [])
         f2: 3 x N array of filament definitions like (r [m], z [m], n [])
-        par: Whether to use the parallel variant
+        par: Whether to use CPU parallelism
 
     Returns:
         [H] mutual inductance of the two discretized coils

@@ -56,6 +56,7 @@ def flux_circular_filament(
         zfil: [m] filament Z-coord
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
+        par: Whether to use CPU parallelism
 
     Returns:
         [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
@@ -99,6 +100,7 @@ def vector_potential_circular_filament(
         zfil: [m] filament Z-coord
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
+        par: Whether to use CPU parallelism
 
     Returns:
         [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
@@ -150,6 +152,7 @@ def flux_density_circular_filament(
         zfil: [m] filament Z-coord
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
+        par: Whether to use CPU parallelism
 
     Returns:
         [T] (Br, Bz) flux density components

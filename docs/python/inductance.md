@@ -2,6 +2,8 @@
 
 ## Mutual inductance
 
+::: cfsem.flux_circular_filament
+
 ::: cfsem.mutual_inductance_of_circular_filaments
 
 ::: cfsem.mutual_inductance_of_cylindrical_coils

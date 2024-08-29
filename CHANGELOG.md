@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0 2024-08-27
+
+### Added
+
+* Add vector potential calcs for linear and circular filaments
+* Add parallel options for circular-filament calcs
+* Add parametrization of unit tests over parallel and serial variants
+* Add optional parallel flags to functions that use functions with new parallel options
+
+### Changed
+
 ## 2.0.4 2024-07-10
 
 ### Changed

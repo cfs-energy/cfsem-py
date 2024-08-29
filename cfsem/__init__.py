@@ -9,6 +9,7 @@ from cfsem.types import Array3xN
 
 from cfsem.bindings import (
     flux_circular_filament,
+    flux_density_linear_filament,
     flux_density_biot_savart,
     flux_density_circular_filament,
     gs_operator_order2,
@@ -16,6 +17,8 @@ from cfsem.bindings import (
     inductance_piecewise_linear_filaments,
     filament_helix_path,
     rotate_filaments_about_path,
+    vector_potential_linear_filament,
+    vector_potential_circular_filament,
 )
 
 from ._cfsem import ellipe, ellipk
@@ -29,6 +32,7 @@ https://www.physics.nist.gov/cuu/pdf/wall_2018.pdf .
 __all__ = [
     "flux_circular_filament",
     "flux_density_biot_savart",
+    "flux_density_linear_filament",
     "flux_density_circular_filament",
     "gs_operator_order2",
     "gs_operator_order4",
@@ -47,6 +51,8 @@ __all__ = [
     "ellipe",
     "ellipk",
     "rotate_filaments_about_path",
+    "vector_potential_linear_filament",
+    "vector_potential_circular_filament",
 ]
 
 
@@ -240,7 +246,9 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     return self_inductance  # [H]
 
 
-def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray) -> float:
+def mutual_inductance_of_circular_filaments(
+    rzn1: NDArray, rzn2: NDArray, par: bool = True
+) -> float:
     """
     Analytic mutual inductance between a pair of ideal cylindrically-symmetric coaxial filaments.
 
@@ -251,19 +259,22 @@ def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray) -> flo
     Args:
         rzn1 (array): 3x1 array (r [m], z [m], n []) coordinates and number of turns
         rzn2 (array): 3x1 array (r [m], z [m], n []) coordinates and number of turns
+        par: Whether to use CPU parallelism
 
     Returns:
         float: [H] mutual inductance
     """
 
     m = mutual_inductance_of_cylindrical_coils(
-        rzn1.reshape((3, 1)), rzn2.reshape((3, 1))
+        rzn1.reshape((3, 1)), rzn2.reshape((3, 1)), par
     )
 
     return m  # [H]
 
 
-def mutual_inductance_of_cylindrical_coils(f1: NDArray, f2: NDArray) -> float:
+def mutual_inductance_of_cylindrical_coils(
+    f1: NDArray, f2: NDArray, par: bool = True
+) -> float:
     """
     Analytical mutual inductance between two coaxial collections of ideal filaments.
 
@@ -274,6 +285,7 @@ def mutual_inductance_of_cylindrical_coils(f1: NDArray, f2: NDArray) -> float:
     Args:
         f1: 3 x N array of filament definitions like (r [m], z [m], n [])
         f2: 3 x N array of filament definitions like (r [m], z [m], n [])
+        par: Whether to use CPU parallelism
 
     Returns:
         [H] mutual inductance of the two discretized coils
@@ -284,7 +296,7 @@ def mutual_inductance_of_cylindrical_coils(f1: NDArray, f2: NDArray) -> float:
     # Using n2 as the current per filament is equivalent to examining a 1A reference current,
     # which gives us the flux per amp (inductance)
     m = np.sum(
-        n1 * flux_circular_filament(n2, r2, z2, r1, z1)
+        n1 * flux_circular_filament(n2, r2, z2, r1, z1, par)
     )  # [H] total mutual inductance
 
     return m  # [H]

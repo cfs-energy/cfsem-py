@@ -255,7 +255,11 @@ fn flux_density_circular_filament<'py>(
     };
 
     // Do calculations
-    match func((&rfil, &zfil, &current), (&rprime, &zprime), (&mut br, &mut bz)) {
+    match func(
+        (&rfil, &zfil, &current),
+        (&rprime, &zprime),
+        (&mut br, &mut bz),
+    ) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -599,7 +603,11 @@ fn flux_density_circular_filament_cartesian<'py>(
     };
 
     // Do calculations
-    match func((&rfil, &zfil, &current), xyzobs, (&mut bx, &mut by, &mut bz)) {
+    match func(
+        (&rfil, &zfil, &current),
+        xyzobs,
+        (&mut bx, &mut by, &mut bz),
+    ) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -617,6 +625,65 @@ fn flux_density_circular_filament_cartesian<'py>(
     })
 }
 
+/// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
+#[pyfunction]
+fn mutual_inductance_circular_to_linear<'py>(
+    current: Bound<'py, PyArray1<f64>>,
+    rfil: Bound<'py, PyArray1<f64>>,
+    zfil: Bound<'py, PyArray1<f64>>,
+    xyzfil: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Filament origin coords (start of segment)
+    dlxyzfil: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Filament length delta
+    par: bool,
+) -> PyResult<f64> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    let current_readonly = current.readonly();
+    let current = current_readonly.as_slice()?;
+    let rfil_readonly = rfil.readonly();
+    let rfil = rfil_readonly.as_slice()?;
+    let zfil_readonly = zfil.readonly();
+    let zfil = zfil_readonly.as_slice()?;
+
+    let xfilro = xyzfil.0.readonly();
+    let yfilro = xyzfil.1.readonly();
+    let zfilro = xyzfil.2.readonly();
+    let xyzfil = (xfilro.as_slice()?, yfilro.as_slice()?, zfilro.as_slice()?);
+
+    let dlxfilro = dlxyzfil.0.readonly();
+    let dlyfilro = dlxyzfil.1.readonly();
+    let dlzfilro = dlxyzfil.2.readonly();
+    let dlxyzfil = (
+        dlxfilro.as_slice()?,
+        dlyfilro.as_slice()?,
+        dlzfilro.as_slice()?,
+    );
+
+    // Select variant
+    let func = match par {
+        true => physics::circular_filament::mutual_inductance_circular_to_linear_par,
+        false => physics::circular_filament::mutual_inductance_circular_to_linear,
+    };
+
+    // Do calculations
+    let m = match func((&rfil, &zfil, &current), xyzfil, dlxyzfil) {
+        Ok(x) => x,
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    Ok(m)
+}
+
 /// A Python module implemented in Rust. The name of this function must match
 /// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
 /// import the module.
@@ -625,9 +692,16 @@ fn flux_density_circular_filament_cartesian<'py>(
 fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(flux_circular_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(flux_density_circular_filament, m.clone())?)?;
-    m.add_function(wrap_pyfunction!(flux_density_circular_filament_cartesian, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        flux_density_circular_filament_cartesian,
+        m.clone()
+    )?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_circular_filament,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        mutual_inductance_circular_to_linear,
         m.clone()
     )?)?;
 

@@ -683,6 +683,10 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
+        flux_density_circular_filament_cartesian,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
         vector_potential_circular_filament,
         m.clone()
     )?)?;

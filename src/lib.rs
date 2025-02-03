@@ -156,7 +156,7 @@ fn flux_circular_filament<'py>(
     };
 
     // Do calculations
-    match func(current, r, z, rprime, zprime, &mut psi[..]) {
+    match func((r, z, current), (rprime, zprime), &mut psi[..]) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -166,7 +166,7 @@ fn flux_circular_filament<'py>(
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
     Python::with_gil(|py| {
-        Ok(PyArray1::from_vec_bound(py, psi).unbind()) // Make PyObject
+        Ok(PyArray1::from_vec(py, psi).unbind()) // Make PyObject
     })
 }
 
@@ -206,7 +206,7 @@ fn vector_potential_circular_filament<'py>(
     };
 
     // Do calculations
-    match func(current, r, z, rprime, zprime, &mut out[..]) {
+    match func((r, z, current), (rprime, zprime), &mut out[..]) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -216,7 +216,7 @@ fn vector_potential_circular_filament<'py>(
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
     Python::with_gil(|py| {
-        Ok(PyArray1::from_vec_bound(py, out).unbind()) // Make PyObject
+        Ok(PyArray1::from_vec(py, out).unbind()) // Make PyObject
     })
 }
 
@@ -255,7 +255,7 @@ fn flux_density_circular_filament<'py>(
     };
 
     // Do calculations
-    match func(&current, &rfil, &zfil, &rprime, &zprime, &mut br, &mut bz) {
+    match func((&rfil, &zfil, &current), (&rprime, &zprime), (&mut br, &mut bz)) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -265,8 +265,8 @@ fn flux_density_circular_filament<'py>(
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
     Python::with_gil(|py| {
-        let br: Py<PyArray1<f64>> = PyArray1::from_slice_bound(py, &br).unbind(); // Make PyObject
-        let bz: Py<PyArray1<f64>> = PyArray1::from_slice_bound(py, &bz).unbind(); // Make PyObject
+        let br: Py<PyArray1<f64>> = PyArray1::from_slice(py, &br).unbind(); // Make PyObject
+        let bz: Py<PyArray1<f64>> = PyArray1::from_slice(py, &bz).unbind(); // Make PyObject
 
         Ok((br, bz))
     })
@@ -334,9 +334,9 @@ fn flux_density_linear_filament<'py>(
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
     Python::with_gil(|py| {
-        let bx: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, bx).unbind();
-        let by: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, by).unbind();
-        let bz: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, bz).unbind();
+        let bx: Py<PyArray1<f64>> = PyArray1::from_vec(py, bx).unbind();
+        let by: Py<PyArray1<f64>> = PyArray1::from_vec(py, by).unbind();
+        let bz: Py<PyArray1<f64>> = PyArray1::from_vec(py, bz).unbind();
 
         Ok((bx, by, bz))
     })
@@ -410,9 +410,9 @@ fn vector_potential_linear_filament<'py>(
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
     Python::with_gil(|py| {
-        let bx: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, outx).unbind();
-        let by: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, outy).unbind();
-        let bz: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, outz).unbind();
+        let bx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
+        let by: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
+        let bz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
 
         Ok((bx, by, bz))
     })
@@ -515,9 +515,9 @@ fn gs_operator_order2<'py>(
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
     Python::with_gil(|py| {
-        let vals: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, vals).unbind();
-        let rows: Py<PyArray1<usize>> = PyArray1::from_vec_bound(py, rows).unbind();
-        let cols: Py<PyArray1<usize>> = PyArray1::from_vec_bound(py, cols).unbind();
+        let vals: Py<PyArray1<f64>> = PyArray1::from_vec(py, vals).unbind();
+        let rows: Py<PyArray1<usize>> = PyArray1::from_vec(py, rows).unbind();
+        let cols: Py<PyArray1<usize>> = PyArray1::from_vec(py, cols).unbind();
 
         Ok((vals, rows, cols))
     })
@@ -540,9 +540,9 @@ fn gs_operator_order4<'py>(
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
     Python::with_gil(|py| {
-        let vals: Py<PyArray1<f64>> = PyArray1::from_vec_bound(py, vals).unbind();
-        let rows: Py<PyArray1<usize>> = PyArray1::from_vec_bound(py, rows).unbind();
-        let cols: Py<PyArray1<usize>> = PyArray1::from_vec_bound(py, cols).unbind();
+        let vals: Py<PyArray1<f64>> = PyArray1::from_vec(py, vals).unbind();
+        let rows: Py<PyArray1<usize>> = PyArray1::from_vec(py, rows).unbind();
+        let cols: Py<PyArray1<usize>> = PyArray1::from_vec(py, cols).unbind();
 
         Ok((vals, rows, cols))
     })

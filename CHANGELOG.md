@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.2.0 2025-02-03
+
+### Added
+
+* Add circular-to-linear filament bridge functions
+    * B-field, vector potential, and mutual inductance
+    * Much faster and more accurate than discretizing loops and using linear filament functions, and more cross-platform consistent than doing coordinate conversions on circular filament methods at the python level
+* Add mesh edgelist mutual/self inductance matrix function
+
+### Changed
+
+* Roll rust bindings forward to latest numpy and pyo3
+* Update interfaces with rust functions that have changed their function signature
+
 ## 2.1.0 2024-08-27
 
 ### Added

@@ -560,6 +560,63 @@ fn ellipk(x: f64) -> f64 {
     math::ellipk(x)
 }
 
+/// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian
+#[pyfunction]
+fn flux_density_circular_filament_cartesian<'py>(
+    current: Bound<'py, PyArray1<f64>>,
+    rfil: Bound<'py, PyArray1<f64>>,
+    zfil: Bound<'py, PyArray1<f64>>,
+    xyzobs: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Observation point coords
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    let current_readonly = current.readonly();
+    let current = current_readonly.as_slice()?;
+    let rfil_readonly = rfil.readonly();
+    let rfil = rfil_readonly.as_slice()?;
+    let zfil_readonly = zfil.readonly();
+    let zfil = zfil_readonly.as_slice()?;
+    let xpro = xyzobs.0.readonly();
+    let ypro = xyzobs.1.readonly();
+    let zpro = xyzobs.2.readonly();
+    let xyzobs = (xpro.as_slice()?, ypro.as_slice()?, zpro.as_slice()?);
+
+    // Initialize output
+    let n = xyzobs.0.len();
+    let mut bx = vec![0.0; n];
+    let mut by = vec![0.0; n];
+    let mut bz = vec![0.0; n];
+
+    // Select variant
+    let func = match par {
+        true => physics::circular_filament::flux_density_circular_filament_cartesian_par,
+        false => physics::circular_filament::flux_density_circular_filament_cartesian,
+    };
+
+    // Do calculations
+    match func((&rfil, &zfil, &current), xyzobs, (&mut bx, &mut by, &mut bz)) {
+        Ok(_) => {}
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    // Acquire global interpreter lock, which will be released when it goes out of scope
+    Python::with_gil(|py| {
+        let bx: Py<PyArray1<f64>> = PyArray1::from_slice(py, &bx).unbind(); // Make PyObjects
+        let by: Py<PyArray1<f64>> = PyArray1::from_slice(py, &by).unbind();
+        let bz: Py<PyArray1<f64>> = PyArray1::from_slice(py, &bz).unbind();
+
+        Ok((bx, by, bz))
+    })
+}
+
 /// A Python module implemented in Rust. The name of this function must match
 /// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
 /// import the module.
@@ -568,6 +625,7 @@ fn ellipk(x: f64) -> f64 {
 fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(flux_circular_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(flux_density_circular_filament, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(flux_density_circular_filament_cartesian, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_circular_filament,
         m.clone()

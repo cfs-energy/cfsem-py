@@ -684,12 +684,76 @@ fn mutual_inductance_circular_to_linear<'py>(
     Ok(m)
 }
 
+/// Python bindings for cfsemrs::physics::point_source::flux_density_dipole
+#[pyfunction]
+fn flux_density_dipole<'py>(
+    loc: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] dipole locations in cartesian coordinates
+    moment: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [A-m^2] dipole moment vector
+    obs: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Observation point coords
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    let xpro = loc.0.readonly();
+    let ypro = loc.1.readonly();
+    let zpro = loc.2.readonly();
+    let loc = (xpro.as_slice()?, ypro.as_slice()?, zpro.as_slice()?);
+
+    let mxro = moment.0.readonly();
+    let myro = moment.1.readonly();
+    let mzro = moment.2.readonly();
+    let moment = (mxro.as_slice()?, myro.as_slice()?, mzro.as_slice()?);
+
+    let obsxro: numpy::PyReadonlyArray<'_, f64, numpy::ndarray::Dim<[usize; 1]>> = obs.0.readonly();
+    let obsyro = obs.1.readonly();
+    let obszro = obs.2.readonly();
+    let obs = (obsxro.as_slice()?, obsyro.as_slice()?, obszro.as_slice()?);
+
+    // Do calculations
+    let n = obs.0.len();
+    let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+
+    let func = match par {
+        true => physics::point_source::flux_density_dipole_par,
+        false => physics::point_source::flux_density_dipole,
+    };
+    match func(loc, moment, obs, (&mut outx, &mut outy, &mut outz)) {
+        Ok(x) => x,
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    // Acquire global interpreter lock, which will be released when it goes out of scope
+    Python::with_gil(|py| {
+        let bx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
+        let by: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
+        let bz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
+
+        Ok((bx, by, bz))
+    })
+}
+
 /// A Python module implemented in Rust. The name of this function must match
 /// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
 /// import the module.
 #[pymodule]
 #[pyo3(name = "_cfsem")]
 fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
+    // Circular filaments
     m.add_function(wrap_pyfunction!(flux_circular_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(flux_density_circular_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
@@ -705,6 +769,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
 
+    // Linear filaments
     m.add_function(wrap_pyfunction!(flux_density_linear_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_linear_filament,
@@ -715,13 +780,20 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
 
+    // Differential operators
     m.add_function(wrap_pyfunction!(gs_operator_order2, m.clone())?)?;
     m.add_function(wrap_pyfunction!(gs_operator_order4, m.clone())?)?;
 
+    // Pure math
     m.add_function(wrap_pyfunction!(ellipe, m.clone())?)?;
     m.add_function(wrap_pyfunction!(ellipk, m.clone())?)?;
 
+    // Filamentization and meshing
     m.add_function(wrap_pyfunction!(filament_helix_path, m.clone())?)?;
     m.add_function(wrap_pyfunction!(rotate_filaments_about_path, m.clone())?)?;
+
+    // Point sources
+    m.add_function(wrap_pyfunction!(flux_density_dipole, m.clone())?)?;
+
     Ok(())
 }

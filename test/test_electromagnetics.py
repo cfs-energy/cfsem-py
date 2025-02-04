@@ -7,24 +7,86 @@ import cfsem
 
 from . import test_funcs as _test
 
+
+@mark.parametrize("r", [0.775 * 2, np.pi])
+@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("par", [True, False])
+def test_flux_density_dipole(r, z, par):
+    """Spot check bindings; more complete tests are run in Rust"""
+    r = r / 300.0  # Make a very small filament
+    xp = np.linspace(0.1, 0.8, 5)
+    yp = np.zeros(5)
+    zp = np.linspace(-1.0, 1.0, 5)
+    area = np.pi * r**2  # m^2
+    xmesh, ymesh, zmesh = np.meshgrid(xp, yp, zp, indexing="ij")
+    xmesh = xmesh.flatten()
+    ymesh = ymesh.flatten()
+    zmesh = zmesh.flatten()
+
+    bx, by, bz = cfsem.flux_density_circular_filament_cartesian(
+        [1.0], [r], [z], (xmesh, ymesh, zmesh), par
+    )
+
+    bxd, byd, bzd = cfsem.flux_density_dipole(
+        loc=([0.0], [0.0], [z]),
+        moment=([0.0], [0.0], [area]),
+        xyzp=(xmesh, ymesh, zmesh),
+        par=par,
+    )
+
+    assert np.allclose(bx, bxd, rtol=5e-2, atol=1e-12)
+    assert np.allclose(by, byd, rtol=5e-2, atol=1e-12)
+    assert np.allclose(bz, bzd, rtol=5e-2, atol=1e-12)
+
+    # Make sure we're not just comparing numbers that are too small to examine properly
+    assert not np.allclose(by, bzd, rtol=5e-2, atol=1e-12)
+
+
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
 @mark.parametrize("par", [True, False])
 def test_mutual_inductance_circular_to_linear(r, z, par):
     """Spot check bindings; more complete tests are run in Rust"""
     r1, z1 = (r + 0.1, abs(z) ** 0.5)
-    fil, dl = _test._filament_loop(r, z, ndiscr=200)
+    fil, _dl = _test._filament_loop(r, z, ndiscr=200)
     fil1, dl1 = _test._filament_loop(r1, z1, ndiscr=200)
     (x1, y1, z1) = fil1
 
     m_linear = cfsem.mutual_inductance_piecewise_linear_filaments(fil, fil1)
     m_circular = cfsem.flux_circular_filament([1.0], [r], [z], [r1], [z1])
-    m_circular_to_linear = cfsem.mutual_inductance_circular_to_linear([r], [z], [1.0], (x1[:-1], y1[:-1], z1[:-1]), dl1, par)
+    m_circular_to_linear = cfsem.mutual_inductance_circular_to_linear(
+        [r], [z], [1.0], (x1[:-1], y1[:-1], z1[:-1]), dl1, par
+    )
 
     # Linear discretization really is not very good unless we use a number of discretizations that is
     # not reasonable for testing, so the tolerances are pretty loose
     assert m_circular_to_linear == approx(m_circular, rel=0.2)
     assert m_circular_to_linear == approx(m_linear, rel=0.2)
+
+
+@mark.parametrize("r", [0.775, np.pi])
+@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_cartesian(r, z, par):
+    """Spot check bindings; more complete tests are run in Rust"""
+    xp = np.linspace(0.1, 0.8, 5)
+    yp = np.zeros(5)
+    zp = np.linspace(-1.0, 1.0, 5)
+    xmesh, ymesh, zmesh = np.meshgrid(xp, yp, zp, indexing="ij")
+    xmesh = xmesh.flatten()
+    ymesh = ymesh.flatten()
+    zmesh = zmesh.flatten()
+
+    bx, by, bz = cfsem.flux_density_circular_filament_cartesian(
+        [1.0], [r], [z], (xmesh, ymesh, zmesh), par
+    )
+    br, bz_circ = cfsem.flux_density_circular_filament(
+        [1.0], [r], [z], xmesh, zmesh, par
+    )
+
+    assert np.allclose(bx, br, rtol=1e-6, atol=1e-10)
+    assert np.allclose(bz, bz_circ, rtol=1e-6, atol=1e-10)
+    assert np.allclose(by, np.zeros_like(by), atol=1e-10)
 
 
 @mark.parametrize("r", [7.7, np.pi])  # Needs to be large for Lyle with very small width
@@ -203,8 +265,8 @@ def test_flux_circular_filament_against_mutual_inductance_of_cylindrical_coils(
 
     # Because the integrated poloidal flux at a given location is the same as mutual inductance,
     # we should get the same number using our mutual inductance calc
-    I = 1.0  # 1A reference current just for clarity
-    m_from_psi = psi_2to1 / I
+    current = 1.0  # 1A reference current just for clarity
+    m_from_psi = psi_2to1 / current
     assert abs(1 - m_from_psi / m_filaments) < 1e-6
 
     # Because mutual inductance is reflexive, reversing the direction of the check should give the same result
@@ -309,11 +371,11 @@ def test_flux_density_circular_filament_against_numerical(a, z, par):
     rprime = R.flatten()
     zprime = Z.flatten()
 
-    I = 1.0  # 1A reference current
+    current = 1.0  # 1A reference current
 
     # Calc using elliptic integral fits
     Br, Bz = cfsem.flux_density_circular_filament(
-        np.array([I]), np.array([a]), np.array([z]), rprime, zprime, par
+        np.array([current]), np.array([a]), np.array([z]), rprime, zprime, par
     )  # [T]
 
     # Calc using numerical integration around the loop
@@ -322,7 +384,7 @@ def test_flux_density_circular_filament_against_numerical(a, z, par):
     for i, x in enumerate(zip(rprime, zprime)):
         robs, zobs = x
         Br_num[i], Bz_num[i] = _test._flux_density_circular_filament_numerical(
-            I, a, robs, zobs - z, n=100
+            current, a, robs, zobs - z, n=100
         )
 
     assert np.allclose(Br, Br_num)
@@ -607,19 +669,3 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
         az, np.zeros_like(az), atol=1e-9
     )  # Should sum to zero everywhere
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
-
-@mark.parametrize("r", [0.775, np.pi])
-@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
-@mark.parametrize("par", [True, False])
-def test_flux_density_circular_filament_cartesian(r, z, par):
-    """Spot check bindings; more complete tests are run in Rust"""
-    xp = np.linspace(0.1, 0.8, 5)
-    yp = np.zeros(5)
-    zp = np.linspace(-1.0, 1.0, 5)
-
-    bx, by, bz = cfsem.flux_density_circular_filament_cartesian([1.0], [r], [z], (xp, yp, zp), par)
-    br, bz_circ = cfsem.flux_density_circular_filament([1.0], [r], [z], xp, zp, par)
-
-    assert np.allclose(bx, br, rtol=1e-6, atol=1e-10)
-    assert np.allclose(bz, bz_circ, rtol=1e-6, atol=1e-10)
-    assert np.allclose(by, np.zeros_like(by), atol=1e-10)

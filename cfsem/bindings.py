@@ -563,7 +563,7 @@ def body_force_density_linear_filament(
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_linear_filament(
-        xyzfil, dlxyzfil, ifil, j, par
+        xyzfil, dlxyzfil, ifil, obs, j, par
     )
 
     return jxbx, jxby, jxbz  # [N/m^3]

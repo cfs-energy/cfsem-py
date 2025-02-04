@@ -23,9 +23,9 @@ def test_body_force_density(r, z, par):
     obs = (xmesh, ymesh, zmesh)
 
     rng = np.random.default_rng(1234098)
-    j = [rng.uniform(-1.0, 1.0, len(xmesh)) for _ in range(3)]
+    j = [rng.uniform(-1e6, 1e6, len(xmesh)) for _ in range(3)]
 
-    fil, dlxyzfil = _test._filament_loop(r, z, 100)
+    fil, dlxyzfil = _test._filament_loop(r, z, 1000)
     xyzfil = (fil[0][:-1], fil[1][:-1], fil[2][:-1])
     ifil = np.ones_like(xyzfil[0])
 
@@ -36,9 +36,9 @@ def test_body_force_density(r, z, par):
         xyzfil, dlxyzfil, ifil, obs, j, par
     )
 
-    assert np.allclose(jxbx, jxbx1, rtol=1e-2, atol=1e-10)
-    assert np.allclose(jxby, jxby1, rtol=1e-2, atol=1e-10)
-    assert np.allclose(jxbz, jxbz1, rtol=1e-2, atol=1e-10)
+    assert np.allclose(jxbx, jxbx1, rtol=1e-2, atol=1e-9)
+    assert np.allclose(jxby, jxby1, rtol=1e-2, atol=1e-9)
+    assert np.allclose(jxbz, jxbz1, rtol=1e-2, atol=1e-9)
 
 
 @mark.parametrize("r", [0.775 * 2, np.pi])

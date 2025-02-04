@@ -5,9 +5,9 @@
 ### Added
 
 * Add circular-to-linear filament bridge functions
-    * B-field, vector potential, and mutual inductance
+    * B-field and mutual inductance
     * Much faster and more accurate than discretizing loops and using linear filament functions, and more cross-platform consistent than doing coordinate conversions on circular filament methods at the python level
-* Add mesh edgelist mutual/self inductance matrix function
+* Add dipole flux density function
 
 ### Changed
 

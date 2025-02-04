@@ -588,3 +588,20 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
         az, np.zeros_like(az), atol=1e-9
     )  # Should sum to zero everywhere
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
+
+@mark.parametrize("r", [0.775, np.pi])
+@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_cartesian(r, z, par):
+    """Spot check bindings; also tested in Rust"""
+    xp = np.linspace(0.1, 0.8, 5)
+    yp = np.zeros(5)
+    zp = np.linspace(-1.0, 1.0, 5)
+
+    bx, by, bz = cfsem.flux_density_circular_filament_cartesian([1.0], [r], [z], (xp, yp, zp), par)
+
+    br, bz_circ = cfsem.flux_density_circular_filament([1.0], [r], [z], xp, zp, par)
+
+    assert np.allclose(bx, br, rtol=1e-6, atol=1e-10)
+    assert np.allclose(bz, bz_circ, rtol=1e-6, atol=1e-10)
+    assert np.allclose(by, np.zeros_like(by), atol=1e-10)

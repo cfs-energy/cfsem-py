@@ -519,6 +519,32 @@ def mutual_inductance_circular_to_linear(
     return m  # [H]
 
 
+def flux_density_dipole(
+    loc: Array3xN,
+    moment: Array3xN,
+    xyzp: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    Magnetic flux density of a dipole in cartesian coordiantes.
+
+    Args:
+        loc: [m] x,y,z coordinates of dipole
+        moment: [A-m^2] dipole magnetic moment vector
+        xyzp: [m] x,y,z coords of observation points
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [T] flux density
+    """
+    loc = _3tup_contig(loc)
+    moment = _3tup_contig(moment)
+    xyzp = _3tup_contig(xyzp)
+    bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, par)
+
+    return bx, by, bz  # [T]
+
+
 def _3tup_contig(
     t: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:

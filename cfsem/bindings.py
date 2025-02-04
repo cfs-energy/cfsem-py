@@ -117,11 +117,8 @@ def vector_potential_circular_filament(
     Returns:
         [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
     """
-    ifil = ascontiguousarray(ifil)
-    rfil = ascontiguousarray(rfil)
-    zfil = ascontiguousarray(zfil)
-    rprime = ascontiguousarray(rprime)
-    zprime = ascontiguousarray(zprime)
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    rprime, zprime = _2tup_contig((rprime, zprime))
     a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
     return a_phi  # [Wb/m] or [V-s/m]
 
@@ -169,13 +166,10 @@ def flux_density_circular_filament(
     Returns:
         [T] (Br, Bz) flux density components
     """
-    ifil = ascontiguousarray(ifil)
-    rfil = ascontiguousarray(rfil)
-    zfil = ascontiguousarray(zfil)
-    rprime = ascontiguousarray(rprime)
-    zprime = ascontiguousarray(zprime)
-    Br, Bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
-    return Br, Bz  # [T]
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    rprime, zprime = _2tup_contig((rprime, zprime))
+    br, bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    return br, bz  # [T]
 
 
 def flux_density_linear_filament(
@@ -199,22 +193,10 @@ def flux_density_linear_filament(
     Returns:
         [T] (Bx, By, Bz) magnetic flux density at observation points
     """
-    xyzp = (
-        ascontiguousarray(xyzp[0]),
-        ascontiguousarray(xyzp[1]),
-        ascontiguousarray(xyzp[2]),
-    )
-    xyzfil = (
-        ascontiguousarray(xyzfil[0]),
-        ascontiguousarray(xyzfil[1]),
-        ascontiguousarray(xyzfil[2]),
-    )
-    dlxyzfil = (
-        ascontiguousarray(dlxyzfil[0]),
-        ascontiguousarray(dlxyzfil[1]),
-        ascontiguousarray(dlxyzfil[2]),
-    )
-    ifil = ascontiguousarray(ifil)
+    xyzp = _3tup_contig(xyzp)
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).flatten()
     return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -242,22 +224,10 @@ def vector_potential_linear_filament(
     Returns:
         [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
     """
-    xyzp = (
-        ascontiguousarray(xyzp[0]),
-        ascontiguousarray(xyzp[1]),
-        ascontiguousarray(xyzp[2]),
-    )
-    xyzfil = (
-        ascontiguousarray(xyzfil[0]),
-        ascontiguousarray(xyzfil[1]),
-        ascontiguousarray(xyzfil[2]),
-    )
-    dlxyzfil = (
-        ascontiguousarray(dlxyzfil[0]),
-        ascontiguousarray(dlxyzfil[1]),
-        ascontiguousarray(dlxyzfil[2]),
-    )
-    ifil = ascontiguousarray(ifil)
+    xyzp = _3tup_contig(xyzp)
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).flatten()
     return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -315,26 +285,11 @@ def inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar inductance
     """
-    xyzfil0 = (
-        ascontiguousarray(xyzfil0[0]),
-        ascontiguousarray(xyzfil0[1]),
-        ascontiguousarray(xyzfil0[2]),
-    )
-    dlxyzfil0 = (
-        ascontiguousarray(dlxyzfil0[0]),
-        ascontiguousarray(dlxyzfil0[1]),
-        ascontiguousarray(dlxyzfil0[2]),
-    )
-    xyzfil1 = (
-        ascontiguousarray(xyzfil1[0]),
-        ascontiguousarray(xyzfil1[1]),
-        ascontiguousarray(xyzfil1[2]),
-    )
-    dlxyzfil1 = (
-        ascontiguousarray(dlxyzfil1[0]),
-        ascontiguousarray(dlxyzfil1[1]),
-        ascontiguousarray(dlxyzfil1[2]),
-    )
+    xyzfil0 = _3tup_contig(xyzfil0)
+    dlxyzfil0 = _3tup_contig(dlxyzfil0)
+    xyzfil1 = _3tup_contig(xyzfil1)
+    dlxyzfil1 = _3tup_contig(dlxyzfil1)
+
     return em_inductance_piecewise_linear_filaments(
         xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, self_inductance
     )
@@ -351,8 +306,7 @@ def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
     Returns:
         Differential operator as triplet format sparse matrix
     """
-    rs = ascontiguousarray(rs)
-    zs = ascontiguousarray(zs)
+    rs, zs = _2tup_contig((rs, zs))
     return em_gs_operator_order2(rs, zs)
 
 
@@ -368,8 +322,7 @@ def gs_operator_order4(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
     Returns:
         Differential operator as triplet format sparse matrix
     """
-    rs = ascontiguousarray(rs)
-    zs = ascontiguousarray(zs)
+    rs, zs = _2tup_contig((rs, zs))
     return em_gs_operator_order4(rs, zs)
 
 

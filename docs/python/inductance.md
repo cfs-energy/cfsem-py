@@ -10,6 +10,8 @@
 
 ::: cfsem.mutual_inductance_piecewise_linear_filaments
 
+::: cfsem.mutual_inductance_circular_to_linear
+
 ## Self inductance
 
 ::: cfsem.self_inductance_annular_ring

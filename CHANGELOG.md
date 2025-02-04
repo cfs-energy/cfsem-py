@@ -8,11 +8,13 @@
     * B-field and mutual inductance
     * Much faster and more accurate than discretizing loops and using linear filament functions, and more cross-platform consistent than doing coordinate conversions on circular filament methods at the python level
 * Add dipole flux density function
+* Add JxB body force density functions
 
 ### Changed
 
 * Roll rust bindings forward to latest numpy and pyo3
 * Update interfaces with rust functions that have changed their function signature
+* Update python bindings with convenience functions for making inputs contiguous and flat, to reduce repetition
 
 ## 2.1.0 2024-08-27
 

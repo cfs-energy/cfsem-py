@@ -1,4 +1,4 @@
-"""Physics calculations shared between various magnet models"""
+"""Quasi-steady electromagnetics calcs"""
 
 from typing import Tuple
 import numpy as np

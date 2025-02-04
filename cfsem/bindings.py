@@ -13,6 +13,9 @@ from numpy.typing import NDArray
 from ._cfsem import flux_circular_filament as em_flux_circular_filament
 from ._cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from ._cfsem import flux_density_circular_filament as em_flux_density_circular_filament
+from ._cfsem import flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian
+from ._cfsem import mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear
+
 from ._cfsem import gs_operator_order2 as em_gs_operator_order2
 from ._cfsem import gs_operator_order4 as em_gs_operator_order4
 from ._cfsem import (
@@ -446,3 +449,36 @@ def rotate_filaments_about_path(
     )
 
     return new_fils  # [m]
+
+
+def flux_density_circular_filament_cartesian(
+    ifil: NDArray[float64],
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    xyzp: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    Flux density of a circular filament in cartesian form
+    at a set of locations given in cartesian coordinates.
+
+    Args:
+        ifil: [A] filament current
+        rfil: [m] filament R-coord
+        zfil: [m] filament Z-coord
+        xyzp: [m] x,y,z coords of observation points
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
+    """
+    ifil = ascontiguousarray(ifil)
+    rfil = ascontiguousarray(rfil)
+    zfil = ascontiguousarray(zfil)
+    xp = ascontiguousarray(xyzp[0])
+    yp = ascontiguousarray(xyzp[1])
+    zp = ascontiguousarray(xyzp[2])
+    bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, (xp, yp, zp), par)
+    return bx, by, bz  # [T]
+
+

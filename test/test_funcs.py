@@ -201,8 +201,8 @@ def _filament_loop(
 ) -> tuple[tuple[NDArray, NDArray, NDArray], tuple[NDArray, NDArray, NDArray]]:
     """Make linear filaments from a circular filament"""
     phi = np.linspace(0.0, 2.0 * np.pi, ndiscr)
-    x = np.cos(phi)
-    y = np.sin(phi)
+    x = r * np.cos(phi)
+    y = r * np.sin(phi)
     z = z * np.ones_like(x)
 
     dx = np.diff(x)

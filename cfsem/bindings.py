@@ -70,11 +70,8 @@ def flux_circular_filament(
     Returns:
         [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
     """
-    ifil = ascontiguousarray(ifil)
-    rfil = ascontiguousarray(rfil)
-    zfil = ascontiguousarray(zfil)
-    rprime = ascontiguousarray(rprime)
-    zprime = ascontiguousarray(zprime)
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    rprime, zprime = _2tup_contig((rprime, zprime))
     psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
     return psi  # [Wb] or [T-m^2] or [V-s]
 
@@ -549,11 +546,11 @@ def _3tup_contig(
     t: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
-    return (ascontiguousarray(t[0]), ascontiguousarray(t[1]), ascontiguousarray(t[2]))
+    return (ascontiguousarray(t[0]).flatten(), ascontiguousarray(t[1]).flatten(), ascontiguousarray(t[2]).flatten())
 
 
 def _2tup_contig(
     t: tuple[NDArray[float64], NDArray[float64]],
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 2-tuple. Only copies data if it is not already contiguous."""
-    return (ascontiguousarray(t[0]), ascontiguousarray(t[1]))
+    return (ascontiguousarray(t[0]).flatten(), ascontiguousarray(t[1]).flatten())

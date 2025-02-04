@@ -7,6 +7,25 @@ import cfsem
 
 from . import test_funcs as _test
 
+@mark.parametrize("r", [0.775, np.pi])
+@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("par", [True, False])
+def test_mutual_inductance_circular_to_linear(r, z, par):
+    """Spot check bindings; more complete tests are run in Rust"""
+    r1, z1 = (r + 0.1, abs(z) ** 0.5)
+    fil, dl = _test._filament_loop(r, z, ndiscr=200)
+    fil1, dl1 = _test._filament_loop(r1, z1, ndiscr=200)
+    (x1, y1, z1) = fil1
+
+    m_linear = cfsem.mutual_inductance_piecewise_linear_filaments(fil, fil1)
+    m_circular = cfsem.flux_circular_filament([1.0], [r], [z], [r1], [z1])
+    m_circular_to_linear = cfsem.mutual_inductance_circular_to_linear([r], [z], [1.0], (x1[:-1], y1[:-1], z1[:-1]), dl1, par)
+
+    # Linear discretization really is not very good unless we use a number of discretizations that is
+    # not reasonable for testing, so the tolerances are pretty loose
+    assert m_circular_to_linear == approx(m_circular, rel=0.2)
+    assert m_circular_to_linear == approx(m_linear, rel=0.2)
+
 
 @mark.parametrize("r", [7.7, np.pi])  # Needs to be large for Lyle with very small width
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
@@ -604,20 +623,3 @@ def test_flux_density_circular_filament_cartesian(r, z, par):
     assert np.allclose(bx, br, rtol=1e-6, atol=1e-10)
     assert np.allclose(bz, bz_circ, rtol=1e-6, atol=1e-10)
     assert np.allclose(by, np.zeros_like(by), atol=1e-10)
-
-@mark.parametrize("r", [0.775, np.pi])
-@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
-@mark.parametrize("par", [True, False])
-def mutual_inductance_circular_to_linear(r, z, par):
-    """Spot check bindings; more complete tests are run in Rust"""
-    r1, z1 = (r + 0.1, z - 0.07)
-    fil, dl = _test._filament_loop(r, z, ndiscr=100)
-    fil1, dl1 = _test._filament_loop(r1, z1, ndiscr=100)
-    (x1, y1, z1) = fil1
-
-    m_linear = cfsem.mutual_inductance_piecewise_linear_filaments(fil, fil1)
-    m_circular = cfsem.flux_circular_filament([1.0], [r], [z], [r1], [z1])
-    m_circular_to_linear = cfsem.mutual_inductance_circular_to_linear([r], [z], [1.0], (x1[:-1], y1[:-1], z1[:-1]), dl1, par)
-
-    assert approx(m_circular, m_circular_to_linear, rtol=1e-2)
-    assert approx(m_linear, m_circular_to_linear, rtol=1e-2)

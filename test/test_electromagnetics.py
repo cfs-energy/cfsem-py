@@ -8,6 +8,39 @@ import cfsem
 from . import test_funcs as _test
 
 
+@mark.parametrize("r", [0.775, np.pi])
+@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("par", [True, False])
+def test_body_force_density(r, z, par):
+    """Spot check bindings; more complete tests are run in Rust"""
+    xp = np.linspace(0.1, 0.8, 5)
+    yp = np.zeros(5)
+    zp = np.linspace(-1.0, 1.0, 5)
+    xmesh, ymesh, zmesh = np.meshgrid(xp, yp, zp, indexing="ij")
+    xmesh = xmesh.flatten()
+    ymesh = ymesh.flatten()
+    zmesh = zmesh.flatten()
+    obs = (xmesh, ymesh, zmesh)
+
+    rng = np.random.default_rng(1234098)
+    j = [rng.uniform(-1.0, 1.0, len(xmesh)) for _ in range(3)]
+
+    fil, dlxyzfil = _test._filament_loop(r, z, 100)
+    xyzfil = (fil[0][:-1], fil[1][:-1], fil[2][:-1])
+    ifil = np.ones_like(xyzfil[0])
+
+    jxbx, jxby, jxbz = cfsem.body_force_density_circular_filament_cartesian(
+        [1.0], [r], [z], obs, j, par
+    )
+    jxbx1, jxby1, jxbz1 = cfsem.body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, par
+    )
+
+    assert np.allclose(jxbx, jxbx1, rtol=1e-2, atol=1e-10)
+    assert np.allclose(jxby, jxby1, rtol=1e-2, atol=1e-10)
+    assert np.allclose(jxbz, jxbz1, rtol=1e-2, atol=1e-10)
+
+
 @mark.parametrize("r", [0.775 * 2, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
 @mark.parametrize("par", [True, False])

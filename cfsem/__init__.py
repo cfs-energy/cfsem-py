@@ -21,7 +21,9 @@ from cfsem.bindings import (
     vector_potential_circular_filament,
     flux_density_circular_filament_cartesian,
     mutual_inductance_circular_to_linear,
-    flux_density_dipole
+    flux_density_dipole,
+    body_force_density_circular_filament_cartesian,
+    body_force_density_linear_filament
 )
 
 from ._cfsem import ellipe, ellipk
@@ -58,7 +60,9 @@ __all__ = [
     "vector_potential_circular_filament",
     "flux_density_circular_filament_cartesian",
     "mutual_inductance_circular_to_linear",
-    "flux_density_dipole"
+    "flux_density_dipole",
+    "body_force_density_circular_filament_cartesian",
+    "body_force_density_linear_filament"
 ]
 
 

@@ -628,9 +628,9 @@ fn flux_density_circular_filament_cartesian<'py>(
 /// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
 #[pyfunction]
 fn mutual_inductance_circular_to_linear<'py>(
-    current: Bound<'py, PyArray1<f64>>,
     rfil: Bound<'py, PyArray1<f64>>,
     zfil: Bound<'py, PyArray1<f64>>,
+    nfil: Bound<'py, PyArray1<f64>>,
     xyzfil: (
         Bound<'py, PyArray1<f64>>,
         Bound<'py, PyArray1<f64>>,
@@ -645,12 +645,12 @@ fn mutual_inductance_circular_to_linear<'py>(
 ) -> PyResult<f64> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
-    let current_readonly = current.readonly();
-    let current = current_readonly.as_slice()?;
     let rfil_readonly = rfil.readonly();
     let rfil = rfil_readonly.as_slice()?;
     let zfil_readonly = zfil.readonly();
     let zfil = zfil_readonly.as_slice()?;
+    let nfil_readonly = nfil.readonly();
+    let nfil = nfil_readonly.as_slice()?;
 
     let xfilro = xyzfil.0.readonly();
     let yfilro = xyzfil.1.readonly();
@@ -673,7 +673,7 @@ fn mutual_inductance_circular_to_linear<'py>(
     };
 
     // Do calculations
-    let m = match func((&rfil, &zfil, &current), xyzfil, dlxyzfil) {
+    let m = match func((&rfil, &zfil, &nfil), xyzfil, dlxyzfil) {
         Ok(x) => x,
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

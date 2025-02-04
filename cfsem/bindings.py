@@ -13,8 +13,12 @@ from numpy.typing import NDArray
 from ._cfsem import flux_circular_filament as em_flux_circular_filament
 from ._cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from ._cfsem import flux_density_circular_filament as em_flux_density_circular_filament
-from ._cfsem import flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian
-from ._cfsem import mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear
+from ._cfsem import (
+    flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
+)
+from ._cfsem import (
+    mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
+)
 
 from ._cfsem import gs_operator_order2 as em_gs_operator_order2
 from ._cfsem import gs_operator_order4 as em_gs_operator_order4
@@ -29,6 +33,8 @@ from ._cfsem import (
 from ._cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
+
+from ._cfsem import flux_density_dipole as em_flux_density_dipole
 
 
 def flux_circular_filament(
@@ -470,15 +476,58 @@ def flux_density_circular_filament_cartesian(
         par: Whether to use CPU parallelism
 
     Returns:
-        [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
+        [T] flux density
     """
-    ifil = ascontiguousarray(ifil)
-    rfil = ascontiguousarray(rfil)
-    zfil = ascontiguousarray(zfil)
-    xp = ascontiguousarray(xyzp[0])
-    yp = ascontiguousarray(xyzp[1])
-    zp = ascontiguousarray(xyzp[2])
-    bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, (xp, yp, zp), par)
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    xyzp = _3tup_contig(xyzp)
+    bx, by, bz = em_flux_density_circular_filament_cartesian(
+        ifil, rfil, zfil, xyzp, par
+    )
+
     return bx, by, bz  # [T]
 
 
+def mutual_inductance_circular_to_linear(
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    nfil: NDArray[float64],
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    Mutual inductance between a collection of circular filaments and a piecewise-linear filament.
+    This method is much faster (~100x typically) than discretizing the circular loop
+    into linear segments and using Neumann's formula.
+
+    Args:
+        rfil: [m] filament R-coord
+        zfil: [m] filament Z-coord
+        nfil: [dimensionless] filament number of turns
+        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
+        dlxyzfil: [m] x,y,z length delta of current filaments
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [H] mutual inductance
+    """
+    rfil, zfil, nfil = _3tup_contig((rfil, zfil, nfil))
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    m = em_mutual_inductance_circular_to_linear(rfil, zfil, nfil, xyzfil, dlxyzfil, par)
+
+    return m  # [H]
+
+
+def _3tup_contig(
+    t: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
+    return (ascontiguousarray(t[0]), ascontiguousarray(t[1]), ascontiguousarray(t[2]))
+
+
+def _2tup_contig(
+    t: tuple[NDArray[float64], NDArray[float64]],
+) -> tuple[NDArray[float64], NDArray[float64]]:
+    """Make contiguous references or copies to arrays in a 2-tuple. Only copies data if it is not already contiguous."""
+    return (ascontiguousarray(t[0]), ascontiguousarray(t[1]))

@@ -747,7 +747,7 @@ fn flux_density_dipole<'py>(
     })
 }
 
-/// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
+/// Python bindings for cfsemrs::physics::body_force_density_circular_filament_cartesian
 #[pyfunction]
 fn body_force_density_circular_filament_cartesian<'py>(
     current: Bound<'py, PyArray1<f64>>,
@@ -762,7 +762,7 @@ fn body_force_density_circular_filament_cartesian<'py>(
         Bound<'py, PyArray1<f64>>,
         Bound<'py, PyArray1<f64>>,
         Bound<'py, PyArray1<f64>>,
-    ), // [m] Filament length delta
+    ), // [A/m^2] current density at observation points
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -796,6 +796,89 @@ fn body_force_density_circular_filament_cartesian<'py>(
     let out = (&mut outx[..], &mut outy[..], &mut outz[..]);
 
     match func((&rfil, &zfil, &current), obs, j, out) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    // Acquire global interpreter lock, which will be released when it goes out of scope
+    Python::with_gil(|py| {
+        let jxbx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
+        let jxby: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
+        let jxbz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
+
+        Ok((jxbx, jxby, jxbz))
+    })
+}
+
+/// Python bindings for cfsemrs::physics::body_force_density_linear_filament
+#[pyfunction]
+fn body_force_density_linear_filament<'py>(
+    xyzfil: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Filament origin coords (start of segment)
+    dlxyzfil: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Filament length delta
+    ifil: Bound<'py, PyArray1<f64>>, // [A] filament current
+    obs: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Filament origin coords (start of segment)
+    j: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [A/m^2] current density at observation points
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    let xfilro = xyzfil.0.readonly();
+    let yfilro = xyzfil.1.readonly();
+    let zfilro = xyzfil.2.readonly();
+    let xyzfil = (xfilro.as_slice()?, yfilro.as_slice()?, zfilro.as_slice()?);
+
+    let dlxfilro = dlxyzfil.0.readonly();
+    let dlyfilro = dlxyzfil.1.readonly();
+    let dlzfilro = dlxyzfil.2.readonly();
+    let dlxyzfil = (
+        dlxfilro.as_slice()?,
+        dlyfilro.as_slice()?,
+        dlzfilro.as_slice()?,
+    );
+    let ifilro = ifil.readonly();
+    let ifil = ifilro.as_slice()?;
+
+    let obsxro = obs.0.readonly();
+    let obsyro = obs.1.readonly();
+    let obszro = obs.2.readonly();
+    let obs = (obsxro.as_slice()?, obsyro.as_slice()?, obszro.as_slice()?);
+
+    let jxro = j.0.readonly();
+    let jyro = j.1.readonly();
+    let jzro = j.2.readonly();
+    let j = (jxro.as_slice()?, jyro.as_slice()?, jzro.as_slice()?);
+
+    // Select variant
+    let func = match par {
+        true => physics::linear_filament::body_force_density_linear_filament,
+        false => physics::linear_filament::body_force_density_linear_filament,
+    };
+
+    // Do calculations
+    let n = obs.0.len();
+    let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    let out = (&mut outx[..], &mut outy[..], &mut outz[..]);
+
+    match func(xyzfil, dlxyzfil, ifil, obs, j, out) {
         Ok(_) => (),
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -847,6 +930,10 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         inductance_piecewise_linear_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        body_force_density_linear_filament,
         m.clone()
     )?)?;
 

@@ -36,6 +36,9 @@ from ._cfsem import (
 from ._cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
+from ._cfsem import (
+    body_force_density_linear_filament as em_body_force_density_linear_filament,
+)
 
 from ._cfsem import flux_density_dipole as em_flux_density_dipole
 
@@ -546,9 +549,9 @@ def flux_density_dipole(
 
 
 def body_force_density_circular_filament_cartesian(
+    ifil: NDArray[float64],
     rfil: NDArray[float64],
     zfil: NDArray[float64],
-    nfil: NDArray[float64],
     obs: Array3xN,
     j: Array3xN,
     par: bool = True,
@@ -558,9 +561,9 @@ def body_force_density_circular_filament_cartesian(
     filament segment at an observation point in cartesian form with some current density (per area).
 
     Args:
+        ifil: [A] filament current
         rfil: [m] filament R-coord
         zfil: [m] filament Z-coord
-        nfil: [dimensionless] filament number of turns
         obs: [m] x,y,z coords of observation locations
         j: [A/m^2] current density vector at observation locations
         par: Whether to use CPU parallelism
@@ -568,11 +571,46 @@ def body_force_density_circular_filament_cartesian(
     Returns:
         [N/m^3] body force density
     """
-    rfil, zfil, nfil = _3tup_contig((rfil, zfil, nfil))
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(
-        rfil, zfil, nfil, obs, j, par
+        ifil, rfil, zfil, obs, j, par
+    )
+
+    return jxbx, jxby, jxbz  # [N/m^3]
+
+
+def body_force_density_linear_filament(
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    ifil: NDArray[float64],
+    obs: Array3xN,
+    j: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    JxB (Lorentz) body force density (per volume) due to a linear current
+    filament segment at an observation point with some current density (per area).
+
+    Args:
+        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
+        dlxyzfil: [m] x,y,z length delta of current filaments
+        ifil: [A] filament current
+        obs: [m] x,y,z coords of observation locations
+        j: [A/m^2] current density vector at observation locations
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [N/m^3] body force density
+    """
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).flatten()
+    obs = _3tup_contig(obs)
+    j = _3tup_contig(j)
+    jxbx, jxby, jxbz = em_body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, j, par
     )
 
     return jxbx, jxby, jxbz  # [N/m^3]

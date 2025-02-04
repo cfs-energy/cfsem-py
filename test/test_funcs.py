@@ -60,8 +60,8 @@ def _self_inductance_filamentized(
                 # Self-inductance of this filament
                 major_radius_filament = fs[i, :][0]  # [m] Filament radius
                 minor_radius_filament = (
-                    dr / nr
-                ) / 2  # [m] Heuristic approximation for effective wire radius of filament
+                    (dr / nr) / 2
+                )  # [m] Heuristic approximation for effective wire radius of filament
                 num_turns = fs[i, :][2]  # [] Filament number of turns
                 L_f = num_turns**2 * cfsem.self_inductance_circular_ring_wien(
                     major_radius_filament, minor_radius_filament
@@ -194,3 +194,19 @@ def _filament_coil_comprehension(
     filaments = np.dstack([R, Z, N]).reshape(nr * nz, 3)
 
     return filaments
+
+
+def _filament_loop(
+    r: float, z: float, ndiscr: int
+) -> tuple[tuple[NDArray, NDArray, NDArray], tuple[NDArray, NDArray, NDArray]]:
+    """Make linear filaments from a circular filament"""
+    phi = np.linspace(0.0, 2.0 * np.pi, ndiscr)
+    x = np.cos(phi)
+    y = np.sin(phi)
+    z = z * np.ones_like(x)
+
+    dx = np.diff(x)
+    dy = np.diff(y)
+    dz = np.diff(z)
+
+    return ((x, y, z), (dx, dy, dz))

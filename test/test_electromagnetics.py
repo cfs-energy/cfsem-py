@@ -593,15 +593,31 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
 @mark.parametrize("par", [True, False])
 def test_flux_density_circular_filament_cartesian(r, z, par):
-    """Spot check bindings; also tested in Rust"""
+    """Spot check bindings; more complete tests are run in Rust"""
     xp = np.linspace(0.1, 0.8, 5)
     yp = np.zeros(5)
     zp = np.linspace(-1.0, 1.0, 5)
 
     bx, by, bz = cfsem.flux_density_circular_filament_cartesian([1.0], [r], [z], (xp, yp, zp), par)
-
     br, bz_circ = cfsem.flux_density_circular_filament([1.0], [r], [z], xp, zp, par)
 
     assert np.allclose(bx, br, rtol=1e-6, atol=1e-10)
     assert np.allclose(bz, bz_circ, rtol=1e-6, atol=1e-10)
     assert np.allclose(by, np.zeros_like(by), atol=1e-10)
+
+@mark.parametrize("r", [0.775, np.pi])
+@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("par", [True, False])
+def mutual_inductance_circular_to_linear(r, z, par):
+    """Spot check bindings; more complete tests are run in Rust"""
+    r1, z1 = (r + 0.1, z - 0.07)
+    fil, dl = _test._filament_loop(r, z, ndiscr=100)
+    fil1, dl1 = _test._filament_loop(r1, z1, ndiscr=100)
+    (x1, y1, z1) = fil1
+
+    m_linear = cfsem.mutual_inductance_piecewise_linear_filaments(fil, fil1)
+    m_circular = cfsem.flux_circular_filament([1.0], [r], [z], [r1], [z1])
+    m_circular_to_linear = cfsem.mutual_inductance_circular_to_linear([r], [z], [1.0], (x1[:-1], y1[:-1], z1[:-1]), dl1, par)
+
+    assert approx(m_circular, m_circular_to_linear, rtol=1e-2)
+    assert approx(m_linear, m_circular_to_linear, rtol=1e-2)

@@ -19,6 +19,9 @@ from ._cfsem import (
 from ._cfsem import (
     mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
 )
+from ._cfsem import (
+    body_force_density_circular_filament_cartesian as em_body_force_density_circular_filament_cartesian,
+)
 
 from ._cfsem import gs_operator_order2 as em_gs_operator_order2
 from ._cfsem import gs_operator_order4 as em_gs_operator_order4
@@ -542,11 +545,48 @@ def flux_density_dipole(
     return bx, by, bz  # [T]
 
 
+def body_force_density_circular_filament_cartesian(
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    nfil: NDArray[float64],
+    obs: Array3xN,
+    j: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
+    filament segment at an observation point in cartesian form with some current density (per area).
+
+    Args:
+        rfil: [m] filament R-coord
+        zfil: [m] filament Z-coord
+        nfil: [dimensionless] filament number of turns
+        obs: [m] x,y,z coords of observation locations
+        j: [A/m^2] current density vector at observation locations
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [N/m^3] body force density
+    """
+    rfil, zfil, nfil = _3tup_contig((rfil, zfil, nfil))
+    obs = _3tup_contig(obs)
+    j = _3tup_contig(j)
+    jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(
+        rfil, zfil, nfil, obs, j, par
+    )
+
+    return jxbx, jxby, jxbz  # [N/m^3]
+
+
 def _3tup_contig(
     t: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
-    return (ascontiguousarray(t[0]).flatten(), ascontiguousarray(t[1]).flatten(), ascontiguousarray(t[2]).flatten())
+    return (
+        ascontiguousarray(t[0]).flatten(),
+        ascontiguousarray(t[1]).flatten(),
+        ascontiguousarray(t[2]).flatten(),
+    )
 
 
 def _2tup_contig(

@@ -747,6 +747,72 @@ fn flux_density_dipole<'py>(
     })
 }
 
+/// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
+#[pyfunction]
+fn body_force_density_circular_filament_cartesian<'py>(
+    current: Bound<'py, PyArray1<f64>>,
+    rfil: Bound<'py, PyArray1<f64>>,
+    zfil: Bound<'py, PyArray1<f64>>,
+    obs: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Filament origin coords (start of segment)
+    j: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Filament length delta
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    let current_readonly = current.readonly();
+    let current = current_readonly.as_slice()?;
+    let rfil_readonly = rfil.readonly();
+    let rfil = rfil_readonly.as_slice()?;
+    let zfil_readonly = zfil.readonly();
+    let zfil = zfil_readonly.as_slice()?;
+
+    let obsxro = obs.0.readonly();
+    let obsyro = obs.1.readonly();
+    let obszro = obs.2.readonly();
+    let obs = (obsxro.as_slice()?, obsyro.as_slice()?, obszro.as_slice()?);
+
+    let jxro = j.0.readonly();
+    let jyro = j.1.readonly();
+    let jzro = j.2.readonly();
+    let j = (jxro.as_slice()?, jyro.as_slice()?, jzro.as_slice()?);
+
+    // Select variant
+    let func = match par {
+        true => physics::circular_filament::body_force_density_circular_filament_cartesian,
+        false => physics::circular_filament::body_force_density_circular_filament_cartesian,
+    };
+
+    // Do calculations
+    let n = obs.0.len();
+    let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    let out = (&mut outx[..], &mut outy[..], &mut outz[..]);
+
+    match func((&rfil, &zfil, &current), obs, j, out) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    // Acquire global interpreter lock, which will be released when it goes out of scope
+    Python::with_gil(|py| {
+        let jxbx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
+        let jxby: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
+        let jxbz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
+
+        Ok((jxbx, jxby, jxbz))
+    })
+}
+
 /// A Python module implemented in Rust. The name of this function must match
 /// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
 /// import the module.
@@ -766,6 +832,10 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         mutual_inductance_circular_to_linear,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        body_force_density_circular_filament_cartesian,
         m.clone()
     )?)?;
 

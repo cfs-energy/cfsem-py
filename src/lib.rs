@@ -256,14 +256,7 @@ fn flux_density_linear_filament<'py>(
         }
     };
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let bx: Py<PyArray1<f64>> = PyArray1::from_vec(py, bx).unbind();
-        let by: Py<PyArray1<f64>> = PyArray1::from_vec(py, by).unbind();
-        let bz: Py<PyArray1<f64>> = PyArray1::from_vec(py, bz).unbind();
-
-        Ok((bx, by, bz))
-    })
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
 /// Python bindings for cfsemrs::physics::linear_filament::vector_potential_linear_filament
@@ -318,14 +311,7 @@ fn vector_potential_linear_filament<'py>(
         }
     };
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let bx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
-        let by: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
-        let bz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
-
-        Ok((bx, by, bz))
-    })
+    _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
 #[pyfunction]
@@ -392,14 +378,7 @@ fn gs_operator_order2<'py>(
     // Do calculations
     let (vals, rows, cols) = physics::gradshafranov::gs_operator_order2(rs, zs);
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let vals: Py<PyArray1<f64>> = PyArray1::from_vec(py, vals).unbind();
-        let rows: Py<PyArray1<usize>> = PyArray1::from_vec(py, rows).unbind();
-        let cols: Py<PyArray1<usize>> = PyArray1::from_vec(py, cols).unbind();
-
-        Ok((vals, rows, cols))
-    })
+    _3tup_ret!((vals, f64), (rows, usize), (cols, usize))
 }
 
 /// Python bindings for cfsemrs::physics::gradshafranov::gs_operator_order4
@@ -417,14 +396,7 @@ fn gs_operator_order4<'py>(
     // Do calculations
     let (vals, rows, cols) = physics::gradshafranov::gs_operator_order4(rs, zs);
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let vals: Py<PyArray1<f64>> = PyArray1::from_vec(py, vals).unbind();
-        let rows: Py<PyArray1<usize>> = PyArray1::from_vec(py, rows).unbind();
-        let cols: Py<PyArray1<usize>> = PyArray1::from_vec(py, cols).unbind();
-
-        Ok((vals, rows, cols))
-    })
+    _3tup_ret!((vals, f64), (rows, usize), (cols, usize))
 }
 
 /// Python bindings for cfsemrs::math::ellipe
@@ -482,14 +454,7 @@ fn flux_density_circular_filament_cartesian<'py>(
         }
     }
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let bx: Py<PyArray1<f64>> = PyArray1::from_slice(py, &bx).unbind(); // Make PyObjects
-        let by: Py<PyArray1<f64>> = PyArray1::from_slice(py, &by).unbind();
-        let bz: Py<PyArray1<f64>> = PyArray1::from_slice(py, &bz).unbind();
-
-        Ok((bx, by, bz))
-    })
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
 /// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
@@ -579,14 +544,7 @@ fn flux_density_dipole<'py>(
         }
     };
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let bx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
-        let by: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
-        let bz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
-
-        Ok((bx, by, bz))
-    })
+    _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
 /// Python bindings for cfsemrs::physics::body_force_density_circular_filament_cartesian
@@ -634,14 +592,7 @@ fn body_force_density_circular_filament_cartesian<'py>(
         }
     };
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let jxbx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
-        let jxby: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
-        let jxbz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
-
-        Ok((jxbx, jxby, jxbz))
-    })
+    _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
 /// Python bindings for cfsemrs::physics::body_force_density_linear_filament
@@ -717,14 +668,7 @@ fn body_force_density_linear_filament<'py>(
         }
     };
 
-    // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
-        let jxbx: Py<PyArray1<f64>> = PyArray1::from_vec(py, outx).unbind();
-        let jxby: Py<PyArray1<f64>> = PyArray1::from_vec(py, outy).unbind();
-        let jxbz: Py<PyArray1<f64>> = PyArray1::from_vec(py, outz).unbind();
-
-        Ok((jxbx, jxby, jxbz))
-    })
+    _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
 /// A Python module implemented in Rust. The name of this function must match
@@ -813,6 +757,21 @@ macro_rules! _3tup_slice_mut {
     };
 }
 
+/// Assemble an Ok((x, y, z)) for 3 output arrays of potentially different types
+macro_rules! _3tup_ret {
+    (($x:ident, $xt:ty), ($y:ident, $yt:ty), ($z:ident, $zt:ty)) => {
+        // Acquire global interpreter lock, which will be released when it goes out of scope
+        Python::with_gil(|py| {
+            let $x: Py<PyArray1<$xt>> = PyArray1::from_vec(py, $x).unbind();
+            let $y: Py<PyArray1<$yt>> = PyArray1::from_vec(py, $y).unbind();
+            let $z: Py<PyArray1<$zt>> = PyArray1::from_vec(py, $z).unbind();
+
+            Ok(($x, $y, $z))
+        })
+    };
+}
+
 pub(crate) use _2tup_slice_ro;
+pub(crate) use _3tup_ret;
 pub(crate) use _3tup_slice_mut;
 pub(crate) use _3tup_slice_ro;

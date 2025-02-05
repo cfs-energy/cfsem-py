@@ -746,6 +746,7 @@ macro_rules! _2tup_slice_ro {
     };
 }
 
+/// Convert a 3-tuple of PyArray to read-write slices, shadowing the original name
 macro_rules! _3tup_slice_mut {
     ($x:ident) => {
         let mut _rw = ($x.0.readwrite(), $x.1.readwrite(), $x.2.readwrite());

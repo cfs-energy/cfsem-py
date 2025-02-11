@@ -438,9 +438,9 @@ def flux_density_circular_filament_cartesian(
     xyzp = _3tup_contig(xyzp)
     bx, by, bz = em_flux_density_circular_filament_cartesian(
         ifil, rfil, zfil, xyzp, par
-    )
+    )  # [T]
 
-    return bx, by, bz  # [T]
+    return bx, by, bz  # type: ignore
 
 
 def mutual_inductance_circular_to_linear(
@@ -496,9 +496,9 @@ def flux_density_dipole(
     loc = _3tup_contig(loc)
     moment = _3tup_contig(moment)
     xyzp = _3tup_contig(xyzp)
-    bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, par)
+    bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, par)  # [T]
 
-    return bx, by, bz  # [T]
+    return bx, by, bz  # type: ignore
 
 
 def body_force_density_circular_filament_cartesian(
@@ -529,9 +529,9 @@ def body_force_density_circular_filament_cartesian(
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(
         ifil, rfil, zfil, obs, j, par
-    )
+    )  # [N/m^3]
 
-    return jxbx, jxby, jxbz  # [N/m^3]
+    return jxbx, jxby, jxbz  # type: ignore
 
 
 def body_force_density_linear_filament(
@@ -564,13 +564,13 @@ def body_force_density_linear_filament(
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_linear_filament(
         xyzfil, dlxyzfil, ifil, obs, j, par
-    )
+    )  # [N/m^3]
 
-    return jxbx, jxby, jxbz  # [N/m^3]
+    return jxbx, jxby, jxbz  # type: ignore
 
 
 def _3tup_contig(
-    t: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
+    t: Array3xN,
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
     return (

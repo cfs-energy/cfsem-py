@@ -23,7 +23,7 @@ from cfsem.bindings import (
     mutual_inductance_circular_to_linear,
     flux_density_dipole,
     body_force_density_circular_filament_cartesian,
-    body_force_density_linear_filament
+    body_force_density_linear_filament,
 )
 
 from ._cfsem import ellipe, ellipk
@@ -62,7 +62,7 @@ __all__ = [
     "mutual_inductance_circular_to_linear",
     "flux_density_dipole",
     "body_force_density_circular_filament_cartesian",
-    "body_force_density_linear_filament"
+    "body_force_density_linear_filament",
 ]
 
 
@@ -101,13 +101,19 @@ def self_inductance_piecewise_linear_filaments(xyzp: Array3xN) -> float:
     Returns:
         [H] Scalar self-inductance
     """
-    x, y, z = xyzp
-    xyzfil = (x[:-1], y[:-1], z[:-1])
-    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])
+    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
+    # erroneously in the pyright output as of pyright 1.1.393.
+    x, y, z = xyzp  # type: ignore
+    xyzfil = (x[:-1], y[:-1], z[:-1])  # type: ignore
+    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])  # type: ignore
 
     self_inductance = inductance_piecewise_linear_filaments(
-        xyzfil, dlxyzfil, xyzfil, dlxyzfil, True
-    )  # [H]
+        xyzfil,  # type: ignore
+        dlxyzfil,  # type: ignore
+        xyzfil,  # type: ignore
+        dlxyzfil,  # type: ignore
+        True,
+    )
 
     return self_inductance  # [H]
 
@@ -144,18 +150,23 @@ def mutual_inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar mutual inductance between the two filaments
     """
+    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
+    # erroneously in the pyright output as of pyright 1.1.393.
+    x0, y0, z0 = xyz0  # type: ignore
+    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])  # type: ignore
+    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])  # type: ignore
 
-    x0, y0, z0 = xyz0
-    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])
-    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])
-
-    x1, y1, z1 = xyz1
-    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])
-    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])
+    x1, y1, z1 = xyz1  # type: ignore
+    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])  # type: ignore
+    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])  # type: ignore
 
     inductance = inductance_piecewise_linear_filaments(
-        xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, False
-    )  # [H]
+        xyzfil0, # type: ignore
+        dlxyzfil0, # type: ignore
+        xyzfil1, # type: ignore
+        dlxyzfil1, # type: ignore
+        False,
+    )
 
     return inductance  # [H]
 

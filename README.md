@@ -38,7 +38,7 @@ maturin develop --release
 
 No part of installation requires root. If access issues are encountered, this can likely be resolved by using a virtual environment.
 
-Some computationally-expensive calculations are written in Rust. These calculations and their python bindings are compiled during installation with no intervention from the user. Symmetric bindings with docstrings are available in the `bindings.py` module and re-exported at the library level.
+Some computationally-expensive calculations are written in Rust. These calculations and their python bindings are installed from pre-built binaries when installing from pypi or compiled during local development installation, with no intervention from the user in either case. Symmetric bindings with docstrings are available in the `bindings.py` module and re-exported at the library level.
 
 To build with all of the optimizations available on your local machine, you can do:
 

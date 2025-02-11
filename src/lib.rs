@@ -479,8 +479,6 @@ fn mutual_inductance_circular_to_linear<'py>(
     // or error if data is not contiguous
     let rznfil = (rfil, zfil, nfil);
     _3tup_slice_ro!(rznfil);
-    let (rfil, zfil, nfil) = rznfil;
-
     _3tup_slice_ro!(xyzfil);
     _3tup_slice_ro!(dlxyzfil);
 
@@ -491,7 +489,7 @@ fn mutual_inductance_circular_to_linear<'py>(
     };
 
     // Do calculations
-    let m = match func((&rfil, &zfil, &nfil), xyzfil, dlxyzfil) {
+    let m = match func(rznfil, xyzfil, dlxyzfil) {
         Ok(x) => x,
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

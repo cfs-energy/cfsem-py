@@ -123,12 +123,13 @@ def test_flux_density_circular_filament_cartesian(r, z, par):
 
 
 @mark.parametrize("r", [7.7, np.pi])  # Needs to be large for Lyle with very small width
-@mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
-@mark.parametrize("h", [np.e / 3, 1.1])
-def test_self_inductance_piecewise_linear_filaments(r, z, h):
+@mark.parametrize("z", [0.0, np.e / 2])
+@mark.parametrize("h_over_r", [5e-2, 0.25, 1.0])
+def test_self_inductance_piecewise_linear_filaments(r, z, h_over_r):
     # Test self inductance via neumann's formula
     # against Lyle's calc for finite-thickness coils
     w = 0.001  # [m] can't be infinitesimally thin for Lyle's calc, but can be very thin compared to height and radius
+    h = h_over_r * r  # [m]
 
     nt = 13  # number of turns
     n = int(1e4)
@@ -527,9 +528,9 @@ def test_wien_against_paper_examples():
 @mark.parametrize("r", [0.775, 1.5])
 @mark.parametrize("z", [0.0, np.pi])
 @mark.parametrize("dr_over_r", [0.1, 0.2])
-@mark.parametrize("dz_over_r", [0.1, 3.0])
+@mark.parametrize("dz_over_r", [0.1, 3.5])
 @mark.parametrize("nt", [3.0, 400.0])
-def test_self_inductance_distributed_axisymmetric_conductor(
+def test_self_inductance_lyle6_against_filamentized(
     r, z, dr_over_r, dz_over_r, nt
 ):
     # Test that the Lyle approximation gives a similar result to
@@ -540,16 +541,16 @@ def test_self_inductance_distributed_axisymmetric_conductor(
         r * dr_over_r,
         r * dz_over_r,
         nt,
-        20,
-        20,
-    )  # Based on ARCV1C CS1 as of 2021-04-05
+        5,
+        100,
+    )
     L_Lyle = cfsem.self_inductance_lyle6(
         r, dr, dz, nt
     )  # Estimate self-inductance via closed-form approximation
     L_fil = _test._self_inductance_filamentized(
         r, z, dr, dz, nt, nr, nz
     )  # Estimate self-inductance via discretization
-    assert L_Lyle == approx(L_fil, 0.05)  # Require 5% accuracy (seat of the pants)
+    assert float(L_Lyle) == approx(L_fil, 0.05)  # Require 5% accuracy (seat of the pants)
 
 
 @mark.parametrize("major_radius", np.linspace(0.35, 1.25, 3, endpoint=True))

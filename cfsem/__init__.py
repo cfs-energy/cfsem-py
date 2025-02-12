@@ -161,10 +161,10 @@ def mutual_inductance_piecewise_linear_filaments(
     dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])  # type: ignore
 
     inductance = inductance_piecewise_linear_filaments(
-        xyzfil0, # type: ignore
-        dlxyzfil0, # type: ignore
-        xyzfil1, # type: ignore
-        dlxyzfil1, # type: ignore
+        xyzfil0,  # type: ignore
+        dlxyzfil0,  # type: ignore
+        xyzfil1,  # type: ignore
+        dlxyzfil1,  # type: ignore
         False,
     )
 
@@ -194,7 +194,10 @@ def flux_density_ideal_solenoid(
 def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     """
     Self-inductance of a cylindrically-symmetric coil of rectangular
-    cross-section, estimated to 6th order.
+    cross-section, estimated to 6th order. 
+    
+    This estimate is viable up to an L/D of about 1.5, above which it
+    rapidly accumulates error and eventually produces negative values.
 
     References:
         [1] T. R. Lyle,
@@ -212,6 +215,9 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     Returns:
         [H] self-inductance
     """
+
+    assert dr < 2.0 * r, "Axisymmetric coil edges can't extend to negative R"
+    assert dz / r <= 3.5, "Coil geometry outside domain of validity of Lyle's formula"
 
     # Guarantee 64-bit floats needed for 6th-order shape term
     a = np.float64(r)
@@ -263,6 +269,8 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     )  # [nondim] shape parameter
 
     self_inductance = MU_0 * (n**2) * a * f
+
+    assert self_inductance >= 0.0, "Coil geometry outside domain of validity of Lyle's formula"
 
     return self_inductance  # [H]
 

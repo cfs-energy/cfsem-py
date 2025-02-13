@@ -573,7 +573,7 @@ fn body_force_density_circular_filament_cartesian<'py>(
 
     // Select variant
     let func = match par {
-        true => physics::circular_filament::body_force_density_circular_filament_cartesian,
+        true => physics::circular_filament::body_force_density_circular_filament_cartesian_par,
         false => physics::circular_filament::body_force_density_circular_filament_cartesian,
     };
 
@@ -649,7 +649,7 @@ fn body_force_density_linear_filament<'py>(
 
     // Select variant
     let func = match par {
-        true => physics::linear_filament::body_force_density_linear_filament,
+        true => physics::linear_filament::body_force_density_linear_filament_par,
         false => physics::linear_filament::body_force_density_linear_filament,
     };
 

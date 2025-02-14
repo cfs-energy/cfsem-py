@@ -9,9 +9,9 @@ name = "_cfsem"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.21.2"
-numpy = "0.21.0"  # This must match pyo3 version!
-cfsem = "1.1.0"
+pyo3 = "0.23.4"
+numpy = "0.23.0"  # This must match pyo3 version!
+cfsem = "2.0.0"
 
 [profile.release]
 opt-level = 3

@@ -1,4 +1,4 @@
-# About cfsem
+# cfsem
 
 Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov.
 

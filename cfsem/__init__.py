@@ -1,4 +1,4 @@
-"""Physics calculations shared between various magnet models"""
+"""Quasi-steady electromagnetics calcs"""
 
 from typing import Tuple
 import numpy as np
@@ -19,6 +19,11 @@ from cfsem.bindings import (
     rotate_filaments_about_path,
     vector_potential_linear_filament,
     vector_potential_circular_filament,
+    flux_density_circular_filament_cartesian,
+    mutual_inductance_circular_to_linear,
+    flux_density_dipole,
+    body_force_density_circular_filament_cartesian,
+    body_force_density_linear_filament,
 )
 
 from ._cfsem import ellipe, ellipk
@@ -53,6 +58,11 @@ __all__ = [
     "rotate_filaments_about_path",
     "vector_potential_linear_filament",
     "vector_potential_circular_filament",
+    "flux_density_circular_filament_cartesian",
+    "mutual_inductance_circular_to_linear",
+    "flux_density_dipole",
+    "body_force_density_circular_filament_cartesian",
+    "body_force_density_linear_filament",
 ]
 
 
@@ -91,13 +101,19 @@ def self_inductance_piecewise_linear_filaments(xyzp: Array3xN) -> float:
     Returns:
         [H] Scalar self-inductance
     """
-    x, y, z = xyzp
-    xyzfil = (x[:-1], y[:-1], z[:-1])
-    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])
+    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
+    # erroneously in the pyright output as of pyright 1.1.393.
+    x, y, z = xyzp  # type: ignore
+    xyzfil = (x[:-1], y[:-1], z[:-1])  # type: ignore
+    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])  # type: ignore
 
     self_inductance = inductance_piecewise_linear_filaments(
-        xyzfil, dlxyzfil, xyzfil, dlxyzfil, True
-    )  # [H]
+        xyzfil,  # type: ignore
+        dlxyzfil,  # type: ignore
+        xyzfil,  # type: ignore
+        dlxyzfil,  # type: ignore
+        True,
+    )
 
     return self_inductance  # [H]
 
@@ -134,18 +150,23 @@ def mutual_inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar mutual inductance between the two filaments
     """
+    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
+    # erroneously in the pyright output as of pyright 1.1.393.
+    x0, y0, z0 = xyz0  # type: ignore
+    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])  # type: ignore
+    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])  # type: ignore
 
-    x0, y0, z0 = xyz0
-    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])
-    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])
-
-    x1, y1, z1 = xyz1
-    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])
-    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])
+    x1, y1, z1 = xyz1  # type: ignore
+    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])  # type: ignore
+    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])  # type: ignore
 
     inductance = inductance_piecewise_linear_filaments(
-        xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, False
-    )  # [H]
+        xyzfil0,  # type: ignore
+        dlxyzfil0,  # type: ignore
+        xyzfil1,  # type: ignore
+        dlxyzfil1,  # type: ignore
+        False,
+    )
 
     return inductance  # [H]
 
@@ -173,7 +194,10 @@ def flux_density_ideal_solenoid(
 def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     """
     Self-inductance of a cylindrically-symmetric coil of rectangular
-    cross-section, estimated to 6th order.
+    cross-section, estimated to 6th order. 
+    
+    This estimate is viable up to an L/D of about 1.5, above which it
+    rapidly accumulates error and eventually produces negative values.
 
     References:
         [1] T. R. Lyle,
@@ -191,6 +215,9 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     Returns:
         [H] self-inductance
     """
+
+    assert dr < 2.0 * r, "Axisymmetric coil edges can't extend to negative R"
+    assert dz / r <= 3.5, "Coil geometry outside domain of validity of Lyle's formula"
 
     # Guarantee 64-bit floats needed for 6th-order shape term
     a = np.float64(r)
@@ -242,6 +269,8 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     )  # [nondim] shape parameter
 
     self_inductance = MU_0 * (n**2) * a * f
+
+    assert self_inductance >= 0.0, "Coil geometry outside domain of validity of Lyle's formula"
 
     return self_inductance  # [H]
 

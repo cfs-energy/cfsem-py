@@ -13,6 +13,16 @@ from numpy.typing import NDArray
 from ._cfsem import flux_circular_filament as em_flux_circular_filament
 from ._cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from ._cfsem import flux_density_circular_filament as em_flux_density_circular_filament
+from ._cfsem import (
+    flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
+)
+from ._cfsem import (
+    mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
+)
+from ._cfsem import (
+    body_force_density_circular_filament_cartesian as em_body_force_density_circular_filament_cartesian,
+)
+
 from ._cfsem import gs_operator_order2 as em_gs_operator_order2
 from ._cfsem import gs_operator_order4 as em_gs_operator_order4
 from ._cfsem import (
@@ -26,6 +36,11 @@ from ._cfsem import (
 from ._cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
+from ._cfsem import (
+    body_force_density_linear_filament as em_body_force_density_linear_filament,
+)
+
+from ._cfsem import flux_density_dipole as em_flux_density_dipole
 
 
 def flux_circular_filament(
@@ -61,11 +76,8 @@ def flux_circular_filament(
     Returns:
         [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
     """
-    ifil = ascontiguousarray(ifil)
-    rfil = ascontiguousarray(rfil)
-    zfil = ascontiguousarray(zfil)
-    rprime = ascontiguousarray(rprime)
-    zprime = ascontiguousarray(zprime)
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    rprime, zprime = _2tup_contig((rprime, zprime))
     psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
     return psi  # [Wb] or [T-m^2] or [V-s]
 
@@ -105,11 +117,8 @@ def vector_potential_circular_filament(
     Returns:
         [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
     """
-    ifil = ascontiguousarray(ifil)
-    rfil = ascontiguousarray(rfil)
-    zfil = ascontiguousarray(zfil)
-    rprime = ascontiguousarray(rprime)
-    zprime = ascontiguousarray(zprime)
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    rprime, zprime = _2tup_contig((rprime, zprime))
     a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
     return a_phi  # [Wb/m] or [V-s/m]
 
@@ -157,13 +166,10 @@ def flux_density_circular_filament(
     Returns:
         [T] (Br, Bz) flux density components
     """
-    ifil = ascontiguousarray(ifil)
-    rfil = ascontiguousarray(rfil)
-    zfil = ascontiguousarray(zfil)
-    rprime = ascontiguousarray(rprime)
-    zprime = ascontiguousarray(zprime)
-    Br, Bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
-    return Br, Bz  # [T]
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    rprime, zprime = _2tup_contig((rprime, zprime))
+    br, bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    return br, bz  # [T]
 
 
 def flux_density_linear_filament(
@@ -187,22 +193,10 @@ def flux_density_linear_filament(
     Returns:
         [T] (Bx, By, Bz) magnetic flux density at observation points
     """
-    xyzp = (
-        ascontiguousarray(xyzp[0]),
-        ascontiguousarray(xyzp[1]),
-        ascontiguousarray(xyzp[2]),
-    )
-    xyzfil = (
-        ascontiguousarray(xyzfil[0]),
-        ascontiguousarray(xyzfil[1]),
-        ascontiguousarray(xyzfil[2]),
-    )
-    dlxyzfil = (
-        ascontiguousarray(dlxyzfil[0]),
-        ascontiguousarray(dlxyzfil[1]),
-        ascontiguousarray(dlxyzfil[2]),
-    )
-    ifil = ascontiguousarray(ifil)
+    xyzp = _3tup_contig(xyzp)
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).flatten()
     return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -230,22 +224,10 @@ def vector_potential_linear_filament(
     Returns:
         [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
     """
-    xyzp = (
-        ascontiguousarray(xyzp[0]),
-        ascontiguousarray(xyzp[1]),
-        ascontiguousarray(xyzp[2]),
-    )
-    xyzfil = (
-        ascontiguousarray(xyzfil[0]),
-        ascontiguousarray(xyzfil[1]),
-        ascontiguousarray(xyzfil[2]),
-    )
-    dlxyzfil = (
-        ascontiguousarray(dlxyzfil[0]),
-        ascontiguousarray(dlxyzfil[1]),
-        ascontiguousarray(dlxyzfil[2]),
-    )
-    ifil = ascontiguousarray(ifil)
+    xyzp = _3tup_contig(xyzp)
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).flatten()
     return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -303,26 +285,11 @@ def inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar inductance
     """
-    xyzfil0 = (
-        ascontiguousarray(xyzfil0[0]),
-        ascontiguousarray(xyzfil0[1]),
-        ascontiguousarray(xyzfil0[2]),
-    )
-    dlxyzfil0 = (
-        ascontiguousarray(dlxyzfil0[0]),
-        ascontiguousarray(dlxyzfil0[1]),
-        ascontiguousarray(dlxyzfil0[2]),
-    )
-    xyzfil1 = (
-        ascontiguousarray(xyzfil1[0]),
-        ascontiguousarray(xyzfil1[1]),
-        ascontiguousarray(xyzfil1[2]),
-    )
-    dlxyzfil1 = (
-        ascontiguousarray(dlxyzfil1[0]),
-        ascontiguousarray(dlxyzfil1[1]),
-        ascontiguousarray(dlxyzfil1[2]),
-    )
+    xyzfil0 = _3tup_contig(xyzfil0)
+    dlxyzfil0 = _3tup_contig(dlxyzfil0)
+    xyzfil1 = _3tup_contig(xyzfil1)
+    dlxyzfil1 = _3tup_contig(dlxyzfil1)
+
     return em_inductance_piecewise_linear_filaments(
         xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, self_inductance
     )
@@ -339,8 +306,7 @@ def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
     Returns:
         Differential operator as triplet format sparse matrix
     """
-    rs = ascontiguousarray(rs)
-    zs = ascontiguousarray(zs)
+    rs, zs = _2tup_contig((rs, zs))
     return em_gs_operator_order2(rs, zs)
 
 
@@ -356,8 +322,7 @@ def gs_operator_order4(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
     Returns:
         Differential operator as triplet format sparse matrix
     """
-    rs = ascontiguousarray(rs)
-    zs = ascontiguousarray(zs)
+    rs, zs = _2tup_contig((rs, zs))
     return em_gs_operator_order4(rs, zs)
 
 
@@ -446,3 +411,177 @@ def rotate_filaments_about_path(
     )
 
     return new_fils  # [m]
+
+
+def flux_density_circular_filament_cartesian(
+    ifil: NDArray[float64],
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    xyzp: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    Flux density of a circular filament in cartesian form
+    at a set of locations given in cartesian coordinates.
+
+    Args:
+        ifil: [A] filament current
+        rfil: [m] filament R-coord
+        zfil: [m] filament Z-coord
+        xyzp: [m] x,y,z coords of observation points
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [T] flux density
+    """
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    xyzp = _3tup_contig(xyzp)
+    bx, by, bz = em_flux_density_circular_filament_cartesian(
+        ifil, rfil, zfil, xyzp, par
+    )  # [T]
+
+    return bx, by, bz  # type: ignore
+
+
+def mutual_inductance_circular_to_linear(
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    nfil: NDArray[float64],
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    Mutual inductance between a collection of circular filaments and a piecewise-linear filament.
+    This method is much faster (~100x typically) than discretizing the circular loop
+    into linear segments and using Neumann's formula.
+
+    Args:
+        rfil: [m] filament R-coord
+        zfil: [m] filament Z-coord
+        nfil: [dimensionless] filament number of turns
+        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
+        dlxyzfil: [m] x,y,z length delta of current filaments
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [H] mutual inductance
+    """
+    rfil, zfil, nfil = _3tup_contig((rfil, zfil, nfil))
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    m = em_mutual_inductance_circular_to_linear(rfil, zfil, nfil, xyzfil, dlxyzfil, par)
+
+    return m  # [H]
+
+
+def flux_density_dipole(
+    loc: Array3xN,
+    moment: Array3xN,
+    xyzp: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    Magnetic flux density of a dipole in cartesian coordiantes.
+
+    Args:
+        loc: [m] x,y,z coordinates of dipole
+        moment: [A-m^2] dipole magnetic moment vector
+        xyzp: [m] x,y,z coords of observation points
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [T] flux density
+    """
+    loc = _3tup_contig(loc)
+    moment = _3tup_contig(moment)
+    xyzp = _3tup_contig(xyzp)
+    bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, par)  # [T]
+
+    return bx, by, bz  # type: ignore
+
+
+def body_force_density_circular_filament_cartesian(
+    ifil: NDArray[float64],
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    obs: Array3xN,
+    j: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
+    filament segment at an observation point in cartesian form with some current density (per area).
+
+    Args:
+        ifil: [A] filament current
+        rfil: [m] filament R-coord
+        zfil: [m] filament Z-coord
+        obs: [m] x,y,z coords of observation locations
+        j: [A/m^2] current density vector at observation locations
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [N/m^3] body force density
+    """
+    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    obs = _3tup_contig(obs)
+    j = _3tup_contig(j)
+    jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(
+        ifil, rfil, zfil, obs, j, par
+    )  # [N/m^3]
+
+    return jxbx, jxby, jxbz  # type: ignore
+
+
+def body_force_density_linear_filament(
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    ifil: NDArray[float64],
+    obs: Array3xN,
+    j: Array3xN,
+    par: bool = True,
+) -> NDArray[float64]:
+    """
+    JxB (Lorentz) body force density (per volume) due to a linear current
+    filament segment at an observation point with some current density (per area).
+
+    Args:
+        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
+        dlxyzfil: [m] x,y,z length delta of current filaments
+        ifil: [A] filament current
+        obs: [m] x,y,z coords of observation locations
+        j: [A/m^2] current density vector at observation locations
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [N/m^3] body force density
+    """
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).flatten()
+    obs = _3tup_contig(obs)
+    j = _3tup_contig(j)
+    jxbx, jxby, jxbz = em_body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, par
+    )  # [N/m^3]
+
+    return jxbx, jxby, jxbz  # type: ignore
+
+
+def _3tup_contig(
+    t: Array3xN,
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
+    return (
+        ascontiguousarray(t[0]).flatten(),
+        ascontiguousarray(t[1]).flatten(),
+        ascontiguousarray(t[2]).flatten(),
+    )
+
+
+def _2tup_contig(
+    t: tuple[NDArray[float64], NDArray[float64]],
+) -> tuple[NDArray[float64], NDArray[float64]]:
+    """Make contiguous references or copies to arrays in a 2-tuple. Only copies data if it is not already contiguous."""
+    return (ascontiguousarray(t[0]).flatten(), ascontiguousarray(t[1]).flatten())

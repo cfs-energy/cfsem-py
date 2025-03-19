@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.0 2025-03-19
+
+### Added
+
+* Add support for python 3.13
+
 ## 2.2.0 2025-02-03
 
 ### Added

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.1 2025-03-19
+
+### Changed
+
+* Update rust to 2024 edition
+* Update pyo3 rust dep version to resolve conditional compilation issue in build for linux arm/aarch64
+
 ## 2.3.0 2025-03-19
 
 ### Added

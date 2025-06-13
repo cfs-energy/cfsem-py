@@ -571,7 +571,7 @@ def body_force_density_linear_filament(
 
 def _3tup_contig(
     t: Array3xN,
-) -> Array3xN:
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
     return (
         ascontiguousarray(t[0]).flatten(),

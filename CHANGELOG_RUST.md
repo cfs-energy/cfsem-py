@@ -1,10 +1,12 @@
 # Changelog
 
-## 2.1.0 2025-06-13
+## 2.4.0 2025-06-13
 
 ### Changed
 
 * Merge library with python bindings by adding `python` feature gate in front of bindings module
+* Synchronize rust and python library versions
+* Update license to MIT only for compatibility with combined Python library
 
 ## 2.0.0 2025-02-03
 

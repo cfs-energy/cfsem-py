@@ -6,6 +6,7 @@
 
 * Merge with rust library
 * Update type hints for symmetric bindings
+* Synchronize rust and python library versions
 
 ## 2.3.1 2025-03-19
 

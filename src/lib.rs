@@ -7,6 +7,7 @@
 #[cfg(feature = "python")]
 pub mod python;
 
+#[allow(unused_imports)]  // Doesn't build without this
 #[cfg(feature = "python")]
 use python::*;
 

@@ -10,37 +10,37 @@ from cfsem.types import Array3xN
 from numpy import ascontiguousarray, float64, zeros_like
 from numpy.typing import NDArray
 
-from ._cfsem import flux_circular_filament as em_flux_circular_filament
-from ._cfsem import flux_density_linear_filament as em_flux_density_linear_filament
-from ._cfsem import flux_density_circular_filament as em_flux_density_circular_filament
-from ._cfsem import (
+from .cfsem import flux_circular_filament as em_flux_circular_filament
+from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
+from .cfsem import flux_density_circular_filament as em_flux_density_circular_filament
+from .cfsem import (
     flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
 )
-from ._cfsem import (
+from .cfsem import (
     mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
 )
-from ._cfsem import (
+from .cfsem import (
     body_force_density_circular_filament_cartesian as em_body_force_density_circular_filament_cartesian,
 )
 
-from ._cfsem import gs_operator_order2 as em_gs_operator_order2
-from ._cfsem import gs_operator_order4 as em_gs_operator_order4
-from ._cfsem import (
+from .cfsem import gs_operator_order2 as em_gs_operator_order2
+from .cfsem import gs_operator_order4 as em_gs_operator_order4
+from .cfsem import (
     inductance_piecewise_linear_filaments as em_inductance_piecewise_linear_filaments,
 )
-from ._cfsem import filament_helix_path as em_filament_helix_path
-from ._cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
-from ._cfsem import (
+from .cfsem import filament_helix_path as em_filament_helix_path
+from .cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
+from .cfsem import (
     vector_potential_circular_filament as em_vector_potential_circular_filament,
 )
-from ._cfsem import (
+from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
-from ._cfsem import (
+from .cfsem import (
     body_force_density_linear_filament as em_body_force_density_linear_filament,
 )
 
-from ._cfsem import flux_density_dipole as em_flux_density_dipole
+from .cfsem import flux_density_dipole as em_flux_density_dipole
 
 
 def flux_circular_filament(

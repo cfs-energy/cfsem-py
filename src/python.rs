@@ -1,4 +1,3 @@
-
 use numpy::PyArray1;
 use numpy::PyArrayMethods;
 use pyo3::exceptions;

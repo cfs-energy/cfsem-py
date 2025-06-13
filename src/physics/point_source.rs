@@ -6,10 +6,9 @@ use rayon::{
 };
 
 use crate::{
-    chunksize,
+    MU0_OVER_4PI, chunksize,
     macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
     math::{dot3, rss3},
-    MU0_OVER_4PI,
 };
 
 /// Magnetic flux density of a dipole in cartesian coordiantes.

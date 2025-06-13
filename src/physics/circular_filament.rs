@@ -11,7 +11,7 @@ use crate::{
     math::{cross3, dot3, ellipe, ellipk, rss3},
 };
 
-use crate::{MU0_OVER_4PI, MU_0};
+use crate::{MU_0, MU0_OVER_4PI};
 
 /// Flux contributions from some circular filaments to some observation points, which happens to be
 /// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.

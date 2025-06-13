@@ -10,7 +10,7 @@ use crate::{
     math::{cross3, decompose_filament, dot3, rss3},
 };
 
-use crate::{macros::*, MU0_OVER_4PI};
+use crate::{MU0_OVER_4PI, macros::*};
 
 /// Estimate the mutual inductance between two piecewise-linear current filaments.
 ///
@@ -76,7 +76,9 @@ pub fn inductance_piecewise_linear_filaments(
     check_length!(m, xfil1, yfil1, zfil1, dlxfil1, dlyfil1, dlzfil1);
 
     if self_inductance && m != n {
-        return Err("For self-inductance runs, the two paths must be the same length and should be identical");
+        return Err(
+            "For self-inductance runs, the two paths must be the same length and should be identical",
+        );
     }
 
     let mut inductance: f64 = 0.0; // [H], although it is in [m] until the final calc

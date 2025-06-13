@@ -8,9 +8,9 @@ use rayon::{
 use num_traits::{Float, NumCast};
 
 use crate::{
-    math::rss3,
-    mesh::{convert_point, MeshEdgeList},
     MU0_OVER_4PI,
+    math::rss3,
+    mesh::{MeshEdgeList, convert_point},
 };
 use crate::{
     math::{decompose_filament, dot3},

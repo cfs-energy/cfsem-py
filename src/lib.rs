@@ -4,10 +4,10 @@
 #![allow(clippy::needless_late_init)]
 #![allow(non_snake_case)]
 
-#[cfg(feature="python")]
+#[cfg(feature = "python")]
 pub mod python;
 
-#[cfg(feature="python")]
+#[cfg(feature = "python")]
 use python::*;
 
 use std::num::NonZeroUsize;

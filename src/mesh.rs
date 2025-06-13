@@ -2,8 +2,8 @@
 use crate::math::{cross3, dot3, rss3};
 use core::f64::consts::PI;
 
-use nalgebra::geometry::Rotation3;
 use nalgebra::Vector3;
+use nalgebra::geometry::Rotation3;
 
 use num_traits::{Float, NumCast};
 
@@ -153,7 +153,9 @@ pub fn filament_helix_path(
 
         // Check that the user's choice of radius was not modified
         if (1.0 - helix_start_offset_mag / final_mag).abs() > 1e-4 {
-            return Err("Helix start offset magnitude was not preserved. Check that helix start offset is not zero or parallel to path.");
+            return Err(
+                "Helix start offset magnitude was not preserved. Check that helix start offset is not zero or parallel to path.",
+            );
         }
 
         // Check that the final projected helix start is, in fact,

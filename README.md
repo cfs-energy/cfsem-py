@@ -8,7 +8,7 @@ Quasi-steady electromagnetics including filamentized approximations, Biot-Savart
 
 Requirements
 
-* Python 3.9-3.12 and pip
+* Python 3.9-3.13 and pip
 * Don't worry about this:
   * This info provided for troubleshooting purposes:
   * If on an x86 processor, you will need a CPU that supports SSE through 4.1, AVX, and FMA.

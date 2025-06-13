@@ -36,8 +36,8 @@ dev = [
 ]
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
-module-name = "cfsem._cfsem"
+features = ["pyo3/extension-module", "python"]
+module-name = "cfsem.cfsem"
 
 [tool.ruff]
 target-version = "py311"

@@ -36,8 +36,8 @@ jobs:
         source .venv/bin/activate
 
         uv pip install maturin
-        uv run --locked maturin develop --features=python
-        uv pip install .[dev] --locked
+        # uv run --locked maturin develop --features=python
+        uv pip install .[dev]
 
         # Python lint, test, and coverage
         uv run --locked ruff check ./cfsem

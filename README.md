@@ -4,7 +4,7 @@
 
 Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov.
 
-## Installation
+## Installation - Python
 
 Requirements
 
@@ -18,7 +18,25 @@ Requirements
 pip install cfsem
 ```
 
-## Development
+## Installation - Rust
+
+To include this library in a Rust project, add an entry to your Cargo.toml's `[dependencies]` section:
+
+```toml
+cfsem = "*"
+```
+
+For Python installation, see the docs for the Python library.
+
+## Benchmarking - Rust
+
+Benchmarks are configured in Cargo.toml, and can be run via cargo:
+
+```bash
+cargo bench
+```
+
+## Development - Python
 
 Requirements
 

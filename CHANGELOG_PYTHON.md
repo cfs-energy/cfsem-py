@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.0 2025-06-13
+
+### Changed
+
+* Merge with rust library
+* Update type hints for symmetric bindings
+
 ## 2.3.1 2025-03-19
 
 ### Changed

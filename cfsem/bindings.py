@@ -331,7 +331,7 @@ def filament_helix_path(
     helix_start_offset: tuple[float, float, float],
     twist_pitch: float,
     angle_offset: float,
-) -> NDArray[float64]:
+) -> Array3xN:
     """
     Filamentize a helix about an arbitrary piecewise-linear path.
 
@@ -383,7 +383,7 @@ def filament_helix_path(
 
 def rotate_filaments_about_path(
     path: Array3xN, angle_offset: float, fils: Array3xN
-) -> NDArray[float64]:
+) -> Array3xN:
     """
     Rotate a path of point about another path.
 
@@ -419,7 +419,7 @@ def flux_density_circular_filament_cartesian(
     zfil: NDArray[float64],
     xyzp: Array3xN,
     par: bool = True,
-) -> NDArray[float64]:
+) -> Array3xN:
     """
     Flux density of a circular filament in cartesian form
     at a set of locations given in cartesian coordinates.
@@ -480,7 +480,7 @@ def flux_density_dipole(
     moment: Array3xN,
     xyzp: Array3xN,
     par: bool = True,
-) -> NDArray[float64]:
+) -> Array3xN:
     """
     Magnetic flux density of a dipole in cartesian coordiantes.
 
@@ -508,7 +508,7 @@ def body_force_density_circular_filament_cartesian(
     obs: Array3xN,
     j: Array3xN,
     par: bool = True,
-) -> NDArray[float64]:
+) -> Array3xN:
     """
     JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
     filament segment at an observation point in cartesian form with some current density (per area).
@@ -541,7 +541,7 @@ def body_force_density_linear_filament(
     obs: Array3xN,
     j: Array3xN,
     par: bool = True,
-) -> NDArray[float64]:
+) -> Array3xN:
     """
     JxB (Lorentz) body force density (per volume) due to a linear current
     filament segment at an observation point with some current density (per area).
@@ -571,7 +571,7 @@ def body_force_density_linear_filament(
 
 def _3tup_contig(
     t: Array3xN,
-) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+) -> Array3xN:
     """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
     return (
         ascontiguousarray(t[0]).flatten(),

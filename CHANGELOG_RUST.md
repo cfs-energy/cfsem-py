@@ -7,6 +7,7 @@
 * Merge library with python bindings by adding `python` feature gate in front of bindings module
 * Synchronize rust and python library versions
 * Update license to MIT only for compatibility with combined Python library
+* Update release workflow to use cargo-semver-checks action directly
 
 ## 2.0.0 2025-02-03
 

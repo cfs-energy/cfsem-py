@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.2 2025-06-16
+
+### Changed
+
+* Include pyo3 extension-module feature to resolve build issues on linux
+
 ## 2.4.1 2025-06-16
 
 ### Changed

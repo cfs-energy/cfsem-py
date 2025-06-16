@@ -4,11 +4,11 @@
 
 Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov.
 
-## Installation
+## Installation - Python
 
 Requirements
 
-* Python 3.9-3.12 and pip
+* Python 3.9-3.13 and pip
 * Don't worry about this:
   * This info provided for troubleshooting purposes:
   * If on an x86 processor, you will need a CPU that supports SSE through 4.1, AVX, and FMA.
@@ -18,7 +18,25 @@ Requirements
 pip install cfsem
 ```
 
-## Development
+## Installation - Rust
+
+To include this library in a Rust project, add an entry to your Cargo.toml's `[dependencies]` section:
+
+```toml
+cfsem = "*"
+```
+
+For Python installation, see the docs for the Python library.
+
+## Benchmarking - Rust
+
+Benchmarks are configured in Cargo.toml, and can be run via cargo:
+
+```bash
+cargo bench
+```
+
+## Development - Python
 
 Requirements
 
@@ -27,13 +45,13 @@ Requirements
 To install in the active python environment, do
 
 ```bash
-pip install -e .[dev]
+uv pip install -e .[dev]
 ```
 
 To build the Rust bindings only, do
 
 ```bash
-maturin develop --release
+maturin develop --release --features=python
 ```
 
 No part of installation requires root. If access issues are encountered, this can likely be resolved by using a virtual environment.
@@ -43,7 +61,7 @@ Some computationally-expensive calculations are written in Rust. These calculati
 To build with all of the optimizations available on your local machine, you can do:
 
 ```bash
-RUSTCFLAGS="-Ctarget-cpu=native" maturin develop --release
+RUSTCFLAGS="-Ctarget-cpu=native" maturin develop --release --features=python
 pip install -e .[dev]
 ```
 

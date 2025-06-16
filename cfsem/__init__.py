@@ -26,7 +26,7 @@ from cfsem.bindings import (
     body_force_density_linear_filament,
 )
 
-from ._cfsem import ellipe, ellipk
+from .cfsem import ellipe, ellipk
 
 MU_0 = 4.0 * np.pi * 1e-7 * (1.0 + 5.5e-10)
 """

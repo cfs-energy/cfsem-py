@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.1 2025-06-16
+
+### Changed
+
+* Update release workflow
+
 ## 2.4.0 2025-06-13
 
 ### Changed

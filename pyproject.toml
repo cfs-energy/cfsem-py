@@ -40,7 +40,7 @@ features = ["pyo3/extension-module", "python"]
 module-name = "cfsem.cfsem"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py39"
 line-length = 110
 
 [tool.ruff.lint]

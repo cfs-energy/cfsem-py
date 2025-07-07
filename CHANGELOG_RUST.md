@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.3 2025-07-07
+
+### Changed
+
+* No changes to rust side; version roll for lock-step versioning with python
+
 ## 2.4.2 2025-06-16
 
 ### Changed

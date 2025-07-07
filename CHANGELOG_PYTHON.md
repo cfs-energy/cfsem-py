@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.3 2025-07-07
+
+### Changed
+
+* Configure linter to be slightly more strict
+* Format and resolve new lints
+
 ## 2.4.2 2025-06-16
 
 ### Changed

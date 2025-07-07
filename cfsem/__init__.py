@@ -1,30 +1,28 @@
 """Quasi-steady electromagnetics calcs"""
 
-from typing import Tuple
 import numpy as np
-from numpy.typing import NDArray
 from interpn import MulticubicRectilinear
-
-from cfsem.types import Array3xN
+from numpy.typing import NDArray
 
 from cfsem.bindings import (
+    body_force_density_circular_filament_cartesian,
+    body_force_density_linear_filament,
+    filament_helix_path,
     flux_circular_filament,
-    flux_density_linear_filament,
     flux_density_biot_savart,
     flux_density_circular_filament,
+    flux_density_circular_filament_cartesian,
+    flux_density_dipole,
+    flux_density_linear_filament,
     gs_operator_order2,
     gs_operator_order4,
     inductance_piecewise_linear_filaments,
-    filament_helix_path,
-    rotate_filaments_about_path,
-    vector_potential_linear_filament,
-    vector_potential_circular_filament,
-    flux_density_circular_filament_cartesian,
     mutual_inductance_circular_to_linear,
-    flux_density_dipole,
-    body_force_density_circular_filament_cartesian,
-    body_force_density_linear_filament,
+    rotate_filaments_about_path,
+    vector_potential_circular_filament,
+    vector_potential_linear_filament,
 )
+from cfsem.types import Array3xN
 
 from .cfsem import ellipe, ellipk
 
@@ -171,9 +169,7 @@ def mutual_inductance_piecewise_linear_filaments(
     return inductance  # [H]
 
 
-def flux_density_ideal_solenoid(
-    current: float, num_turns: float, length: float
-) -> float:
+def flux_density_ideal_solenoid(current: float, num_turns: float, length: float) -> float:
     """
     Axial B-field on centerline of an ideal (infinitely long) solenoid.
 
@@ -194,8 +190,8 @@ def flux_density_ideal_solenoid(
 def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     """
     Self-inductance of a cylindrically-symmetric coil of rectangular
-    cross-section, estimated to 6th order. 
-    
+    cross-section, estimated to 6th order.
+
     This estimate is viable up to an L/D of about 1.5, above which it
     rapidly accumulates error and eventually produces negative values.
 
@@ -239,13 +235,7 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     f = (
         ml
         + (1 + u + v - 8 * (w + ww)) / 12.0  # 0th order in d/a
-        + (
-            da2
-            * (
-                cd2 * (221 + 60 * ml - 6 * v)
-                + 3 * bd2 * (69 + 60 * ml + 10 * u - 64 * w)
-            )
-        )
+        + (da2 * (cd2 * (221 + 60 * ml - 6 * v) + 3 * bd2 * (69 + 60 * ml + 10 * u - 64 * w)))
         / 5760.0  # 2nd order
         + (
             da2**2
@@ -275,9 +265,7 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
     return self_inductance  # [H]
 
 
-def mutual_inductance_of_circular_filaments(
-    rzn1: NDArray, rzn2: NDArray, par: bool = True
-) -> float:
+def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray, par: bool = True) -> float:
     """
     Analytic mutual inductance between a pair of ideal cylindrically-symmetric coaxial filaments.
 
@@ -294,16 +282,12 @@ def mutual_inductance_of_circular_filaments(
         float: [H] mutual inductance
     """
 
-    m = mutual_inductance_of_cylindrical_coils(
-        rzn1.reshape((3, 1)), rzn2.reshape((3, 1)), par
-    )
+    m = mutual_inductance_of_cylindrical_coils(rzn1.reshape((3, 1)), rzn2.reshape((3, 1)), par)
 
     return m  # [H]
 
 
-def mutual_inductance_of_cylindrical_coils(
-    f1: NDArray, f2: NDArray, par: bool = True
-) -> float:
+def mutual_inductance_of_cylindrical_coils(f1: NDArray, f2: NDArray, par: bool = True) -> float:
     """
     Analytical mutual inductance between two coaxial collections of ideal filaments.
 
@@ -324,16 +308,12 @@ def mutual_inductance_of_cylindrical_coils(
 
     # Using n2 as the current per filament is equivalent to examining a 1A reference current,
     # which gives us the flux per amp (inductance)
-    m = np.sum(
-        n1 * flux_circular_filament(n2, r2, z2, r1, z1, par)
-    )  # [H] total mutual inductance
+    m = np.sum(n1 * flux_circular_filament(n2, r2, z2, r1, z1, par))  # [H] total mutual inductance
 
     return m  # [H]
 
 
-def filament_coil(
-    r: float, z: float, w: float, h: float, nt: float, nr: int, nz: int
-) -> NDArray:
+def filament_coil(r: float, z: float, w: float, h: float, nt: float, nr: int, nz: int) -> NDArray:
     """
     Create an array of filaments from coil cross-section, evenly spaced
     _inside_ the winding pack. No filaments are coincident with the coil surface.
@@ -365,9 +345,7 @@ def filament_coil(
     return filaments  # [m], [m], [dimensionless]
 
 
-def self_inductance_circular_ring_wien(
-    major_radius: NDArray, minor_radius: NDArray
-) -> NDArray:
+def self_inductance_circular_ring_wien(major_radius: NDArray, minor_radius: NDArray) -> NDArray:
     """
     Wien's formula for the self-inductance of a circular ring
     with thin circular cross section.
@@ -391,21 +369,19 @@ def self_inductance_circular_ring_wien(
     ra2 = (minor_radius / major_radius) ** 2  # [], (rho / a)^2, dimensionless
     # Equation 7 in Rosa & Cohen lacks the factor of 1e-7
     # because it is not in SI base units.
-    self_inductance = (
-        MU_0 * major_radius * ((1 + 0.125 * ra2) * np.log(8 * ar) - 0.0083 * ra2 - 1.75)
-    )  # [H]
+    self_inductance = MU_0 * major_radius * ((1 + 0.125 * ra2) * np.log(8 * ar) - 0.0083 * ra2 - 1.75)  # [H]
     return self_inductance  # [H]
 
 
 def self_inductance_distributed_axisymmetric_conductor(
     current: float,
-    grid: Tuple[NDArray, NDArray],
-    mesh: Tuple[NDArray, NDArray],
-    b_part: Tuple[NDArray, NDArray],
+    grid: tuple[NDArray, NDArray],
+    mesh: tuple[NDArray, NDArray],
+    b_part: tuple[NDArray, NDArray],
     psi_part: NDArray,
     mask: NDArray,
-    edge_path: Tuple[NDArray, NDArray],
-) -> Tuple[float, float, float]:
+    edge_path: tuple[NDArray, NDArray],
+) -> tuple[float, float, float]:
     """
     Calculation of a distributed conductor's self-inductance from two components:
 
@@ -546,7 +522,8 @@ def self_inductance_annular_ring(r: float, a: float, b: float) -> float:
     and `(b/r)^2`.
 
     References:
-        [1] E. B. Rosa and F. W. Grover, “Formulas and tables for the calculation of mutual and self-inductance (Revised),”
+        [1] E. B. Rosa and F. W. Grover,
+            “Formulas and tables for the calculation of mutual and self-inductance (Revised),”
             BULL. NATL. BUR. STAND., vol. 8, no. 1, p. 1, Jan. 1912,
             doi: [10.6028/bulletin.185](https://doi.org/10.6028/bulletin.185)
 

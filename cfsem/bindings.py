@@ -5,30 +5,33 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
-from cfsem.types import Array3xN
-
 from numpy import ascontiguousarray, float64, zeros_like
 from numpy.typing import NDArray
 
+from cfsem.types import Array3xN
+
+from .cfsem import (
+    body_force_density_circular_filament_cartesian as em_body_force_density_circular_filament_cartesian,
+)
+from .cfsem import (
+    body_force_density_linear_filament as em_body_force_density_linear_filament,
+)
+from .cfsem import filament_helix_path as em_filament_helix_path
 from .cfsem import flux_circular_filament as em_flux_circular_filament
-from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from .cfsem import flux_density_circular_filament as em_flux_density_circular_filament
 from .cfsem import (
     flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
 )
-from .cfsem import (
-    mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
-)
-from .cfsem import (
-    body_force_density_circular_filament_cartesian as em_body_force_density_circular_filament_cartesian,
-)
-
+from .cfsem import flux_density_dipole as em_flux_density_dipole
+from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from .cfsem import gs_operator_order2 as em_gs_operator_order2
 from .cfsem import gs_operator_order4 as em_gs_operator_order4
 from .cfsem import (
     inductance_piecewise_linear_filaments as em_inductance_piecewise_linear_filaments,
 )
-from .cfsem import filament_helix_path as em_filament_helix_path
+from .cfsem import (
+    mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
+)
 from .cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
 from .cfsem import (
     vector_potential_circular_filament as em_vector_potential_circular_filament,
@@ -36,11 +39,6 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
-from .cfsem import (
-    body_force_density_linear_filament as em_body_force_density_linear_filament,
-)
-
-from .cfsem import flux_density_dipole as em_flux_density_dipole
 
 
 def flux_circular_filament(
@@ -290,9 +288,7 @@ def inductance_piecewise_linear_filaments(
     xyzfil1 = _3tup_contig(xyzfil1)
     dlxyzfil1 = _3tup_contig(dlxyzfil1)
 
-    return em_inductance_piecewise_linear_filaments(
-        xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, self_inductance
-    )
+    return em_inductance_piecewise_linear_filaments(xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, self_inductance)
 
 
 def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
@@ -381,9 +377,7 @@ def filament_helix_path(
     return helix  # [m]
 
 
-def rotate_filaments_about_path(
-    path: Array3xN, angle_offset: float, fils: Array3xN
-) -> Array3xN:
+def rotate_filaments_about_path(path: Array3xN, angle_offset: float, fils: Array3xN) -> Array3xN:
     """
     Rotate a path of point about another path.
 
@@ -436,9 +430,7 @@ def flux_density_circular_filament_cartesian(
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     xyzp = _3tup_contig(xyzp)
-    bx, by, bz = em_flux_density_circular_filament_cartesian(
-        ifil, rfil, zfil, xyzp, par
-    )  # [T]
+    bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, xyzp, par)  # [T]
 
     return bx, by, bz  # type: ignore
 
@@ -562,9 +554,7 @@ def body_force_density_linear_filament(
     ifil = ascontiguousarray(ifil).flatten()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
-    jxbx, jxby, jxbz = em_body_force_density_linear_filament(
-        xyzfil, dlxyzfil, ifil, obs, j, par
-    )  # [N/m^3]
+    jxbx, jxby, jxbz = em_body_force_density_linear_filament(xyzfil, dlxyzfil, ifil, obs, j, par)  # [N/m^3]
 
     return jxbx, jxby, jxbz  # type: ignore
 
@@ -572,7 +562,8 @@ def body_force_density_linear_filament(
 def _3tup_contig(
     t: Array3xN,
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
-    """Make contiguous references or copies to arrays in a 3-tuple. Only copies data if it is not already contiguous."""
+    """Make contiguous references or copies to arrays in a 3-tuple.
+    Only copies data if it is not already contiguous."""
     return (
         ascontiguousarray(t[0]).flatten(),
         ascontiguousarray(t[1]).flatten(),
@@ -583,5 +574,6 @@ def _3tup_contig(
 def _2tup_contig(
     t: tuple[NDArray[float64], NDArray[float64]],
 ) -> tuple[NDArray[float64], NDArray[float64]]:
-    """Make contiguous references or copies to arrays in a 2-tuple. Only copies data if it is not already contiguous."""
+    """Make contiguous references or copies to arrays in a 2-tuple.
+    Only copies data if it is not already contiguous."""
     return (ascontiguousarray(t[0]).flatten(), ascontiguousarray(t[1]).flatten())

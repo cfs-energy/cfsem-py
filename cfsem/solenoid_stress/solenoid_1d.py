@@ -20,7 +20,6 @@ Supports
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from functools import cached_property
 from logging import getLogger

@@ -8,8 +8,8 @@ from pytest import approx
 from scipy.sparse.linalg import factorized
 
 from cfsem.solenoid_stress.solenoid_1d import (
-    solenoid_1d_structural_factor,
     SolenoidStress1D,
+    solenoid_1d_structural_factor,
     solenoid_1d_structural_rhs,
 )
 from cfsem.solenoid_stress.solenoid_handcalc import s_long_solenoid
@@ -181,11 +181,12 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
     c = solenoid_1d_structural_factor(elasticity_modulus, poisson_ratio)
     rhs = solenoid_1d_structural_rhs(c, j, bz, pi, po)
 
-    operators = SolenoidStress1D(
+    solenoid_stress = SolenoidStress1D(
         rgrid=rgrid, elasticity_modulus=elasticity_modulus, poisson_ratio=poisson_ratio, direct_inverse=True
-    ).operators
+    )
+    operators = solenoid_stress.operators
 
-    a_bu = operators.a_bu
+    # a_bu = operators.a_bu
     a_ub = operators.a_ub
     a_eu = operators.a_eu
     a_eu_radial = operators.a_eu_radial
@@ -209,7 +210,7 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
     start_time = monotonic_ns()
     # The better solve method that isn't an operator
     # About 100us solve
-    a_ub_solver = factorized(a_bu)
+    a_ub_solver = solenoid_stress.displacement_solver
     u_r_direct_solver = a_ub_solver(rhs)
 
     end_time = monotonic_ns()

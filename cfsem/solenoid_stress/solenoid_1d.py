@@ -125,8 +125,9 @@ class SolenoidStress1D(NumpyModel):
 
     @cached_property
     def displacement_solver(self) -> Callable[[NDArray], NDArray]:
-        """LU solver for load-displacement relation as an alternative to taking a direct inverse of A_ub"""
-        return factorized(self.operators.a_ub)
+        """LU solver for load-displacement relation (A_ub)
+        as an alternative to taking a direct inverse of A_bu"""
+        return factorized(self.operators.a_bu)
 
 
 @dataclass(frozen=True)

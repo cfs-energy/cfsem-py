@@ -39,7 +39,7 @@ from scipy.sparse import csr_matrix as CSR
 from scipy.sparse.linalg import factorized
 
 
-def solenoid_1d_structural_factor(elasticity_modulus: float, poisson_ratio: float):
+def solenoid_1d_structural_factor(elasticity_modulus: float, poisson_ratio: float) -> float:
     """Structural factor applied to RHS of solenoid stress solve"""
     c = (1.0 - poisson_ratio**2) / elasticity_modulus  # [m/N]
     return c
@@ -51,7 +51,7 @@ def solenoid_1d_structural_rhs(
     bz: NDArray | list[float],
     pi: float = 0.0,
     po: float = 0.0,
-):
+) -> NDArray:
     """
     Right-hand-side for solenoid stress solve,
     including zero values at the BCs.
@@ -163,9 +163,6 @@ class SolenoidStress1DOperators:
 
         Args:
             dst: Target directory to place the file named "stress_operators.mat"
-            rgrid: [m] grid of r-coords
-            elasticity_modulus: [N/m] Material property; Young's modulus
-            poisson_ratio: [dimensionless] Material property; off-axis stress coupling term
 
         Raises:
             IOError: If the directory does not exist

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 def s_hoop_thick_wall_cylinder(
     r: NDArray, ri: float, ro: float, pin: float, pout: float
-):
+) -> NDArray:
     """
     Hoop stress at a location in a thick walled cylinder under pressure load
     with ends "capped", although the capped constraint does not affect the hoop or radial stress
@@ -26,7 +26,7 @@ def s_hoop_thick_wall_cylinder(
         pout: [Pa] outside pressure
 
     Returns:
-        float: [Pa] hoop stress
+        [Pa] hoop stress
     """
     # Factors of pi cancel out
     # fmt: off
@@ -39,7 +39,7 @@ def s_hoop_thick_wall_cylinder(
     return s_hoop  # [Pa] hoop stress
 
 
-def s_radial_thick_wall_cylinder(r, ri, ro, pin, pout):
+def s_radial_thick_wall_cylinder(r: NDArray, ri: float, ro: float, pin: float, pout: float) -> NDArray:
     """
     Radial stress at a location in a thick walled cylinder under pressure load
     with ends "capped", although the capped constraint does not affect the hoop or radial stress
@@ -56,7 +56,7 @@ def s_radial_thick_wall_cylinder(r, ri, ro, pin, pout):
         pout: [Pa] outside pressure
 
     Returns:
-        float: [Pa] radial stress
+        [Pa] radial stress
     """
     # Factors of pi cancel out
     # fmt: off

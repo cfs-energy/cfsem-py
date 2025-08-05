@@ -22,7 +22,7 @@ def s_long_solenoid(
     bzi: float,
     bzo: float,
     poisson_ratio: float,
-):
+) -> tuple[NDArray, NDArray]:
     """
     Radial and hoop stress in an infinitely long solenoid under linearly-varying self field.
     The "infinite length" assumption is equivalent to assuming zero R-Z shear ("deck of cards")

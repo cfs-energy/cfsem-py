@@ -9,9 +9,8 @@ from scipy.sparse.linalg import factorized
 
 from cfsem.solenoid_stress.solenoid_1d import (
     solenoid_1d_structural_factor,
-    solenoid_1d_structural_operators,
+    SolenoidStress1D,
     solenoid_1d_structural_rhs,
-    write_mat,
 )
 from cfsem.solenoid_stress.solenoid_handcalc import s_long_solenoid
 from cfsem.solenoid_stress.thick_wall_cylinder_handcalc import (
@@ -22,7 +21,8 @@ from cfsem.solenoid_stress.thick_wall_cylinder_handcalc import (
 
 @pytest.mark.parametrize("r0", [0.5, 0.7])
 @pytest.mark.parametrize("r1", [1.0, 1.8])
-def test_solenoid_stress(r0, r1):
+@pytest.mark.parametrize("order", [2, 4])
+def test_solenoid_stress(r0, r1, order):
     """Make sure the analytic and finite-difference calcs match for a geometry
     that they can both represent"""
 
@@ -44,9 +44,7 @@ def test_solenoid_stress(r0, r1):
 
     nr = int(np.ceil((r1 - r0) / dx_reqd)) + 1
     rgrid = np.linspace(r0, r1, nr)
-    nudge = (
-        1e-6  # Pad with points just outside to avoid nulling any real current density
-    )
+    nudge = 1e-6  # Pad with points just outside to avoid nulling any real current density
     rgrid = np.array([r0 - nudge] + rgrid.tolist() + [r1 + nudge])
     r0, r1 = rgrid[0], rgrid[-1]  # Account for nudge in later calcs
     nr = nr + 2
@@ -66,9 +64,20 @@ def test_solenoid_stress(r0, r1):
 
     c = solenoid_1d_structural_factor(elasticity_modulus, poisson_ratio)
     rhs = solenoid_1d_structural_rhs(c, j, bz)
-    a_bu, a_ub, (a_eu, a_eu_radial, a_eu_hoop), a_se = solenoid_1d_structural_operators(
-        rgrid, elasticity_modulus, poisson_ratio
-    )
+    operators = SolenoidStress1D(
+        rgrid=rgrid,
+        elasticity_modulus=elasticity_modulus,
+        poisson_ratio=poisson_ratio,
+        order=order,
+        direct_inverse=True,
+    ).operators
+
+    a_bu = operators.a_bu
+    a_ub = operators.a_ub
+    a_eu = operators.a_eu
+    a_eu_radial = operators.a_eu_radial
+    a_eu_hoop = operators.a_eu_hoop
+    a_se = operators.a_se
 
     #
     # Solve for displacement
@@ -83,9 +92,7 @@ def test_solenoid_stress(r0, r1):
     u_r = np.squeeze(np.asarray(a_ub @ rhs))
 
     end_time = monotonic_ns()
-    print(
-        f"    Solved using pre-calculated direct inverse in {(end_time - start_time) / 1e9:.6f} s"
-    )
+    print(f"    Solved using pre-calculated direct inverse in {(end_time - start_time) / 1e9:.6f} s")
 
     start_time = monotonic_ns()
     # The better solve method that isn't an operator
@@ -124,9 +131,7 @@ def test_solenoid_stress(r0, r1):
     # Compare to handcalc
     #
     rgrid_wp = rgrid[wpinds]
-    s_r_ideal, s_hoop_ideal = s_long_solenoid(
-        rgrid_wp, r0, rwp, j, 27.0, 0.0, poisson_ratio
-    )
+    s_r_ideal, s_hoop_ideal = s_long_solenoid(rgrid_wp, r0, rwp, j, 27.0, 0.0, poisson_ratio)
 
     # Error in R-stress is slightly difficult to evaluate near the ends,
     # where it goes to zero, but the absolute error is very small,
@@ -159,9 +164,7 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
 
     nr = int(np.ceil((r1 - r0) / dx_reqd)) + 1
     rgrid = np.linspace(r0, r1, nr)
-    nudge = (
-        1e-6  # Pad with points just outside to avoid nulling any real current density
-    )
+    nudge = 1e-6  # Pad with points just outside to avoid nulling any real current density
     rgrid = np.array([r0 - nudge] + rgrid.tolist() + [r1 + nudge])
 
     r0, r1 = rgrid[0], rgrid[-1]  # Account for nudge in later calcs
@@ -177,9 +180,17 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
 
     c = solenoid_1d_structural_factor(elasticity_modulus, poisson_ratio)
     rhs = solenoid_1d_structural_rhs(c, j, bz, pi, po)
-    a_bu, a_ub, (a_eu, a_eu_radial, a_eu_hoop), a_se = solenoid_1d_structural_operators(
-        rgrid, elasticity_modulus, poisson_ratio
-    )
+
+    operators = SolenoidStress1D(
+        rgrid=rgrid, elasticity_modulus=elasticity_modulus, poisson_ratio=poisson_ratio, direct_inverse=True
+    ).operators
+
+    a_bu = operators.a_bu
+    a_ub = operators.a_ub
+    a_eu = operators.a_eu
+    a_eu_radial = operators.a_eu_radial
+    a_eu_hoop = operators.a_eu_hoop
+    a_se = operators.a_se
 
     #
     # Solve for displacement
@@ -193,9 +204,7 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
     # np.squeeze and np.ravel fail here for some reason, but we need u_r to be flat for plotting
     u_r = np.squeeze(np.asarray(a_ub @ rhs))
     end_time = monotonic_ns()
-    print(
-        f"    Solved using pre-calculated direct inverse in {(end_time - start_time) / 1e9:.6f} s"
-    )
+    print(f"    Solved using pre-calculated direct inverse in {(end_time - start_time) / 1e9:.6f} s")
 
     start_time = monotonic_ns()
     # The better solve method that isn't an operator
@@ -204,7 +213,6 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
     u_r_direct_solver = a_ub_solver(rhs)
 
     end_time = monotonic_ns()
-    print(f"    Solved using umfpack solver in {(end_time - start_time) / 1e9:.6f} s")
 
     assert np.allclose(u_r, u_r_direct_solver, rtol=1e-6, atol=1e-5)
 
@@ -249,6 +257,7 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
     # Hoop stress is the most important, and maintains a very tight match
     assert np.allclose(s_phi, s_hoop_ideal, rtol=1e-4)
 
+
 def test_write_mat():
     r0, r1 = 0.1, 0.2
     dx_reqd = 0.01  # [m] target resolution
@@ -261,6 +270,14 @@ def test_write_mat():
 
     here = Path(__file__).parent
 
-    fpath = write_mat(here, rgrid, elasticity_modulus, poisson_ratio)
+    operators = SolenoidStress1D(
+        rgrid=rgrid, elasticity_modulus=elasticity_modulus, poisson_ratio=poisson_ratio, direct_inverse=False
+    ).operators
 
-    os.remove(fpath)
+    fpath = None
+    try:
+        fpath = operators.write_mat(here)
+    finally:
+        fpath = fpath or here / "stress_operators.mat"
+        if os.path.isfile(fpath):
+            os.remove(fpath)

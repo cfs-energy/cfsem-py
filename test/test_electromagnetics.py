@@ -516,13 +516,13 @@ def test_wien_against_paper_examples():
     minor_radius_1 = 0.05e-2
     L_ref_1 = 654.40537 * np.pi * 1e-7 * 1e-2  # units: henry
     L_1 = cfsem.self_inductance_circular_ring_wien(major_radius_1, minor_radius_1)
-    assert L_1 == approx(L_ref_1)
+    assert approx(L_ref_1) == L_1
 
     major_radius_2 = 25e-2
     minor_radius_2 = 0.5e-2
     L_ref_2 = 424.1761 * np.pi * 1e-7 * 1e-2  # units: henry
     L_2 = cfsem.self_inductance_circular_ring_wien(major_radius_2, minor_radius_2)
-    assert L_2 == approx(L_ref_2)
+    assert approx(L_ref_2) == L_2
 
 
 @mark.parametrize("r", [0.775, 1.5])

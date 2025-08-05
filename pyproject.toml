@@ -16,7 +16,9 @@ classifiers = [
 dependencies = [
     "numpy >= 2",
     "interpn >= 0.2.5",
-    "findiff>=0.12.1",
+    "findiff >= 0.12.1",
+    "pydantic >= 2",
+    "pydantic-numpy >= 8"
 ]
 license = "MIT"
 

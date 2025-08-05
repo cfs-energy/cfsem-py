@@ -5,9 +5,10 @@ infinite-length solenoid coil, following Iwasa 2e section 3.6.
 Assumes
 * Uniform current density within each r-section
 * Zero R-Z shear (deck-of-cards structure)
-* Zero Z-force,stress,strain (no axial compression accounted here; can be evaluated separately; usually relatively small)
+* Zero Z-force,stress,strain (no axial compression accounted here; can be evaluated separately;
+  usually relatively small)
 * Isotropic material
-    * This method could be extended to handle orthotropic material, but it would be very unpleasant to implement
+    * This method could be extended to handle orthotropic material, with some effort
 * Single material region
     * This method could be extended to handle multiple regions of isotropic materials
 
@@ -17,16 +18,25 @@ Supports
 * Nonzero pressure on inner/outer wall (fluid pressure, bucking load, etc)
 """
 
+from __future__ import annotations
+
 import os
+from dataclasses import dataclass
+from functools import cached_property
 from logging import getLogger
 from pathlib import Path
+from typing import Literal
 
 import findiff
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import ConfigDict
+from pydantic_numpy.model import NumpyModel
+from pydantic_numpy.typing import NpNDArray  # Array of any type or dimensionality
 from scipy import io, sparse
 from scipy.sparse import csc_matrix as CSC
 from scipy.sparse import csr_matrix as CSR
+from scipy.sparse.linalg import factorized
 
 
 def solenoid_1d_structural_factor(elasticity_modulus: float, poisson_ratio: float):
@@ -86,14 +96,109 @@ def solenoid_1d_structural_rhs(
     return rhs
 
 
-# class SolenoidStress1D:
-#     rgrid: NDArray
-#     elasticity_modulus: 
-#     def __init__(self, rgrid: NDArray | list, elasticity_modulus: float, poisson_ratio: float):
+class SolenoidStress1D(NumpyModel):
+    model_config = ConfigDict(validate_assignment=True, frozen=True, extra="forbid")
+
+    rgrid: NpNDArray
+    """[m] 1D grid of r-coordinates"""
+    elasticity_modulus: float
+    """[Pa] diagonal terms in material property matrix"""
+    poisson_ratio: float
+    """[dimensionless] factor determining off-diagonal terms in material property matrix"""
+    order: Literal[2, 4] = 4
+    """Finite-difference stencil polynomial order.
+       Higher order operators produce excessive numerical error under typical use."""
+    direct_inverse: bool = False
+    """Whether to generate fully-dense direct inverse of the system, which
+    can be useful as a linear operator. Alternatively, the system can be solved
+    using an LU solver with reduced memory usage and better numerical conditioning."""
+
+    @cached_property
+    def operators(self) -> SolenoidStress1DOperators:
+        """
+        Linear operators for solving stress and strain in a pancake coil
+        following Iwasa 2e section 3.6.
+        """
+        return solenoid_1d_structural_operators(
+            self.rgrid, self.elasticity_modulus, self.poisson_ratio, self.order, self.direct_inverse
+        )
+
+    @cached_property
+    def displacement_solver(self) -> factorized:
+        return factorized(self.operators.a_ub)
+
+
+@dataclass(frozen=True)
+class SolenoidStress1DOperators:
+    """
+    Linear operators for solving stress and strain in a pancake coil
+    following Iwasa 2e section 3.6.
+
+    A_bu, (n x n) sparse operator mapping displacement to the RHS like A @ u_r = -c * j * bz
+    A_ub, (n x n) fully-dense direct inverse of A_bu mapping RHS to displacement
+    A_eu (2n x n), A_eu_radial (n x n), A_eu_hoop (n x n), sparse operators mapping displacement to strain
+        * First entry is combined operator producing both strain components
+        * Second and third entries are split operators, which are equivalent because they are fully decoupled
+    A_se (2n x 2n), sparse operator mapping strain to stress
+    """
+
+    a_bu: CSC
+    """(n x n) sparse operator mapping displacement to the RHS like A @ u_r = -c * j * bz"""
+    a_ub: NDArray | None
+    """(n x n) fully-dense direct inverse of A_bu mapping RHS to displacement.
+        Only generated if `direct_inverse` flag is set."""
+    a_eu: CSR
+    """(2n x n), sparse operator mapping displacement to strain; contains both radial and hoop components"""
+    a_eu_radial: CSR
+    """(n x n), sparse operators mapping displacement to strain; radial component only"""
+    a_eu_hoop: CSR
+    """(n x n), sparse operators mapping displacement to strain; hoop component only"""
+    a_se: CSR
+    """(2n x 2n), sparse operator mapping strain to stress"""
+
+    def write_mat(self, dst: str | Path) -> str:
+        """Write the collection of operators in .mat format.
+
+        Args:
+            dst: Target directory to place the file named "stress_operators.mat"
+            rgrid: [m] grid of r-coords
+            elasticity_modulus: [N/m] Material property; Young's modulus
+            poisson_ratio: [dimensionless] Material property; off-axis stress coupling term
+
+        Raises:
+            IOError: If the directory does not exist
+        """
+        # Check directory
+        dst = Path(dst).absolute()
+        if not os.path.isdir(dst):
+            raise OSError(f"No directory at {dst}")
+        fpath = dst / "stress_operators.mat"
+        getLogger("cfsem").info(f"Saving stress operator data to {fpath}")
+
+        to_save = {
+            "A_bu": self.a_bu,
+            "A_ub": self.a_ub,
+            "A_eu": self.a_eu,
+            "A_eu_radial": self.a_eu_radial,
+            "A_eu_hoop": self.a_eu_hoop,
+            "A_se": self.a_se,
+        }
+
+        if self.a_ub is None:  # savemat fails on None value
+            to_save.pop("A_ub")
+
+        #    Note this will implicitly convert all CSR matrices to CSC, which is .mat's preferred I/O
+        io.savemat(fpath, to_save)
+
+        return f"{fpath}"
 
 
 def solenoid_1d_structural_operators(
-    rgrid: NDArray | list, elasticity_modulus: float, poisson_ratio: float
+    rgrid: NDArray | list,
+    elasticity_modulus: float,
+    poisson_ratio: float,
+    order: Literal[2, 4],
+    direct_inverse: bool = False,
 ) -> tuple[
     CSC,
     NDArray,
@@ -122,14 +227,14 @@ def solenoid_1d_structural_operators(
         rgrid: [m] with shape (n x 1), Grid of r-coordinates. Must be sorted ascending.
         elasticity_modulus: [N/m] Material property; Young's modulus
         poisson_ratio: [dimensionless] Material property; off-axis stress coupling term
+        order: Finite-difference stencil polynomial order
+        direct_inverse: Whether to generate fully-dense direct inverse of the system, which
+                        can be useful as a linear operator.
+                        Alternatively, the system can be solved using an LU solver with
+                        reduced memory usage and better numerical conditioning.
 
     Returns:
-        A_bu, (n x n) sparse operator mapping displacement to the RHS like A @ u_r = -c * j * bz
-        A_ub, (n x n) fully-dense direct inverse of A_bu mapping RHS to displacement
-        A_eu (2n x n), A_eu_radial (n x n), A_eu_hoop (n x n), sparse operators mapping displacement to strain
-          * First entry is combined operator producing both strain components
-          * Second and third entries are split operators, which are equivalent because they are fully decoupled
-        A_se (2n x 2n), sparse operator mapping strain to stress
+        object containing linear operators
     """
     # Guarantee arrays
     rgrid = np.array(rgrid)
@@ -138,11 +243,10 @@ def solenoid_1d_structural_operators(
     #
     # Stencils / differential operators
     #
-    print("Building FD stencils")
 
     # Note these will include the 1/dr and 1/dr^2 scalings,
     # not just the normalized stencil
-    ddr = findiff.Diff(0, rgrid, acc=4)
+    ddr = findiff.Diff(0, rgrid, acc=order)
     d2dr2 = ddr**2
 
     ddr = ddr.matrix((nr,))
@@ -162,9 +266,7 @@ def solenoid_1d_structural_operators(
     #
     # This one is converted to CSC because, while it's easiest to build it as CSR,
     # it is more useful for solving a system as CSC
-    a_bu = CSC(
-        d2dr2 + (rinv @ ddr) - rinv2
-    )  # Operator maps displacement TO rhs (-c*j*B)
+    a_bu = CSC(d2dr2 + (rinv @ ddr) - rinv2)  # Operator maps displacement TO rhs (-c*j*B)
 
     # Stress-strain relation components
     # that are needed for BCs
@@ -190,8 +292,10 @@ def solenoid_1d_structural_operators(
     a_bu[-1, :] = bcmat[-1, :]
 
     # Invert A_bu directly to get A_ub
-    # This is fully dense!!
-    a_ub = np.linalg.inv(a_bu.todense())  # Operator maps RHS=-c*j*bz to displacement
+    # This is fully dense, which may be prohibitive in some situations
+    a_ub = (
+        None if not direct_inverse else np.linalg.inv(a_bu.todense())
+    )  # Operator maps RHS=-c*j*bz to displacement
 
     #
     # Strain-displacement operator(s)
@@ -214,56 +318,9 @@ def solenoid_1d_structural_operators(
     eye = sparse.eye(nr, nr)
     # fmt: off
     a_se = CSR(sparse.block_array(
-        [[diag_term * eye, off_diag_term * eye],
+        [[   diag_term * eye, off_diag_term * eye],
         [off_diag_term * eye, diag_term * eye]]
     )) # Operator maps strain to stress
     # fmt: on
 
-    return a_bu, a_ub, (a_eu, a_eu_radial, a_eu_hoop), a_se
-
-
-def write_mat(
-    dst: str | Path,
-    rgrid: NDArray | list[float],
-    elasticity_modulus: float,
-    poisson_ratio: float,
-) -> str:
-    """Write the collection of operators in .mat format.
-
-    Args:
-        dst: Target directory to place the file named "stress_operators.mat"
-        rgrid: [m] grid of r-coords
-        elasticity_modulus: [N/m] Material property; Young's modulus
-        poisson_ratio: [dimensionless] Material property; off-axis stress coupling term
-
-    Raises:
-        IOError: If the directory does not exist
-    """
-    # Guarantee arrays
-    rgrid = np.array(rgrid)
-
-    # Check directory
-    dst = Path(dst).absolute()
-    if not os.path.isdir(dst):
-        raise OSError(f"No directory at {dst}")
-    fpath = dst / "stress_operators.mat"
-    getLogger("cfsem").info(f"Saving stress operator data to {fpath}")
-
-    # Build and save
-    a_bu, a_ub, (a_eu, a_eu_radial, a_eu_hoop), a_se = solenoid_1d_structural_operators(
-        rgrid, elasticity_modulus, poisson_ratio
-    )
-    #    Note this will implicitly convert all CSR matrices to CSC, which is .mat's preferred I/O
-    io.savemat(
-        fpath,
-        {
-            "A_bu": a_bu,
-            "a_ub": a_ub,
-            "a_eu": a_eu,
-            "a_eu_radial": a_eu_radial,
-            "a_eu_hoop": a_eu_hoop,
-            "a_se": a_se,
-        },
-    )
-
-    return f"{fpath}"
+    return SolenoidStress1DOperators(a_bu, a_ub, a_eu, a_eu_radial, a_eu_hoop, a_se)

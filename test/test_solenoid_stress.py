@@ -258,7 +258,7 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
     assert np.allclose(s_phi, s_hoop_ideal, rtol=1e-4)
 
 
-def test_write_mat():
+def test_write_mat_and_json():
     r0, r1 = 0.1, 0.2
     dx_reqd = 0.01  # [m] target resolution
     nr = int(np.ceil((r1 - r0) / dx_reqd)) + 1
@@ -270,9 +270,10 @@ def test_write_mat():
 
     here = Path(__file__).parent
 
-    operators = SolenoidStress1D(
+    solenoid_stress = SolenoidStress1D(
         rgrid=rgrid, elasticity_modulus=elasticity_modulus, poisson_ratio=poisson_ratio, direct_inverse=False
-    ).operators
+    )
+    operators = solenoid_stress.operators
 
     fpath = None
     try:
@@ -281,3 +282,8 @@ def test_write_mat():
         fpath = fpath or here / "stress_operators.mat"
         if os.path.isfile(fpath):
             os.remove(fpath)
+
+    # Roundtrip json ser/de
+    json_string = solenoid_stress.model_dump_json()
+    reloaded = SolenoidStress1D.model_validate_json(json_string)
+    assert reloaded == solenoid_stress

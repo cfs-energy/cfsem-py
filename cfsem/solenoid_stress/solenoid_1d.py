@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from logging import getLogger
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import findiff
 import numpy as np
@@ -120,11 +120,12 @@ class SolenoidStress1D(NumpyModel):
         following Iwasa 2e section 3.6.
         """
         return solenoid_1d_structural_operators(
-            self.rgrid, self.elasticity_modulus, self.poisson_ratio, self.order, self.direct_inverse
+            np.array(self.rgrid), self.elasticity_modulus, self.poisson_ratio, self.order, self.direct_inverse
         )
 
     @cached_property
-    def displacement_solver(self) -> factorized:
+    def displacement_solver(self) -> Callable[[NDArray], NDArray]:
+        """LU solver for load-displacement relation as an alternative to taking a direct inverse of A_ub"""
         return factorized(self.operators.a_ub)
 
 
@@ -199,12 +200,7 @@ def solenoid_1d_structural_operators(
     poisson_ratio: float,
     order: Literal[2, 4],
     direct_inverse: bool = False,
-) -> tuple[
-    CSC,
-    NDArray,
-    tuple[CSR, CSR, CSR],
-    CSR,
-]:
+) -> SolenoidStress1DOperators:
     """
     Linear operators for solving stress and strain in a pancake coil
     following Iwasa 2e section 3.6.

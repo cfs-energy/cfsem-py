@@ -169,8 +169,6 @@ class SolenoidStress1DOperators:
         """
         # Check directory
         dst = Path(dst).absolute()
-        if not os.path.isdir(dst):
-            raise OSError(f"No directory at {dst}")
         fpath = dst / "stress_operators.mat"
         getLogger("cfsem").info(f"Saving stress operator data to {fpath}")
 

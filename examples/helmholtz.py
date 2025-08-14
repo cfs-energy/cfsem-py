@@ -1,9 +1,11 @@
 """Calculate the B-field from a Helmholtz coil pair."""
 
 import os
+
 import numpy as np
 from matplotlib import pyplot as plt
-from cfsem import flux_density_circular_filament, MU_0
+
+from cfsem import MU_0, flux_density_circular_filament
 
 coil_radius = 0.2  # [m]
 

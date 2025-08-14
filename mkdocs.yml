@@ -27,6 +27,8 @@ nav:
       - "python/vector_potential.md"
       - "python/inductance.md"
       - "python/grad_shafranov.md"
+      - "python/force.md"
+      - "python/solenoid_stress.md"
       - "python/math.md"
       - "python/types.md"
   - "Rust API": "https://docs.rs/cfsem"

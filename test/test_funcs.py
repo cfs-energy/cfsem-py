@@ -3,10 +3,11 @@
 from typing import Optional
 
 import numpy as np
+from interpn import MultilinearRectilinear
 from numpy.typing import NDArray
 from scipy.constants import mu_0
 from scipy.special import ellipe, ellipk
-from interpn import MultilinearRectilinear
+
 import cfsem
 
 

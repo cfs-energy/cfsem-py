@@ -4,6 +4,7 @@ or as a piecewise-linear helix.
 """
 
 import numpy as np
+
 import cfsem
 
 # Center radius and height, winding pack width and height,

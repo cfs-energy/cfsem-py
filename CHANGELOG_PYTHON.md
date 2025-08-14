@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.5.0 2025-08-05
+
+### Added
+
+* Add `solenoid_stress` module
+  * 1D finite-difference solver for solenoid stress given arbitrary B-field, current density, and surface load
+    * Generalizes over both long-solenoid stress and ideal thick-walled pressure vessel stress
+    * Tested against handcalcs for both ideal solenoid & thick-walled pressure vessel
+  * 1D handcalc for solenoid stress under uniform current density and linear B-field profile
+  * 1D handcalc for thick-walled pressure vessel
+
 ## 2.4.3 2025-07-07
 
 ### Changed

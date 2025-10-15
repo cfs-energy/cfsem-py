@@ -320,14 +320,14 @@ def self_inductance_of_cylindrical_coil(
 
     # Iterate over filaments
     for i in range(f.shape[1]):
-        # Split into f1 (i-th filament) and f2 (all other filaments), can skip this if only one filament
+        # Split into f1 (i-th filament) and f2 (i+1th to end)
         f1 = f[:, i]
         if f.shape[1] > 1:
-            f2 = f[:, np.arange(f.shape[1]) != i]
+            f2 = f[:, i+1:]
 
             # Add mutual inductance of f1 to all other filaments; the call to
             # mutual_inductance_of_cylindrical_coils computes one row/column, so we'll need a 2x factor
-            m += 2*mutual_inductance_of_cylindrical_coils(f1, f2, par)  # [H]
+            m += mutual_inductance_of_cylindrical_coils(f1, f2, par)  # [H]
 
         # Get self-inductance of f1
         if section_kind == "rectangular":

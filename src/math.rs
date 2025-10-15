@@ -45,6 +45,9 @@ pub fn ellipk(m: f64) -> f64 {
     let mut ellip: f64 = 0.0;
     let c: f64 = 1.0 - m;
     let logterm = c.powi(-1).ln();
+
+    // NOTE: This loop is unrolled at compile-time automatically,
+    // and the repeated calls to `powi` are de-duplicated by the compiler.
     for i in 0..5 {
         ellip = logterm
             .mul_add(ELLIPK_B[i], ELLIPK_A[i])
@@ -69,6 +72,9 @@ pub fn ellipe(m: f64) -> f64 {
     let mut ellip: f64 = 0.0;
     let c: f64 = 1.0 - m;
     let logterm = c.powi(-1).ln();
+
+    // NOTE: This loop is unrolled at compile-time automatically,
+    // and the repeated calls to `powi` are de-duplicated by the compiler.
     for i in 0..5 {
         ellip = logterm
             .mul_add(ELLIPE_B[i], ELLIPE_A[i])

@@ -7,7 +7,7 @@ use rayon::{
 
 use crate::{
     chunksize,
-    math::{cross3, decompose_filament, dot3, rss3},
+    math::{cross3, cross3f, decompose_filament, dot3, dot3f, rss3},
 };
 
 use crate::{MU0_OVER_4PI, macros::*};
@@ -260,28 +260,39 @@ pub fn flux_density_linear_filament_scalar(
     let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
 
     // Get distance from middle of the filament segment to the observation point
-    let rx = xp - xmid; // [m]
+    let rx: f64 = xp - xmid; // [m]
     let ry = yp - ymid; // [m]
     let rz = zp - zmid; // [m]
+
+    // Now that we've resolved the part of the calculation that involves a wide dynamic range,
+    // which drives the need for 64-bit floats to control roundoff error,
+    // we can switch to 32-bit floats for the majority of the calculation without incurring
+    // excessive error, before converting back to 64-bit float so that we maintain
+    // acceptable error during summation downstream.
+    let (rx, ry, rz) = (rx as f32, ry as f32, rz as f32);
+    let dl = (dl.0 as f32, dl.1 as f32, dl.2 as f32);
+    let ifil = ifil as f32;
 
     // Do 1/r^3 operation with an ordering that improves float error by eliminating
     // the actual cube operation and using fused multiply-add to reduce roundoff events,
     // then rolling the result into the factor that is constant between all contributions.
-    let sumsq = dot3(rx, ry, rz, rx, ry, rz);
+    let sumsq = dot3f(rx, ry, rz, rx, ry, rz);
     let rnorm3_inv = sumsq.powf(-1.5); // [m^-3]
 
     // This factor is constant across all x, y, and z components
-    let c = MU0_OVER_4PI * ifil * rnorm3_inv;
+    let c = (MU0_OVER_4PI as f32) * ifil * rnorm3_inv;
 
     // Evaluate the cross products for each axis component
     // separately using mul_add which would not be assumed usable
     // in a more general implementation.
-    let (cx, cy, cz) = cross3(dl.0, dl.1, dl.2, rx, ry, rz);
+    let (cx, cy, cz) = cross3f(dl.0, dl.1, dl.2, rx, ry, rz);
 
     // Assemble final B-field components
-    let bx = c * cx; // [T]
-    let by = c * cy;
-    let bz = c * cz;
+    // and upcast back to 64-bit float so that summation operations
+    // downstream do not incur excessive roundoff error.
+    let bx = (c * cx) as f64; // [T]
+    let by = (c * cy) as f64;
+    let bz = (c * cz) as f64;
 
     (bx, by, bz)
 }
@@ -849,7 +860,7 @@ mod test {
         let dlzfil: Vec<f64> = (0..=NFIL - 2).map(|i| zfil[i + 1] - zfil[i]).collect();
         let dlxyzfil = (&dlxfil[..], &dlyfil[..], &dlzfil[..]);
 
-        let ifil: &[f64] = &(0..NFIL - 1).map(|i| (i as f64)).collect::<Vec<f64>>()[..];
+        let ifil: &[f64] = &(0..NFIL - 1).map(|i| i as f64).collect::<Vec<f64>>()[..];
 
         // Build a scattering of observation locations
         let xp: Vec<f64> = (0..NOBS).map(|i| 2.0 * (i as f64).sin() + 2.1).collect();

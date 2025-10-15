@@ -5,6 +5,8 @@ See archived changelogs for versions prior to 2.6.0.
 ## 2.6.0 2025-10-15
 
 Substantial performance improvement for `flux_density_linear_filament` Biot-Savart methods.
+This also improves performance in calculations that use these methods, such as linear filament
+body force density calcs.
 
 ### Added
 

@@ -1268,7 +1268,7 @@ mod test {
         let zfil: Vec<f64> = (0..NFIL)
             .map(|i| (i as f64) - (NFIL as f64) / 2.0)
             .collect();
-        let ifil: Vec<f64> = (0..NFIL).map(|i| (i as f64)).collect();
+        let ifil: Vec<f64> = (0..NFIL).map(|i| i as f64).collect();
 
         // Build a scattering of observation locations
         let rprime: Vec<f64> = (0..NOBS).map(|i| 2.0 * (i as f64).sin() + 2.1).collect();

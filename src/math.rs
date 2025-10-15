@@ -45,6 +45,9 @@ pub fn ellipk(m: f64) -> f64 {
     let mut ellip: f64 = 0.0;
     let c: f64 = 1.0 - m;
     let logterm = c.powi(-1).ln();
+
+    // NOTE: This loop is unrolled at compile-time automatically,
+    // and the repeated calls to `powi` are de-duplicated by the compiler.
     for i in 0..5 {
         ellip = logterm
             .mul_add(ELLIPK_B[i], ELLIPK_A[i])
@@ -69,6 +72,9 @@ pub fn ellipe(m: f64) -> f64 {
     let mut ellip: f64 = 0.0;
     let c: f64 = 1.0 - m;
     let logterm = c.powi(-1).ln();
+
+    // NOTE: This loop is unrolled at compile-time automatically,
+    // and the repeated calls to `powi` are de-duplicated by the compiler.
     for i in 0..5 {
         ellip = logterm
             .mul_add(ELLIPE_B[i], ELLIPE_A[i])
@@ -99,9 +105,32 @@ pub fn cross3(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> (f64, f64
     (cx, cy, cz)
 }
 
+/// Evaluate the cross products for each axis component
+/// separately using `mul_add` which would not be assumed usable
+/// in a more general implementation.
+/// 32-bit float variant.
+#[inline]
+pub fn cross3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> (f32, f32, f32) {
+    let xy = -x1 * y0;
+    let yz = -y1 * z0;
+    let zx = -z1 * x0;
+    let cx = y0.mul_add(z1, yz);
+    let cy = z0.mul_add(x1, zx);
+    let cz = x0.mul_add(y1, xy);
+
+    (cx, cy, cz)
+}
+
 /// Scalar dot product using `mul_add`.
 #[inline]
 pub fn dot3(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> f64 {
+    x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
+}
+
+/// Scalar dot product using `mul_add`.
+/// 32-bit float variant.
+#[inline]
+pub fn dot3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> f32 {
     x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
 }
 

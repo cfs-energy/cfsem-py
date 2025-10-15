@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "cfsem"
-version = "2.5.0"
+version = "2.6.0"
 description = "Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov."
 authors = [{name = "Commonwealth Fusion Systems", email = "jlogan@cfs.energy"}]
 requires-python = ">=3.9, <3.14"
@@ -15,7 +15,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy >= 2",
-    "interpn >= 0.2.5",
+    "interpn >= 0.6.1",
     "findiff >= 0.12.1",
     "pydantic >= 2",
     "pydantic-numpy >= 6"

@@ -1,5 +1,5 @@
 #![doc=include_str!("../README.md")]
-#![allow(non_snake_case)]
+#![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::needless_late_init)]
 #![allow(non_snake_case)]

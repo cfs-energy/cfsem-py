@@ -29,4 +29,4 @@ body force density calcs.
         this mixed-precision method passes all the same tests as the 64-bit-only method
 * Python
     * Update dep versions
-    * Use latest rust backend version, which includes 2-10x speedup for flux_density_linear_filament Biot-Savart calcs
+    * Use latest rust backend version, which includes 1.4-2x speedup for flux_density_linear_filament Biot-Savart calcs

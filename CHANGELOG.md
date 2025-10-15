@@ -24,7 +24,7 @@ body force density calcs.
         roundoff to final operation. As a result, total roundoff error
         accumulated in this section is minimal.
     * Return is upcast back to 64-bit float to support precise summation downstream
-    * 1.4-10x speedup without any meaningful loss of precision
+    * 1.4-2x speedup without any meaningful loss of precision
         * No change to unit test tolerances needed; unlike an all-32-bit implementation,
         this mixed-precision method passes all the same tests as the 64-bit-only method
 * Python

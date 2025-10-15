@@ -1,12 +1,5 @@
 # Changelog
 
-## 2.6.0 2025-10-15
-
-### Changed
-
-* Update dep versions
-* Use latest rust backend version, which includes 2-10x speedup for flux_density_linear_filament Biot-Savart calcs
-
 ## 2.5.0 2025-08-05
 
 ### Added

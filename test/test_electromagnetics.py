@@ -5,7 +5,7 @@ from pytest import approx, mark, raises
 
 import cfsem
 
-from test import test_funcs as _test
+from . import test_funcs as _test
 
 
 @mark.parametrize("r", [0.775, np.pi])
@@ -749,8 +749,4 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
         az, np.zeros_like(az), atol=1e-9
     )  # Should sum to zero everywhere
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
-
-
-if __name__ == "__main__":
-    test_self_inductance_axisymmetric_across_section_types(par=False)
 

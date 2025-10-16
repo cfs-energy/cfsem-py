@@ -1,9 +1,10 @@
 """Quasi-steady electromagnetics calcs"""
 
+from typing import Literal
+
 import numpy as np
 from interpn import MulticubicRectilinear
 from numpy.typing import NDArray
-from typing import Literal
 
 from cfsem.bindings import (
     body_force_density_circular_filament_cartesian,
@@ -288,11 +289,13 @@ def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray, par: b
 
     return m  # [H]
 
+
 def self_inductance_of_cylindrical_coil(
-        f: NDArray,
-        section_kind: Literal["rectangular", "circular", "annular"],
-        section_size: float | tuple[float,float],
-        par: bool = True) -> float:
+    f: NDArray,
+    section_kind: Literal["rectangular", "circular", "annular"],
+    section_size: float | tuple[float, float],
+    par: bool = True,
+) -> float:
     """
     Self-inductance of a coaxial collection of ideal circular filaments.
 
@@ -304,54 +307,66 @@ def self_inductance_of_cylindrical_coil(
             * For "circular", a single float (radius [m])
             * For "annular", a tuple (inner radius [m], outer radius [m])
     """
-    
+
     # Validate valid section_kind and section_size
     if section_kind == "rectangular" and not isinstance(section_size, tuple):
-        raise ValueError("For rectangular section, section_size must be a tuple \
-                         (conductor width and height)")
+        raise ValueError(
+            "For rectangular section, section_size must be a tuple \
+                         (conductor width and height)"
+        )
     if section_kind in "circular" and not isinstance(section_size, float):
-        raise ValueError("For circular section, section_size must be a single float \
-                         (conductor radius)")
+        raise ValueError(
+            "For circular section, section_size must be a single float \
+                         (conductor radius)"
+        )
     if section_kind == "annular" and not isinstance(section_size, tuple):
-        raise ValueError("For annular section, section_size must be a tuple \
-                         (inner and outer conductor radius)")
+        raise ValueError(
+            "For annular section, section_size must be a tuple \
+                         (inner and outer conductor radius)"
+        )
 
     m = 0.0
     rs, zs, ns = f
 
     # Iterate over filaments
     for i in range(f.shape[1]):
-
         # Get mutual inductance of i-th filament to all other filaments
-        m_contribs = ns * flux_circular_filament(rs[i], zs[i], ns[i], rs, zs)
-        
+        m_contribs = ns * flux_circular_filament(ns[i], rs[i], zs[i], rs, zs)
+
         # Get self-inductance of f1
         if section_kind == "rectangular":
             m_self = self_inductance_lyle6(
-                r=rs[i],            # coil center radius
-                dr=section_size[0], # width of the rectangular conductor section
-                dz=section_size[1], # height of the rectangular conductor section
-                n=ns[i]
-                )
+                r=rs[i],  # coil center radius
+                dr=section_size[0],  # width of the rectangular conductor section
+                dz=section_size[1],  # height of the rectangular conductor section
+                n=ns[i],
+            )
         elif section_kind == "circular":
             # Wien formula for circular cross-section
-            m_self = self_inductance_circular_ring_wien(
-                major_radius=rs[i],  # coil center radius
-                minor_radius=section_size
-            ) * ns[i]**2
+            m_self = (
+                self_inductance_circular_ring_wien(
+                    major_radius=rs[i],  # coil center radius
+                    minor_radius=section_size,
+                )
+                * ns[i] ** 2
+            )
         elif section_kind == "annular":
             # Wien formula for annular cross-section
-            m_self = self_inductance_annular_ring(
-                r=rs[i],            # major radius
-                a=section_size[0],  # inner minor radius (tube inside radius)
-                b=section_size[1]   # outer minor radius (tube outside radius)
-            ) * ns[i]**2
+            m_self = (
+                self_inductance_annular_ring(
+                    r=rs[i],  # major radius
+                    a=section_size[0],  # inner minor radius (tube inside radius)
+                    b=section_size[1],  # outer minor radius (tube outside radius)
+                )
+                * ns[i] ** 2
+            )
 
         # Replace self-pairing with self-inductance
         m_contribs[i] = m_self
         m += np.sum(m_contribs)
 
     return m  # [H]
+
 
 def mutual_inductance_of_cylindrical_coils(f1: NDArray, f2: NDArray, par: bool = True) -> float:
     """

@@ -426,7 +426,7 @@ def test_flux_density_circular_filament_against_numerical(a, z, par):
 
 
 @mark.parametrize("par", [True, False])
-def test_self_inductance_lyle6_against_filamentization_and_distributed(par):
+def test_self_inductance_lyle6_against_filamentization_and_distributed_and_axisymmetric(par):
     # Test that the Lyle approximation gives a similar result to
     # a case done by brute-force filamentization w/ a heuristic for self-inductance of a loop
     r, z, dr, dz, nt, nr, nz = (0.8, 0.0, 0.5, 2.0, 3.0, 20, 20)
@@ -436,6 +436,9 @@ def test_self_inductance_lyle6_against_filamentization_and_distributed(par):
     L_fil = _test._self_inductance_filamentized(
         r, z, dr, dz, nt, nr, nz
     )  # Estimate self-inductance via discretization
+
+    # Approximate conductor cross-section for axisymmetric calc
+    cnd_w, cnd_h = (dr/nr, dz/nz)  # Approximate conductor width and height
 
     # Set up distributed-conductor solve
     fils = cfsem.filament_coil(r, z, dr, dz, nt, nr, nz)
@@ -486,10 +489,52 @@ def test_self_inductance_lyle6_against_filamentization_and_distributed(par):
         edge_path=(rpath, zpath),
     )
 
+    # Do the axisymmetric run
+    L_axisymmetric = cfsem.self_inductance_of_cylindrical_coil(
+        f=fils.T,
+        section_kind="rectangular",
+        section_size=(cnd_w, cnd_h),
+    )
+
     # Require 5% accuracy (seat of the pants, since we're comparing approximations)
     assert L_Lyle == approx(L_fil, 0.05)
     assert (nt**2 * L_distributed) == approx(L_fil, 0.05)
+    assert L_Lyle == approx(L_axisymmetric, 0.05)
 
+@mark.parametrize("par", [True, False])
+def test_self_inductance_axisymmetric_across_section_types(par):
+    """ Test that the different conductor cross-section types give similar results """
+    r, z, dr, dz, nt, nr, nz = (0.8, 0.0, 0.5, 2.0, 3.0, 20, 20)
+    # Approximate conductor cross-section for axisymmetric calc
+    cnd_w, cnd_h = (dr/nr, dz/nz)  # Approximate conductor width and height
+
+    # Set up distributed-conductor solve
+    fils = cfsem.filament_coil(r, z, dr, dz, nt, nr, nz)
+
+    cnd_w, cnd_h = (dr/20, dz/20)  # Approximate conductor width and height
+    cnd_r = (cnd_w * cnd_h / np.pi)**0.5  # Equivalent-area radius
+
+    # Use base height/width for rectangular
+    L_rect = cfsem.self_inductance_of_cylindrical_coil(
+        f=fils.T,
+        section_kind="rectangular",
+        section_size=(cnd_w, cnd_h),
+    )
+    # Use equivalent-area radius for circular and annular
+    L_circle = cfsem.self_inductance_of_cylindrical_coil(
+        f=fils.T,
+        section_kind="circular",
+        section_size=cnd_r,
+    )
+    # Use equivalent-area radius for major radius, and outer radius = 2*inner radius
+    L_annulus = cfsem.self_inductance_of_cylindrical_coil(
+        f=fils.T,
+        section_kind="annular",
+        section_size=(cnd_r/2, cnd_r),
+    )
+
+    assert L_rect == approx(L_circle, rel=1e-2)
+    assert L_rect == approx(L_annulus, rel=1e-2)
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("dr", [0.001, 0.02])
@@ -703,3 +748,4 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
         az, np.zeros_like(az), atol=1e-9
     )  # Should sum to zero everywhere
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
+

@@ -13,6 +13,9 @@ import cfsem
 r1, z1, w1, h1, nr1, nz1 = (0.3, 0.0, 0.01, 1.0, 1, 10)
 r2, z2, w2, h2, nr2, nz2 = (0.5, 0.2, 0.01, 0.5, 1, 5)
 
+cnd_w1, cnd_h1 = (0.02, 0.02)  # Approximate conductor width and height for first coil
+cnd_w2, cnd_h2 = (0.02, 0.02)  # Approximate conductor width and height for second coil
+
 nt1 = nr1 * nz1  # Total number of turns for each coil
 nt2 = nr2 * nz2
 
@@ -47,13 +50,26 @@ self_inductance_helical_2 = cfsem.self_inductance_piecewise_linear_filaments(
     (xhelix2, yhelix2, zhelix2)
 )
 
+self_inductance_axisymmetric_1 = cfsem.self_inductance_of_cylindrical_coil(
+    f=filaments_1.T,
+    section_kind="rectangular",
+    section_size=(cnd_w1, cnd_h1),
+)
+self_inductance_axisymmetric_2 = cfsem.self_inductance_of_cylindrical_coil(
+    f=filaments_2.T,
+    section_kind="rectangular",
+    section_size=(cnd_w2, cnd_h2),
+)
+
 print("First coil self-inductance")
-print(f"    Handcalc: {self_inductance_handcalc_1:.2e} [H]")
-print(f"    Helical: {self_inductance_helical_1:.2e} [H]")
+print(f"                Handcalc: {self_inductance_handcalc_1:.2e} [H]")
+print(f"                 Helical: {self_inductance_helical_1:.2e} [H]")
+print(f"            Axisymmetric: {self_inductance_axisymmetric_1:.2e} [H]")
 
 print("Second coil self-inductance")
-print(f"    Handcalc: {self_inductance_handcalc_2:.2e} [H]")
-print(f"    Helical: {self_inductance_helical_2:.2e} [H]")
+print(f"                Handcalc: {self_inductance_handcalc_2:.2e} [H]")
+print(f"                 Helical: {self_inductance_helical_2:.2e} [H]")
+print(f"            Axisymmetric: {self_inductance_axisymmetric_2:.2e} [H]")
 
 # Estimate mutual inductance by 2 different methods,
 # axisymmetric filaments and helical filaments.
@@ -74,7 +90,7 @@ mutual_inductance_helical_reflexive = (
 )
 
 print("Mutual-inductance")
-print(f"    Axisymmetric: {mutual_inductance_axisymmetric:.2e} [H]")
-print(f"    Helical: {mutual_inductance_helical:.2e} [H]")
-print(f"    Axisymmetric reflexive: {mutual_inductance_axisymmetric_reflexive:.2e} [H]")
-print(f"    Helical reflexive: {mutual_inductance_helical_reflexive:.2e} [H]")
+print(f"            Axisymmetric: {mutual_inductance_axisymmetric:.2e} [H]")
+print(f"                 Helical: {mutual_inductance_helical:.2e} [H]")
+print(f"  Axisymmetric reflexive: {mutual_inductance_axisymmetric_reflexive:.2e} [H]")
+print(f"       Helical reflexive: {mutual_inductance_helical_reflexive:.2e} [H]")

@@ -340,7 +340,7 @@ def self_inductance_axisymmetric_coil(
         # Get mutual inductance of i-th filament to all other filaments
         m_contribs = ns * flux_circular_filament(ns[i], rs[i], zs[i], rs, zs, par)
 
-        # Get self-inductance of f1
+        # Get self-inductance of i-th filament
         if section_kind == "rectangular":
             assert isinstance(section_size, tuple)
             m_self = self_inductance_lyle6(

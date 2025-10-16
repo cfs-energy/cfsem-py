@@ -50,12 +50,12 @@ self_inductance_helical_2 = cfsem.self_inductance_piecewise_linear_filaments(
     (xhelix2, yhelix2, zhelix2)
 )
 
-self_inductance_axisymmetric_1 = cfsem.self_inductance_of_cylindrical_coil(
+self_inductance_axisymmetric_1 = cfsem.self_inductance_axisymmetric_coil(
     f=filaments_1.T,
     section_kind="rectangular",
     section_size=(cnd_w1, cnd_h1),
 )
-self_inductance_axisymmetric_2 = cfsem.self_inductance_of_cylindrical_coil(
+self_inductance_axisymmetric_2 = cfsem.self_inductance_axisymmetric_coil(
     f=filaments_2.T,
     section_kind="rectangular",
     section_size=(cnd_w2, cnd_h2),

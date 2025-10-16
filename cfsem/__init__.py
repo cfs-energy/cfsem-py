@@ -44,7 +44,7 @@ __all__ = [
     "filament_helix_path",
     "inductance_piecewise_linear_filaments",
     "self_inductance_piecewise_linear_filaments",
-    "self_inductance_of_cylindrical_coil",
+    "self_inductance_axisymmetric_coil",
     "mutual_inductance_piecewise_linear_filaments",
     "flux_density_ideal_solenoid",
     "self_inductance_lyle6",
@@ -290,7 +290,7 @@ def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray, par: b
     return m  # [H]
 
 
-def self_inductance_of_cylindrical_coil(
+def self_inductance_axisymmetric_coil(
     f: NDArray,
     section_kind: Literal["rectangular", "circular", "annular"],
     section_size: Union[tuple[float, float], float],
@@ -306,6 +306,9 @@ def self_inductance_of_cylindrical_coil(
             * For "rectangular", a tuple (width [m], height [m])
             * For "circular", a single float (radius [m])
             * For "annular", a tuple (inner radius [m], outer radius [m])
+
+    Returns:
+        float: Self-inductance [H]
     """
 
     # Validate valid section_kind and section_size

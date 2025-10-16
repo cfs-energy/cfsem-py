@@ -490,7 +490,7 @@ def test_self_inductance_lyle6_against_filamentization_and_distributed_and_axisy
     )
 
     # Do the axisymmetric run
-    L_axisymmetric = cfsem.self_inductance_of_cylindrical_coil(
+    L_axisymmetric = cfsem.self_inductance_axisymmetric_coil(
         f=fils.T,
         section_kind="rectangular",
         section_size=(cnd_w, cnd_h),
@@ -515,19 +515,19 @@ def test_self_inductance_axisymmetric_across_section_types(par):
     cnd_r = (cnd_w * cnd_h / np.pi)**0.5  # Equivalent-area radius
 
     # Use base height/width for rectangular
-    L_rect = cfsem.self_inductance_of_cylindrical_coil(
+    L_rect = cfsem.self_inductance_axisymmetric_coil(
         f=fils.T,
         section_kind="rectangular",
         section_size=(cnd_w, cnd_h),
     )
     # Use equivalent-area radius for circular and annular
-    L_circle = cfsem.self_inductance_of_cylindrical_coil(
+    L_circle = cfsem.self_inductance_axisymmetric_coil(
         f=fils.T,
         section_kind="circular",
         section_size=cnd_r,
     )
     # Use equivalent-area radius for major radius, and outer radius = 2*inner radius
-    L_annulus = cfsem.self_inductance_of_cylindrical_coil(
+    L_annulus = cfsem.self_inductance_axisymmetric_coil(
         f=fils.T,
         section_kind="annular",
         section_size=(cnd_r/2, cnd_r),

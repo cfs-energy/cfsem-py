@@ -309,21 +309,25 @@ def self_inductance_of_cylindrical_coil(
     """
 
     # Validate valid section_kind and section_size
-    if section_kind == "rectangular" and not isinstance(section_size, tuple):
-        raise ValueError(
-            "For rectangular section, section_size must be a tuple \
-                         (conductor width and height)"
-        )
-    if section_kind in "circular" and not isinstance(section_size, float):
-        raise ValueError(
-            "For circular section, section_size must be a single float \
-                         (conductor radius)"
-        )
-    if section_kind == "annular" and not isinstance(section_size, tuple):
-        raise ValueError(
-            "For annular section, section_size must be a tuple \
-                         (inner and outer conductor radius)"
-        )
+    assert section_kind in ("rectangular", "circular", "annular"), "section_kind must be one of \
+        'rectangular', 'circular', or 'annular'"
+
+    if section_kind == "rectangular":
+        assert isinstance(section_size, tuple), "For rectangular section, section_size must be a tuple \
+            (conductor width and height)"
+        assert len(section_size) == 2, "For rectangular section, section_size must be a tuple of length 2"
+        assert section_size[0] > 0.0 and section_size[1] > 0.0, "Conductor section sizes (width and height) \
+            must be positive"
+
+    if section_kind == "circular":
+        assert isinstance(section_size, float) and section_size > 0.0, "For circular section, section size \
+            must be a non-negative float (conductor radius)"
+        
+    if section_kind == "annular":
+        assert isinstance(section_size, tuple) and len(section_size) == 2, "For annular section, \
+            section_size must be a tuple (inner and outer conductor radius)"
+        assert section_size[0] >= 0.0 and section_size[1] > section_size[0], "For annular section, \
+            inner radius must be non-negative and outer radius must be larger than inner radius"
 
     m = 0.0
     rs, zs, ns = f
@@ -351,7 +355,9 @@ def self_inductance_of_cylindrical_coil(
                     minor_radius=np.atleast_1d(section_size),
                 )
                 * ns[i] ** 2
-            )
+            ) 
+            m_self = float(m_self.item())  # Convert to float
+
         elif section_kind == "annular":
             # Wien formula for annular cross-section
             assert isinstance(section_size, tuple)

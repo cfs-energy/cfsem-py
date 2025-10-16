@@ -335,6 +335,7 @@ def self_inductance_of_cylindrical_coil(
 
         # Get self-inductance of f1
         if section_kind == "rectangular":
+            assert isinstance(section_size, tuple)
             m_self = self_inductance_lyle6(
                 r=rs[i],  # coil center radius
                 dr=section_size[0],  # width of the rectangular conductor section
@@ -343,15 +344,17 @@ def self_inductance_of_cylindrical_coil(
             )
         elif section_kind == "circular":
             # Wien formula for circular cross-section
+            assert isinstance(section_size, float)
             m_self = (
                 self_inductance_circular_ring_wien(
                     major_radius=rs[i],  # coil center radius
-                    minor_radius=section_size,
+                    minor_radius=np.atleast_1d(section_size),
                 )
                 * ns[i] ** 2
             )
         elif section_kind == "annular":
             # Wien formula for annular cross-section
+            assert isinstance(section_size, tuple)
             m_self = (
                 self_inductance_annular_ring(
                     r=rs[i],  # major radius

@@ -2,6 +2,11 @@
 
 See archived changelogs for versions prior to 2.6.0.
 
+## 2.7.0 2025-10-15
+
+### Added
+* Add method for calculating self-inductance for coaxial collection of ideal circular filaments.
+
 ## 2.6.0 2025-10-15
 
 Substantial performance improvement for `flux_density_linear_filament` Biot-Savart methods.

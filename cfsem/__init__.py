@@ -1,6 +1,6 @@
 """Quasi-steady electromagnetics calcs"""
 
-from typing import Literal
+from typing import Literal, Union
 
 import numpy as np
 from interpn import MulticubicRectilinear
@@ -293,7 +293,7 @@ def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray, par: b
 def self_inductance_of_cylindrical_coil(
     f: NDArray,
     section_kind: Literal["rectangular", "circular", "annular"],
-    section_size: float | tuple[float, float],
+    section_size: Union[tuple[float, float], float],
     par: bool = True,
 ) -> float:
     """
@@ -331,7 +331,7 @@ def self_inductance_of_cylindrical_coil(
     # Iterate over filaments
     for i in range(f.shape[1]):
         # Get mutual inductance of i-th filament to all other filaments
-        m_contribs = ns * flux_circular_filament(ns[i], rs[i], zs[i], rs, zs)
+        m_contribs = ns * flux_circular_filament(ns[i], rs[i], zs[i], rs, zs, par)
 
         # Get self-inductance of f1
         if section_kind == "rectangular":

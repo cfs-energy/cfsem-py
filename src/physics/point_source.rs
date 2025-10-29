@@ -14,8 +14,6 @@ use crate::{
     },
 };
 
-use libm::pow;
-
 /// Magnetic flux density of a dipole in cartesian coordinates.
 ///
 /// Arguments
@@ -39,7 +37,7 @@ pub fn flux_density_dipole_scalar(
     let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
     let rmag = rss3(r.0, r.1, r.2); // [m]
     let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
-    let rinv3 = pow(rmag, -3.0);
+    let rinv3 = 1.0 / (rmag * rmag * rmag);
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
     let m_dot_r = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
@@ -57,6 +55,9 @@ pub fn flux_density_dipole_scalar(
     );
 
     // Defer to magnetized sphere if necessary
+    // Because this is done without producing a true branch,
+    // it is only a 20-40% reduction in throughput, and does not disrupt
+    // the autovectorizer.
     let inside = rmag < outer_radius;
     let (bx_inside, by_inside, bz_inside) =
         flux_density_inside_magnetized_sphere(moment, outer_radius);
@@ -161,7 +162,7 @@ pub fn vector_potential_dipole_scalar(
     let m = moment;
     let mmag = rss3(m.0, m.1, m.2);
     let mhat = (m.0 / mmag, m.1 / mmag, m.2 / mmag);
-    let rinv2 = pow(rmag, -2.0);
+    let rinv2 = 1.0 / (rmag * rmag);
 
     // mhat x rhat
     // Use normalized vectors for cross product to improve float roundoff
@@ -169,14 +170,16 @@ pub fn vector_potential_dipole_scalar(
 
     // Assemble components
     let c = MU0_OVER_4PI * mmag * rinv2; // Shared factor
-    let tsum = (
+    let (ax, ay, az) = (
         mhat_cross_rhat.0 * c,
         mhat_cross_rhat.1 * c,
         mhat_cross_rhat.2 * c,
     );
-    let (ax, ay, az) = (tsum.0, tsum.1, tsum.2);
 
     // Defer to magnetized sphere if necessary
+    // Because this is done without producing a true branch,
+    // it is only a 20-40% reduction in throughput, and does not disrupt
+    // the autovectorizer.
     let inside = rmag < outer_radius;
     let (ax_inside, ay_inside, az_inside) =
         vector_potential_inside_magnetized_sphere(mhat_cross_rhat, mmag, rmag, outer_radius);

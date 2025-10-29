@@ -17,6 +17,8 @@
     * !Require sphere radius input for dipole flux density
     * Update dependencies
     * Use more codegen units and don't do LTO for debug builds
+    * Use more mul_add in flux_circular_filament
+    * Use multiplication instead of pow in dipole calcs
 * Python
     * !Enable more instruction sets for x86 processors
 

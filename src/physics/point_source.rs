@@ -37,7 +37,7 @@ pub fn flux_density_dipole_scalar(
     let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
     let rmag = rss3(r.0, r.1, r.2); // [m]
     let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
-    let rinv3 = 1.0 / (rmag * rmag * rmag);
+    let r3 = rmag * rmag * rmag;
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
     let m_dot_rhat = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
@@ -48,15 +48,13 @@ pub fn flux_density_dipole_scalar(
     );
 
     // Assemble components
-    let c = 3.0 * rinv3;
-    let term1 = (rmr.0 * c, rmr.1 * c, rmr.2 * c);
-    let term2 = (-moment.0 * rinv3, -moment.1 * rinv3, -moment.2 * rinv3);
-    let tsum = (term1.0 + term2.0, term1.1 + term2.1, term1.2 + term2.2);
-    let (bx, by, bz) = (
-        MU0_OVER_4PI * tsum.0,
-        MU0_OVER_4PI * tsum.1,
-        MU0_OVER_4PI * tsum.2,
+    let c = MU0_OVER_4PI / r3;
+    let tsum = (
+        rmr.0 * 3.0 - moment.0,
+        rmr.1 * 3.0 - moment.1,
+        rmr.2 * 3.0 - moment.2,
     );
+    let (bx, by, bz) = (c * tsum.0, c * tsum.1, c * tsum.2);
 
     // Defer to magnetized sphere if necessary
     // Because this is done without producing a true branch,
@@ -166,14 +164,14 @@ pub fn vector_potential_dipole_scalar(
     let m = moment;
     let mmag = rss3(m.0, m.1, m.2);
     let mhat = (m.0 / mmag, m.1 / mmag, m.2 / mmag);
-    let rinv2 = 1.0 / (rmag * rmag);
+    let r2 = rmag * rmag;
 
     // mhat x rhat
     // Use normalized vectors for cross product to improve float roundoff
     let mhat_cross_rhat = cross3(mhat.0, mhat.1, mhat.2, rhat.0, rhat.1, rhat.2);
 
     // Assemble components
-    let c = MU0_OVER_4PI * mmag * rinv2; // Shared factor
+    let c = MU0_OVER_4PI * mmag / r2; // Shared factor
     let (ax, ay, az) = (
         mhat_cross_rhat.0 * c,
         mhat_cross_rhat.1 * c,

@@ -37,7 +37,7 @@ pub fn flux_density_dipole_scalar(
     let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
     let rmag = rss3(r.0, r.1, r.2); // [m]
     let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
-    let r3 = rmag * rmag * rmag; // [m^3]
+    let r3 = dot3(r.0, r.1, r.2, r.0, r.1, r.2) * rmag; // [m^3]
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
     let m_dot_rhat = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
@@ -155,12 +155,12 @@ pub fn vector_potential_dipole_scalar(
 ) -> (f64, f64, f64) {
     // Radius and moment vectors decomposed into direction and magnitude
     let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
-    let rmag = rss3(r.0, r.1, r.2); // [m]
+    let r2 = dot3(r.0, r.1, r.2, r.0, r.1, r.2); // [m^2]
+    let rmag = r2.sqrt(); // [m]
     let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
     let m = moment;
     let mmag = rss3(m.0, m.1, m.2); // [A-m^2]
     let mhat = (m.0 / mmag, m.1 / mmag, m.2 / mmag); // [dimensionless]
-    let r2 = rmag * rmag; // [m^2]
 
     // mhat x rhat
     // Use normalized vectors for cross product to improve float roundoff

@@ -41,18 +41,14 @@ pub fn flux_density_dipole_scalar(
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
     let m_dot_rhat = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
-    let rmr = (
-        rhat.0 * m_dot_rhat,
-        rhat.1 * m_dot_rhat,
-        rhat.2 * m_dot_rhat,
-    );
 
     // Assemble components
     let c = MU0_OVER_4PI / r3;
+    let c1 = 3.0 * m_dot_rhat;
     let tsum = (
-        rmr.0 * 3.0 - moment.0,
-        rmr.1 * 3.0 - moment.1,
-        rmr.2 * 3.0 - moment.2,
+        rhat.0.mul_add(c1, -moment.0),
+        rhat.1.mul_add(c1, -moment.1),
+        rhat.2.mul_add(c1, -moment.2),
     );
     let (bx, by, bz) = (c * tsum.0, c * tsum.1, c * tsum.2);
 

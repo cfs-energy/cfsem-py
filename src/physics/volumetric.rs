@@ -17,7 +17,7 @@ use crate::MU0_OVER_4PI;
 ///
 /// Based on Griffith's 5e eqn 6.16 with some manipulation to phrase
 /// in terms of dipole moment and to reduce float roundoff and number of operations.
-/// 
+///
 /// The formula implemented here is
 /// B = 2/3 mu_0 M
 /// where M is the vector magnetization and r is the vector

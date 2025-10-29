@@ -515,6 +515,7 @@ fn flux_density_dipole<'py>(
         Bound<'py, PyArray1<f64>>,
         Bound<'py, PyArray1<f64>>,
     ), // [m] Observation point coords
+    outer_radius: Bound<'py, PyArray1<f64>>,
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -531,7 +532,65 @@ fn flux_density_dipole<'py>(
         true => physics::point_source::flux_density_dipole_par,
         false => physics::point_source::flux_density_dipole,
     };
-    match func(loc, moment, obs, (&mut outx, &mut outy, &mut outz)) {
+    match func(
+        loc,
+        moment,
+        outer_radius.readonly().as_slice()?,
+        obs,
+        (&mut outx, &mut outy, &mut outz),
+    ) {
+        Ok(x) => x,
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
+}
+
+/// Python bindings for cfsemrs::physics::point_source::vector_potential_dipole
+#[pyfunction]
+fn vector_potential_dipole<'py>(
+    loc: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] dipole locations in cartesian coordinates
+    moment: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [A-m^2] dipole moment vector
+    obs: (
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    ), // [m] Observation point coords
+    outer_radius: Bound<'py, PyArray1<f64>>,
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(moment);
+    _3tup_slice_ro!(obs);
+
+    // Do calculations
+    let n = obs.0.len();
+    let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+
+    let func = match par {
+        true => physics::point_source::vector_potential_dipole_par,
+        false => physics::point_source::vector_potential_dipole,
+    };
+    match func(
+        loc,
+        moment,
+        outer_radius.readonly().as_slice()?,
+        obs,
+        (&mut outx, &mut outy, &mut outz),
+    ) {
         Ok(x) => x,
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -721,6 +780,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
 
     // Point sources
     m.add_function(wrap_pyfunction!(flux_density_dipole, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(vector_potential_dipole, m.clone())?)?;
 
     Ok(())
 }

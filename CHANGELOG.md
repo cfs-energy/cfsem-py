@@ -1,6 +1,28 @@
 # Changelog
 
-See archived changelogs for versions prior to 2.6.0.
+## 3.0.0 2025-10-29
+
+### Added
+
+* Rust
+    * Add methods for vector potential of a dipole in `physics::point_source` and `python.rs` bindings
+    * Add `physics::volumetric` module with methods for fields inside a uniformly magnetized sphere
+    * Add `math::{clip_nan, switch_float}` functions for branchless-in-assembly float selection operations
+* Python
+    * Add `vector_potential_dipole` function
+    * Add optional sphere radius input for dipole flux density
+
+### Changed
+
+* Rust
+    * !Require sphere radius input for dipole flux density
+    * Update dependencies
+    * Use more codegen units and don't do LTO for debug builds
+    * Use more mul_add in flux_circular_filament
+    * Use multiplication instead of pow in dipole calcs
+* Python
+    * !Enable more instruction sets for x86 processors
+    * Replace flatten() with ravel() everywhere to reduce copies
 
 ## 2.7.0 2025-10-15
 
@@ -35,3 +57,7 @@ body force density calcs.
 * Python
     * Update dep versions
     * Use latest rust backend version, which includes 1.4-2x speedup for flux_density_linear_filament Biot-Savart calcs
+
+## Earlier Versions
+
+See archived changelogs for versions prior to 2.6.0.

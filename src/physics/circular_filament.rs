@@ -170,9 +170,9 @@ pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64))
     let (rprime, zprime) = rzobs;
     // Evaluate
     let rrprime = rfil * rprime;
-    let r_plus_rprime = rfil + rprime;
-    let z_minus_zprime = zfil - zprime;
-    let k2 = 4.0 * rrprime / (r_plus_rprime.powi(2) + z_minus_zprime.powi(2));
+    let rpr = rfil + rprime;
+    let zmz = zfil - zprime;
+    let k2 = 4.0 * rrprime / (rpr.mul_add(rpr, zmz * zmz));
     // [V-s]
     MU_0 * ifil * (rrprime / k2).sqrt() * ((2.0 - k2) * ellipk(k2) - 2.0 * ellipe(k2))
 }
@@ -365,7 +365,7 @@ pub fn flux_density_circular_filament_scalar(
     let z2 = z * z; // [m^2]
     let r2 = rprime * rprime; // [m^2]
 
-    let rpr = rfil + rprime;
+    let rpr = rfil + rprime; // [m]
 
     let q = rpr.mul_add(rpr, z2); // [m^2]
     let k2 = 4.0 * rfil * rprime / q; // [nondim]
@@ -618,7 +618,8 @@ pub fn vector_potential_circular_filament_scalar(
     let z = zprime - zfil; // [m]
 
     // Assemble argument to elliptic integrals
-    let rpr2 = (rfil + rprime).powf(2.0);
+    let rpr = rfil + rprime;
+    let rpr2 = rpr * rpr;
     let denom = z.mul_add(z, rpr2);
     let numer = 4.0 * rfil * rprime;
     let k2 = numer / denom;

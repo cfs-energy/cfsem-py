@@ -5,6 +5,8 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
+from typing import Optional
+
 from numpy import ascontiguousarray, float64, zeros_like
 from numpy.typing import NDArray
 
@@ -23,6 +25,7 @@ from .cfsem import (
     flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
 )
 from .cfsem import flux_density_dipole as em_flux_density_dipole
+from .cfsem import vector_potential_dipole as em_vector_potential_dipole
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from .cfsem import gs_operator_order2 as em_gs_operator_order2
 from .cfsem import gs_operator_order4 as em_gs_operator_order4
@@ -194,7 +197,7 @@ def flux_density_linear_filament(
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil).flatten()
+    ifil = ascontiguousarray(ifil).ravel()
     return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -225,7 +228,7 @@ def vector_potential_linear_filament(
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil).flatten()
+    ifil = ascontiguousarray(ifil).ravel()
     return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -471,7 +474,8 @@ def flux_density_dipole(
     loc: Array3xN,
     moment: Array3xN,
     xyzp: Array3xN,
-    par: bool = True,
+    par: bool = True,  # Ordered for backwards compatibility
+    outer_radius: Optional[NDArray[float64]] = None,
 ) -> Array3xN:
     """
     Magnetic flux density of a dipole in cartesian coordiantes.
@@ -481,6 +485,8 @@ def flux_density_dipole(
         moment: [A-m^2] dipole magnetic moment vector
         xyzp: [m] x,y,z coords of observation points
         par: Whether to use CPU parallelism
+        outer_radius: [m] radius inside which to defer to magnetized sphere calc. Defaults to zeroes.
+
 
     Returns:
         [T] flux density
@@ -488,9 +494,43 @@ def flux_density_dipole(
     loc = _3tup_contig(loc)
     moment = _3tup_contig(moment)
     xyzp = _3tup_contig(xyzp)
-    bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, par)  # [T]
+    outer_radius = outer_radius or zeros_like(loc[0])
+    outer_radius = ascontiguousarray(outer_radius).ravel()
+
+    bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
     return bx, by, bz  # type: ignore
+
+
+def vector_potential_dipole(
+    loc: Array3xN,
+    moment: Array3xN,
+    xyzp: Array3xN,
+    par: bool = True,  # Ordered for backwards compatibility
+    outer_radius: Optional[NDArray[float64]] = None,
+) -> Array3xN:
+    """
+    Magnetic vector potential of a dipole in cartesian coordiantes.
+
+    Args:
+        loc: [m] x,y,z coordinates of dipole
+        moment: [A-m^2] dipole magnetic moment vector
+        xyzp: [m] x,y,z coords of observation points
+        par: Whether to use CPU parallelism
+        outer_radius: [m] radius inside which to defer to magnetized sphere calc. Defaults to zeroes.
+
+    Returns:
+        [V⋅s⋅m-1] vector potential
+    """
+    loc = _3tup_contig(loc)
+    moment = _3tup_contig(moment)
+    xyzp = _3tup_contig(xyzp)
+    outer_radius = outer_radius or zeros_like(loc[0])
+    outer_radius = ascontiguousarray(outer_radius).ravel()
+
+    ax, ay, az = em_vector_potential_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
+
+    return ax, ay, az  # type: ignore
 
 
 def body_force_density_circular_filament_cartesian(
@@ -551,7 +591,7 @@ def body_force_density_linear_filament(
     """
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil).flatten()
+    ifil = ascontiguousarray(ifil).ravel()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_linear_filament(xyzfil, dlxyzfil, ifil, obs, j, par)  # [N/m^3]
@@ -565,9 +605,9 @@ def _3tup_contig(
     """Make contiguous references or copies to arrays in a 3-tuple.
     Only copies data if it is not already contiguous."""
     return (
-        ascontiguousarray(t[0]).flatten(),
-        ascontiguousarray(t[1]).flatten(),
-        ascontiguousarray(t[2]).flatten(),
+        ascontiguousarray(t[0]).ravel(),
+        ascontiguousarray(t[1]).ravel(),
+        ascontiguousarray(t[2]).ravel(),
     )
 
 
@@ -576,4 +616,4 @@ def _2tup_contig(
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 2-tuple.
     Only copies data if it is not already contiguous."""
-    return (ascontiguousarray(t[0]).flatten(), ascontiguousarray(t[1]).flatten())
+    return (ascontiguousarray(t[0]).ravel(), ascontiguousarray(t[1]).ravel())

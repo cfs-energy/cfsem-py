@@ -84,7 +84,7 @@ pub fn ellipe(m: f64) -> f64 {
     ellip
 }
 
-/// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to perform all addition in extended registers.
+/// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to reduce roundoff error.
 #[inline]
 pub fn rss3(x: f64, y: f64, z: f64) -> f64 {
     x.mul_add(x, y.mul_add(y, z.powi(2))).sqrt()
@@ -165,4 +165,38 @@ pub fn decompose_filament(
     ); // [m] filament midpoint
 
     (midpoint, dl)
+}
+
+/// Clip NaN values to the provided value.
+/// This is carefully organized to avoid producing any `jmp`
+/// instructions on modern-as-of-2025 systems.
+#[inline]
+pub fn clip_nan(x: f64, v: f64) -> f64 {
+    if x.is_nan() { v } else { x }
+}
+
+/// Defer between two float values (left and right)
+/// depending on some condition.
+///
+/// Evaluates like `left if cond else right`, clipping
+/// either value to zero if it is non-finite.
+///
+/// If the condition is based on a float comparison, this
+/// will evaluate without producing any `jmp`
+/// instructions on modern-as-of-2025 systems.
+#[inline(always)] // Must be inlined to eliminate jmp
+pub fn switch_float(left: f64, right: f64, cond: bool) -> f64 {
+    // Convert the boolean check to floating-point factors
+    // for each branch without producing a true branch
+    let left_factor: f64 = match cond {
+        true => 1.0, // This does not produce a jmp!
+        false => 0.0,
+    };
+    let right_factor: f64 = 1.0 - left_factor;
+
+    // Use float factors instead of a true branch
+    let left_part = left * left_factor;
+    let right_part = right * right_factor;
+
+    clip_nan(left_part, 0.0) + clip_nan(right_part, 0.0)
 }

@@ -6,9 +6,6 @@
 name: release_python
 
 on:
-  push:
-    branches:
-      - release
   workflow_dispatch:
 
 permissions:
@@ -177,6 +174,7 @@ jobs:
           subject-path: 'wheels-*/*'
       - name: Publish to PyPI
         #if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        if: github.ref == 'refs/heads/release'
         uses: PyO3/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.MATURIN_PASSWORD }}

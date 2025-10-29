@@ -7,9 +7,7 @@ with constant and isotropic material properties and small displacements.
 from numpy.typing import NDArray
 
 
-def s_hoop_thick_wall_cylinder(
-    r: NDArray, ri: float, ro: float, pin: float, pout: float
-) -> NDArray:
+def s_hoop_thick_wall_cylinder(r: NDArray, ri: float, ro: float, pin: float, pout: float) -> NDArray:
     """
     Hoop stress at a location in a thick walled cylinder under pressure load
     with ends "capped", although the capped constraint does not affect the hoop or radial stress

@@ -35,7 +35,8 @@ pub(crate) fn flux_density_inside_magnetized_sphere(
     moment: (f64, f64, f64),
     outer_radius: f64,
 ) -> (f64, f64, f64) {
-    let c = 2.0 * outer_radius.powi(-3) * MU0_OVER_4PI;
+    let r3 = outer_radius * outer_radius * outer_radius;
+    let c = 2.0 * MU0_OVER_4PI / r3;
     (moment.0 * c, moment.1 * c, moment.2 * c)
 }
 
@@ -53,6 +54,8 @@ pub(crate) fn flux_density_inside_magnetized_sphere(
 /// Based on Griffith's 5e eqn 6.16 with some manipulation to phrase
 /// in terms of dipole moment, reduce float roundoff and number of operations,
 /// and to extract vector potential.
+///
+/// The
 ///
 /// References
 ///
@@ -75,7 +78,8 @@ pub(crate) fn vector_potential_inside_magnetized_sphere(
     rmag: f64,
     outer_radius: f64,
 ) -> (f64, f64, f64) {
-    let c = outer_radius.powi(-3) * MU0_OVER_4PI * mmag * rmag;
+    let r3 = outer_radius * outer_radius * outer_radius;
+    let c = MU0_OVER_4PI * mmag * rmag / r3;
     (
         mhat_cross_rhat.0 * c,
         mhat_cross_rhat.1 * c,

@@ -40,8 +40,8 @@ pub fn flux_density_dipole_scalar(
     let rinv3 = 1.0 / (rmag * rmag * rmag);
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
-    let m_dot_r = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
-    let rmr = (rhat.0 * m_dot_r, rhat.1 * m_dot_r, rhat.2 * m_dot_r);
+    let m_dot_rhat = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
+    let rmr = (rhat.0 * m_dot_rhat, rhat.1 * m_dot_rhat, rhat.2 * m_dot_rhat);
 
     // Assemble components
     let c = 3.0 * rinv3;

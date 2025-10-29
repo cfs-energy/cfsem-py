@@ -6,6 +6,7 @@
 
 * Rust
     * Add methods for vector potential of a dipole in `physics::point_source` and `python.rs` bindings
+    * Add `physics::volumetric` module with methods for fields inside a uniformly magnetized sphere
     * Add `math::{clip_nan, switch_float}` functions for branchless-in-assembly float selection operations
 * Python
     * Add `vector_potential_dipole` function

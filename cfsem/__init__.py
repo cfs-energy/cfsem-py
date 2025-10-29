@@ -439,10 +439,10 @@ def filament_coil(r: float, z: float, w: float, h: float, nt: float, nr: int, nz
     rmesh, zmesh = np.meshgrid(rs, zs, indexing="ij")  # [m]
 
     # Number of turns attributed to each point is not necessarily an integer
-    n = np.full_like(rmesh.flatten(), float(nt) / (nr * nz))
+    n = np.full_like(rmesh.ravel(), float(nt) / (nr * nz))
 
     # Pack filament locations and number of turns into an array together
-    filaments = np.dstack([rmesh.flatten(), zmesh.flatten(), n]).reshape(nr * nz, 3)
+    filaments = np.dstack([rmesh.ravel(), zmesh.ravel(), n]).reshape(nr * nz, 3)
 
     return filaments  # [m], [m], [dimensionless]
 
@@ -544,7 +544,7 @@ def self_inductance_distributed_axisymmetric_conductor(
     # Set up
     nr = rgrid.size
     nz = zgrid.size
-    psi_interpolator = MulticubicRectilinear.new([rgrid, zgrid], psi_part.flatten())
+    psi_interpolator = MulticubicRectilinear.new([rgrid, zgrid], psi_part.ravel())
 
     # Same-length diffs assuming last grid cell is the same size
     # as the previous one. In general the conductor can't touch the

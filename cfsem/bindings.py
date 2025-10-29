@@ -197,7 +197,7 @@ def flux_density_linear_filament(
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil).flatten()
+    ifil = ascontiguousarray(ifil).ravel()
     return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -228,7 +228,7 @@ def vector_potential_linear_filament(
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil).flatten()
+    ifil = ascontiguousarray(ifil).ravel()
     return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
@@ -495,7 +495,7 @@ def flux_density_dipole(
     moment = _3tup_contig(moment)
     xyzp = _3tup_contig(xyzp)
     outer_radius = outer_radius or zeros_like(loc[0])
-    outer_radius = ascontiguousarray(outer_radius).flatten()
+    outer_radius = ascontiguousarray(outer_radius).ravel()
 
     bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
@@ -526,7 +526,7 @@ def vector_potential_dipole(
     moment = _3tup_contig(moment)
     xyzp = _3tup_contig(xyzp)
     outer_radius = outer_radius or zeros_like(loc[0])
-    outer_radius = ascontiguousarray(outer_radius).flatten()
+    outer_radius = ascontiguousarray(outer_radius).ravel()
 
     ax, ay, az = em_vector_potential_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
@@ -591,7 +591,7 @@ def body_force_density_linear_filament(
     """
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil).flatten()
+    ifil = ascontiguousarray(ifil).ravel()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_linear_filament(xyzfil, dlxyzfil, ifil, obs, j, par)  # [N/m^3]
@@ -605,9 +605,9 @@ def _3tup_contig(
     """Make contiguous references or copies to arrays in a 3-tuple.
     Only copies data if it is not already contiguous."""
     return (
-        ascontiguousarray(t[0]).flatten(),
-        ascontiguousarray(t[1]).flatten(),
-        ascontiguousarray(t[2]).flatten(),
+        ascontiguousarray(t[0]).ravel(),
+        ascontiguousarray(t[1]).ravel(),
+        ascontiguousarray(t[2]).ravel(),
     )
 
 
@@ -616,4 +616,4 @@ def _2tup_contig(
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 2-tuple.
     Only copies data if it is not already contiguous."""
-    return (ascontiguousarray(t[0]).flatten(), ascontiguousarray(t[1]).flatten())
+    return (ascontiguousarray(t[0]).ravel(), ascontiguousarray(t[1]).ravel())

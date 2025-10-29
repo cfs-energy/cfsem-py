@@ -22,6 +22,7 @@
     * Use multiplication instead of pow in dipole calcs
 * Python
     * !Enable more instruction sets for x86 processors
+    * Replace flatten() with ravel() everywhere to reduce copies
 
 ## 2.7.0 2025-10-15
 

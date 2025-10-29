@@ -12,7 +12,7 @@ use crate::MU0_OVER_4PI;
 /// consistent with the apparent discontinuity in material properties.
 ///
 /// The dipole moment of the magnetized sphere can be calculated as
-/// (4/3) * pi * R^3 * M, where R is the sphere's outer radius and M is
+/// m = 4/3 pi R^3 M, where R is the sphere's outer radius and M is
 /// the (vector) uniform magnetization.
 ///
 /// Based on Griffith's 5e eqn 6.16 with some manipulation to phrase
@@ -48,14 +48,19 @@ pub(crate) fn flux_density_inside_magnetized_sphere(
 /// consistent with the apparent discontinuity in material properties.
 ///
 /// The dipole moment of the magnetized sphere can be calculated as
-/// (4/3) * pi * R^3 * M, where R is the sphere's outer radius and M is
+/// m = 4/3 pi R^3 M, where R is the sphere's outer radius and M is
 /// the (vector) uniform magnetization.
 ///
 /// Based on Griffith's 5e eqn 6.16 with some manipulation to phrase
 /// in terms of dipole moment, reduce float roundoff and number of operations,
 /// and to extract vector potential.
 ///
-/// The
+/// The formula implemented here is
+/// A = 1/3 mu_0 cross(M, r)
+/// where M is the vector magnetization and r is the vector
+/// from the center of the sphere to the observation point.
+/// The magnetization M is then replaced with the formula above
+/// in terms of the total magnetic moment.
 ///
 /// References
 ///

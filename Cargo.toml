@@ -52,5 +52,9 @@ harness = false
 name = "circular_filament"
 harness = false
 
+[[bench]]
+name = "point_source"
+harness = false
+
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "katex-header.html" ]

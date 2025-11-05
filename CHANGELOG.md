@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.0.1 2025-11-05
+
+### Changed
+
+* Rust
+    * Improve performance of dipole calcs
+        * Now >1Gelem/s throughput including magnetized sphere fallback and nan clipping
+    * Update benchmarks to use latest version of criterion
+* Python
+    * Use latest rust backend with improved dipole calc perf
+    * Eliminate duplicate wheel builds during deployment
+        * Maturin now builds for all supported python versions automatically in the same job;
+          matrix on python versions is no longer necessary
+        * Later, this can be further reduced to single wheels by building for a stable abi3 target
+    * Remove support for python 3.9 (leaving long term support)
+
 ## 3.0.0 2025-10-29
 
 ### Added

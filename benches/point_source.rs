@@ -7,6 +7,8 @@ use cfsem::physics::point_source::{
 use criterion::*;
 use std::time::Duration;
 
+use std::hint::black_box;
+
 fn bench_flux_density_dipole(c: &mut Criterion) {
     let mut group = c.benchmark_group("Flux Density of a Magnetic Dipole");
     group.sample_size(10);
@@ -18,11 +20,11 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
             let locy = vec![0.02_f64; ndipoles];
             let locz = vec![0.03_f64; ndipoles];
 
-            let momx = vec![0.0_f64; ndipoles];
-            let momy = vec![0.0_f64; ndipoles];
+            let momx = vec![0.17_f64; ndipoles];
+            let momy = vec![0.077_f64; ndipoles];
             let momz = vec![1.0_f64; ndipoles];
 
-            let outer_radius = vec![0.0_f64; ndipoles];
+            let outer_radius = vec![0.001_f64; ndipoles];
 
             let obsx = vec![0.7_f64; nobs];
             let obsy = vec![-0.4_f64; nobs];
@@ -101,11 +103,11 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
             let locy = vec![0.02_f64; ndipoles];
             let locz = vec![0.03_f64; ndipoles];
 
-            let momx = vec![0.0_f64; ndipoles];
-            let momy = vec![0.0_f64; ndipoles];
+            let momx = vec![0.17_f64; ndipoles];
+            let momy = vec![0.077_f64; ndipoles];
             let momz = vec![1.0_f64; ndipoles];
 
-            let outer_radius = vec![0.0_f64; ndipoles];
+            let outer_radius = vec![0.001_f64; ndipoles];
 
             let obsx = vec![0.7_f64; nobs];
             let obsy = vec![-0.4_f64; nobs];

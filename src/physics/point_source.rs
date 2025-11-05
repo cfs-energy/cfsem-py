@@ -8,7 +8,7 @@ use rayon::{
 use crate::{
     MU0_OVER_4PI, chunksize,
     macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{cross3, dot3, rss3, switch_float},
+    math::{clip_nan, cross3, dot3, rss3},
     physics::volumetric::{
         flux_density_inside_magnetized_sphere, vector_potential_inside_magnetized_sphere,
     },
@@ -51,18 +51,23 @@ pub fn flux_density_dipole_scalar(
         rhat.1.mul_add(c1, -moment.1),
         rhat.2.mul_add(c1, -moment.2),
     );
-    let (bx, by, bz) = (c * tsum.0, c * tsum.1, c * tsum.2);
 
     // Defer to magnetized sphere if necessary
-    // Because this is done without producing a true branch,
-    // it is only a 20-40% reduction in throughput, and does not disrupt
-    // the autovectorizer.
+    // This branch does not cause a cache miss because the conditional
+    // does not require fetching any additional resources from RAM into cache.
+    // In fact, this has essentially no effect on performance because the
+    // branch is extremely predictable, and can be resolved consistently
+    // between when rmag is calculated and when the other dependencies are done.
     let inside = rmag < outer_radius;
-    let (bx_inside, by_inside, bz_inside) =
-        flux_density_inside_magnetized_sphere(moment, outer_radius);
-    let bx = switch_float(bx_inside, bx, inside);
-    let by = switch_float(by_inside, by, inside);
-    let bz = switch_float(bz_inside, bz, inside);
+    let (mut bx, mut by, mut bz) = match inside {
+        true => flux_density_inside_magnetized_sphere(moment, outer_radius),
+        false => (c * tsum.0, c * tsum.1, c * tsum.2),
+    }; // [T]
+
+    // This does not produce a jmp
+    bx = clip_nan(bx, 0.0);
+    by = clip_nan(by, 0.0);
+    bz = clip_nan(bz, 0.0);
 
     (bx, by, bz) // [T]
 }
@@ -146,7 +151,7 @@ pub fn flux_density_dipole_par(
 ///
 /// Returns
 ///
-/// * (ax, ay, az) [V⋅s⋅m-1] vector potential components at observation point
+/// * (ax, ay, az) [V-s/m] vector potential components at observation point
 #[inline]
 pub fn vector_potential_dipole_scalar(
     loc: (f64, f64, f64),
@@ -167,26 +172,35 @@ pub fn vector_potential_dipole_scalar(
     // Use normalized vectors for cross product to improve float roundoff
     let mhat_cross_rhat = cross3(mhat.0, mhat.1, mhat.2, rhat.0, rhat.1, rhat.2);
 
-    // Assemble components
-    let c = MU0_OVER_4PI * mmag / r2; // [V-s/m] Shared factor
-    let (ax, ay, az) = (
-        mhat_cross_rhat.0 * c,
-        mhat_cross_rhat.1 * c,
-        mhat_cross_rhat.2 * c,
-    );
-
-    // Defer to magnetized sphere if necessary
-    // Because this is done without producing a true branch,
-    // it is only a 20-40% reduction in throughput, and does not disrupt
-    // the autovectorizer.
+    // Defer to magnetized sphere if necessary.
+    // This branch does not cause a cache miss because the conditional
+    // does not require fetching any additional resources from RAM into cache.
+    // In fact, this has essentially no effect on performance because the
+    // branch is extremely predictable, and can be resolved consistently
+    // between when rmag is calculated and when the other dependencies are done.
     let inside = rmag < outer_radius;
-    let (ax_inside, ay_inside, az_inside) =
-        vector_potential_inside_magnetized_sphere(mhat_cross_rhat, mmag, rmag, outer_radius);
-    let ax = switch_float(ax_inside, ax, inside);
-    let ay = switch_float(ay_inside, ay, inside);
-    let az = switch_float(az_inside, az, inside);
+    let (mut ax, mut ay, mut az) = match inside {
+        // Magnetized sphere internal field
+        true => {
+            vector_potential_inside_magnetized_sphere(mhat_cross_rhat, mmag, rmag, outer_radius)
+        }
+        // Dipole field
+        false => {
+            let c = MU0_OVER_4PI * mmag / r2; // [V-s/m] Shared factor
+            (
+                mhat_cross_rhat.0 * c,
+                mhat_cross_rhat.1 * c,
+                mhat_cross_rhat.2 * c,
+            )
+        }
+    };
 
-    (ax, ay, az) // [V⋅s⋅m-1]
+    // This does not produce a jmp
+    ax = clip_nan(ax, 0.0);
+    ay = clip_nan(ay, 0.0);
+    az = clip_nan(az, 0.0);
+
+    (ax, ay, az) // [V-s/m]
 }
 
 /// Magnetic vector potential of a dipole in cartesian coordinates.

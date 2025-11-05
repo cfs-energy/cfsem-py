@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.2 2025-11-05
+
+### Changed
+
+* Use numpy borrow interface instead of manually borrowchecking numpy arrays
+
 ## 3.0.1 2025-11-05
 
 ### Changed

@@ -5,8 +5,6 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
-from typing import Optional
-
 from numpy import ascontiguousarray, float64, zeros_like
 from numpy.typing import NDArray
 
@@ -475,7 +473,7 @@ def flux_density_dipole(
     moment: Array3xN,
     xyzp: Array3xN,
     par: bool = True,  # Ordered for backwards compatibility
-    outer_radius: Optional[NDArray[float64]] = None,
+    outer_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
     """
     Magnetic flux density of a dipole in cartesian coordiantes.
@@ -507,7 +505,7 @@ def vector_potential_dipole(
     moment: Array3xN,
     xyzp: Array3xN,
     par: bool = True,  # Ordered for backwards compatibility
-    outer_radius: Optional[NDArray[float64]] = None,
+    outer_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
     """
     Magnetic vector potential of a dipole in cartesian coordiantes.

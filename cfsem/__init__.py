@@ -1,6 +1,6 @@
 """Quasi-steady electromagnetics calcs"""
 
-from typing import Literal, Union
+from typing import Literal
 
 import numpy as np
 from interpn import MulticubicRectilinear
@@ -295,7 +295,7 @@ def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray, par: b
 def self_inductance_axisymmetric_coil(
     f: NDArray,
     section_kind: Literal["rectangular", "circular", "annular"],
-    section_size: Union[tuple[float, float], float],
+    section_size: tuple[float, float] | float,
     par: bool = True,
 ) -> float:
     """

@@ -7,6 +7,8 @@ use cfsem::physics::linear_filament::{
 use criterion::*;
 use std::time::Duration;
 
+use std::hint::black_box;
+
 fn bench_flux_density_linear_filament(c: &mut Criterion) {
     let mut group = c.benchmark_group("Flux Density of Linear Filaments");
     group.sample_size(10);

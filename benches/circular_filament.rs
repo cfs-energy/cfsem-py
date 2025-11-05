@@ -10,6 +10,8 @@ use cfsem::physics::{
 use criterion::*;
 use std::time::Duration;
 
+use std::hint::black_box;
+
 fn bench_flux_circular_filament(c: &mut Criterion) {
     let mut group = c.benchmark_group("Poloidal Flux of a Circular Filament");
     group.sample_size(10);

@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
 
@@ -46,7 +46,7 @@ jobs:
         # Python lint, test, and coverage
         uv run --locked ruff check ./cfsem
         uv run --locked ruff format ./cfsem --check
-        uv run --locked pyright ./cfsem --pythonversion 3.11
+        uv run --locked pyright ./cfsem --pythonversion 3.10
         uv run --locked coverage run --source=./cfsem -m pytest ./test/
         uv run --locked coverage report
 

@@ -1,5 +1,4 @@
 use numpy::PyArray1;
-use numpy::PyArrayMethods;
 use numpy::borrow::{PyReadonlyArray1, PyReadwriteArray1};
 use pyo3::exceptions;
 use pyo3::prelude::*;
@@ -118,7 +117,7 @@ fn flux_circular_filament<'py>(
     }
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         Ok(PyArray1::from_vec(py, psi).unbind()) // Make PyObject
     })
 }
@@ -159,7 +158,7 @@ fn vector_potential_circular_filament<'py>(
     }
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         Ok(PyArray1::from_vec(py, out).unbind()) // Make PyObject
     })
 }
@@ -201,7 +200,7 @@ fn flux_density_circular_filament<'py>(
     }
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let br: Py<PyArray1<f64>> = PyArray1::from_slice(py, &br).unbind(); // Make PyObject
         let bz: Py<PyArray1<f64>> = PyArray1::from_slice(py, &bz).unbind(); // Make PyObject
 

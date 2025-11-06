@@ -20,7 +20,7 @@ impl From<PyInteropError> for PyErr {
 }
 
 #[pyfunction]
-fn filament_helix_path<'py>(
+fn filament_helix_path(
     path: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,

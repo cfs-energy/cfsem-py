@@ -52,7 +52,7 @@ fn filament_helix_path(
 }
 
 #[pyfunction]
-fn rotate_filaments_about_path<'py>(
+fn rotate_filaments_about_path(
     path: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -83,7 +83,7 @@ fn rotate_filaments_about_path<'py>(
 
 /// Python bindings for cfsemrs::physics::flux_circular_filament
 #[pyfunction]
-fn flux_circular_filament<'py>(
+fn flux_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
@@ -124,7 +124,7 @@ fn flux_circular_filament<'py>(
 
 /// Python bindings for cfsemrs::physics::circular_filament::vector_potential_circular_filament
 #[pyfunction]
-fn vector_potential_circular_filament<'py>(
+fn vector_potential_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
@@ -165,7 +165,7 @@ fn vector_potential_circular_filament<'py>(
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament
 #[pyfunction]
-fn flux_density_circular_filament<'py>(
+fn flux_density_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
@@ -210,7 +210,7 @@ fn flux_density_circular_filament<'py>(
 
 /// Python bindings for cfsemrs::physics::linear_filament::flux_density_linear_filament
 #[pyfunction]
-fn flux_density_linear_filament<'py>(
+fn flux_density_linear_filament(
     xyzp: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -257,7 +257,7 @@ fn flux_density_linear_filament<'py>(
 
 /// Python bindings for cfsemrs::physics::linear_filament::vector_potential_linear_filament
 #[pyfunction]
-fn vector_potential_linear_filament<'py>(
+fn vector_potential_linear_filament(
     xyzp: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -309,7 +309,7 @@ fn vector_potential_linear_filament<'py>(
 }
 
 #[pyfunction]
-fn inductance_piecewise_linear_filaments<'py>(
+fn inductance_piecewise_linear_filaments(
     xyzfil0: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -359,7 +359,7 @@ fn inductance_piecewise_linear_filaments<'py>(
 
 /// Python bindings for cfsemrs::physics::gradshafranov::gs_operator_order2
 #[pyfunction]
-fn gs_operator_order2<'py>(
+fn gs_operator_order2(
     rs: PyReadonlyArray1<f64>,
     zs: PyReadonlyArray1<f64>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<usize>>, Py<PyArray1<usize>>)> {
@@ -375,7 +375,7 @@ fn gs_operator_order2<'py>(
 
 /// Python bindings for cfsemrs::physics::gradshafranov::gs_operator_order4
 #[pyfunction]
-fn gs_operator_order4<'py>(
+fn gs_operator_order4(
     rs: PyReadonlyArray1<f64>,
     zs: PyReadonlyArray1<f64>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<usize>>, Py<PyArray1<usize>>)> {
@@ -403,7 +403,7 @@ fn ellipk(x: f64) -> f64 {
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian
 #[pyfunction]
-fn flux_density_circular_filament_cartesian<'py>(
+fn flux_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
@@ -449,7 +449,7 @@ fn flux_density_circular_filament_cartesian<'py>(
 
 /// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
 #[pyfunction]
-fn mutual_inductance_circular_to_linear<'py>(
+fn mutual_inductance_circular_to_linear(
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
     nfil: PyReadonlyArray1<f64>,
@@ -492,7 +492,7 @@ fn mutual_inductance_circular_to_linear<'py>(
 
 /// Python bindings for cfsemrs::physics::point_source::flux_density_dipole
 #[pyfunction]
-fn flux_density_dipole<'py>(
+fn flux_density_dipole(
     loc: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -544,7 +544,7 @@ fn flux_density_dipole<'py>(
 
 /// Python bindings for cfsemrs::physics::point_source::vector_potential_dipole
 #[pyfunction]
-fn vector_potential_dipole<'py>(
+fn vector_potential_dipole(
     loc: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -596,7 +596,7 @@ fn vector_potential_dipole<'py>(
 
 /// Python bindings for cfsemrs::physics::body_force_density_circular_filament_cartesian
 #[pyfunction]
-fn body_force_density_circular_filament_cartesian<'py>(
+fn body_force_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
@@ -644,7 +644,7 @@ fn body_force_density_circular_filament_cartesian<'py>(
 
 /// Python bindings for cfsemrs::physics::body_force_density_linear_filament
 #[pyfunction]
-fn body_force_density_linear_filament<'py>(
+fn body_force_density_linear_filament(
     xyzfil: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,

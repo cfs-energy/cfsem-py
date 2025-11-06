@@ -1,5 +1,5 @@
 use numpy::PyArray1;
-use numpy::PyArrayMethods;
+use numpy::borrow::{PyReadonlyArray1, PyReadwriteArray1};
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use std::fmt::Debug;
@@ -20,19 +20,19 @@ impl From<PyInteropError> for PyErr {
 }
 
 #[pyfunction]
-fn filament_helix_path<'py>(
+fn filament_helix_path(
     path: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m]
     helix_start_offset: (f64, f64, f64),
     twist_pitch: f64,
     angle_offset: f64,
-    out: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+    mut out: (
+        PyReadwriteArray1<f64>,
+        PyReadwriteArray1<f64>,
+        PyReadwriteArray1<f64>,
     ),
 ) -> PyResult<()> {
     // Unpack
@@ -52,17 +52,17 @@ fn filament_helix_path<'py>(
 }
 
 #[pyfunction]
-fn rotate_filaments_about_path<'py>(
+fn rotate_filaments_about_path(
     path: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m]
     angle_offset: f64,
-    out: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+    mut out: (
+        PyReadwriteArray1<f64>,
+        PyReadwriteArray1<f64>,
+        PyReadwriteArray1<f64>,
     ),
 ) -> PyResult<()> {
     // Unpack
@@ -83,12 +83,12 @@ fn rotate_filaments_about_path<'py>(
 
 /// Python bindings for cfsemrs::physics::flux_circular_filament
 #[pyfunction]
-fn flux_circular_filament<'py>(
-    current: Bound<'py, PyArray1<f64>>,
-    rfil: Bound<'py, PyArray1<f64>>,
-    zfil: Bound<'py, PyArray1<f64>>,
-    rprime: Bound<'py, PyArray1<f64>>,
-    zprime: Bound<'py, PyArray1<f64>>,
+fn flux_circular_filament(
+    current: PyReadonlyArray1<f64>,
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    rprime: PyReadonlyArray1<f64>,
+    zprime: PyReadonlyArray1<f64>,
     par: bool,
 ) -> PyResult<Py<PyArray1<f64>>> {
     // Get references to contiguous data as slice
@@ -117,19 +117,19 @@ fn flux_circular_filament<'py>(
     }
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         Ok(PyArray1::from_vec(py, psi).unbind()) // Make PyObject
     })
 }
 
 /// Python bindings for cfsemrs::physics::circular_filament::vector_potential_circular_filament
 #[pyfunction]
-fn vector_potential_circular_filament<'py>(
-    current: Bound<'py, PyArray1<f64>>,
-    rfil: Bound<'py, PyArray1<f64>>,
-    zfil: Bound<'py, PyArray1<f64>>,
-    rprime: Bound<'py, PyArray1<f64>>,
-    zprime: Bound<'py, PyArray1<f64>>,
+fn vector_potential_circular_filament(
+    current: PyReadonlyArray1<f64>,
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    rprime: PyReadonlyArray1<f64>,
+    zprime: PyReadonlyArray1<f64>,
     par: bool,
 ) -> PyResult<Py<PyArray1<f64>>> {
     // Get references to contiguous data as slice
@@ -158,19 +158,19 @@ fn vector_potential_circular_filament<'py>(
     }
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         Ok(PyArray1::from_vec(py, out).unbind()) // Make PyObject
     })
 }
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament
 #[pyfunction]
-fn flux_density_circular_filament<'py>(
-    current: Bound<'py, PyArray1<f64>>,
-    rfil: Bound<'py, PyArray1<f64>>,
-    zfil: Bound<'py, PyArray1<f64>>,
-    rprime: Bound<'py, PyArray1<f64>>,
-    zprime: Bound<'py, PyArray1<f64>>,
+fn flux_density_circular_filament(
+    current: PyReadonlyArray1<f64>,
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    rprime: PyReadonlyArray1<f64>,
+    zprime: PyReadonlyArray1<f64>,
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -200,7 +200,7 @@ fn flux_density_circular_filament<'py>(
     }
 
     // Acquire global interpreter lock, which will be released when it goes out of scope
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let br: Py<PyArray1<f64>> = PyArray1::from_slice(py, &br).unbind(); // Make PyObject
         let bz: Py<PyArray1<f64>> = PyArray1::from_slice(py, &bz).unbind(); // Make PyObject
 
@@ -210,23 +210,23 @@ fn flux_density_circular_filament<'py>(
 
 /// Python bindings for cfsemrs::physics::linear_filament::flux_density_linear_filament
 #[pyfunction]
-fn flux_density_linear_filament<'py>(
+fn flux_density_linear_filament(
     xyzp: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Test point coords
     xyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     dlxyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
-    ifil: Bound<'py, PyArray1<f64>>, // [A] filament current
+    ifil: PyReadonlyArray1<f64>, // [A] filament current
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -234,8 +234,7 @@ fn flux_density_linear_filament<'py>(
     _3tup_slice_ro!(xyzp);
     _3tup_slice_ro!(xyzfil);
     _3tup_slice_ro!(dlxyzfil);
-    let ifilro = ifil.readonly();
-    let ifil = ifilro.as_slice()?;
+    let ifil = ifil.as_slice()?;
 
     // Do calculations
     let n = xyzp.0.len();
@@ -258,23 +257,23 @@ fn flux_density_linear_filament<'py>(
 
 /// Python bindings for cfsemrs::physics::linear_filament::vector_potential_linear_filament
 #[pyfunction]
-fn vector_potential_linear_filament<'py>(
+fn vector_potential_linear_filament(
     xyzp: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Test point coords
     xyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     dlxyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
-    ifil: Bound<'py, PyArray1<f64>>, // [A] filament current
+    ifil: PyReadonlyArray1<f64>, // [A] filament current
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -282,9 +281,7 @@ fn vector_potential_linear_filament<'py>(
     _3tup_slice_ro!(xyzp);
     _3tup_slice_ro!(xyzfil);
     _3tup_slice_ro!(dlxyzfil);
-
-    let ifilro = ifil.readonly();
-    let ifil = ifilro.as_slice()?;
+    let ifil = ifil.as_slice()?;
 
     // Do calculations
     let n = xyzp.0.len();
@@ -312,26 +309,26 @@ fn vector_potential_linear_filament<'py>(
 }
 
 #[pyfunction]
-fn inductance_piecewise_linear_filaments<'py>(
+fn inductance_piecewise_linear_filaments(
     xyzfil0: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     dlxyzfil0: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
     xyzfil1: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     dlxyzfil1: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
     self_inductance: bool, // Whether this is being used as a self-inductance calc
 ) -> PyResult<f64> {
@@ -362,15 +359,13 @@ fn inductance_piecewise_linear_filaments<'py>(
 
 /// Python bindings for cfsemrs::physics::gradshafranov::gs_operator_order2
 #[pyfunction]
-fn gs_operator_order2<'py>(
-    rs: Bound<'py, PyArray1<f64>>,
-    zs: Bound<'py, PyArray1<f64>>,
+fn gs_operator_order2(
+    rs: PyReadonlyArray1<f64>,
+    zs: PyReadonlyArray1<f64>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<usize>>, Py<PyArray1<usize>>)> {
     // Process inputs
-    let rsro = rs.readonly();
-    let rs = rsro.as_slice()?;
-    let zsro = zs.readonly();
-    let zs = zsro.as_slice()?;
+    let rs = rs.as_slice()?;
+    let zs = zs.as_slice()?;
 
     // Do calculations
     let (vals, rows, cols) = physics::gradshafranov::gs_operator_order2(rs, zs);
@@ -380,15 +375,13 @@ fn gs_operator_order2<'py>(
 
 /// Python bindings for cfsemrs::physics::gradshafranov::gs_operator_order4
 #[pyfunction]
-fn gs_operator_order4<'py>(
-    rs: Bound<'py, PyArray1<f64>>,
-    zs: Bound<'py, PyArray1<f64>>,
+fn gs_operator_order4(
+    rs: PyReadonlyArray1<f64>,
+    zs: PyReadonlyArray1<f64>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<usize>>, Py<PyArray1<usize>>)> {
     // Process inputs
-    let rsro = rs.readonly();
-    let rs = rsro.as_slice()?;
-    let zsro = zs.readonly();
-    let zs = zsro.as_slice()?;
+    let rs = rs.as_slice()?;
+    let zs = zs.as_slice()?;
 
     // Do calculations
     let (vals, rows, cols) = physics::gradshafranov::gs_operator_order4(rs, zs);
@@ -410,14 +403,14 @@ fn ellipk(x: f64) -> f64 {
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian
 #[pyfunction]
-fn flux_density_circular_filament_cartesian<'py>(
-    current: Bound<'py, PyArray1<f64>>,
-    rfil: Bound<'py, PyArray1<f64>>,
-    zfil: Bound<'py, PyArray1<f64>>,
+fn flux_density_circular_filament_cartesian(
+    current: PyReadonlyArray1<f64>,
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
     xyzobs: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Observation point coords
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
@@ -456,19 +449,19 @@ fn flux_density_circular_filament_cartesian<'py>(
 
 /// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
 #[pyfunction]
-fn mutual_inductance_circular_to_linear<'py>(
-    rfil: Bound<'py, PyArray1<f64>>,
-    zfil: Bound<'py, PyArray1<f64>>,
-    nfil: Bound<'py, PyArray1<f64>>,
+fn mutual_inductance_circular_to_linear(
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    nfil: PyReadonlyArray1<f64>,
     xyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     dlxyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
     par: bool,
 ) -> PyResult<f64> {
@@ -499,23 +492,23 @@ fn mutual_inductance_circular_to_linear<'py>(
 
 /// Python bindings for cfsemrs::physics::point_source::flux_density_dipole
 #[pyfunction]
-fn flux_density_dipole<'py>(
+fn flux_density_dipole(
     loc: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] dipole locations in cartesian coordinates
     moment: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [A-m^2] dipole moment vector
     obs: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Observation point coords
-    outer_radius: Bound<'py, PyArray1<f64>>,
+    outer_radius: PyReadonlyArray1<f64>,
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -535,7 +528,7 @@ fn flux_density_dipole<'py>(
     match func(
         loc,
         moment,
-        outer_radius.readonly().as_slice()?,
+        outer_radius.as_slice()?,
         obs,
         (&mut outx, &mut outy, &mut outz),
     ) {
@@ -551,23 +544,23 @@ fn flux_density_dipole<'py>(
 
 /// Python bindings for cfsemrs::physics::point_source::vector_potential_dipole
 #[pyfunction]
-fn vector_potential_dipole<'py>(
+fn vector_potential_dipole(
     loc: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] dipole locations in cartesian coordinates
     moment: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [A-m^2] dipole moment vector
     obs: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Observation point coords
-    outer_radius: Bound<'py, PyArray1<f64>>,
+    outer_radius: PyReadonlyArray1<f64>,
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -587,7 +580,7 @@ fn vector_potential_dipole<'py>(
     match func(
         loc,
         moment,
-        outer_radius.readonly().as_slice()?,
+        outer_radius.as_slice()?,
         obs,
         (&mut outx, &mut outy, &mut outz),
     ) {
@@ -603,19 +596,19 @@ fn vector_potential_dipole<'py>(
 
 /// Python bindings for cfsemrs::physics::body_force_density_circular_filament_cartesian
 #[pyfunction]
-fn body_force_density_circular_filament_cartesian<'py>(
-    current: Bound<'py, PyArray1<f64>>,
-    rfil: Bound<'py, PyArray1<f64>>,
-    zfil: Bound<'py, PyArray1<f64>>,
+fn body_force_density_circular_filament_cartesian(
+    current: PyReadonlyArray1<f64>,
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
     obs: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     j: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [A/m^2] current density at observation points
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
@@ -651,57 +644,37 @@ fn body_force_density_circular_filament_cartesian<'py>(
 
 /// Python bindings for cfsemrs::physics::body_force_density_linear_filament
 #[pyfunction]
-fn body_force_density_linear_filament<'py>(
+fn body_force_density_linear_filament(
     xyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     dlxyzfil: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
-    ifil: Bound<'py, PyArray1<f64>>, // [A] filament current
+    ifil: PyReadonlyArray1<f64>, // [A] filament current
     obs: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [m] Filament origin coords (start of segment)
     j: (
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
     ), // [A/m^2] current density at observation points
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
-    let xfilro = xyzfil.0.readonly();
-    let yfilro = xyzfil.1.readonly();
-    let zfilro = xyzfil.2.readonly();
-    let xyzfil = (xfilro.as_slice()?, yfilro.as_slice()?, zfilro.as_slice()?);
-
-    let dlxfilro = dlxyzfil.0.readonly();
-    let dlyfilro = dlxyzfil.1.readonly();
-    let dlzfilro = dlxyzfil.2.readonly();
-    let dlxyzfil = (
-        dlxfilro.as_slice()?,
-        dlyfilro.as_slice()?,
-        dlzfilro.as_slice()?,
-    );
-    let ifilro = ifil.readonly();
-    let ifil = ifilro.as_slice()?;
-
-    let obsxro = obs.0.readonly();
-    let obsyro = obs.1.readonly();
-    let obszro = obs.2.readonly();
-    let obs = (obsxro.as_slice()?, obsyro.as_slice()?, obszro.as_slice()?);
-
-    let jxro = j.0.readonly();
-    let jyro = j.1.readonly();
-    let jzro = j.2.readonly();
-    let j = (jxro.as_slice()?, jyro.as_slice()?, jzro.as_slice()?);
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let ifil = ifil.as_slice()?;
+    _3tup_slice_ro!(obs);
+    _3tup_slice_ro!(j);
 
     // Select variant
     let func = match par {
@@ -785,30 +758,27 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-/// Convert a 3-tuple of PyArray to read-only slices, shadowing the original name
+/// Convert a 3-tuple of PyReadonlyArray to read-only slices, shadowing the original name
 macro_rules! _3tup_slice_ro {
     ($x:ident) => {
-        let _ro = ($x.0.readonly(), $x.1.readonly(), $x.2.readonly());
-        let $x = (_ro.0.as_slice()?, _ro.1.as_slice()?, _ro.2.as_slice()?);
+        let $x = ($x.0.as_slice()?, $x.1.as_slice()?, $x.2.as_slice()?);
     };
 }
 
-/// Convert a 2-tuple of PyArray to read-only slices, shadowing the original name
+/// Convert a 2-tuple of PyReadonlyArray to read-only slices, shadowing the original name
 macro_rules! _2tup_slice_ro {
     ($x:ident) => {
-        let _ro = ($x.0.readonly(), $x.1.readonly());
-        let $x = (_ro.0.as_slice()?, _ro.1.as_slice()?);
+        let $x = ($x.0.as_slice()?, $x.1.as_slice()?);
     };
 }
 
-/// Convert a 3-tuple of PyArray to read-write slices, shadowing the original name
+/// Convert a 3-tuple of PyReadwriteArray to read-write slices, shadowing the original name
 macro_rules! _3tup_slice_mut {
     ($x:ident) => {
-        let mut _rw = ($x.0.readwrite(), $x.1.readwrite(), $x.2.readwrite());
         let $x = (
-            _rw.0.as_slice_mut()?,
-            _rw.1.as_slice_mut()?,
-            _rw.2.as_slice_mut()?,
+            $x.0.as_slice_mut()?,
+            $x.1.as_slice_mut()?,
+            $x.2.as_slice_mut()?,
         );
     };
 }
@@ -817,7 +787,7 @@ macro_rules! _3tup_slice_mut {
 macro_rules! _3tup_ret {
     (($x:ident, $xt:ty), ($y:ident, $yt:ty), ($z:ident, $zt:ty)) => {
         // Acquire global interpreter lock, which will be released when it goes out of scope
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let $x: Py<PyArray1<$xt>> = PyArray1::from_vec(py, $x).unbind();
             let $y: Py<PyArray1<$yt>> = PyArray1::from_vec(py, $y).unbind();
             let $z: Py<PyArray1<$zt>> = PyArray1::from_vec(py, $z).unbind();

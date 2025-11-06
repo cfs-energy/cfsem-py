@@ -22,7 +22,7 @@ dependencies = [
 ]
 license = "MIT"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     # Tests
     "pytest >= 7.1.3",

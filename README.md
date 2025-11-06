@@ -45,7 +45,7 @@ Requirements
 To install in the active python environment, do
 
 ```bash
-uv pip install -e .[dev]
+uv pip install -e . --group dev
 ```
 
 To build the Rust bindings only, do
@@ -61,8 +61,7 @@ Some computationally-expensive calculations are written in Rust. These calculati
 To build with all of the optimizations available on your local machine, you can do:
 
 ```bash
-RUSTCFLAGS="-Ctarget-cpu=native" maturin develop --release --features=python
-pip install -e .[dev]
+RUSTCFLAGS="-Ctarget-cpu=native" pip install -e . --group dev --reinstall
 ```
 
 ## Contributing

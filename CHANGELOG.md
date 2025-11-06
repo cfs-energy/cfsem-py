@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.3 2025-11-06
+
+### Changed
+
+* Use ternary instead of or-defaulting for array defaults in dipole functions
+    * Eliminates issue with ambiguous truthiness of arrays under some circumstances
+
 ## 3.0.2 2025-11-05
 
 ### Changed

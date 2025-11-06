@@ -492,7 +492,7 @@ def flux_density_dipole(
     loc = _3tup_contig(loc)
     moment = _3tup_contig(moment)
     xyzp = _3tup_contig(xyzp)
-    outer_radius = outer_radius or zeros_like(loc[0])
+    outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
     outer_radius = ascontiguousarray(outer_radius).ravel()
 
     bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
@@ -523,7 +523,7 @@ def vector_potential_dipole(
     loc = _3tup_contig(loc)
     moment = _3tup_contig(moment)
     xyzp = _3tup_contig(xyzp)
-    outer_radius = outer_radius or zeros_like(loc[0])
+    outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
     outer_radius = ascontiguousarray(outer_radius).ravel()
 
     ax, ay, az = em_vector_potential_dipole(loc, moment, xyzp, outer_radius, par)  # [T]

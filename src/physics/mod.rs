@@ -3,6 +3,7 @@ pub mod circular_filament;
 pub mod gradshafranov;
 pub mod linear_filament;
 pub mod point_source;
+pub mod boundary_element;
 pub(crate) mod volumetric;
 
 #[doc(hidden)] // Might make breaking changes soon

@@ -765,12 +765,12 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
 
 def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
     
-    # Create set of four non-overlapping coaxial rectangular coils
+    # Create set of four non-overlapping coaxial rectangular coils and prescribed turn density
     r = [0.5, 1.0, 1.5, 2.0]
     z = [0.0, -0.4, +0.2, 0.6]
     dr = [0.1, 0.2, 0.3, 0.2]
     dz = [0.2, 0.3, 0.3, 0.2]
-    j = [10.0, 10.0, 5.0, 5.0]
+    td = [10.0, 10.0, 5.0, 5.0]
     nr = [10, 10, 10, 10]
     nz = [10, 10, 10, 10]
 
@@ -780,7 +780,7 @@ def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
         z = z,
         dr = dr,
         dz = dz,
-        j = j,
+        td = td,
         nr = nr,
         nz = nz,
     )
@@ -791,21 +791,19 @@ def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
         z = z,
         dr = dr,
         dz = dz,
-        j = j,
+        td = td,
         nr = [n*2 for n in nr],
         nz = [n*2 for n in nz],
     )
     assert np.allclose(L_rectangular_coils, L_rectangular_coils_fine, rtol=1e-6)
 
-
     # Compare total inductance against fully filamentized calculation
-    itot = [j[c]*dr[c]*dz[c] for c in range(4)]
-    nt = [itot[c]/(nr[c]*nz[c]) for c in range(4)]
-    filaments = np.vstack([ cfsem.filament_coil(r[i], z[i], dr[i], dz[i], itot[i], 2*nr[i], 2*nz[i]) for i in range(4) ])
+    nt = [td[c]*dr[c]*dz[c] for c in range(4)]
+    filaments = np.vstack([ cfsem.filament_coil(r[i], z[i], dr[i], dz[i], nt[i], nr[i], nz[i]) for i in range(4) ])
     L_fully_filamentized = cfsem.self_inductance_axisymmetric_coil(
         f = filaments.T,
         section_kind = "rectangular",
-        section_size = (dr[0]/nr[0], dz[0]/nz[0]),
+        section_size = (2e-3, 2e-3),
     )
     assert L_rectangular_coils.sum() == approx(L_fully_filamentized, rel=1e-2)
 
@@ -815,7 +813,7 @@ def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
             r = r[i],
             dr = dr[i],
             dz = dz[i],
-            n = itot[i],
+            n = nt[i],
         )
         # Should be identical because self_inductance_axisymmetric_coil uses the same underlying 
         # calculation, here we're also testing that self_inductance_axisymmetric_coil is using
@@ -831,7 +829,7 @@ def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
             z = [-0.5, +0.3],
             dr = [1.0, 1.0],
             dz = [1.0, 1.0],
-            j = [1.0, 1.0],
+            td = [1.0, 1.0],
             nr = [10, 10],
             nz = [10, 10],
         )
@@ -845,7 +843,7 @@ def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
             z = [-0.5, +0.3],
             dr = [1.0, 4.0],
             dz = [1.0, 1.0],
-            j = [1.0, 1.0],
+            td = [1.0, 1.0],
             nr = [10, 10],
             nz = [10, 10],
         )
@@ -859,7 +857,7 @@ def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
             z = [-0.5, +0.3],
             dr = [1.0, 1.0],
             dz = [1.0, 4.0],
-            j = [1.0, 1.0],
+            td = [1.0, 1.0],
             nr = [10, 10],
             nz = [10, 10],
         )
@@ -873,14 +871,7 @@ def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
             z = [-0.1, +0.1],
             dr = [1.0, 2.0],
             dz = [1.0, 2.0],
-            j = [1.0, 1.0],
+            td = [1.0, 1.0],
             nr = [10, 10],
             nz = [10, 10],
         )
-
-
-def main():
-    test_inductance_matrix_axisymmetric_coaxial_rectangular_coils()
-
-if __name__ == "__main__":
-    main()

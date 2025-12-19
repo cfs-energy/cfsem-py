@@ -317,7 +317,7 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
         nz: axial discretizations
 
     Returns:
-        L: Inductance matrix in [H] with size (ncoil, ncoil)
+        m: Mutual inductance matrix in [H] with size (ncoil, ncoil)
     """
 
     # Check that all input lists have the same length
@@ -385,12 +385,12 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
         filaments_list.append(filaments)
 
     # Build symmetric inductance matrix
-    L = np.zeros((nc, nc), dtype=np.float64)
+    m = np.zeros((nc, nc), dtype=np.float64)
     for c1 in range(nc):
         for c2 in range(c1, nc):
             if c1 == c2:
                 # Use Lyle's formula for self-inductance
-                L[c1, c2] = self_inductance_lyle6(
+                m[c1, c2] = self_inductance_lyle6(
                     r=r[c1],
                     dr=dr[c1],
                     dz=dz[c1],
@@ -398,13 +398,13 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
                 )
             else:
                 # Mutual inductance between different filamentized coils
-                L[c1, c2] = mutual_inductance_of_cylindrical_coils(
+                m[c1, c2] = mutual_inductance_of_cylindrical_coils(
                     f1=filaments_list[c1].T,
                     f2=filaments_list[c2].T,
                 )
-                L[c2, c1] = L[c1, c2]  # Symmetric matrix
+                m[c2, c1] = m[c1, c2]  # Symmetric matrix
 
-    return L  # [H]
+    return m  # [H]
 
 
 def self_inductance_axisymmetric_coil(

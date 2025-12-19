@@ -89,14 +89,14 @@ def self_inductance_piecewise_linear_filaments(xyzp: Array3xN) -> float:
       (otherwise we need an inductance matrix)
 
     References:
-        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
+        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: jan. 23, 2023. [Online].
             Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
 
         [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-            Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
+            jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
 
         [3] R. Dengler, “Self inductance of a wire loop as a curve integral,”
-            AEM, vol. 5, no. 1, p. 1, Jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331)
+            AEM, vol. 5, no. 1, p. 1, jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331)
 
     Args:
         xyzp: [m] 3xN point series describing the filament
@@ -140,11 +140,11 @@ def mutual_inductance_piecewise_linear_filaments(
     * All segments between the two filaments are distinct; no identical pairs
 
     References:
-        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
+        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: jan. 23, 2023. [Online].
             Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
 
         [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-            Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
+            jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
 
     Args:
         xyz0: [m] 3xN point series describing the first filament
@@ -205,7 +205,7 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
         “IX. On the self-inductance of circular coils of rectangular section,”
         Philosophical Transactions of the Royal Society of London.
         Series A, Containing Papers of a Mathematical or Physical Character,
-        vol. 213, no. 497-508, pp. 421-435, Jan. 1914, doi: [10.1098/rsta.1914.0009](https://doi.org/10.1098/rsta.1914.0009)
+        vol. 213, no. 497-508, pp. 421-435, jan. 1914, doi: [10.1098/rsta.1914.0009](https://doi.org/10.1098/rsta.1914.0009)
 
     Args:
         r: [m] radius, coil center
@@ -290,6 +290,122 @@ def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray, par: b
     m = mutual_inductance_of_cylindrical_coils(rzn1.reshape((3, 1)), rzn2.reshape((3, 1)), par)
 
     return m  # [H]
+
+def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
+    r: list[float],
+    z: list[float],
+    dr: list[float],
+    dz: list[float],
+    j: list[float],
+    nr: list[int],
+    nz: list[int]
+) -> NDArray:
+    """ Inductance matrix for a set of coils with rectangular cross-sections and constant current 
+    density. Self-inductances are calculated using Lyle's 6th-order formula, mutual inductance 
+    calculations use filamentized coil model. The filamentization inputs nr and nt are used primarily
+    to define the accuracy of the mutual inductance calculations, but do not impact assumed total current
+    or current density in each coil.
+     
+    Args:
+        r: [m] radii, coil center
+        z: [m] axial positions, coil center
+        dr: [m] radial sizes of each coil pack
+        dz: [m] axial sizes of each coil pack
+        j: [A/m2] current density in each coil pack
+        nr: radial discretizations
+        nz: axial discretizations
+    Returns:
+        L: Inductance matrix in [H] with size (ncoil, ncoil)
+    
+    """
+
+    # Check that all input lists have the same length
+    assert len(np.unique([len(r), len(z), len(dr), len(dz), len(nr), len(nz)])) == 1, (
+        "All input lists must have the same length."
+    )
+    
+    # Check for sizes to be positive
+    assert all(size > 0 for size in dr), "All coil radial sizes must be positive."
+    assert all(size > 0 for size in dz), "All coil axial sizes must be positive."
+
+    # Check for discretizations to be positive integers
+    assert all(isinstance(n, int) and n > 0 for n in nr), "All radial discretizations must be positive integers."
+    assert all(isinstance(n, int) and n > 0 for n in nz), "All axial discretizations must be positive integers."
+
+    # Make sure that rectangular coil don't overlap
+    num_coils = len(r)
+    # Calculate total current in each coil
+    itot = [j[c] * dr[c] * dz[c] for c in range(num_coils)]
+    # Apply scaling to turns to achieve target total current
+    #nt = [itot[c]/(nr[c] * nz[c]) for c in range(num_coils)]
+
+    for c1 in range(num_coils):
+        # Corner points of coil 1
+        r1_min = r[c1] - dr[c1] / 2
+        r1_max = r[c1] + dr[c1] / 2
+        z1_min = z[c1] - dz[c1] / 2
+        z1_max = z[c1] + dz[c1] / 2
+
+        for c2 in range(c1 + 1, num_coils):
+            # Corner points of coil 2
+            r2_min = r[c2] - dr[c2] / 2
+            r2_max = r[c2] + dr[c2] / 2
+            z2_min = z[c2] - dz[c2] / 2
+            z2_max = z[c2] + dz[c2] / 2
+
+            # Check for radial overlap
+            radial_overlap = ( r1_min > r2_min and r1_min < r2_max ) or \
+                             ( r1_max > r2_min and r1_max < r2_max ) or \
+                             ( r2_min > r1_min and r2_min < r1_max ) or \
+                             ( r2_max > r1_min and r2_max < r1_max )
+
+            # No need to check for axial overlap if no radial overlap
+            if not radial_overlap:
+                continue
+
+            # Check for axial overlap
+            axial_overlap = ( z1_min > z2_min and z1_min < z2_max ) or \
+                            ( z1_max > z2_min and z1_max < z2_max ) or \
+                            ( z2_min > z1_min and z2_min < z1_max ) or \
+                            ( z2_max > z1_min and z2_max < z1_max )
+            
+            assert not axial_overlap, f"Rectangular coils {c1} and {c2} overlap."
+
+    # Create filaments for each coil
+    filaments_list = []
+    for c in range(num_coils):
+        filaments = filament_coil(
+            r=r[c],
+            z=z[c],
+            w=dr[c],
+            h=dz[c],
+            nt=itot[c],
+            nr=nr[c],
+            nz=nz[c]
+        )
+        filaments_list.append(filaments)
+
+    # Build symmetric inductance matrix
+    L = np.zeros((num_coils, num_coils), dtype=np.float64)
+    for c1 in range(num_coils):
+        for c2 in range(c1, num_coils):
+            if c1 == c2:
+                # Use Lyle's formula for self-inductance
+                L[c1, c2] = self_inductance_lyle6(
+                    r=r[c1],
+                    dr=dr[c1],
+                    dz=dz[c1],
+                    n=itot[c1], # Current density as number of 1A turns
+                )
+            else:
+                # Mutual inductance between different filamentized coils
+                L[c1, c2] = mutual_inductance_of_cylindrical_coils(
+                    f1=filaments_list[c1].T,
+                    f2=filaments_list[c2].T,
+                )
+                L[c2, c1] = L[c1, c2]  # Symmetric matrix   
+
+    return L  # [H]
 
 
 def self_inductance_axisymmetric_coil(
@@ -511,17 +627,17 @@ def self_inductance_distributed_axisymmetric_conductor(
         * At least one grid cell of padding is needed to support finite differences
 
     References:
-        [1] S. Ejima, R. W. Callis, J. L. Luxon, R. D. Stambaugh, T. S. Taylor, and J. C. Wesley,
+        [1] S. Ejima, R. W. Callis, j. L. Luxon, R. D. Stambaugh, T. S. Taylor, and j. C. Wesley,
             “Volt-second analysis and consumption in Doublet III plasmas,”
             Nucl. Fusion, vol. 22, no. 10, pp. 1313-1319, Oct. 1982,
             doi: [10.1088/0029-5515/22/10/006](https://doi.org/10.1088/0029-5515/22/10/006)
 
-        [2] J. A. Romero and J.-E. Contributors, “Plasma internal inductance dynamics in a tokamak,”
+        [2] j. A. Romero and j.-E. Contributors, “Plasma internal inductance dynamics in a tokamak,”
             arXiv.org. Accessed: Dec. 21, 2023. [Online]. Available: https://arxiv.org/abs/1009.1984v1
             doi: [10.1088/0029-5515/50/11/115002](https://doi.org/10.1088/0029-5515/50/11/115002)
 
-        [3] J. T. Wai and E. Kolemen, “GSPD: An algorithm for time-dependent tokamak equilibria design.”
-            arXiv, Jun. 22, 2023. Accessed: Sep. 15, 2023. [Online]. Available: https://arxiv.org/abs/2306.13163
+        [3] j. T. Wai and E. Kolemen, “GSPD: An algorithm for time-dependent tokamak equilibria design.”
+            arXiv, jun. 22, 2023. Accessed: Sep. 15, 2023. [Online]. Available: https://arxiv.org/abs/2306.13163
             doi: [10.48550/arXiv.2306.13163](https://doi.org/10.48550/arXiv.2306.13163)
 
     Args:
@@ -575,7 +691,7 @@ def self_inductance_distributed_axisymmetric_conductor(
     #
     # That doesn't mean there isn't store energy related to the conductor's toroidal field,
     # only that it can be separated from the poloidal inductance.
-    wmag_pol = (1.0 / (2.0 * MU_0)) * np.sum((br**2 + bz**2) * volmesh * mask)  # [J]
+    wmag_pol = (1.0 / (2.0 * MU_0)) * np.sum((br**2 + bz**2) * volmesh * mask)  # [j]
 
     # Internal inductance.
     #
@@ -626,7 +742,7 @@ def self_inductance_annular_ring(r: float, a: float, b: float) -> float:
     References:
         [1] E. B. Rosa and F. W. Grover,
             “Formulas and tables for the calculation of mutual and self-inductance (Revised),”
-            BULL. NATL. BUR. STAND., vol. 8, no. 1, p. 1, Jan. 1912,
+            BULL. NATL. BUR. STAND., vol. 8, no. 1, p. 1, jan. 1912,
             doi: [10.6028/bulletin.185](https://doi.org/10.6028/bulletin.185)
 
     Args:

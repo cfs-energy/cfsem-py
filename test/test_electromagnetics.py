@@ -6,7 +6,7 @@ from pytest import approx, mark, raises
 import cfsem
 
 from test import test_funcs as _test
-
+import matplotlib.pyplot as plt
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
@@ -762,3 +762,126 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
     assert np.allclose(a_phi, ay, rtol=1e-12, atol=1e-12)  # Should match circular calc
     assert np.allclose(az, np.zeros_like(az), atol=1e-9)  # Should sum to zero everywhere
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
+
+
+def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
+    
+    # Create set of four non-overlapping coaxial rectangular coils
+    r = [0.5, 1.0, 1.5, 2.0]
+    z = [0.0, -0.4, +0.2, 0.6]
+    dr = [0.1, 0.2, 0.3, 0.2]
+    dz = [0.2, 0.3, 0.3, 0.2]
+    j = [10.0, 10.0, 5.0, 5.0]
+    nr = [10, 10, 10, 10]
+    nz = [10, 10, 10, 10]
+
+    # Calculate inductance matrix using rectangular coil calc
+    L_rectangular_coils = cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils(
+        r = r,
+        z = z,
+        dr = dr,
+        dz = dz,
+        j = j,
+        nr = nr,
+        nz = nz,
+    )
+
+    # One run with refined filamentization to make sure this does not significantly change results
+    L_rectangular_coils_fine = cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils(
+        r = r,
+        z = z,
+        dr = dr,
+        dz = dz,
+        j = j,
+        nr = [n*2 for n in nr],
+        nz = [n*2 for n in nz],
+    )
+    assert np.allclose(L_rectangular_coils, L_rectangular_coils_fine, rtol=1e-6)
+
+
+    # Compare total inductance against fully filamentized calculation
+    itot = [j[c]*dr[c]*dz[c] for c in range(4)]
+    nt = [itot[c]/(nr[c]*nz[c]) for c in range(4)]
+    filaments = np.vstack([ cfsem.filament_coil(r[i], z[i], dr[i], dz[i], itot[i], 2*nr[i], 2*nz[i]) for i in range(4) ])
+    L_fully_filamentized = cfsem.self_inductance_axisymmetric_coil(
+        f = filaments.T,
+        section_kind = "rectangular",
+        section_size = (dr[0]/nr[0], dz[0]/nz[0]),
+    )
+    assert L_rectangular_coils.sum() == approx(L_fully_filamentized, rel=1e-2)
+
+    # Compare individual self-inductances against Lyle approx for first coil
+    for i in range(4):
+        L_lyle = cfsem.self_inductance_lyle6(
+            r = r[i],
+            dr = dr[i],
+            dz = dz[i],
+            n = itot[i],
+        )
+        # Should be identical because self_inductance_axisymmetric_coil uses the same underlying 
+        # calculation, here we're also testing that self_inductance_axisymmetric_coil is using
+        # the correct indexing
+        assert L_rectangular_coils[i, i] == L_lyle
+
+    # Overlap check 1:
+    # "Corner" + "Corner" overlap
+    with raises(AssertionError):
+        # Overlapping coils in r
+        cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils(
+            r = [+1.0, +1.8],
+            z = [-0.5, +0.3],
+            dr = [1.0, 1.0],
+            dz = [1.0, 1.0],
+            j = [1.0, 1.0],
+            nr = [10, 10],
+            nz = [10, 10],
+        )
+
+    # Overlap check 2:
+    # "Corner" + "Full R size" overlap
+    with raises(AssertionError):
+        # Overlapping coils in r
+        cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils(
+            r = [+1.0, +1.8],
+            z = [-0.5, +0.3],
+            dr = [1.0, 4.0],
+            dz = [1.0, 1.0],
+            j = [1.0, 1.0],
+            nr = [10, 10],
+            nz = [10, 10],
+        )
+
+    # Overlap check 3:
+    # "Corner" + "Full Z size" overlap
+    with raises(AssertionError):
+        # Overlapping coils in z
+        cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils(
+            r = [+1.0, +1.8],
+            z = [-0.5, +0.3],
+            dr = [1.0, 1.0],
+            dz = [1.0, 4.0],
+            j = [1.0, 1.0],
+            nr = [10, 10],
+            nz = [10, 10],
+        )
+
+    # Overlap check 4:
+    # Coil 1 fully inside Coil 2
+    with raises(AssertionError):
+        # Overlapping coils in both r and z
+        cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils(
+            r = [+1.5, +1.6],
+            z = [-0.1, +0.1],
+            dr = [1.0, 2.0],
+            dz = [1.0, 2.0],
+            j = [1.0, 1.0],
+            nr = [10, 10],
+            nz = [10, 10],
+        )
+
+
+def main():
+    test_inductance_matrix_axisymmetric_coaxial_rectangular_coils()
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.4 2025-12-19
+
+### Added
+
+* Add method inductance_matrix_axisymmetric_coaxial_rectangular_coils to calculate inductance matrix for a set of coaxial coils with rectangular cross-section and prescribed current density per coil section
+
 ## 3.0.3 2025-11-06
 
 ### Changed

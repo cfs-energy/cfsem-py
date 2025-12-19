@@ -329,8 +329,12 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     assert all(size > 0 for size in dz), "All coil axial sizes must be positive."
 
     # Check for discretizations to be positive integers
-    assert all(isinstance(n, int) and n > 0 for n in nr), "All radial discretizations must be positive integers."
-    assert all(isinstance(n, int) and n > 0 for n in nz), "All axial discretizations must be positive integers."
+    assert all(isinstance(n, int) and n > 0 for n in nr), (
+        "All radial discretizations must be positive integers."
+    )
+    assert all(isinstance(n, int) and n > 0 for n in nz), (
+        "All axial discretizations must be positive integers."
+    )
 
     # Make sure that rectangular coil don't overlap
     num_coils = len(r)

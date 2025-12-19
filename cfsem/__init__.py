@@ -89,14 +89,14 @@ def self_inductance_piecewise_linear_filaments(xyzp: Array3xN) -> float:
       (otherwise we need an inductance matrix)
 
     References:
-        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: jan. 23, 2023. [Online].
+        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
             Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
 
         [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-            jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
+            Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
 
         [3] R. Dengler, “Self inductance of a wire loop as a curve integral,”
-            AEM, vol. 5, no. 1, p. 1, jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331)
+            AEM, vol. 5, no. 1, p. 1, Jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331)
 
     Args:
         xyzp: [m] 3xN point series describing the filament
@@ -140,11 +140,11 @@ def mutual_inductance_piecewise_linear_filaments(
     * All segments between the two filaments are distinct; no identical pairs
 
     References:
-        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: jan. 23, 2023. [Online].
+        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
             Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
 
         [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-            jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
+            Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
 
     Args:
         xyz0: [m] 3xN point series describing the first filament
@@ -205,7 +205,7 @@ def self_inductance_lyle6(r: float, dr: float, dz: float, n: float) -> float:
         “IX. On the self-inductance of circular coils of rectangular section,”
         Philosophical Transactions of the Royal Society of London.
         Series A, Containing Papers of a Mathematical or Physical Character,
-        vol. 213, no. 497-508, pp. 421-435, jan. 1914, doi: [10.1098/rsta.1914.0009](https://doi.org/10.1098/rsta.1914.0009)
+        vol. 213, no. 497-508, pp. 421-435, Jan. 1914, doi: [10.1098/rsta.1914.0009](https://doi.org/10.1098/rsta.1914.0009)
 
     Args:
         r: [m] radius, coil center
@@ -626,16 +626,16 @@ def self_inductance_distributed_axisymmetric_conductor(
         * At least one grid cell of padding is needed to support finite differences
 
     References:
-        [1] S. Ejima, R. W. Callis, j. L. Luxon, R. D. Stambaugh, T. S. Taylor, and j. C. Wesley,
+        [1] S. Ejima, R. W. Callis, J. L. Luxon, R. D. Stambaugh, T. S. Taylor, and J. C. Wesley,
             “Volt-second analysis and consumption in Doublet III plasmas,”
             Nucl. Fusion, vol. 22, no. 10, pp. 1313-1319, Oct. 1982,
             doi: [10.1088/0029-5515/22/10/006](https://doi.org/10.1088/0029-5515/22/10/006)
 
-        [2] j. A. Romero and j.-E. Contributors, “Plasma internal inductance dynamics in a tokamak,”
+        [2] J. A. Romero and J.-E. Contributors, “Plasma internal inductance dynamics in a tokamak,”
             arXiv.org. Accessed: Dec. 21, 2023. [Online]. Available: https://arxiv.org/abs/1009.1984v1
             doi: [10.1088/0029-5515/50/11/115002](https://doi.org/10.1088/0029-5515/50/11/115002)
 
-        [3] j. T. Wai and E. Kolemen, “GSPD: An algorithm for time-dependent tokamak equilibria design.”
+        [3] J. T. Wai and E. Kolemen, “GSPD: An algorithm for time-dependent tokamak equilibria design.”
             arXiv, jun. 22, 2023. Accessed: Sep. 15, 2023. [Online]. Available: https://arxiv.org/abs/2306.13163
             doi: [10.48550/arXiv.2306.13163](https://doi.org/10.48550/arXiv.2306.13163)
 
@@ -690,7 +690,7 @@ def self_inductance_distributed_axisymmetric_conductor(
     #
     # That doesn't mean there isn't store energy related to the conductor's toroidal field,
     # only that it can be separated from the poloidal inductance.
-    wmag_pol = (1.0 / (2.0 * MU_0)) * np.sum((br**2 + bz**2) * volmesh * mask)  # [j]
+    wmag_pol = (1.0 / (2.0 * MU_0)) * np.sum((br**2 + bz**2) * volmesh * mask)  # [J]
 
     # Internal inductance.
     #
@@ -741,7 +741,7 @@ def self_inductance_annular_ring(r: float, a: float, b: float) -> float:
     References:
         [1] E. B. Rosa and F. W. Grover,
             “Formulas and tables for the calculation of mutual and self-inductance (Revised),”
-            BULL. NATL. BUR. STAND., vol. 8, no. 1, p. 1, jan. 1912,
+            BULL. NATL. BUR. STAND., vol. 8, no. 1, p. 1, Jan. 1912,
             doi: [10.6028/bulletin.185](https://doi.org/10.6028/bulletin.185)
 
     Args:

@@ -6,7 +6,6 @@ from pytest import approx, mark, raises
 import cfsem
 
 from test import test_funcs as _test
-import matplotlib.pyplot as plt
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])

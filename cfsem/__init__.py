@@ -291,6 +291,7 @@ def mutual_inductance_of_circular_filaments(rzn1: NDArray, rzn2: NDArray, par: b
 
     return m  # [H]
 
+
 def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     r: list[float],
     z: list[float],
@@ -298,14 +299,14 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     dz: list[float],
     j: list[float],
     nr: list[int],
-    nz: list[int]
+    nz: list[int],
 ) -> NDArray:
-    """ Inductance matrix for a set of coils with rectangular cross-sections and constant current 
-    density. Self-inductances are calculated using Lyle's 6th-order formula, mutual inductance 
+    """Inductance matrix for a set of coils with rectangular cross-sections and constant current
+    density. Self-inductances are calculated using Lyle's 6th-order formula, mutual inductance
     calculations use filamentized coil model. The filamentization inputs nr and nt are used primarily
     to define the accuracy of the mutual inductance calculations, but do not impact assumed total current
     or current density in each coil.
-     
+
     Args:
         r: [m] radii, coil center
         z: [m] axial positions, coil center
@@ -314,16 +315,16 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
         j: [A/m2] current density in each coil pack
         nr: radial discretizations
         nz: axial discretizations
+        
     Returns:
         L: Inductance matrix in [H] with size (ncoil, ncoil)
-    
     """
 
     # Check that all input lists have the same length
     assert len(np.unique([len(r), len(z), len(dr), len(dz), len(nr), len(nz)])) == 1, (
         "All input lists must have the same length."
     )
-    
+
     # Check for sizes to be positive
     assert all(size > 0 for size in dr), "All coil radial sizes must be positive."
     assert all(size > 0 for size in dz), "All coil axial sizes must be positive."
@@ -340,8 +341,6 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     num_coils = len(r)
     # Calculate total current in each coil
     itot = [j[c] * dr[c] * dz[c] for c in range(num_coils)]
-    # Apply scaling to turns to achieve target total current
-    #nt = [itot[c]/(nr[c] * nz[c]) for c in range(num_coils)]
 
     for c1 in range(num_coils):
         # Corner points of coil 1
@@ -358,35 +357,31 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
             z2_max = z[c2] + dz[c2] / 2
 
             # Check for radial overlap
-            radial_overlap = ( r1_min > r2_min and r1_min < r2_max ) or \
-                             ( r1_max > r2_min and r1_max < r2_max ) or \
-                             ( r2_min > r1_min and r2_min < r1_max ) or \
-                             ( r2_max > r1_min and r2_max < r1_max )
+            radial_overlap = (
+                (r1_min > r2_min and r1_min < r2_max)
+                or (r1_max > r2_min and r1_max < r2_max)
+                or (r2_min > r1_min and r2_min < r1_max)
+                or (r2_max > r1_min and r2_max < r1_max)
+            )
 
             # No need to check for axial overlap if no radial overlap
             if not radial_overlap:
                 continue
 
             # Check for axial overlap
-            axial_overlap = ( z1_min > z2_min and z1_min < z2_max ) or \
-                            ( z1_max > z2_min and z1_max < z2_max ) or \
-                            ( z2_min > z1_min and z2_min < z1_max ) or \
-                            ( z2_max > z1_min and z2_max < z1_max )
-            
+            axial_overlap = (
+                (z1_min > z2_min and z1_min < z2_max)
+                or (z1_max > z2_min and z1_max < z2_max)
+                or (z2_min > z1_min and z2_min < z1_max)
+                or (z2_max > z1_min and z2_max < z1_max)
+            )
+
             assert not axial_overlap, f"Rectangular coils {c1} and {c2} overlap."
 
     # Create filaments for each coil
     filaments_list = []
     for c in range(num_coils):
-        filaments = filament_coil(
-            r=r[c],
-            z=z[c],
-            w=dr[c],
-            h=dz[c],
-            nt=itot[c],
-            nr=nr[c],
-            nz=nz[c]
-        )
+        filaments = filament_coil(r=r[c], z=z[c], w=dr[c], h=dz[c], nt=itot[c], nr=nr[c], nz=nz[c])
         filaments_list.append(filaments)
 
     # Build symmetric inductance matrix
@@ -399,7 +394,7 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
                     r=r[c1],
                     dr=dr[c1],
                     dz=dz[c1],
-                    n=itot[c1], # Current density as number of 1A turns
+                    n=itot[c1],  # Current density as number of 1A turns
                 )
             else:
                 # Mutual inductance between different filamentized coils
@@ -407,7 +402,7 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
                     f1=filaments_list[c1].T,
                     f2=filaments_list[c2].T,
                 )
-                L[c2, c1] = L[c1, c2]  # Symmetric matrix   
+                L[c2, c1] = L[c1, c2]  # Symmetric matrix
 
     return L  # [H]
 

@@ -312,7 +312,7 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
         z: [m] axial positions, coil center
         dr: [m] radial sizes of each coil pack
         dz: [m] axial sizes of each coil pack
-        td: [turns/m^2] turns density in each coil pack (same as current density at 1A per turn)
+        td: [turns/m^2] turn density in each coil pack (same as current density at 1A per turn)
         nr: radial discretizations
         nz: axial discretizations
 

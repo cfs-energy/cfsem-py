@@ -315,7 +315,7 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
         j: [A/m2] current density in each coil pack
         nr: radial discretizations
         nz: axial discretizations
-        
+
     Returns:
         L: Inductance matrix in [H] with size (ncoil, ncoil)
     """

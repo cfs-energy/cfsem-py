@@ -636,7 +636,7 @@ def self_inductance_distributed_axisymmetric_conductor(
             doi: [10.1088/0029-5515/50/11/115002](https://doi.org/10.1088/0029-5515/50/11/115002)
 
         [3] J. T. Wai and E. Kolemen, “GSPD: An algorithm for time-dependent tokamak equilibria design.”
-            arXiv, jun. 22, 2023. Accessed: Sep. 15, 2023. [Online]. Available: https://arxiv.org/abs/2306.13163
+            arXiv, Jun. 22, 2023. Accessed: Sep. 15, 2023. [Online]. Available: https://arxiv.org/abs/2306.13163
             doi: [10.48550/arXiv.2306.13163](https://doi.org/10.48550/arXiv.2306.13163)
 
     Args:

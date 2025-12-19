@@ -15,7 +15,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy >= 2",
-    "interpn[pydantic] >= 0.7",
+    "interpn[pydantic]>=0.8.2,<0.9",
     "findiff >= 0.12.1",
     "pydantic >= 2",
     "pydantic-numpy >= 6"

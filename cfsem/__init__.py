@@ -297,11 +297,11 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     z: list[float],
     dr: list[float],
     dz: list[float],
-    j: list[float],
+    td: list[float],
     nr: list[int],
     nz: list[int],
 ) -> NDArray:
-    """Inductance matrix for a set of coils with rectangular cross-sections and constant current
+    """Inductance matrix for a set of coils with rectangular cross-sections and prescribed turn
     density. Self-inductances are calculated using Lyle's 6th-order formula, mutual inductance
     calculations use filamentized coil model. The filamentization inputs nr and nt are used primarily
     to define the accuracy of the mutual inductance calculations, but do not impact assumed total current
@@ -312,7 +312,7 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
         z: [m] axial positions, coil center
         dr: [m] radial sizes of each coil pack
         dz: [m] axial sizes of each coil pack
-        j: [A/m2] current density in each coil pack
+        td: [turns/m^2] turns density in each coil pack (same as current density at 1A per turn)
         nr: radial discretizations
         nz: axial discretizations
 
@@ -321,7 +321,7 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     """
 
     # Check that all input lists have the same length
-    assert len(np.unique([len(r), len(z), len(dr), len(dz), len(nr), len(nz)])) == 1, (
+    assert len(np.unique([len(r), len(z), len(dr), len(dz), len(td), len(nr), len(nz)])) == 1, (
         "All input lists must have the same length."
     )
 
@@ -338,18 +338,18 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     )
 
     # Make sure that rectangular coil don't overlap
-    num_coils = len(r)
-    # Calculate total current in each coil
-    itot = [j[c] * dr[c] * dz[c] for c in range(num_coils)]
+    nc = len(r)
+    # Calculate turn number per coil
+    nt = [td[c] * dr[c] * dz[c] for c in range(nc)]
 
-    for c1 in range(num_coils):
+    for c1 in range(nc):
         # Corner points of coil 1
         r1_min = r[c1] - dr[c1] / 2
         r1_max = r[c1] + dr[c1] / 2
         z1_min = z[c1] - dz[c1] / 2
         z1_max = z[c1] + dz[c1] / 2
 
-        for c2 in range(c1 + 1, num_coils):
+        for c2 in range(c1 + 1, nc):
             # Corner points of coil 2
             r2_min = r[c2] - dr[c2] / 2
             r2_max = r[c2] + dr[c2] / 2
@@ -380,21 +380,21 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
 
     # Create filaments for each coil
     filaments_list = []
-    for c in range(num_coils):
-        filaments = filament_coil(r=r[c], z=z[c], w=dr[c], h=dz[c], nt=itot[c], nr=nr[c], nz=nz[c])
+    for c in range(nc):
+        filaments = filament_coil(r=r[c], z=z[c], w=dr[c], h=dz[c], nt=nt[c], nr=nr[c], nz=nz[c])
         filaments_list.append(filaments)
 
     # Build symmetric inductance matrix
-    L = np.zeros((num_coils, num_coils), dtype=np.float64)
-    for c1 in range(num_coils):
-        for c2 in range(c1, num_coils):
+    L = np.zeros((nc, nc), dtype=np.float64)
+    for c1 in range(nc):
+        for c2 in range(c1, nc):
             if c1 == c2:
                 # Use Lyle's formula for self-inductance
                 L[c1, c2] = self_inductance_lyle6(
                     r=r[c1],
                     dr=dr[c1],
                     dz=dz[c1],
-                    n=itot[c1],  # Current density as number of 1A turns
+                    n=nt[c1],  # Number of turns in the coil
                 )
             else:
                 # Mutual inductance between different filamentized coils

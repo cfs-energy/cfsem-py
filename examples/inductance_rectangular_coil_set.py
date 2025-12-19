@@ -1,6 +1,6 @@
 """
-Comparison of self- and mutual- inductance of coils modeled as either an axisymmetric filament collection
-or as a piecewise-linear helix.
+Example script for calculating the inductance matrix of a set of
+rectangular coaxial coils with prescribed turn density.
 """
 
 import numpy as np
@@ -12,16 +12,16 @@ r = [0.1, 0.15]        # Radial positions of coil centers [m]
 z = [0.0, 0.2]         # Axial positions of coil centers [m]
 dr = [0.05, 0.05]      # Radial sizes of coils [m]
 dz = [0.1, 0.1]        # Axial sizes of coils [m]
-j = [1e5, 2e5]         # Current densities [A/m^2]
-nr = [10, 10]        # Radial discretizations for mutual inductance
-nz = [10, 10]        # Axial discretizations for mutual inductance
+td = [2500.0, 2500.0]  # Turn density at 20mm x 20mm cross-section [turns/m^2]
+nr = [10, 10]          # Radial discretizations for mutual inductance
+nz = [10, 10]          # Axial discretizations for mutual inductance
 
 L = cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils(
         r=r,
         z=z,
         dr=dr,
         dz=dz,
-        j=j,
+        td=td,
         nr=nr,
         nz=nz,
     )

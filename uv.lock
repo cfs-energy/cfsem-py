@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10, <3.14"
 resolution-markers = [
     "python_full_version >= '3.11'",
@@ -48,7 +48,6 @@ wheels = [
 
 [[package]]
 name = "cfsem"
-version = "3.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "findiff" },
@@ -75,7 +74,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "findiff", specifier = ">=0.12.1" },
-    { name = "interpn", extras = ["pydantic"], specifier = ">=0.8.2,<0.9" },
+    { name = "interpn", extras = ["pydantic"], specifier = ">=0.8.2,<0.12" },
     { name = "numpy", specifier = ">=2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-numpy", specifier = ">=6" },

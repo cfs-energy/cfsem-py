@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "cfsem"
-version = "3.1.0"
+dynamic = ["version"]
 description = "Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov."
 authors = [{name = "Commonwealth Fusion Systems", email = "jlogan@cfs.energy"}]
 requires-python = ">=3.10, <3.14"
@@ -15,7 +15,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy >= 2",
-    "interpn[pydantic]>=0.8.2,<0.9",
+    "interpn[pydantic]>=0.8.2,<0.12",
     "findiff >= 0.12.1",
     "pydantic >= 2",
     "pydantic-numpy >= 6"
@@ -39,11 +39,13 @@ dev = [
 ]
 
 [tool.maturin]
-features = ["pyo3/extension-module", "python"]
+features = ["python"]
 module-name = "cfsem.cfsem"
+version = "cargo"
 
 [tool.ruff]
 line-length = 110
+exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = [
@@ -61,3 +63,6 @@ select = [
 
 [tool.coverage.report]
 fail_under = 100
+
+[tool.pytest.ini_options]
+norecursedirs = ["vendor", "target", ".venv", "dist", "build"]

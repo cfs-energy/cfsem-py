@@ -29,11 +29,20 @@ def test_body_force_density(r, z, par):
     ifil = np.ones_like(xyzfil[0])
 
     jxbx, jxby, jxbz = cfsem.body_force_density_circular_filament_cartesian([1.0], [r], [z], obs, j, par)
-    jxbx1, jxby1, jxbz1 = cfsem.body_force_density_linear_filament(xyzfil, dlxyzfil, ifil, obs, j, par)
+    wire_radius = np.zeros_like(ifil)
+    jxbx1, jxby1, jxbz1 = cfsem.body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par=par
+    )
+    jxbx2, jxby2, jxbz2 = cfsem.body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, 0.0, par=par
+    )
 
     assert np.allclose(jxbx, jxbx1, rtol=1e-2, atol=1e-9)
     assert np.allclose(jxby, jxby1, rtol=1e-2, atol=1e-9)
     assert np.allclose(jxbz, jxbz1, rtol=1e-2, atol=1e-9)
+    assert np.allclose(jxbx1, jxbx2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(jxby1, jxby2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(jxbz1, jxbz2, rtol=1e-12, atol=1e-12)
 
 
 @mark.parametrize("r", [0.775 * 2, np.pi])
@@ -259,8 +268,14 @@ def test_biot_savart_against_flux_density_ideal_solenoid(r, par):
     xyzfil = (x1[:-1], y1[:-1], z1[:-1])
     #   Get B-field at the origin
     zero = np.array([0.0])
-    bx, _by, _bz = cfsem.flux_density_biot_savart(
-        xyzp=(zero, zero, zero), xyzfil=xyzfil, dlxyzfil=dlxyzfil, ifil=ifil, par=par
+    wire_radius = np.zeros_like(ifil)
+    bx, _by, _bz = cfsem.flux_density_linear_filament(
+        xyzp=(zero, zero, zero),
+        xyzfil=xyzfil,
+        dlxyzfil=dlxyzfil,
+        ifil=ifil,
+        wire_radius=wire_radius,
+        par=par,
     )
     b_bs = bx[0]  # [T] First and only element on the axis of the solenoid
 
@@ -299,7 +314,10 @@ def test_biot_savart_against_flux_density_circular_filament(r, z, par):
     xyzfil = (xfils[1:], yfils[1:], zfils[1:])
     dlxyzfil = (xfils[1:] - xfils[:-1], yfils[1:] - yfils[:-1], zfils[1:] - zfils[:-1])
     ifil = np.ones_like(xfils[1:])
-    Br_bs, By_bs, Bz_bs = cfsem.flux_density_biot_savart(xyzp, xyzfil, dlxyzfil, ifil, par)  # [T]
+    wire_radius = np.zeros_like(ifil)
+    Br_bs, By_bs, Bz_bs = cfsem.flux_density_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
+    )  # [T]
 
     assert np.allclose(Br_circular, Br_bs, rtol=1e-6, atol=1e-7)  # Should match circular calc
     assert np.allclose(Bz_circular, Bz_bs, rtol=1e-6, atol=1e-7)  # ...
@@ -756,7 +774,10 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
     xyzfil = (xfils[1:], yfils[1:], zfils[1:])
     dlxyzfil = (xfils[1:] - xfils[:-1], yfils[1:] - yfils[:-1], zfils[1:] - zfils[:-1])
     ifil = np.ones_like(xfils[1:])
-    ax, ay, az = cfsem.vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)  # [V-s/m]
+    wire_radius = np.zeros_like(ifil)
+    ax, ay, az = cfsem.vector_potential_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
+    )  # [V-s/m]
 
     assert np.allclose(a_phi, ay, rtol=1e-12, atol=1e-12)  # Should match circular calc
     assert np.allclose(az, np.zeros_like(az), atol=1e-9)  # Should sum to zero everywhere

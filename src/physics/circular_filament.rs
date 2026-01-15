@@ -1019,7 +1019,8 @@ mod test {
                     &xyzfil1.2[..n - 1],
                 ),
                 dl1,
-                &vec![1.0; x.len()][..],
+                &vec![1.0; n - 1][..],
+                &vec![0.0; n - 1][..],
                 (&midpoints(&xi), &midpoints(&yi), &midpoints(&zi)),
                 j2,
                 (outxi, outyi, outzi),
@@ -1099,6 +1100,7 @@ mod test {
                 ),
                 dlxyzfil,
                 &ifil[..],
+                &vec![0.0; ifil.len()],
                 (xcontrib, ycontrib, zcontrib),
             )
             .unwrap();

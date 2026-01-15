@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.0.0 2025-01-28
+
+### Added
+
+* !Remove `flux_density_biot_savart` backwards-compatibility alias
+* !Upgrade `flux_density_linear_filament`, `vector_potential_linear_filament`, and `body_force_density_linear_filament` functions
+  * Now handle finite wire length and finite wire thickness analytically
+  * New `wire_radius` input; A-field blends quandratically to zero at wire center, B-field blends linearly to zero
+  * Old point-source segment formulations moved to `point_source::segment` module and available as `flux_density_point_segment` and `vector_potential_point_segment` functions
+* Add `biot_savart.py` and `vector_potential.py` examples with plots comparing linear filament and point-segment calcs 
+* Improve parallelism heuristics to use half of available parallelism as heuristic for physical cores
+    * Prevents oversubscription on systems with hyperthreading
+
 ## 3.1.0 2025-12-19
 
 ### Added

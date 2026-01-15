@@ -17,6 +17,9 @@ pub mod math;
 pub mod mesh;
 pub mod physics;
 
+#[cfg(feature = "rat-mlfmm")]
+pub mod rat_mlfmm;
+
 #[cfg(test)]
 pub(crate) mod testing;
 

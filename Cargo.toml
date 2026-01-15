@@ -8,6 +8,7 @@ repository = "https://github.com/cfs-energy/cfsem-py"
 homepage = "https://github.com/cfs-energy/cfsem-py"
 description = "Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov."
 readme = "README.md"
+build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -27,6 +28,9 @@ num-traits = { version = "0.2.19", features = ["libm"] }
 criterion = "0.7.0"
 itertools = "0.14.0"
 
+[build-dependencies]
+cmake = "0.1"
+
 [profile.release]
 opt-level = 3
 lto = true
@@ -43,6 +47,7 @@ codegen-units = 16
 [features]
 default = []
 python = ["pyo3", "numpy"]
+rat-mlfmm = []
 
 [[bench]]
 name = "linear_filament"

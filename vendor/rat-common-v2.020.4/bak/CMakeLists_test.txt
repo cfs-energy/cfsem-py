@@ -1,0 +1,70 @@
+# bitshift harmonic tests
+add_executable(test_bitshift test_bitshift.cpp)
+target_link_libraries(test_bitshift rat-commonlib)
+
+# cross product tests
+add_executable(test_cross test_cross.cpp)
+target_link_libraries(test_cross rat-commonlib)
+
+# find sections test
+add_executable(test_find_sections test_find_sections.cpp)
+target_link_libraries(test_find_sections rat-commonlib)
+
+# field to matrix test
+add_executable(test_field2mat test_field2mat.cpp)
+target_link_libraries(test_field2mat rat-commonlib)
+
+# hexahedron coordinate test
+add_executable(test_hex_coords test_hex_coords.cpp)
+target_link_libraries(test_hex_coords rat-commonlib)
+
+# hexahedron isinside function test
+add_executable(test_hex_isinside test_hex_isinside.cpp)
+target_link_libraries(test_hex_isinside rat-commonlib)
+
+# quadrilateral coordinate test
+add_executable(test_quad_coords test_quad_coords.cpp)
+target_link_libraries(test_quad_coords rat-commonlib)
+
+# hexahedron volume calculation test
+add_executable(test_hex_volume test_hex_volume.cpp)
+target_link_libraries(test_hex_volume rat-commonlib)
+
+# test of newton-raphson non-linear solver
+add_executable(test_newton test_newton.cpp)
+target_link_libraries(test_newton rat-commonlib)
+
+# test of steepest descent optimizer
+add_executable(test_steepest test_steepest.cpp)
+target_link_libraries(test_steepest rat-commonlib)
+
+# test of gmres newton-krylov solver
+add_executable(test_gmres test_gmres.cpp)
+target_link_libraries(test_gmres rat-commonlib)
+
+# test of gmres newton-krylov solver
+add_executable(test_parsort test_parsort.cpp)
+target_link_libraries(test_parsort rat-commonlib)
+
+# test of gmres newton-krylov solver
+add_executable(test_serialize test_serialize.cpp)
+target_link_libraries(test_serialize rat-commonlib)
+
+# test of linear interpolation function
+add_executable(test_lininterp test_lininterp.cpp)
+target_link_libraries(test_lininterp rat-commonlib)
+
+# add test to cmake
+add_test(test_cross test_cross)
+add_test(test_find_sections test_find_sections)
+add_test(test_field2mat test_field2mat)
+add_test(test_bitshift test_bitshift)
+add_test(test_hex_coords test_hex_coords)
+add_test(test_hex_isinside test_hex_isinside)
+add_test(test_quad_coords test_quad_coords)
+add_test(test_hex_volume test_hex_volume)
+add_test(test_newton test_newton)
+add_test(test_steepest test_steepest)
+add_test(test_gmres test_gmres)
+add_test(test_parsort test_parsort)
+add_test(test_lininterp test_lininterp)

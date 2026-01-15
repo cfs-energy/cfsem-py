@@ -109,6 +109,17 @@ impl Context {
             Ok(())
         }
     }
+
+    pub fn compute_a(&mut self, out_a_xyz: &mut [f64]) -> Result<(), String> {
+        let ok = unsafe {
+            ffi::rat_mlfmm_context_compute_a(self.raw, out_a_xyz.as_mut_ptr(), out_a_xyz.len())
+        };
+        if ok == 0 {
+            Err(last_error())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Drop for Context {
@@ -131,6 +142,7 @@ fn last_error() -> String {
 mod tests {
     use super::{ffi, Context};
     use crate::physics::linear_filament::flux_density_linear_filament;
+    use crate::physics::linear_filament::vector_potential_linear_filament;
 
     #[test]
     fn compares_mlfmm_with_linear_filament() {
@@ -268,6 +280,156 @@ mod tests {
             let base = i * 3;
             let expect = [bx[i], by[i], bz[i]];
             let got = [b_mlfmm[base], b_mlfmm[base + 1], b_mlfmm[base + 2]];
+            for j in 0..3 {
+                let denom = expect[j].abs().max(1.0);
+                let err = (got[j] - expect[j]).abs() / denom;
+                assert!(
+                    err <= tol,
+                    "component mismatch at target {i} axis {j}: got {}, expected {}, rel err {}",
+                    got[j],
+                    expect[j],
+                    err
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compares_mlfmm_with_vector_potential() {
+        let xfil = [0.0, 0.5];
+        let yfil = [0.0, 0.0];
+        let zfil = [0.0, 0.0];
+        let dlx = [0.5, 0.5];
+        let dly = [0.0, 0.0];
+        let dlz = [0.0, 0.0];
+        let ifil = [10.0, 10.0];
+
+        let rs = [
+            0.25, 0.0, 0.0, //
+            0.75, 0.0, 0.0,
+        ];
+        let drs = [
+            0.5, 0.0, 0.0, //
+            0.5, 0.0, 0.0,
+        ];
+        let eps = [1e-6, 1e-6];
+
+        let targets = [
+            0.25, 0.2, 0.0, //
+            0.75, -0.4, 0.1, //
+            0.5, 0.3, -0.2,
+        ];
+
+        let xp = [targets[0], targets[3], targets[6]];
+        let yp = [targets[1], targets[4], targets[7]];
+        let zp = [targets[2], targets[5], targets[8]];
+
+        let mut ax = vec![0.0; xp.len()];
+        let mut ay = vec![0.0; xp.len()];
+        let mut az = vec![0.0; xp.len()];
+        vector_potential_linear_filament(
+            (&xp, &yp, &zp),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            (&mut ax, &mut ay, &mut az),
+        )
+        .expect("vector potential calc failed");
+
+        let mut ctx = Context::new().expect("mlfmm context create failed");
+        ctx.set_sources_linear(&rs, &drs, &ifil, &eps)
+            .expect("mlfmm set sources failed");
+        ctx.set_targets(&targets)
+            .expect("mlfmm set targets failed");
+        ctx.set_van_lanen(false)
+            .expect("mlfmm set van lanen failed");
+        ctx.set_direct_mode(ffi::RatMlfmmDirectMode::Always)
+            .expect("mlfmm set direct mode failed");
+
+        let mut a_mlfmm = vec![0.0; 9];
+        ctx.compute_a(&mut a_mlfmm)
+            .expect("mlfmm compute failed");
+
+        let tol = 1e-5_f64;
+        for i in 0..3 {
+            let base = i * 3;
+            let expect = [ax[i], ay[i], az[i]];
+            let got = [a_mlfmm[base], a_mlfmm[base + 1], a_mlfmm[base + 2]];
+            for j in 0..3 {
+                let denom = expect[j].abs().max(1.0);
+                let err = (got[j] - expect[j]).abs() / denom;
+                assert!(
+                    err <= tol,
+                    "component mismatch at target {i} axis {j}: got {}, expected {}, rel err {}",
+                    got[j],
+                    expect[j],
+                    err
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compares_mlfmm_with_vector_potential_van_lanen_fmm() {
+        let xfil = [0.0, 0.5];
+        let yfil = [0.0, 0.0];
+        let zfil = [0.0, 0.0];
+        let dlx = [0.5, 0.5];
+        let dly = [0.0, 0.0];
+        let dlz = [0.0, 0.0];
+        let ifil = [10.0, 10.0];
+
+        let rs = [
+            0.25, 0.0, 0.0, //
+            0.75, 0.0, 0.0,
+        ];
+        let drs = [
+            0.5, 0.0, 0.0, //
+            0.5, 0.0, 0.0,
+        ];
+        let eps = [1e-3, 1e-3];
+
+        let targets = [
+            0.25, 2.0, 0.5, //
+            0.75, -2.5, 1.0, //
+            0.5, 3.0, -1.5,
+        ];
+
+        let xp = [targets[0], targets[3], targets[6]];
+        let yp = [targets[1], targets[4], targets[7]];
+        let zp = [targets[2], targets[5], targets[8]];
+
+        let mut ax = vec![0.0; xp.len()];
+        let mut ay = vec![0.0; xp.len()];
+        let mut az = vec![0.0; xp.len()];
+        vector_potential_linear_filament(
+            (&xp, &yp, &zp),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            (&mut ax, &mut ay, &mut az),
+        )
+        .expect("vector potential calc failed");
+
+        let mut ctx = Context::new().expect("mlfmm context create failed");
+        ctx.set_sources_linear(&rs, &drs, &ifil, &eps)
+            .expect("mlfmm set sources failed");
+        ctx.set_targets(&targets)
+            .expect("mlfmm set targets failed");
+        ctx.set_van_lanen(true)
+            .expect("mlfmm set van lanen failed");
+        ctx.set_direct_mode(ffi::RatMlfmmDirectMode::Never)
+            .expect("mlfmm set direct mode failed");
+
+        let mut a_mlfmm = vec![0.0; 9];
+        ctx.compute_a(&mut a_mlfmm)
+            .expect("mlfmm compute failed");
+
+        let tol = 5e-3_f64;
+        for i in 0..3 {
+            let base = i * 3;
+            let expect = [ax[i], ay[i], az[i]];
+            let got = [a_mlfmm[base], a_mlfmm[base + 1], a_mlfmm[base + 2]];
             for j in 0..3 {
                 let denom = expect[j].abs().max(1.0);
                 let err = (got[j] - expect[j]).abs() / denom;

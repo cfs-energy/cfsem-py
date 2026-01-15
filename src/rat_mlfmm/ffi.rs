@@ -53,5 +53,11 @@ unsafe extern "C" {
         out_len: usize,
     ) -> c_int;
 
+    pub fn rat_mlfmm_context_compute_a(
+        ctx: *mut RatMlfmmContext,
+        out_a_xyz: *mut f64,
+        out_len: usize,
+    ) -> c_int;
+
     pub fn rat_mlfmm_last_error() -> *const c_char;
 }

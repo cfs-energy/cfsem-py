@@ -33,6 +33,23 @@ fn main() {
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_tar);
 
     let mut cfg = cmake::Config::new(&wrapper_dir);
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
+    let build_type = if profile == "release" { "Release" } else { "Debug" };
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let cpu_flag = resolve_cpu_flag(&target_arch);
+    let (c_flags_release, c_flags_debug) = compose_c_flags(&cpu_flag);
+    let (cxx_flags_release, cxx_flags_debug) = compose_cxx_flags(&cpu_flag);
+    let boost_cxxflags = compose_boost_cxxflags(&cpu_flag);
+    cfg.profile(build_type);
+    cfg.define("CMAKE_BUILD_TYPE", build_type);
+    cfg.define("CMAKE_C_FLAGS_RELEASE", &c_flags_release);
+    cfg.define("CMAKE_CXX_FLAGS_RELEASE", &cxx_flags_release);
+    cfg.define("CMAKE_C_FLAGS_DEBUG", &c_flags_debug);
+    cfg.define("CMAKE_CXX_FLAGS_DEBUG", &cxx_flags_debug);
+    cfg.define("CFSEM_BOOST_CXXFLAGS", &boost_cxxflags);
+    if build_type == "Release" {
+        cfg.define("CMAKE_INTERPROCEDURAL_OPTIMIZATION", "ON");
+    }
     cfg.define("RAT_MLFMM_DIR", rat_mlfmm_dir.to_str().unwrap());
     cfg.define("RAT_COMMON_DIR", rat_common_dir.to_str().unwrap());
     cfg.define("JSONCPP_SRC_DIR", jsoncpp_dir.to_str().unwrap());
@@ -82,6 +99,64 @@ fn main() {
 
 fn rerun_if_changed(path: &Path) {
     println!("cargo:rerun-if-changed={}", path.display());
+}
+
+fn resolve_cpu_flag(target_arch: &str) -> Option<String> {
+    let mut target_cpu = extract_target_cpu_from_rustflags();
+    if target_cpu.is_none() && matches!(target_arch, "x86_64" | "x64") {
+        target_cpu = Some("x86-64-v3".to_string());
+    }
+
+    target_cpu.map(|cpu| {
+        if matches!(target_arch, "x86_64" | "x64") {
+            format!("-march={cpu}")
+        } else if matches!(target_arch, "aarch64") {
+            format!("-mcpu={cpu}")
+        } else {
+            format!("-march={cpu}")
+        }
+    })
+}
+
+fn extract_target_cpu_from_rustflags() -> Option<String> {
+    let encoded = env::var("CARGO_ENCODED_RUSTFLAGS").ok()?;
+    let parts: Vec<&str> = encoded.split('\u{1f}').collect();
+    for i in 0..parts.len() {
+        let part = parts[i];
+        if let Some(value) = part.strip_prefix("-Ctarget-cpu=") {
+            return Some(value.to_string());
+        }
+        if part == "-C" {
+            if let Some(next) = parts.get(i + 1) {
+                if let Some(value) = next.strip_prefix("target-cpu=") {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn compose_c_flags(cpu_flag: &Option<String>) -> (String, String) {
+    let mut release = vec!["-O3"];
+    let mut debug = vec!["-O3", "-g"];
+    if let Some(flag) = cpu_flag {
+        release.push(flag);
+        debug.push(flag);
+    }
+    (release.join(" "), debug.join(" "))
+}
+
+fn compose_cxx_flags(cpu_flag: &Option<String>) -> (String, String) {
+    compose_c_flags(cpu_flag)
+}
+
+fn compose_boost_cxxflags(cpu_flag: &Option<String>) -> String {
+    let mut flags = vec!["-O3"];
+    if let Some(flag) = cpu_flag {
+        flags.push(flag);
+    }
+    flags.join(" ")
 }
 
 fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {

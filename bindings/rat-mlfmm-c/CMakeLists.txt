@@ -99,18 +99,28 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         endif()
     endif()
 
+    if(DEFINED CFSEM_BOOST_CXXFLAGS AND NOT CFSEM_BOOST_CXXFLAGS STREQUAL "")
+        set(_boost_cxxflags "${CFSEM_BOOST_CXXFLAGS}")
+    else()
+        set(_boost_cxxflags "-O3")
+    endif()
+
+    set(_boost_b2_args
+        --build-dir=${BOOST_BUILD_DIR}
+        --with-filesystem
+        --with-iostreams
+        --with-thread
+        --with-chrono
+        link=static
+        runtime-link=static
+        variant=${_boost_variant}
+        optimization=speed
+        cxxflags=${_boost_cxxflags}
+        --prefix=${BOOST_INSTALL_DIR}
+        install
+    )
     execute_process(
-        COMMAND ${BOOST_SRC_DIR}/b2
-            --build-dir=${BOOST_BUILD_DIR}
-            --with-filesystem
-            --with-iostreams
-            --with-thread
-            --with-chrono
-            link=static
-            runtime-link=static
-            variant=${_boost_variant}
-            --prefix=${BOOST_INSTALL_DIR}
-            install
+        COMMAND ${BOOST_SRC_DIR}/b2 ${_boost_b2_args}
         WORKING_DIRECTORY ${BOOST_SRC_DIR}
         RESULT_VARIABLE _boost_build_result
     )

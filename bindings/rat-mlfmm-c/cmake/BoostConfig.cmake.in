@@ -1,0 +1,57 @@
+set(Boost_VERSION 1.90.0)
+set(Boost_VERSION_STRING "1.90.0")
+set(Boost_FOUND TRUE)
+
+set(Boost_INCLUDE_DIR "@BOOST_INSTALL_DIR@/include")
+set(Boost_INCLUDE_DIRS "@BOOST_INSTALL_DIR@/include")
+set(_boost_lib_dir "@BOOST_INSTALL_DIR@/lib")
+
+find_library(Boost_FILESYSTEM_LIBRARY NAMES boost_filesystem PATHS "${_boost_lib_dir}" NO_DEFAULT_PATH)
+find_library(Boost_IOSTREAMS_LIBRARY NAMES boost_iostreams PATHS "${_boost_lib_dir}" NO_DEFAULT_PATH)
+find_library(Boost_THREAD_LIBRARY NAMES boost_thread PATHS "${_boost_lib_dir}" NO_DEFAULT_PATH)
+find_library(Boost_CHRONO_LIBRARY NAMES boost_chrono PATHS "${_boost_lib_dir}" NO_DEFAULT_PATH)
+
+if(NOT Boost_FILESYSTEM_LIBRARY OR NOT Boost_IOSTREAMS_LIBRARY OR NOT Boost_THREAD_LIBRARY OR NOT Boost_CHRONO_LIBRARY)
+    set(Boost_FOUND FALSE)
+    return()
+endif()
+
+if(NOT TARGET Boost::boost)
+    add_library(Boost::boost INTERFACE IMPORTED)
+    set_target_properties(Boost::boost PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${Boost_INCLUDE_DIRS}"
+    )
+endif()
+
+if(NOT TARGET Boost::filesystem)
+    add_library(Boost::filesystem STATIC IMPORTED)
+    set_target_properties(Boost::filesystem PROPERTIES
+        IMPORTED_LOCATION "${Boost_FILESYSTEM_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Boost_INCLUDE_DIRS}"
+    )
+endif()
+
+if(NOT TARGET Boost::iostreams)
+    add_library(Boost::iostreams STATIC IMPORTED)
+    set_target_properties(Boost::iostreams PROPERTIES
+        IMPORTED_LOCATION "${Boost_IOSTREAMS_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Boost_INCLUDE_DIRS}"
+        INTERFACE_LINK_LIBRARIES "z"
+    )
+endif()
+
+if(NOT TARGET Boost::thread)
+    add_library(Boost::thread STATIC IMPORTED)
+    set_target_properties(Boost::thread PROPERTIES
+        IMPORTED_LOCATION "${Boost_THREAD_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Boost_INCLUDE_DIRS}"
+    )
+endif()
+
+if(NOT TARGET Boost::chrono)
+    add_library(Boost::chrono STATIC IMPORTED)
+    set_target_properties(Boost::chrono PROPERTIES
+        IMPORTED_LOCATION "${Boost_CHRONO_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Boost_INCLUDE_DIRS}"
+    )
+endif()

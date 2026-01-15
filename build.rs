@@ -1,5 +1,6 @@
 use std::env;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     if env::var("CARGO_FEATURE_RAT_MLFMM").is_err() {
@@ -13,25 +14,20 @@ fn main() {
     let jsoncpp_dir = manifest_dir.join("vendor").join("jsoncpp-1.9.6");
     let armadillo_dir = manifest_dir.join("vendor").join("armadillo-15.2.3");
     let tclap_dir = manifest_dir.join("vendor").join("tclap-1.2.5");
+    let boost_dir = manifest_dir.join("vendor").join("boost-boost-1.90.0");
 
-    if !wrapper_dir.join("CMakeLists.txt").exists() {
-        panic!("rat-mlfmm C wrapper missing: {}", wrapper_dir.display());
-    }
-    if !rat_mlfmm_dir.join("CMakeLists.txt").exists() {
-        panic!("rat-mlfmm vendor dir missing: {}", rat_mlfmm_dir.display());
-    }
-    if !rat_common_dir.join("CMakeLists.txt").exists() {
-        panic!("rat-common vendor dir missing: {}", rat_common_dir.display());
-    }
-    if !jsoncpp_dir.join("CMakeLists.txt").exists() {
-        panic!("jsoncpp vendor dir missing: {}", jsoncpp_dir.display());
-    }
-    if !armadillo_dir.join("CMakeLists.txt").exists() {
-        panic!("armadillo vendor dir missing: {}", armadillo_dir.display());
-    }
-    if !tclap_dir.join("CMakeLists.txt").exists() {
-        panic!("tclap vendor dir missing: {}", tclap_dir.display());
-    }
+    ensure_submodules(
+        &manifest_dir,
+        &[
+            wrapper_dir.join("CMakeLists.txt"),
+            rat_mlfmm_dir.join("CMakeLists.txt"),
+            rat_common_dir.join("CMakeLists.txt"),
+            jsoncpp_dir.join("CMakeLists.txt"),
+            armadillo_dir.join("CMakeLists.txt"),
+            tclap_dir.join("CMakeLists.txt"),
+            boost_dir.join("tools/build/src/engine/build.sh"),
+        ],
+    );
 
     let mut cfg = cmake::Config::new(&wrapper_dir);
     cfg.define("RAT_MLFMM_DIR", rat_mlfmm_dir.to_str().unwrap());
@@ -39,6 +35,7 @@ fn main() {
     cfg.define("JSONCPP_SRC_DIR", jsoncpp_dir.to_str().unwrap());
     cfg.define("ARMADILLO_SRC_DIR", armadillo_dir.to_str().unwrap());
     cfg.define("TCLAP_SRC_DIR", tclap_dir.to_str().unwrap());
+    cfg.define("BOOST_SRC_DIR", boost_dir.to_str().unwrap());
     if let Ok(prefix) = env::var("CMAKE_PREFIX_PATH") {
         cfg.define("CMAKE_PREFIX_PATH", &prefix);
     }
@@ -54,8 +51,8 @@ fn main() {
 
     let dst = cfg.build();
 
-    let lib_dir = dst.join("lib");
-    let bin_dir = dst.join("bin");
+    let lib_dir = dst.join("build").join("lib");
+    let bin_dir = dst.join("build").join("bin");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
@@ -74,8 +71,38 @@ fn main() {
     rerun_if_changed(&jsoncpp_dir.join("CMakeLists.txt"));
     rerun_if_changed(&armadillo_dir.join("CMakeLists.txt"));
     rerun_if_changed(&tclap_dir.join("CMakeLists.txt"));
+    rerun_if_changed(&boost_dir.join("CMakeLists.txt"));
+    rerun_if_changed(&wrapper_dir.join("cmake/BoostConfig.cmake.in"));
+    rerun_if_changed(&wrapper_dir.join("cmake/ArmadilloConfig.cmake"));
 }
 
 fn rerun_if_changed(path: &Path) {
     println!("cargo:rerun-if-changed={}", path.display());
+}
+
+fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
+    let missing: Vec<_> = required_paths
+        .iter()
+        .filter(|path| !path.exists())
+        .collect();
+
+    if missing.is_empty() {
+        return;
+    }
+
+    let status = Command::new("git")
+        .args(["submodule", "update", "--init", "--recursive"])
+        .current_dir(manifest_dir)
+        .status()
+        .expect("failed to run git submodule update");
+
+    if !status.success() {
+        panic!("git submodule update failed with status {status}");
+    }
+
+    for path in required_paths {
+        if !path.exists() {
+            panic!("required path missing after submodule update: {}", path.display());
+        }
+    }
 }

@@ -13,7 +13,7 @@ pub enum RatMlfmmDirectMode {
     Never = 2,
 }
 
-extern "C" {
+unsafe extern "C" {
     pub fn rat_mlfmm_context_create() -> *mut RatMlfmmContext;
     pub fn rat_mlfmm_context_destroy(ctx: *mut RatMlfmmContext);
 

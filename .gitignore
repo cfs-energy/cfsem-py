@@ -79,3 +79,6 @@ site
 
 examples/*.png
 docs/python/example_outputs/*.png
+
+# Vendored code and build artefacts
+vendor/armadillo-15.2.3/

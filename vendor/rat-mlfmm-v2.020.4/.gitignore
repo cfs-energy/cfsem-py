@@ -1,0 +1,16 @@
+*~
+
+# Ignore the build and lib dirs
+old/*
+
+# Ignore any executables
+bin/*
+build/*
+debug/*
+release/*
+
+# mac dsstore
+.DS_Store
+
+# mex files
+*.mex

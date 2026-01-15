@@ -47,6 +47,10 @@ fn main() {
     cfg.define("CMAKE_C_FLAGS_DEBUG", &c_flags_debug);
     cfg.define("CMAKE_CXX_FLAGS_DEBUG", &cxx_flags_debug);
     cfg.define("CFSEM_BOOST_CXXFLAGS", &boost_cxxflags);
+    cfg.define(
+        "CFSEM_EXPECT_RELEASE",
+        if build_type == "Release" { "ON" } else { "OFF" },
+    );
     if build_type == "Release" {
         cfg.define("CMAKE_INTERPROCEDURAL_OPTIMIZATION", "ON");
     }

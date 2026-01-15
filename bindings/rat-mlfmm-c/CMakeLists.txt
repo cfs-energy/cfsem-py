@@ -3,6 +3,10 @@ project(RatMlfmmC LANGUAGES CXX)
 
 list(INSERT CMAKE_MODULE_PATH 0 ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
+if(CFSEM_EXPECT_RELEASE AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(FATAL_ERROR "CFSEM_EXPECT_RELEASE is ON but CMAKE_BUILD_TYPE is '${CMAKE_BUILD_TYPE}'.")
+endif()
+
 set(RAT_MLFMM_DIR "" CACHE PATH "Path to rat-mlfmm source directory")
 if(NOT RAT_MLFMM_DIR)
     message(FATAL_ERROR "RAT_MLFMM_DIR is required")
@@ -57,7 +61,16 @@ set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "" FORCE)
 set(JSONCPP_WITH_WARNING_AS_ERROR OFF CACHE BOOL "" FORCE)
 add_subdirectory(${JSONCPP_SRC_DIR} ${CMAKE_BINARY_DIR}/jsoncpp-build EXCLUDE_FROM_ALL)
 set(JsonCPP_INCLUDE_DIR ${JSONCPP_SRC_DIR}/include CACHE PATH "" FORCE)
-set(JsonCPP_LIBRARY ${CMAKE_BINARY_DIR}/rat-mlfmm-build/lib/${CMAKE_SHARED_LIBRARY_PREFIX}jsoncpp${CMAKE_SHARED_LIBRARY_SUFFIX} CACHE FILEPATH "" FORCE)
+set(JSONCPP_OUTPUT_DIR ${CMAKE_BINARY_DIR}/lib)
+set(JSONCPP_OUTPUT_LIB ${JSONCPP_OUTPUT_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}jsoncpp${CMAKE_SHARED_LIBRARY_SUFFIX})
+add_custom_command(
+    OUTPUT ${JSONCPP_OUTPUT_LIB}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${JSONCPP_OUTPUT_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:jsoncpp_lib> ${JSONCPP_OUTPUT_LIB}
+    DEPENDS jsoncpp_lib
+)
+add_custom_target(jsoncpp_copy ALL DEPENDS ${JSONCPP_OUTPUT_LIB})
+set(JsonCPP_LIBRARY ${JSONCPP_OUTPUT_LIB} CACHE FILEPATH "" FORCE)
 
 set(BUILD_SMOKE_TEST OFF CACHE BOOL "" FORCE)
 set(ALLOW_BLAS_LAPACK_MACOS ON CACHE BOOL "" FORCE)
@@ -161,6 +174,9 @@ add_subdirectory(${RAT_MLFMM_DIR} ${CMAKE_BINARY_DIR}/rat-mlfmm-build EXCLUDE_FR
 
 if(TARGET ratcmn AND TARGET jsoncpp_lib)
     add_dependencies(ratcmn jsoncpp_lib)
+endif()
+if(TARGET ratcmn AND TARGET jsoncpp_copy)
+    add_dependencies(ratcmn jsoncpp_copy)
 endif()
 
 set(RAT_COMMON_BUILD_INCLUDE ${CMAKE_BINARY_DIR}/rat-common-build/include/rat/common)

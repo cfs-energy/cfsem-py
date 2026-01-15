@@ -13,6 +13,9 @@ fn main() {
     let rat_common_dir = manifest_dir.join("vendor").join("rat-common-v2.020.4");
     let jsoncpp_dir = manifest_dir.join("vendor").join("jsoncpp-1.9.6");
     let armadillo_dir = manifest_dir.join("vendor").join("armadillo-15.2.3");
+    let armadillo_tar = manifest_dir
+        .join("vendor")
+        .join("armadillo-15.2.3.tar.xz");
     let tclap_dir = manifest_dir.join("vendor").join("tclap-1.2.5");
     let boost_dir = manifest_dir.join("vendor").join("boost-boost-1.90.0");
 
@@ -23,11 +26,11 @@ fn main() {
             rat_mlfmm_dir.join("CMakeLists.txt"),
             rat_common_dir.join("CMakeLists.txt"),
             jsoncpp_dir.join("CMakeLists.txt"),
-            armadillo_dir.join("CMakeLists.txt"),
             tclap_dir.join("CMakeLists.txt"),
             boost_dir.join("tools/build/src/engine/build.sh"),
         ],
     );
+    ensure_armadillo_extracted(&armadillo_dir, &armadillo_tar);
 
     let mut cfg = cmake::Config::new(&wrapper_dir);
     cfg.define("RAT_MLFMM_DIR", rat_mlfmm_dir.to_str().unwrap());
@@ -70,6 +73,7 @@ fn main() {
     rerun_if_changed(&rat_mlfmm_dir.join("CMakeLists.txt"));
     rerun_if_changed(&jsoncpp_dir.join("CMakeLists.txt"));
     rerun_if_changed(&armadillo_dir.join("CMakeLists.txt"));
+    rerun_if_changed(&armadillo_tar);
     rerun_if_changed(&tclap_dir.join("CMakeLists.txt"));
     rerun_if_changed(&boost_dir.join("CMakeLists.txt"));
     rerun_if_changed(&wrapper_dir.join("cmake/BoostConfig.cmake.in"));
@@ -104,5 +108,32 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
         if !path.exists() {
             panic!("required path missing after submodule update: {}", path.display());
         }
+    }
+}
+
+fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_tar: &Path) {
+    if armadillo_dir.join("CMakeLists.txt").exists() {
+        return;
+    }
+    if !armadillo_tar.exists() {
+        panic!("armadillo tarball missing: {}", armadillo_tar.display());
+    }
+
+    std::fs::create_dir_all(armadillo_dir)
+        .expect("failed to create armadillo directory");
+
+    let status = Command::new("tar")
+        .args([
+            "-xf",
+            armadillo_tar.to_str().unwrap(),
+            "-C",
+            armadillo_dir.to_str().unwrap(),
+            "--strip-components=1",
+        ])
+        .status()
+        .expect("failed to run tar to extract armadillo");
+
+    if !status.success() {
+        panic!("armadillo extraction failed with status {status}");
     }
 }

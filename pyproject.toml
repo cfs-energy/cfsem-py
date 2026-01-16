@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "cfsem"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov."
 authors = [{name = "Commonwealth Fusion Systems", email = "jlogan@cfs.energy"}]
 requires-python = ">=3.10, <3.14"
@@ -39,7 +39,7 @@ dev = [
 ]
 
 [tool.maturin]
-features = ["pyo3/extension-module", "python"]
+features = ["python"]
 module-name = "cfsem.cfsem"
 version = "cargo"
 

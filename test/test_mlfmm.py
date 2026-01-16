@@ -6,7 +6,7 @@ import cfsem
 
 
 def _build_helix_sources():
-    n_path = 200
+    n_path = int(1e3)
     z = np.linspace(0.0, 1.0, n_path)
     path = (np.zeros_like(z), np.zeros_like(z), z)
     helix = cfsem.filament_helix_path(
@@ -32,8 +32,10 @@ def _cube_targets(center, half_len, points_per_axis=5):
     return x, y, z
 
 
-@mark.parametrize("half_len", [5.0, 100.0])
-def test_mlfmm_fields_against_direct(half_len):
+@mark.parametrize("half_len", [5.1, 100.0])
+@mark.parametrize("direct_threshold", [0, int(1e3), int(1e12)])
+@mark.parametrize("use_van_lanen", [False, True])
+def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
     try:
         fields_mlfmm = cfsem.fields_linear_filament_mlfmm
     except AttributeError:
@@ -52,8 +54,8 @@ def test_mlfmm_fields_against_direct(half_len):
         ifil,
         eps,
         xyzp,
-        use_van_lanen=False,
-        direct_threshold=10_000_000,
+        use_van_lanen=use_van_lanen,
+        direct_threshold=direct_threshold,
         num_exp=0,
     )
 

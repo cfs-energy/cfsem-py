@@ -4,6 +4,18 @@
 
 Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov.
 
+## Installation - System Dependencies
+
+When using `mlfmm` feature, some system dependencies are needed.
+
+* cmake
+* C/C++ toolchain (clang/gcc + make or ninja)
+* git (for submodules)
+* BLAS/LAPACK 
+  * Linux & Windows: openblas
+  * Mac: already included by the OS (Accelerate)
+* zlib (for Boost iostreams; typically provided by the OS)
+
 ## Installation - Python
 
 Requirements

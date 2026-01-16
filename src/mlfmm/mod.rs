@@ -1,3 +1,5 @@
+//! Limited bindings to Project Rat's rat-mlfmm C++ library.
+
 mod ffi;
 
 use std::ffi::CStr;

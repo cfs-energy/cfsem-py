@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.0.0 2025-01-16
+
+### Added
+
+* Add `rat_mlfmm` module with limited bindings to Project Rat's multipole methods for B-field and A-field
+* Add vendored dependencies and thin C FFI to support those bindings
+
 ## 3.1.0 2025-12-19
 
 ### Added

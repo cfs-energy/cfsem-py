@@ -59,18 +59,19 @@ set(JSONCPP_WITH_TESTS OFF CACHE BOOL "" FORCE)
 set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF CACHE BOOL "" FORCE)
 set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "" FORCE)
 set(JSONCPP_WITH_WARNING_AS_ERROR OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
 add_subdirectory(${JSONCPP_SRC_DIR} ${CMAKE_BINARY_DIR}/jsoncpp-build EXCLUDE_FROM_ALL)
 set(JsonCPP_INCLUDE_DIR ${JSONCPP_SRC_DIR}/include CACHE PATH "" FORCE)
 set(JSONCPP_OUTPUT_DIR ${CMAKE_BINARY_DIR}/lib)
-set(JSONCPP_OUTPUT_LIB ${JSONCPP_OUTPUT_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}jsoncpp${CMAKE_SHARED_LIBRARY_SUFFIX})
+set(JsonCPP_LIBRARY ${JSONCPP_OUTPUT_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}jsoncpp${CMAKE_STATIC_LIBRARY_SUFFIX} CACHE FILEPATH "" FORCE)
 add_custom_command(
-    OUTPUT ${JSONCPP_OUTPUT_LIB}
+    OUTPUT ${JsonCPP_LIBRARY}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${JSONCPP_OUTPUT_DIR}
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:jsoncpp_lib> ${JSONCPP_OUTPUT_LIB}
-    DEPENDS jsoncpp_lib
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:jsoncpp_static> ${JsonCPP_LIBRARY}
+    DEPENDS jsoncpp_static
 )
-add_custom_target(jsoncpp_copy ALL DEPENDS ${JSONCPP_OUTPUT_LIB})
-set(JsonCPP_LIBRARY ${JSONCPP_OUTPUT_LIB} CACHE FILEPATH "" FORCE)
+add_custom_target(jsoncpp_copy ALL DEPENDS ${JsonCPP_LIBRARY})
 
 set(BUILD_SMOKE_TEST OFF CACHE BOOL "" FORCE)
 set(ALLOW_BLAS_LAPACK_MACOS ON CACHE BOOL "" FORCE)
@@ -174,6 +175,9 @@ add_subdirectory(${RAT_MLFMM_DIR} ${CMAKE_BINARY_DIR}/rat-mlfmm-build EXCLUDE_FR
 
 if(TARGET ratcmn AND TARGET jsoncpp_lib)
     add_dependencies(ratcmn jsoncpp_lib)
+endif()
+if(TARGET ratcmn AND TARGET jsoncpp_static)
+    add_dependencies(ratcmn jsoncpp_static)
 endif()
 if(TARGET ratcmn AND TARGET jsoncpp_copy)
     add_dependencies(ratcmn jsoncpp_copy)

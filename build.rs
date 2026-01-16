@@ -1,5 +1,6 @@
 use std::env;
 use std::path::{Path, PathBuf};
+use std::io;
 use std::process::Command;
 
 fn main() {
@@ -13,9 +14,9 @@ fn main() {
     let rat_common_dir = manifest_dir.join("vendor").join("rat-common");
     let jsoncpp_dir = manifest_dir.join("vendor").join("jsoncpp");
     let armadillo_dir = manifest_dir.join("vendor").join("armadillo-15.2.3");
-    let armadillo_tar = manifest_dir
+    let armadillo_zip = manifest_dir
         .join("vendor")
-        .join("armadillo-15.2.3.tar.xz");
+        .join("armadillo-15.2.3.zip");
     let tclap_dir = manifest_dir.join("vendor").join("tclap");
     let boost_dir = manifest_dir.join("vendor").join("boost-boost-1.90.0");
 
@@ -30,12 +31,13 @@ fn main() {
             boost_dir.join("tools/build/src/engine/build.sh"),
         ],
     );
-    ensure_armadillo_extracted(&armadillo_dir, &armadillo_tar);
+    ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
 
     let mut cfg = cmake::Config::new(&wrapper_dir);
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
     let build_type = if profile == "release" { "Release" } else { "Debug" };
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let cpu_flag = resolve_cpu_flag(&target_arch);
     let (c_flags_release, c_flags_debug) = compose_c_flags(&cpu_flag);
     let (cxx_flags_release, cxx_flags_debug) = compose_cxx_flags(&cpu_flag);
@@ -53,6 +55,10 @@ fn main() {
     );
     if build_type == "Release" {
         cfg.define("CMAKE_INTERPROCEDURAL_OPTIMIZATION", "ON");
+    }
+    if target_os == "macos" {
+        let deploy = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
+        cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &deploy);
     }
     cfg.define("RAT_MLFMM_DIR", rat_mlfmm_dir.to_str().unwrap());
     cfg.define("RAT_COMMON_DIR", rat_common_dir.to_str().unwrap());
@@ -82,6 +88,7 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
     println!("cargo:rustc-link-lib=rat_mlfmm_c");
+    let _ = lib_dir;
 
     rerun_if_changed(&wrapper_dir.join("CMakeLists.txt"));
     rerun_if_changed(&wrapper_dir.join("src/rat_mlfmm_c.cpp"));
@@ -94,7 +101,7 @@ fn main() {
     rerun_if_changed(&rat_mlfmm_dir.join("CMakeLists.txt"));
     rerun_if_changed(&jsoncpp_dir.join("CMakeLists.txt"));
     rerun_if_changed(&armadillo_dir.join("CMakeLists.txt"));
-    rerun_if_changed(&armadillo_tar);
+    rerun_if_changed(&armadillo_zip);
     rerun_if_changed(&tclap_dir.join("CMakeLists.txt"));
     rerun_if_changed(&boost_dir.join("CMakeLists.txt"));
     rerun_if_changed(&wrapper_dir.join("cmake/BoostConfig.cmake.in"));
@@ -190,29 +197,63 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
     }
 }
 
-fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_tar: &Path) {
+fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_zip: &Path) {
     if armadillo_dir.join("CMakeLists.txt").exists() {
         return;
     }
-    if !armadillo_tar.exists() {
-        panic!("armadillo tarball missing: {}", armadillo_tar.display());
+    if !armadillo_zip.exists() {
+        panic!("armadillo zip missing: {}", armadillo_zip.display());
     }
 
     std::fs::create_dir_all(armadillo_dir)
         .expect("failed to create armadillo directory");
 
-    let status = Command::new("tar")
-        .args([
-            "-xf",
-            armadillo_tar.to_str().unwrap(),
-            "-C",
-            armadillo_dir.to_str().unwrap(),
-            "--strip-components=1",
-        ])
-        .status()
-        .expect("failed to run tar to extract armadillo");
+    let file = std::fs::File::open(armadillo_zip)
+        .unwrap_or_else(|err| panic!("failed to open armadillo zip: {err}"));
+    let mut archive = zip::ZipArchive::new(file)
+        .unwrap_or_else(|err| panic!("failed to read armadillo zip: {err}"));
 
-    if !status.success() {
-        panic!("armadillo extraction failed with status {status}");
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .unwrap_or_else(|err| panic!("failed to read armadillo zip entry: {err}"));
+        let name = entry.name().to_string();
+        let stripped = name
+            .splitn(2, '/')
+            .nth(1)
+            .unwrap_or("");
+        if stripped.is_empty() {
+            continue;
+        }
+        let outpath = armadillo_dir.join(stripped);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&outpath)
+                .unwrap_or_else(|err| panic!("failed to create dir {outpath:?}: {err}"));
+            continue;
+        }
+
+        if let Some(parent) = outpath.parent() {
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|err| panic!("failed to create dir {parent:?}: {err}"));
+        }
+
+        let mut outfile = std::fs::File::create(&outpath)
+            .unwrap_or_else(|err| panic!("failed to create file {outpath:?}: {err}"));
+        io::copy(&mut entry, &mut outfile)
+            .unwrap_or_else(|err| panic!("failed to extract {outpath:?}: {err}"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(mode) = entry.unix_mode() {
+                let mut perms = outfile
+                    .metadata()
+                    .unwrap_or_else(|err| panic!("failed to stat {outpath:?}: {err}"))
+                    .permissions();
+                perms.set_mode(mode);
+                std::fs::set_permissions(&outpath, perms)
+                    .unwrap_or_else(|err| panic!("failed to set perms {outpath:?}: {err}"));
+            }
+        }
     }
 }

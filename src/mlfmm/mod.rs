@@ -163,6 +163,17 @@ impl Default for MlfmmOptions {
     }
 }
 
+pub(crate) fn direct_mode_from_str(
+    value: &str,
+) -> Result<ffi::RatMlfmmDirectMode, &'static str> {
+    match value {
+        "always" => Ok(ffi::RatMlfmmDirectMode::Always),
+        "threshold" => Ok(ffi::RatMlfmmDirectMode::Threshold),
+        "never" => Ok(ffi::RatMlfmmDirectMode::Never),
+        _ => Err("direct_mode must be one of: always, threshold, never"),
+    }
+}
+
 pub fn fields_linear_filament_mlfmm(
     rs_xyz: (&[f64], &[f64], &[f64]),
     drs_xyz: (&[f64], &[f64], &[f64]),

@@ -4,6 +4,8 @@ use pyo3::exceptions;
 use pyo3::prelude::*;
 use std::fmt::Debug;
 
+#[cfg(feature = "rat-mlfmm")]
+use crate::mlfmm::{MlfmmOptions, direct_mode_from_str};
 use crate::{math, mesh, physics};
 
 /// Errors from mismatch between python and rust
@@ -253,6 +255,94 @@ fn flux_density_linear_filament(
     };
 
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+/// Python bindings for cfsemrs::mlfmm::fields_linear_filament_mlfmm
+#[cfg(feature = "rat-mlfmm")]
+#[pyfunction(signature = (rs_xyz, drs_xyz, currents, eps, targets_xyz, use_van_lanen = true, direct_mode = "threshold", direct_threshold = 0.0, num_exp = 0))]
+fn fields_linear_filament_mlfmm(
+    rs_xyz: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament origin coords (start of segment)
+    drs_xyz: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament segment length delta
+    currents: PyReadonlyArray1<f64>, // [A] filament current
+    eps: PyReadonlyArray1<f64>,      // [m] van Lanen softening parameter
+    targets_xyz: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Target coords
+    use_van_lanen: bool,
+    direct_mode: &str,
+    direct_threshold: f64,
+    num_exp: i32,
+) -> PyResult<(
+    (Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>),
+    (Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>),
+)> {
+    _3tup_slice_ro!(rs_xyz);
+    _3tup_slice_ro!(drs_xyz);
+    _3tup_slice_ro!(targets_xyz);
+    let currents = currents.as_slice()?;
+    let eps = eps.as_slice()?;
+
+    let mode = match direct_mode_from_str(direct_mode) {
+        Ok(value) => value,
+        Err(msg) => {
+            let err: PyErr = PyInteropError::DimensionalityError {
+                msg: msg.to_string(),
+            }
+            .into();
+            return Err(err);
+        }
+    };
+
+    let mut opts = MlfmmOptions::default();
+    opts.use_van_lanen = use_van_lanen;
+    opts.direct_mode = mode;
+    if direct_threshold > 0.0 {
+        opts.direct_threshold = Some(direct_threshold);
+    }
+    if num_exp > 0 {
+        opts.num_exp = Some(num_exp);
+    }
+
+    let n = targets_xyz.0.len();
+    let (mut bx, mut by, mut bz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    let (mut ax, mut ay, mut az) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+
+    match crate::mlfmm::fields_linear_filament_mlfmm(
+        rs_xyz,
+        drs_xyz,
+        currents,
+        eps,
+        targets_xyz,
+        Some(&opts),
+        (&mut bx, &mut by, &mut bz),
+        (&mut ax, &mut ay, &mut az),
+    ) {
+        Ok(x) => x,
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    Python::attach(|py| {
+        let bx: Py<PyArray1<f64>> = PyArray1::from_vec(py, bx).unbind();
+        let by: Py<PyArray1<f64>> = PyArray1::from_vec(py, by).unbind();
+        let bz: Py<PyArray1<f64>> = PyArray1::from_vec(py, bz).unbind();
+        let ax: Py<PyArray1<f64>> = PyArray1::from_vec(py, ax).unbind();
+        let ay: Py<PyArray1<f64>> = PyArray1::from_vec(py, ay).unbind();
+        let az: Py<PyArray1<f64>> = PyArray1::from_vec(py, az).unbind();
+        Ok(((bx, by, bz), (ax, ay, az)))
+    })
 }
 
 /// Python bindings for cfsemrs::physics::linear_filament::vector_potential_linear_filament
@@ -730,6 +820,8 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         vector_potential_linear_filament,
         m.clone()
     )?)?;
+    #[cfg(feature = "rat-mlfmm")]
+    m.add_function(wrap_pyfunction!(fields_linear_filament_mlfmm, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         inductance_piecewise_linear_filaments,
         m.clone()

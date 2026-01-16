@@ -24,22 +24,22 @@ jobs:
         platform:
           - runner: ubuntu-22.04
             target: x86_64
-            features: python,rat-mlfmm
+            maturin_args: --release --out dist --find-interpreter
           - runner: ubuntu-22.04
             target: x86
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
           - runner: ubuntu-22.04
             target: aarch64
-            features: python,rat-mlfmm
+            maturin_args: --release --out dist --find-interpreter
           - runner: ubuntu-22.04
             target: armv7
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
           - runner: ubuntu-22.04
             target: s390x
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
           - runner: ubuntu-22.04
             target: ppc64le
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -49,7 +49,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --features=${{ matrix.platform.features }}
+          args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: auto
       - name: Repair wheels
@@ -68,16 +68,16 @@ jobs:
         platform:
           - runner: ubuntu-22.04
             target: x86_64
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
           - runner: ubuntu-22.04
             target: x86
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
           - runner: ubuntu-22.04
             target: aarch64
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
           - runner: ubuntu-22.04
             target: armv7
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -87,7 +87,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --features=${{ matrix.platform.features }}
+          args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: musllinux_1_2
       - name: Repair wheels
@@ -106,10 +106,10 @@ jobs:
         platform:
           - runner: windows-latest
             target: x64
-            features: python,rat-mlfmm
+            maturin_args: --release --out dist --find-interpreter
           - runner: windows-latest
             target: x86
-            features: python
+            maturin_args: --release --out dist --find-interpreter --no-default-features --features=python
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -120,7 +120,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --features=${{ matrix.platform.features }}
+          args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist
@@ -139,10 +139,10 @@ jobs:
           - runner: macos-15-intel
             target: x86_64
             # macos-15 runner is arm64
-            features: python,rat-mlfmm
+            maturin_args: --release --out dist --find-interpreter
           - runner: macos-15
             target: aarch64
-            features: python,rat-mlfmm
+            maturin_args: --release --out dist --find-interpreter
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -152,7 +152,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --features=${{ matrix.platform.features }}
+          args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist

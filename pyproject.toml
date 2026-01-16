@@ -15,7 +15,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy >= 2",
-    "interpn[pydantic]>=0.8.2,<0.9",
+    "interpn[pydantic]>=0.8.2,<0.12",
     "findiff >= 0.12.1",
     "pydantic >= 2",
     "pydantic-numpy >= 6"
@@ -39,12 +39,13 @@ dev = [
 ]
 
 [tool.maturin]
-features = ["python"]
+features = ["python", "rat-mlfmm"]
 module-name = "cfsem.cfsem"
 version = "cargo"
 
 [tool.ruff]
 line-length = 110
+exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = [

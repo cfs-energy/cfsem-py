@@ -265,12 +265,12 @@ fn fields_linear_filament_mlfmm(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
-    ), // [m] Filament origin coords (start of segment)
+    ), // [m] Filament segment start coords
     drs_xyz: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
-    ), // [m] Filament segment length delta
+    ), // [m] Filament delta from start to end
     currents: PyReadonlyArray1<f64>, // [A] filament current
     eps: PyReadonlyArray1<f64>,      // [m] van Lanen softening parameter
     targets_xyz: (

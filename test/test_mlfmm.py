@@ -58,6 +58,6 @@ def test_mlfmm_fields_against_direct(half_len):
     )
 
     for got, exp in zip(b_mlfmm, b_direct, strict=True):
-        assert np.allclose(got, exp, rtol=2e-2, atol=1e-8)
+        assert np.allclose(got, exp, rtol=1e-8, atol=1e-8)
     for got, exp in zip(a_mlfmm, a_direct, strict=True):
-        assert np.allclose(got, exp, rtol=2e-2, atol=1e-8)
+        assert np.allclose(got, exp, rtol=1e-8, atol=1e-8)

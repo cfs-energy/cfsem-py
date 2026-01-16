@@ -101,6 +101,8 @@ extern "C" int rat_mlfmm_context_set_sources_linear(
         arma::Row<rat::fltp> Is = copy_row(currents, num_sources);
         arma::Row<rat::fltp> epss = copy_row(eps, num_sources);
 
+        // Rat kernels expect segment centers; shift from start-point inputs to midpoint.
+        Rs += RAT_CONST(0.5) * dRs;
         raw->sources = rat::fmm::CurrentSources::create(Rs, dRs, Is, epss);
         raw->sources->set_van_Lanen(raw->use_van_lanen);
         rat_mlfmm_set_last_error(nullptr);

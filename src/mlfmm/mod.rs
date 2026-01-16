@@ -166,6 +166,7 @@ impl Default for MlfmmOptions {
 
 const DEFAULT_DIRECT_THRESHOLD: u64 = 10_000_000;
 
+/// rs_xyz: segment start points; drs_xyz: delta from start to end.
 pub fn fields_linear_filament_mlfmm(
     rs_xyz: (&[f64], &[f64], &[f64]),
     drs_xyz: (&[f64], &[f64], &[f64]),

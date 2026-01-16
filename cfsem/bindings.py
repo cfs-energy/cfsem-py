@@ -190,8 +190,8 @@ def flux_density_linear_filament(
 
     Args:
         xyzp: [m] x,y,z coords of observation points
-        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
-        dlxyzfil: [m] x,y,z length delta of current filaments
+        xyzfil: [m] x,y,z coords of filament segment start points
+        dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
         par: Whether to use CPU parallelism
 
@@ -221,8 +221,8 @@ def vector_potential_linear_filament(
 
     Args:
         xyzp: [m] x,y,z coords of observation points
-        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
-        dlxyzfil: [m] x,y,z length delta of current filaments
+        xyzfil: [m] x,y,z coords of filament segment start points
+        dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
         par: Whether to use CPU parallelism
 
@@ -252,8 +252,8 @@ def fields_linear_filament_mlfmm(
     to many observation points.
 
     Args:
-        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
-        dlxyzfil: [m] x,y,z length delta of current filaments
+        xyzfil: [m] x,y,z coords of filament segment start points
+        dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
         eps: [m] van Lanen softening parameter
         xyzp: [m] x,y,z coords of observation points

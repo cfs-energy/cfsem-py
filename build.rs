@@ -59,6 +59,13 @@ fn main() {
     if target_os == "macos" {
         let deploy = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
         cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &deploy);
+    } else {
+        cfg.define("BLA_STATIC", "ON");
+        if target_os == "windows" {
+            cfg.define("CMAKE_FIND_LIBRARY_SUFFIXES", ".lib;.a");
+        } else if target_os == "linux" {
+            cfg.define("CMAKE_FIND_LIBRARY_SUFFIXES", ".a");
+        }
     }
     cfg.define("RAT_MLFMM_DIR", rat_mlfmm_dir.to_str().unwrap());
     cfg.define("RAT_COMMON_DIR", rat_common_dir.to_str().unwrap());

@@ -6,7 +6,7 @@ Quasi-steady electromagnetics including filamentized approximations, Biot-Savart
 
 ## Installation - System Dependencies
 
-When using `mlfmm` feature, some system dependencies are needed.
+When building the `mlfmm` feature, some system dependencies are needed.
 
 * cmake
 * C/C++ toolchain (clang/gcc + make or ninja)
@@ -16,15 +16,16 @@ When using `mlfmm` feature, some system dependencies are needed.
   * Mac: already included by the OS (Accelerate)
 * zlib (for Boost iostreams; typically provided by the OS)
 
+as well as some run-time dependencies:
+
+* System C++ runtime
+
 ## Installation - Python
 
 Requirements
 
 * Python 3.9-3.13 and pip
-* Don't worry about this:
-  * This info provided for troubleshooting purposes:
-  * If on an x86 processor, you will need a CPU that supports SSE through 4.1, AVX, and FMA.
-  * This should be true on any modern machine.
+* If on an x86 processor, you will need a CPU from roughly 2013 or later.
 
 ```bash
 pip install cfsem
@@ -38,7 +39,11 @@ To include this library in a Rust project, add an entry to your Cargo.toml's `[d
 cfsem = "*"
 ```
 
-For Python installation, see the docs for the Python library.
+If building with the `rat-mlfmm` feature, the library must be included as a git dependency.
+
+```toml
+cfsem = { git = "https://github.com/cfs-energy/cfsem-py.git", tag = "4.0.0" }
+```
 
 ## Benchmarking - Rust
 

@@ -5,6 +5,8 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
+from typing import Literal
+
 from numpy import ascontiguousarray, float64, zeros_like
 from numpy.typing import NDArray
 
@@ -40,6 +42,12 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
+try:
+    from .cfsem import (
+        fields_linear_filament_mlfmm as em_fields_linear_filament_mlfmm,
+    )
+except ImportError:  # pragma: no cover - depends on optional rat-mlfmm feature
+    em_fields_linear_filament_mlfmm = None
 
 
 def flux_circular_filament(
@@ -228,6 +236,56 @@ def vector_potential_linear_filament(
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
     return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
+
+
+def fields_linear_filament_mlfmm(
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    ifil: NDArray[float64],
+    eps: NDArray[float64],
+    xyzp: Array3xN,
+    *,
+    use_van_lanen: bool = True,
+    direct_mode: Literal["always", "threshold", "never"] = "threshold",
+    direct_threshold: float = 0.0,
+    num_exp: int = 0,
+) -> tuple[Array3xN, Array3xN]:
+    """
+    MLFMM calculation for B- and A-field contributions from many filament segments
+    to many observation points.
+
+    Args:
+        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
+        dlxyzfil: [m] x,y,z length delta of current filaments
+        ifil: [A] current in each filament segment
+        eps: [m] van Lanen softening parameter
+        xyzp: [m] x,y,z coords of observation points
+        use_van_lanen: Whether to use Van Lanen kernel
+        direct_mode: "always", "threshold", or "never"
+        direct_threshold: Interaction count threshold for direct evaluation
+        num_exp: Number of multipole expansions (0 uses library default)
+
+    Returns:
+        (B, A) tuples of [T] and [Wb/m] field components at observation points
+    """
+    if em_fields_linear_filament_mlfmm is None:
+        raise RuntimeError("rat-mlfmm feature is not enabled in this build")
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    xyzp = _3tup_contig(xyzp)
+    ifil = ascontiguousarray(ifil).ravel()
+    eps = ascontiguousarray(eps).ravel()
+    return em_fields_linear_filament_mlfmm(
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        eps,
+        xyzp,
+        use_van_lanen,
+        direct_mode,
+        direct_threshold,
+        num_exp,
+    )
 
 
 def inductance_piecewise_linear_filaments(

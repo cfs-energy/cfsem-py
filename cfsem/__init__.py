@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from cfsem.bindings import (
     body_force_density_circular_filament_cartesian,
     body_force_density_linear_filament,
+    fields_linear_filament_mlfmm,
     filament_helix_path,
     flux_circular_filament,
     flux_density_biot_savart,
@@ -61,6 +62,7 @@ __all__ = [
     "vector_potential_linear_filament",
     "vector_potential_circular_filament",
     "flux_density_circular_filament_cartesian",
+    "fields_linear_filament_mlfmm",
     "mutual_inductance_circular_to_linear",
     "flux_density_dipole",
     "vector_potential_dipole",

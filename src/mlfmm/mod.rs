@@ -2,9 +2,10 @@
 
 mod ffi;
 
+use crate::macros::check_length_3tup;
 use std::ffi::CStr;
 
-pub struct Context {
+pub(crate) struct Context {
     raw: *mut ffi::RatMlfmmContext,
 }
 
@@ -18,109 +19,122 @@ impl Context {
         }
     }
 
+    pub fn from_options(opts: Option<&MlfmmOptions>) -> Result<Self, String> {
+        let mut ctx = Self::new()?;
+        ctx.apply_options(opts)?;
+        Ok(ctx)
+    }
+
     pub fn set_sources_linear(
         &mut self,
-        rs_xyz: &[f64],
-        drs_xyz: &[f64],
+        rs_xyz: (&[f64], &[f64], &[f64]),
+        drs_xyz: (&[f64], &[f64], &[f64]),
         currents: &[f64],
         eps: &[f64],
     ) -> Result<(), String> {
-        if rs_xyz.len() != drs_xyz.len() {
-            return Err("rs_xyz and drs_xyz must have the same length".to_string());
-        }
-        if rs_xyz.len() % 3 != 0 {
-            return Err("rs_xyz length must be a multiple of 3".to_string());
-        }
-        let num_sources = rs_xyz.len() / 3;
+        let num_sources = rs_xyz.0.len();
+        check_length_3tup_result(num_sources, rs_xyz).map_err(|err| err.to_string())?;
+        check_length_3tup_result(num_sources, drs_xyz).map_err(|err| err.to_string())?;
         if currents.len() != num_sources || eps.len() != num_sources {
-            return Err("currents and eps must have length num_sources".to_string());
+            return Err("currents and eps must match sources length".to_string());
         }
         let ok = unsafe {
             ffi::rat_mlfmm_context_set_sources_linear(
                 self.raw,
-                rs_xyz.as_ptr(),
-                drs_xyz.as_ptr(),
+                rs_xyz.0.as_ptr(),
+                rs_xyz.1.as_ptr(),
+                rs_xyz.2.as_ptr(),
+                drs_xyz.0.as_ptr(),
+                drs_xyz.1.as_ptr(),
+                drs_xyz.2.as_ptr(),
                 currents.as_ptr(),
                 eps.as_ptr(),
                 num_sources,
             )
         };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
+        if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
-    pub fn set_targets(&mut self, rt_xyz: &[f64]) -> Result<(), String> {
-        if rt_xyz.len() % 3 != 0 {
-            return Err("rt_xyz length must be a multiple of 3".to_string());
-        }
-        let num_targets = rt_xyz.len() / 3;
-        let ok = unsafe { ffi::rat_mlfmm_context_set_targets(self.raw, rt_xyz.as_ptr(), num_targets) };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
+    pub fn set_targets(&mut self, rt_xyz: (&[f64], &[f64], &[f64])) -> Result<(), String> {
+        let num_targets = rt_xyz.0.len();
+        check_length_3tup_result(num_targets, rt_xyz).map_err(|err| err.to_string())?;
+        let ok = unsafe {
+            ffi::rat_mlfmm_context_set_targets(
+                self.raw,
+                rt_xyz.0.as_ptr(),
+                rt_xyz.1.as_ptr(),
+                rt_xyz.2.as_ptr(),
+                num_targets,
+            )
+        };
+        if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
     pub fn set_van_lanen(&mut self, use_van_lanen: bool) -> Result<(), String> {
         let ok = unsafe { ffi::rat_mlfmm_context_set_van_lanen(self.raw, use_van_lanen as i32) };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
+        if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
     pub fn set_num_exp(&mut self, num_exp: i32) -> Result<(), String> {
         let ok = unsafe { ffi::rat_mlfmm_context_set_num_exp(self.raw, num_exp) };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
+        if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
     pub fn set_direct_mode(&mut self, mode: ffi::RatMlfmmDirectMode) -> Result<(), String> {
         let ok = unsafe { ffi::rat_mlfmm_context_set_direct_mode(self.raw, mode) };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
+        if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
     pub fn set_direct_threshold(&mut self, threshold: f64) -> Result<(), String> {
         let ok = unsafe { ffi::rat_mlfmm_context_set_direct_threshold(self.raw, threshold) };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
+        if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
-    pub fn compute_b(&mut self, out_b_xyz: &mut [f64]) -> Result<(), String> {
+    pub fn compute_ba(
+        &mut self,
+        out_b_xyz: (&mut [f64], &mut [f64], &mut [f64]),
+        out_a_xyz: (&mut [f64], &mut [f64], &mut [f64]),
+    ) -> Result<(), String> {
+        let n = out_b_xyz.0.len();
+        check_length_3tup_result(n, (&out_b_xyz.0, &out_b_xyz.1, &out_b_xyz.2))
+            .map_err(|err| err.to_string())?;
+        check_length_3tup_result(n, (&out_a_xyz.0, &out_a_xyz.1, &out_a_xyz.2))
+            .map_err(|err| err.to_string())?;
         let ok = unsafe {
-            ffi::rat_mlfmm_context_compute_b(self.raw, out_b_xyz.as_mut_ptr(), out_b_xyz.len())
+            ffi::rat_mlfmm_context_compute_ba(
+                self.raw,
+                out_b_xyz.0.as_mut_ptr(),
+                out_b_xyz.1.as_mut_ptr(),
+                out_b_xyz.2.as_mut_ptr(),
+                n,
+                out_a_xyz.0.as_mut_ptr(),
+                out_a_xyz.1.as_mut_ptr(),
+                out_a_xyz.2.as_mut_ptr(),
+                n,
+            )
         };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
+        if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
-    pub fn compute_a(&mut self, out_a_xyz: &mut [f64]) -> Result<(), String> {
-        let ok = unsafe {
-            ffi::rat_mlfmm_context_compute_a(self.raw, out_a_xyz.as_mut_ptr(), out_a_xyz.len())
+    fn apply_options(&mut self, opts: Option<&MlfmmOptions>) -> Result<(), String> {
+        let default_opts;
+        let opts = match opts {
+            Some(value) => value,
+            None => {
+                default_opts = MlfmmOptions::default();
+                &default_opts
+            }
         };
-        if ok == 0 {
-            Err(last_error())
-        } else {
-            Ok(())
+
+        self.set_van_lanen(opts.use_van_lanen)?;
+        self.set_direct_mode(opts.direct_mode)?;
+        if let Some(threshold) = opts.direct_threshold {
+            self.set_direct_threshold(threshold)?;
         }
+        if let Some(num_exp) = opts.num_exp {
+            self.set_num_exp(num_exp)?;
+        }
+        Ok(())
     }
 }
 
@@ -128,6 +142,41 @@ impl Drop for Context {
     fn drop(&mut self) {
         unsafe { ffi::rat_mlfmm_context_destroy(self.raw) };
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct MlfmmOptions {
+    pub use_van_lanen: bool,
+    pub direct_mode: ffi::RatMlfmmDirectMode,
+    pub direct_threshold: Option<f64>,
+    pub num_exp: Option<i32>,
+}
+
+impl Default for MlfmmOptions {
+    fn default() -> Self {
+        Self {
+            use_van_lanen: true,
+            direct_mode: ffi::RatMlfmmDirectMode::Threshold,
+            direct_threshold: None,
+            num_exp: None,
+        }
+    }
+}
+
+pub fn field_linear_filament_mlfmm(
+    rs_xyz: (&[f64], &[f64], &[f64]),
+    drs_xyz: (&[f64], &[f64], &[f64]),
+    currents: &[f64],
+    eps: &[f64],
+    targets_xyz: (&[f64], &[f64], &[f64]),
+    opts: Option<&MlfmmOptions>,
+    out_b_xyz: (&mut [f64], &mut [f64], &mut [f64]),
+    out_a_xyz: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), String> {
+    let mut ctx = Context::from_options(opts)?;
+    ctx.set_sources_linear(rs_xyz, drs_xyz, currents, eps)?;
+    ctx.set_targets(targets_xyz)?;
+    ctx.compute_ba(out_b_xyz, out_a_xyz)
 }
 
 fn last_error() -> String {
@@ -140,9 +189,14 @@ fn last_error() -> String {
     }
 }
 
+fn check_length_3tup_result(n: usize, tuple: (&[f64], &[f64], &[f64])) -> Result<(), &'static str> {
+    check_length_3tup!(n, tuple);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ffi, Context};
+    use super::{MlfmmOptions, ffi, field_linear_filament_mlfmm};
     use crate::physics::linear_filament::flux_density_linear_filament;
     use crate::physics::linear_filament::vector_potential_linear_filament;
 
@@ -156,25 +210,21 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs = [
-            0.25, 0.0, 0.0, //
-            0.75, 0.0, 0.0,
-        ];
-        let drs = [
-            0.5, 0.0, 0.0, //
-            0.5, 0.0, 0.0,
-        ];
+        let rs_x = [0.25, 0.75];
+        let rs_y = [0.0, 0.0];
+        let rs_z = [0.0, 0.0];
+        let drs_x = [0.5, 0.5];
+        let drs_y = [0.0, 0.0];
+        let drs_z = [0.0, 0.0];
         let eps = [1e-6, 1e-6];
 
-        let targets = [
-            0.25, 0.1, 0.0, //
-            0.75, 0.2, 0.1, //
-            0.5, 0.3, -0.2,
-        ];
+        let targets_x = [0.25, 0.75, 0.5];
+        let targets_y = [0.1, 0.2, 0.3];
+        let targets_z = [0.0, 0.1, -0.2];
 
-        let xp = [targets[0], targets[3], targets[6]];
-        let yp = [targets[1], targets[4], targets[7]];
-        let zp = [targets[2], targets[5], targets[8]];
+        let xp = targets_x;
+        let yp = targets_y;
+        let zp = targets_z;
 
         let mut bx = vec![0.0; xp.len()];
         let mut by = vec![0.0; xp.len()];
@@ -188,25 +238,34 @@ mod tests {
         )
         .expect("linear filament calc failed");
 
-        let mut ctx = Context::new().expect("mlfmm context create failed");
-        ctx.set_sources_linear(&rs, &drs, &ifil, &eps)
-            .expect("mlfmm set sources failed");
-        ctx.set_targets(&targets)
-            .expect("mlfmm set targets failed");
-        ctx.set_van_lanen(false)
-            .expect("mlfmm set van lanen failed");
-        ctx.set_direct_mode(ffi::RatMlfmmDirectMode::Always)
-            .expect("mlfmm set direct mode failed");
-
-        let mut b_mlfmm = vec![0.0; 9];
-        ctx.compute_b(&mut b_mlfmm)
-            .expect("mlfmm compute failed");
+        let opts = MlfmmOptions {
+            use_van_lanen: false,
+            direct_mode: ffi::RatMlfmmDirectMode::Always,
+            direct_threshold: None,
+            num_exp: None,
+        };
+        let mut bx_mlfmm = vec![0.0; xp.len()];
+        let mut by_mlfmm = vec![0.0; xp.len()];
+        let mut bz_mlfmm = vec![0.0; xp.len()];
+        let mut ax_mlfmm = vec![0.0; xp.len()];
+        let mut ay_mlfmm = vec![0.0; xp.len()];
+        let mut az_mlfmm = vec![0.0; xp.len()];
+        field_linear_filament_mlfmm(
+            (&rs_x, &rs_y, &rs_z),
+            (&drs_x, &drs_y, &drs_z),
+            &ifil,
+            &eps,
+            (&targets_x, &targets_y, &targets_z),
+            Some(&opts),
+            (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
+            (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),
+        )
+        .expect("mlfmm compute failed");
 
         let tol = 1e-5_f64;
         for i in 0..3 {
-            let base = i * 3;
             let expect = [bx[i], by[i], bz[i]];
-            let got = [b_mlfmm[base], b_mlfmm[base + 1], b_mlfmm[base + 2]];
+            let got = [bx_mlfmm[i], by_mlfmm[i], bz_mlfmm[i]];
             for j in 0..3 {
                 let denom = expect[j].abs().max(1.0);
                 let err = (got[j] - expect[j]).abs() / denom;
@@ -231,25 +290,21 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs = [
-            0.25, 0.0, 0.0, //
-            0.75, 0.0, 0.0,
-        ];
-        let drs = [
-            0.5, 0.0, 0.0, //
-            0.5, 0.0, 0.0,
-        ];
+        let rs_x = [0.25, 0.75];
+        let rs_y = [0.0, 0.0];
+        let rs_z = [0.0, 0.0];
+        let drs_x = [0.5, 0.5];
+        let drs_y = [0.0, 0.0];
+        let drs_z = [0.0, 0.0];
         let eps = [1e-3, 1e-3];
 
-        let targets = [
-            0.25, 2.0, 0.5, //
-            0.75, -2.5, 1.0, //
-            0.5, 3.0, -1.5,
-        ];
+        let targets_x = [0.25, 0.75, 0.5];
+        let targets_y = [2.0, -2.5, 3.0];
+        let targets_z = [0.5, 1.0, -1.5];
 
-        let xp = [targets[0], targets[3], targets[6]];
-        let yp = [targets[1], targets[4], targets[7]];
-        let zp = [targets[2], targets[5], targets[8]];
+        let xp = targets_x;
+        let yp = targets_y;
+        let zp = targets_z;
 
         let mut bx = vec![0.0; xp.len()];
         let mut by = vec![0.0; xp.len()];
@@ -263,25 +318,34 @@ mod tests {
         )
         .expect("linear filament calc failed");
 
-        let mut ctx = Context::new().expect("mlfmm context create failed");
-        ctx.set_sources_linear(&rs, &drs, &ifil, &eps)
-            .expect("mlfmm set sources failed");
-        ctx.set_targets(&targets)
-            .expect("mlfmm set targets failed");
-        ctx.set_van_lanen(true)
-            .expect("mlfmm set van lanen failed");
-        ctx.set_direct_mode(ffi::RatMlfmmDirectMode::Never)
-            .expect("mlfmm set direct mode failed");
-
-        let mut b_mlfmm = vec![0.0; 9];
-        ctx.compute_b(&mut b_mlfmm)
-            .expect("mlfmm compute failed");
+        let opts = MlfmmOptions {
+            use_van_lanen: true,
+            direct_mode: ffi::RatMlfmmDirectMode::Never,
+            direct_threshold: None,
+            num_exp: None,
+        };
+        let mut bx_mlfmm = vec![0.0; xp.len()];
+        let mut by_mlfmm = vec![0.0; xp.len()];
+        let mut bz_mlfmm = vec![0.0; xp.len()];
+        let mut ax_mlfmm = vec![0.0; xp.len()];
+        let mut ay_mlfmm = vec![0.0; xp.len()];
+        let mut az_mlfmm = vec![0.0; xp.len()];
+        field_linear_filament_mlfmm(
+            (&rs_x, &rs_y, &rs_z),
+            (&drs_x, &drs_y, &drs_z),
+            &ifil,
+            &eps,
+            (&targets_x, &targets_y, &targets_z),
+            Some(&opts),
+            (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
+            (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),
+        )
+        .expect("mlfmm compute failed");
 
         let tol = 5e-3_f64;
         for i in 0..3 {
-            let base = i * 3;
             let expect = [bx[i], by[i], bz[i]];
-            let got = [b_mlfmm[base], b_mlfmm[base + 1], b_mlfmm[base + 2]];
+            let got = [bx_mlfmm[i], by_mlfmm[i], bz_mlfmm[i]];
             for j in 0..3 {
                 let denom = expect[j].abs().max(1.0);
                 let err = (got[j] - expect[j]).abs() / denom;
@@ -306,25 +370,21 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs = [
-            0.25, 0.0, 0.0, //
-            0.75, 0.0, 0.0,
-        ];
-        let drs = [
-            0.5, 0.0, 0.0, //
-            0.5, 0.0, 0.0,
-        ];
+        let rs_x = [0.25, 0.75];
+        let rs_y = [0.0, 0.0];
+        let rs_z = [0.0, 0.0];
+        let drs_x = [0.5, 0.5];
+        let drs_y = [0.0, 0.0];
+        let drs_z = [0.0, 0.0];
         let eps = [1e-6, 1e-6];
 
-        let targets = [
-            0.25, 0.2, 0.0, //
-            0.75, -0.4, 0.1, //
-            0.5, 0.3, -0.2,
-        ];
+        let targets_x = [0.25, 0.75, 0.5];
+        let targets_y = [0.2, -0.4, 0.3];
+        let targets_z = [0.0, 0.1, -0.2];
 
-        let xp = [targets[0], targets[3], targets[6]];
-        let yp = [targets[1], targets[4], targets[7]];
-        let zp = [targets[2], targets[5], targets[8]];
+        let xp = targets_x;
+        let yp = targets_y;
+        let zp = targets_z;
 
         let mut ax = vec![0.0; xp.len()];
         let mut ay = vec![0.0; xp.len()];
@@ -338,25 +398,34 @@ mod tests {
         )
         .expect("vector potential calc failed");
 
-        let mut ctx = Context::new().expect("mlfmm context create failed");
-        ctx.set_sources_linear(&rs, &drs, &ifil, &eps)
-            .expect("mlfmm set sources failed");
-        ctx.set_targets(&targets)
-            .expect("mlfmm set targets failed");
-        ctx.set_van_lanen(false)
-            .expect("mlfmm set van lanen failed");
-        ctx.set_direct_mode(ffi::RatMlfmmDirectMode::Always)
-            .expect("mlfmm set direct mode failed");
-
-        let mut a_mlfmm = vec![0.0; 9];
-        ctx.compute_a(&mut a_mlfmm)
-            .expect("mlfmm compute failed");
+        let opts = MlfmmOptions {
+            use_van_lanen: false,
+            direct_mode: ffi::RatMlfmmDirectMode::Always,
+            direct_threshold: None,
+            num_exp: None,
+        };
+        let mut bx_mlfmm = vec![0.0; xp.len()];
+        let mut by_mlfmm = vec![0.0; xp.len()];
+        let mut bz_mlfmm = vec![0.0; xp.len()];
+        let mut ax_mlfmm = vec![0.0; xp.len()];
+        let mut ay_mlfmm = vec![0.0; xp.len()];
+        let mut az_mlfmm = vec![0.0; xp.len()];
+        field_linear_filament_mlfmm(
+            (&rs_x, &rs_y, &rs_z),
+            (&drs_x, &drs_y, &drs_z),
+            &ifil,
+            &eps,
+            (&targets_x, &targets_y, &targets_z),
+            Some(&opts),
+            (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
+            (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),
+        )
+        .expect("mlfmm compute failed");
 
         let tol = 1e-5_f64;
         for i in 0..3 {
-            let base = i * 3;
             let expect = [ax[i], ay[i], az[i]];
-            let got = [a_mlfmm[base], a_mlfmm[base + 1], a_mlfmm[base + 2]];
+            let got = [ax_mlfmm[i], ay_mlfmm[i], az_mlfmm[i]];
             for j in 0..3 {
                 let denom = expect[j].abs().max(1.0);
                 let err = (got[j] - expect[j]).abs() / denom;
@@ -381,25 +450,21 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs = [
-            0.25, 0.0, 0.0, //
-            0.75, 0.0, 0.0,
-        ];
-        let drs = [
-            0.5, 0.0, 0.0, //
-            0.5, 0.0, 0.0,
-        ];
+        let rs_x = [0.25, 0.75];
+        let rs_y = [0.0, 0.0];
+        let rs_z = [0.0, 0.0];
+        let drs_x = [0.5, 0.5];
+        let drs_y = [0.0, 0.0];
+        let drs_z = [0.0, 0.0];
         let eps = [1e-3, 1e-3];
 
-        let targets = [
-            0.25, 2.0, 0.5, //
-            0.75, -2.5, 1.0, //
-            0.5, 3.0, -1.5,
-        ];
+        let targets_x = [0.25, 0.75, 0.5];
+        let targets_y = [2.0, -2.5, 3.0];
+        let targets_z = [0.5, 1.0, -1.5];
 
-        let xp = [targets[0], targets[3], targets[6]];
-        let yp = [targets[1], targets[4], targets[7]];
-        let zp = [targets[2], targets[5], targets[8]];
+        let xp = targets_x;
+        let yp = targets_y;
+        let zp = targets_z;
 
         let mut ax = vec![0.0; xp.len()];
         let mut ay = vec![0.0; xp.len()];
@@ -413,25 +478,34 @@ mod tests {
         )
         .expect("vector potential calc failed");
 
-        let mut ctx = Context::new().expect("mlfmm context create failed");
-        ctx.set_sources_linear(&rs, &drs, &ifil, &eps)
-            .expect("mlfmm set sources failed");
-        ctx.set_targets(&targets)
-            .expect("mlfmm set targets failed");
-        ctx.set_van_lanen(true)
-            .expect("mlfmm set van lanen failed");
-        ctx.set_direct_mode(ffi::RatMlfmmDirectMode::Never)
-            .expect("mlfmm set direct mode failed");
-
-        let mut a_mlfmm = vec![0.0; 9];
-        ctx.compute_a(&mut a_mlfmm)
-            .expect("mlfmm compute failed");
+        let opts = MlfmmOptions {
+            use_van_lanen: true,
+            direct_mode: ffi::RatMlfmmDirectMode::Never,
+            direct_threshold: None,
+            num_exp: None,
+        };
+        let mut bx_mlfmm = vec![0.0; xp.len()];
+        let mut by_mlfmm = vec![0.0; xp.len()];
+        let mut bz_mlfmm = vec![0.0; xp.len()];
+        let mut ax_mlfmm = vec![0.0; xp.len()];
+        let mut ay_mlfmm = vec![0.0; xp.len()];
+        let mut az_mlfmm = vec![0.0; xp.len()];
+        field_linear_filament_mlfmm(
+            (&rs_x, &rs_y, &rs_z),
+            (&drs_x, &drs_y, &drs_z),
+            &ifil,
+            &eps,
+            (&targets_x, &targets_y, &targets_z),
+            Some(&opts),
+            (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
+            (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),
+        )
+        .expect("mlfmm compute failed");
 
         let tol = 5e-3_f64;
         for i in 0..3 {
-            let base = i * 3;
             let expect = [ax[i], ay[i], az[i]];
-            let got = [a_mlfmm[base], a_mlfmm[base + 1], a_mlfmm[base + 2]];
+            let got = [ax_mlfmm[i], ay_mlfmm[i], az_mlfmm[i]];
             for j in 0..3 {
                 let denom = expect[j].abs().max(1.0);
                 let err = (got[j] - expect[j]).abs() / denom;

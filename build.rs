@@ -1,6 +1,6 @@
 use std::env;
-use std::path::{Path, PathBuf};
 use std::io;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -14,9 +14,7 @@ fn main() {
     let rat_common_dir = manifest_dir.join("vendor").join("rat-common");
     let jsoncpp_dir = manifest_dir.join("vendor").join("jsoncpp");
     let armadillo_dir = manifest_dir.join("vendor").join("armadillo-15.2.3");
-    let armadillo_zip = manifest_dir
-        .join("vendor")
-        .join("armadillo-15.2.3.zip");
+    let armadillo_zip = manifest_dir.join("vendor").join("armadillo-15.2.3.zip");
     let tclap_dir = manifest_dir.join("vendor").join("tclap");
     let boost_dir = manifest_dir.join("vendor").join("boost-boost-1.90.0");
 
@@ -35,7 +33,11 @@ fn main() {
 
     let mut cfg = cmake::Config::new(&wrapper_dir);
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
-    let build_type = if profile == "release" { "Release" } else { "Debug" };
+    let build_type = if profile == "release" {
+        "Release"
+    } else {
+        "Debug"
+    };
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let cpu_flag = resolve_cpu_flag(&target_arch);
@@ -199,7 +201,10 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
 
     for path in required_paths {
         if !path.exists() {
-            panic!("required path missing after submodule update: {}", path.display());
+            panic!(
+                "required path missing after submodule update: {}",
+                path.display()
+            );
         }
     }
 }
@@ -212,8 +217,7 @@ fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_zip: &Path) {
         panic!("armadillo zip missing: {}", armadillo_zip.display());
     }
 
-    std::fs::create_dir_all(armadillo_dir)
-        .expect("failed to create armadillo directory");
+    std::fs::create_dir_all(armadillo_dir).expect("failed to create armadillo directory");
 
     let file = std::fs::File::open(armadillo_zip)
         .unwrap_or_else(|err| panic!("failed to open armadillo zip: {err}"));
@@ -225,10 +229,7 @@ fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_zip: &Path) {
             .by_index(i)
             .unwrap_or_else(|err| panic!("failed to read armadillo zip entry: {err}"));
         let name = entry.name().to_string();
-        let stripped = name
-            .splitn(2, '/')
-            .nth(1)
-            .unwrap_or("");
+        let stripped = name.splitn(2, '/').nth(1).unwrap_or("");
         if stripped.is_empty() {
             continue;
         }

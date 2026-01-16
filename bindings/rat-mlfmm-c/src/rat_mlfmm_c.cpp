@@ -21,13 +21,16 @@ struct Context {
     bool use_van_lanen = true;
 };
 
-static arma::Mat<rat::fltp> copy_mat_3xn(const double *data, size_t n_cols) {
+static arma::Mat<rat::fltp> copy_mat_3xn_cols(
+    const double *x,
+    const double *y,
+    const double *z,
+    size_t n_cols) {
     arma::Mat<rat::fltp> out(3, n_cols);
     for (size_t j = 0; j < n_cols; ++j) {
-        const size_t base = 3 * j;
-        out(0, j) = static_cast<rat::fltp>(data[base]);
-        out(1, j) = static_cast<rat::fltp>(data[base + 1]);
-        out(2, j) = static_cast<rat::fltp>(data[base + 2]);
+        out(0, j) = static_cast<rat::fltp>(x[j]);
+        out(1, j) = static_cast<rat::fltp>(y[j]);
+        out(2, j) = static_cast<rat::fltp>(z[j]);
     }
     return out;
 }
@@ -74,13 +77,17 @@ extern "C" void rat_mlfmm_context_destroy(rat_mlfmm_context *ctx) {
 
 extern "C" int rat_mlfmm_context_set_sources_linear(
     rat_mlfmm_context *ctx,
-    const double *rs_xyz,
-    const double *drs_xyz,
+    const double *rs_x,
+    const double *rs_y,
+    const double *rs_z,
+    const double *drs_x,
+    const double *drs_y,
+    const double *drs_z,
     const double *currents,
     const double *eps,
     size_t num_sources) {
 
-    if (!ctx || !rs_xyz || !drs_xyz || !currents || !eps) {
+    if (!ctx || !rs_x || !rs_y || !rs_z || !drs_x || !drs_y || !drs_z || !currents || !eps) {
         return set_error_and_return("null pointer in set_sources_linear");
     }
     if (num_sources == 0) {
@@ -89,8 +96,8 @@ extern "C" int rat_mlfmm_context_set_sources_linear(
 
     try {
         auto *raw = reinterpret_cast<Context *>(ctx);
-        arma::Mat<rat::fltp> Rs = copy_mat_3xn(rs_xyz, num_sources);
-        arma::Mat<rat::fltp> dRs = copy_mat_3xn(drs_xyz, num_sources);
+        arma::Mat<rat::fltp> Rs = copy_mat_3xn_cols(rs_x, rs_y, rs_z, num_sources);
+        arma::Mat<rat::fltp> dRs = copy_mat_3xn_cols(drs_x, drs_y, drs_z, num_sources);
         arma::Row<rat::fltp> Is = copy_row(currents, num_sources);
         arma::Row<rat::fltp> epss = copy_row(eps, num_sources);
 
@@ -107,10 +114,12 @@ extern "C" int rat_mlfmm_context_set_sources_linear(
 
 extern "C" int rat_mlfmm_context_set_targets(
     rat_mlfmm_context *ctx,
-    const double *rt_xyz,
+    const double *rt_x,
+    const double *rt_y,
+    const double *rt_z,
     size_t num_targets) {
 
-    if (!ctx || !rt_xyz) {
+    if (!ctx || !rt_x || !rt_y || !rt_z) {
         return set_error_and_return("null pointer in set_targets");
     }
     if (num_targets == 0) {
@@ -119,7 +128,7 @@ extern "C" int rat_mlfmm_context_set_targets(
 
     try {
         auto *raw = reinterpret_cast<Context *>(ctx);
-        arma::Mat<rat::fltp> Rt = copy_mat_3xn(rt_xyz, num_targets);
+        arma::Mat<rat::fltp> Rt = copy_mat_3xn_cols(rt_x, rt_y, rt_z, num_targets);
         raw->targets = rat::fmm::MgnTargets::create(Rt);
         raw->targets->set_field_type('B', 3);
         rat_mlfmm_set_last_error(nullptr);
@@ -234,13 +243,19 @@ extern "C" int rat_mlfmm_context_set_direct_threshold(
     }
 }
 
-extern "C" int rat_mlfmm_context_compute_b(
+extern "C" int rat_mlfmm_context_compute_ba(
     rat_mlfmm_context *ctx,
-    double *out_b_xyz,
-    size_t out_len) {
+    double *out_bx,
+    double *out_by,
+    double *out_bz,
+    size_t out_b_len,
+    double *out_ax,
+    double *out_ay,
+    double *out_az,
+    size_t out_a_len) {
 
-    if (!ctx || !out_b_xyz) {
-        return set_error_and_return("null pointer in compute_b");
+    if (!ctx || !out_bx || !out_by || !out_bz || !out_ax || !out_ay || !out_az) {
+        return set_error_and_return("null pointer in compute_ba");
     }
 
     try {
@@ -253,75 +268,31 @@ extern "C" int rat_mlfmm_context_compute_b(
         }
 
         const size_t num_targets = raw->targets->num_targets();
-        const size_t needed = 3 * num_targets;
-        if (out_len < needed) {
+        if (out_b_len < num_targets || out_a_len < num_targets) {
             return set_error_and_return("output buffer too small");
         }
 
+        raw->targets->set_field_type("BA", arma::Row<arma::uword>{3, 3});
         raw->mlfmm = rat::fmm::Mlfmm::create(raw->sources, raw->targets, raw->settings);
         raw->mlfmm->setup();
         raw->mlfmm->calculate();
 
         const arma::Mat<rat::fltp> B = raw->targets->get_field('B');
+        const arma::Mat<rat::fltp> A = raw->targets->get_field('A');
         if (B.n_rows != 3 || B.n_cols != num_targets) {
             return set_error_and_return("unexpected B-field shape");
         }
-
-        for (size_t j = 0; j < num_targets; ++j) {
-            const size_t base = 3 * j;
-            out_b_xyz[base] = static_cast<double>(B(0, j));
-            out_b_xyz[base + 1] = static_cast<double>(B(1, j));
-            out_b_xyz[base + 2] = static_cast<double>(B(2, j));
-        }
-
-        rat_mlfmm_set_last_error(nullptr);
-        return 1;
-    } catch (const std::exception &ex) {
-        return handle_exception(ex);
-    } catch (...) {
-        return set_error_and_return("unknown error in compute_b");
-    }
-}
-
-extern "C" int rat_mlfmm_context_compute_a(
-    rat_mlfmm_context *ctx,
-    double *out_a_xyz,
-    size_t out_len) {
-
-    if (!ctx || !out_a_xyz) {
-        return set_error_and_return("null pointer in compute_a");
-    }
-
-    try {
-        auto *raw = reinterpret_cast<Context *>(ctx);
-        if (!raw->sources) {
-            return set_error_and_return("sources not set");
-        }
-        if (!raw->targets) {
-            return set_error_and_return("targets not set");
-        }
-
-        const size_t num_targets = raw->targets->num_targets();
-        const size_t needed = 3 * num_targets;
-        if (out_len < needed) {
-            return set_error_and_return("output buffer too small");
-        }
-
-        raw->targets->set_field_type('A', 3);
-        raw->mlfmm = rat::fmm::Mlfmm::create(raw->sources, raw->targets, raw->settings);
-        raw->mlfmm->setup();
-        raw->mlfmm->calculate();
-
-        const arma::Mat<rat::fltp> A = raw->targets->get_field('A');
         if (A.n_rows != 3 || A.n_cols != num_targets) {
             return set_error_and_return("unexpected A-field shape");
         }
 
         for (size_t j = 0; j < num_targets; ++j) {
-            const size_t base = 3 * j;
-            out_a_xyz[base] = static_cast<double>(A(0, j));
-            out_a_xyz[base + 1] = static_cast<double>(A(1, j));
-            out_a_xyz[base + 2] = static_cast<double>(A(2, j));
+            out_bx[j] = static_cast<double>(B(0, j));
+            out_by[j] = static_cast<double>(B(1, j));
+            out_bz[j] = static_cast<double>(B(2, j));
+            out_ax[j] = static_cast<double>(A(0, j));
+            out_ay[j] = static_cast<double>(A(1, j));
+            out_az[j] = static_cast<double>(A(2, j));
         }
 
         rat_mlfmm_set_last_error(nullptr);
@@ -329,6 +300,6 @@ extern "C" int rat_mlfmm_context_compute_a(
     } catch (const std::exception &ex) {
         return handle_exception(ex);
     } catch (...) {
-        return set_error_and_return("unknown error in compute_a");
+        return set_error_and_return("unknown error in compute_ba");
     }
 }

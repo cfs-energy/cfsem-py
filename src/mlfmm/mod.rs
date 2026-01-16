@@ -5,7 +5,7 @@ mod ffi;
 use crate::macros::check_length_3tup;
 use std::ffi::CStr;
 
-pub(crate) struct Context {
+struct Context {
     raw: *mut ffi::RatMlfmmContext,
 }
 
@@ -163,7 +163,7 @@ impl Default for MlfmmOptions {
     }
 }
 
-pub fn field_linear_filament_mlfmm(
+pub fn fields_linear_filament_mlfmm(
     rs_xyz: (&[f64], &[f64], &[f64]),
     drs_xyz: (&[f64], &[f64], &[f64]),
     currents: &[f64],
@@ -196,7 +196,7 @@ fn check_length_3tup_result(n: usize, tuple: (&[f64], &[f64], &[f64])) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{MlfmmOptions, ffi, field_linear_filament_mlfmm};
+    use super::{MlfmmOptions, ffi, fields_linear_filament_mlfmm};
     use crate::physics::linear_filament::flux_density_linear_filament;
     use crate::physics::linear_filament::vector_potential_linear_filament;
 
@@ -250,7 +250,7 @@ mod tests {
         let mut ax_mlfmm = vec![0.0; xp.len()];
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
-        field_linear_filament_mlfmm(
+        fields_linear_filament_mlfmm(
             (&rs_x, &rs_y, &rs_z),
             (&drs_x, &drs_y, &drs_z),
             &ifil,
@@ -330,7 +330,7 @@ mod tests {
         let mut ax_mlfmm = vec![0.0; xp.len()];
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
-        field_linear_filament_mlfmm(
+        fields_linear_filament_mlfmm(
             (&rs_x, &rs_y, &rs_z),
             (&drs_x, &drs_y, &drs_z),
             &ifil,
@@ -410,7 +410,7 @@ mod tests {
         let mut ax_mlfmm = vec![0.0; xp.len()];
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
-        field_linear_filament_mlfmm(
+        fields_linear_filament_mlfmm(
             (&rs_x, &rs_y, &rs_z),
             (&drs_x, &drs_y, &drs_z),
             &ifil,
@@ -490,7 +490,7 @@ mod tests {
         let mut ax_mlfmm = vec![0.0; xp.len()];
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
-        field_linear_filament_mlfmm(
+        fields_linear_filament_mlfmm(
             (&rs_x, &rs_y, &rs_z),
             (&drs_x, &drs_y, &drs_z),
             &ifil,

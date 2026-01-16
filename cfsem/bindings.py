@@ -5,8 +5,6 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
-from typing import Literal
-
 from numpy import ascontiguousarray, float64, zeros_like
 from numpy.typing import NDArray
 
@@ -246,8 +244,7 @@ def fields_linear_filament_mlfmm(
     xyzp: Array3xN,
     *,
     use_van_lanen: bool = True,
-    direct_mode: Literal["always", "threshold", "never"] = "threshold",
-    direct_threshold: float = 0.0,
+    direct_threshold: int = 10_000_000,
     num_exp: int = 0,
 ) -> tuple[Array3xN, Array3xN]:
     """
@@ -261,7 +258,6 @@ def fields_linear_filament_mlfmm(
         eps: [m] van Lanen softening parameter
         xyzp: [m] x,y,z coords of observation points
         use_van_lanen: Whether to use Van Lanen kernel
-        direct_mode: "always", "threshold", or "never"
         direct_threshold: Interaction count threshold for direct evaluation
         num_exp: Number of multipole expansions (0 uses library default)
 
@@ -282,7 +278,6 @@ def fields_linear_filament_mlfmm(
         eps,
         xyzp,
         use_van_lanen,
-        direct_mode,
         direct_threshold,
         num_exp,
     )

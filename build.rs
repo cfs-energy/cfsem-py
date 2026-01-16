@@ -9,6 +9,7 @@ fn main() {
     }
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let patches_dir = manifest_dir.join("bindings").join("vendor-patches");
     let wrapper_dir = manifest_dir.join("bindings").join("rat-mlfmm-c");
     let rat_mlfmm_dir = manifest_dir.join("vendor").join("rat-mlfmm");
     let rat_common_dir = manifest_dir.join("vendor").join("rat-common");
@@ -30,6 +31,12 @@ fn main() {
         ],
     );
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
+    apply_vendor_patches(
+        &manifest_dir,
+        &patches_dir,
+        &rat_common_dir,
+        &rat_mlfmm_dir,
+    );
 
     let mut cfg = cmake::Config::new(&wrapper_dir);
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
@@ -92,11 +99,40 @@ fn main() {
 
     let lib_dir = dst.join("build").join("lib");
     let bin_dir = dst.join("build").join("bin");
+    let rat_common_lib_dir = dst.join("build").join("rat-common-build").join("lib");
+    let rat_mlfmm_lib_dir = dst.join("build").join("rat-mlfmm-build").join("lib");
+    let boost_lib_dir = dst.join("build").join("boost-install").join("lib");
+    let armadillo_lib_dir = dst.join("build").join("armadillo-build");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        rat_common_lib_dir.display()
+    );
+    println!(
+        "cargo:rustc-link-search=native={}",
+        rat_mlfmm_lib_dir.display()
+    );
+    println!("cargo:rustc-link-search=native={}", boost_lib_dir.display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        armadillo_lib_dir.display()
+    );
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
-    println!("cargo:rustc-link-lib=rat_mlfmm_c");
+    println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
+    println!("cargo:rustc-link-lib=static=ratmlfmm");
+    println!("cargo:rustc-link-lib=static=ratcmn");
+    println!("cargo:rustc-link-lib=static=boost_filesystem");
+    println!("cargo:rustc-link-lib=static=boost_iostreams");
+    println!("cargo:rustc-link-lib=static=boost_thread");
+    println!("cargo:rustc-link-lib=static=boost_chrono");
+    println!("cargo:rustc-link-lib=static=jsoncpp");
+    println!("cargo:rustc-link-lib=static=armadillo");
+    println!("cargo:rustc-link-lib=z");
+    if target_os == "macos" {
+        println!("cargo:rustc-link-lib=framework=Accelerate");
+    }
     let _ = lib_dir;
 
     rerun_if_changed(&wrapper_dir.join("CMakeLists.txt"));
@@ -115,6 +151,8 @@ fn main() {
     rerun_if_changed(&boost_dir.join("CMakeLists.txt"));
     rerun_if_changed(&wrapper_dir.join("cmake/BoostConfig.cmake.in"));
     rerun_if_changed(&wrapper_dir.join("cmake/ArmadilloConfig.cmake"));
+    rerun_if_changed(&patches_dir.join("rat-common-static.patch"));
+    rerun_if_changed(&patches_dir.join("rat-mlfmm-static.patch"));
 }
 
 fn rerun_if_changed(path: &Path) {
@@ -207,6 +245,62 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
             );
         }
     }
+}
+
+fn apply_vendor_patches(
+    manifest_dir: &Path,
+    patches_dir: &Path,
+    rat_common_dir: &Path,
+    rat_mlfmm_dir: &Path,
+) {
+    let patches = [
+        ("rat-common-static.patch", rat_common_dir),
+        ("rat-mlfmm-static.patch", rat_mlfmm_dir),
+    ];
+
+    for (patch_name, repo_dir) in patches {
+        let patch = patches_dir.join(patch_name);
+        if !patch.exists() {
+            panic!("required patch missing: {}", patch.display());
+        }
+        if !repo_dir.exists() {
+            panic!("required vendor dir missing: {}", repo_dir.display());
+        }
+
+        let check = Command::new("git")
+            .args(["apply", "--check", patch.to_str().unwrap()])
+            .current_dir(repo_dir)
+            .status()
+            .expect("failed to run git apply --check");
+
+        if check.success() {
+            let status = Command::new("git")
+                .args(["apply", patch.to_str().unwrap()])
+                .current_dir(repo_dir)
+                .status()
+                .expect("failed to run git apply");
+            if !status.success() {
+                panic!("failed to apply patch {} in {}", patch.display(), repo_dir.display());
+            }
+            continue;
+        }
+
+        let reverse_check = Command::new("git")
+            .args(["apply", "--reverse", "--check", patch.to_str().unwrap()])
+            .current_dir(repo_dir)
+            .status()
+            .expect("failed to run git apply --reverse --check");
+
+        if !reverse_check.success() {
+            panic!(
+                "patch {} does not apply cleanly in {}",
+                patch.display(),
+                repo_dir.display()
+            );
+        }
+    }
+
+    let _ = manifest_dir;
 }
 
 fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_zip: &Path) {

@@ -18,7 +18,9 @@ When building the `mlfmm` feature, some system dependencies are needed.
 
 as well as some run-time dependencies:
 
+* zlib
 * System C++ runtime
+* BLAS/LAPACK (MacOS only, nominally provided by OS)
 
 ## Installation - Python
 
@@ -39,7 +41,7 @@ To include this library in a Rust project, add an entry to your Cargo.toml's `[d
 cfsem = "*"
 ```
 
-If building with the `rat-mlfmm` feature, the library must be included as a git dependency.
+If building with the `rat-mlfmm` feature, the library must be included as a git dependency
 
 ```toml
 cfsem = { git = "https://github.com/cfs-energy/cfsem-py.git", tag = "4.0.0" }

@@ -90,6 +90,10 @@ impl Context {
         if ok == 0 { Err(last_error()) } else { Ok(()) }
     }
 
+    pub fn set_direct_threshold_count(&mut self, threshold: u64) -> Result<(), String> {
+        self.set_direct_threshold(threshold as f64)
+    }
+
     pub fn compute_ba(
         &mut self,
         out_b_xyz: (&mut [f64], &mut [f64], &mut [f64]),
@@ -127,10 +131,9 @@ impl Context {
         };
 
         self.set_van_lanen(opts.use_van_lanen)?;
-        self.set_direct_mode(opts.direct_mode)?;
-        if let Some(threshold) = opts.direct_threshold {
-            self.set_direct_threshold(threshold)?;
-        }
+        self.set_direct_mode(ffi::RatMlfmmDirectMode::Threshold)?;
+        let threshold = opts.direct_threshold.unwrap_or(DEFAULT_DIRECT_THRESHOLD);
+        self.set_direct_threshold_count(threshold)?;
         if let Some(num_exp) = opts.num_exp {
             self.set_num_exp(num_exp)?;
         }
@@ -147,8 +150,7 @@ impl Drop for Context {
 #[derive(Clone, Debug)]
 pub struct MlfmmOptions {
     pub use_van_lanen: bool,
-    pub direct_mode: ffi::RatMlfmmDirectMode,
-    pub direct_threshold: Option<f64>,
+    pub direct_threshold: Option<u64>,
     pub num_exp: Option<i32>,
 }
 
@@ -156,23 +158,13 @@ impl Default for MlfmmOptions {
     fn default() -> Self {
         Self {
             use_van_lanen: true,
-            direct_mode: ffi::RatMlfmmDirectMode::Threshold,
             direct_threshold: None,
             num_exp: None,
         }
     }
 }
 
-pub(crate) fn direct_mode_from_str(
-    value: &str,
-) -> Result<ffi::RatMlfmmDirectMode, &'static str> {
-    match value {
-        "always" => Ok(ffi::RatMlfmmDirectMode::Always),
-        "threshold" => Ok(ffi::RatMlfmmDirectMode::Threshold),
-        "never" => Ok(ffi::RatMlfmmDirectMode::Never),
-        _ => Err("direct_mode must be one of: always, threshold, never"),
-    }
-}
+const DEFAULT_DIRECT_THRESHOLD: u64 = 10_000_000;
 
 pub fn fields_linear_filament_mlfmm(
     rs_xyz: (&[f64], &[f64], &[f64]),
@@ -207,7 +199,7 @@ fn check_length_3tup_result(n: usize, tuple: (&[f64], &[f64], &[f64])) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{MlfmmOptions, ffi, fields_linear_filament_mlfmm};
+    use super::{MlfmmOptions, fields_linear_filament_mlfmm};
     use crate::physics::linear_filament::flux_density_linear_filament;
     use crate::physics::linear_filament::vector_potential_linear_filament;
 
@@ -251,8 +243,7 @@ mod tests {
 
         let opts = MlfmmOptions {
             use_van_lanen: false,
-            direct_mode: ffi::RatMlfmmDirectMode::Always,
-            direct_threshold: None,
+            direct_threshold: Some(1_000_000),
             num_exp: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];
@@ -331,8 +322,7 @@ mod tests {
 
         let opts = MlfmmOptions {
             use_van_lanen: true,
-            direct_mode: ffi::RatMlfmmDirectMode::Never,
-            direct_threshold: None,
+            direct_threshold: Some(0),
             num_exp: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];
@@ -411,8 +401,7 @@ mod tests {
 
         let opts = MlfmmOptions {
             use_van_lanen: false,
-            direct_mode: ffi::RatMlfmmDirectMode::Always,
-            direct_threshold: None,
+            direct_threshold: Some(1_000_000),
             num_exp: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];
@@ -491,8 +480,7 @@ mod tests {
 
         let opts = MlfmmOptions {
             use_van_lanen: true,
-            direct_mode: ffi::RatMlfmmDirectMode::Never,
-            direct_threshold: None,
+            direct_threshold: Some(0),
             num_exp: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];

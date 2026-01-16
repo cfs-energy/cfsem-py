@@ -163,6 +163,7 @@ set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(ENABLE_BLAS ON CACHE BOOL "" FORCE)
 set(ENABLE_SUPERLU OFF CACHE BOOL "" FORCE)
 set(ENABLE_MKL_ALLOC OFF CACHE BOOL "" FORCE)
+set(RAT_COMMON_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(${RAT_COMMON_DIR} ${CMAKE_BINARY_DIR}/rat-common-build EXCLUDE_FROM_ALL)
 set(RatCommon_DIR ${CMAKE_BINARY_DIR}/rat-common-build CACHE PATH "" FORCE)
@@ -171,6 +172,7 @@ set(ENABLE_CUDA OFF CACHE BOOL "" FORCE)
 set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(ENABLE_MATLAB OFF CACHE BOOL "" FORCE)
+set(RAT_MLFMM_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(${RAT_MLFMM_DIR} ${CMAKE_BINARY_DIR}/rat-mlfmm-build EXCLUDE_FROM_ALL)
 
@@ -195,7 +197,7 @@ if(TARGET ratmlfmm)
     target_include_directories(ratmlfmm PRIVATE ${CMAKE_BINARY_DIR}/rat-common-build/include)
 endif()
 
-add_library(rat_mlfmm_c SHARED
+add_library(rat_mlfmm_c STATIC
     src/rat_mlfmm_c.cpp
     src/rat_mlfmm_c_err.cpp
 )
@@ -215,6 +217,7 @@ set_target_properties(rat_mlfmm_c PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    POSITION_INDEPENDENT_CODE ON
 )
 
 target_compile_definitions(rat_mlfmm_c PRIVATE RAT_MLFMM_C_BUILD)

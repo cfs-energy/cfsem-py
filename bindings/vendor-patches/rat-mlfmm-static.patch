@@ -1,0 +1,26 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d6951e8..6563147 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -12,6 +12,7 @@ option(ENABLE_CUDA_FAST_MATH "use fast math for cuda routines" OFF)
+ option(ENABLE_TESTING "build unit/system tests" ON)
+ option(ENABLE_EXAMPLES "build examples" ON)
+ option(ENABLE_MATLAB "build matlab mex interface" OFF)
++option(RAT_MLFMM_BUILD_SHARED "Build ratmlfmm as shared library" OFF)
+ 
+ # where are the custom CMake modules located
+ list(INSERT CMAKE_MODULE_PATH 0 ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+@@ -123,7 +124,12 @@ if(CMAKE_CUDA_COMPILER)
+ endif()
+ 
+ # add the library
+-add_library(ratmlfmm SHARED ${source_list})
++if(RAT_MLFMM_BUILD_SHARED)
++	set(_rat_mlfmm_lib_type SHARED)
++else()
++	set(_rat_mlfmm_lib_type STATIC)
++endif()
++add_library(ratmlfmm ${_rat_mlfmm_lib_type} ${source_list})
+ 
+ # Add an alias so that library can be used inside the build tree, e.g. when testing
+ add_library(Rat::MLFMM ALIAS ratmlfmm)

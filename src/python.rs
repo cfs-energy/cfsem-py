@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use std::fmt::Debug;
 
 #[cfg(feature = "rat-mlfmm")]
-use crate::mlfmm::{MlfmmOptions, direct_mode_from_str};
+use crate::mlfmm::MlfmmOptions;
 use crate::{math, mesh, physics};
 
 /// Errors from mismatch between python and rust
@@ -259,7 +259,7 @@ fn flux_density_linear_filament(
 
 /// Python bindings for cfsemrs::mlfmm::fields_linear_filament_mlfmm
 #[cfg(feature = "rat-mlfmm")]
-#[pyfunction(signature = (rs_xyz, drs_xyz, currents, eps, targets_xyz, use_van_lanen = true, direct_mode = "threshold", direct_threshold = 0.0, num_exp = 0))]
+#[pyfunction(signature = (rs_xyz, drs_xyz, currents, eps, targets_xyz, use_van_lanen = true, direct_threshold = 10000000, num_exp = 0))]
 fn fields_linear_filament_mlfmm(
     rs_xyz: (
         PyReadonlyArray1<f64>,
@@ -279,8 +279,7 @@ fn fields_linear_filament_mlfmm(
         PyReadonlyArray1<f64>,
     ), // [m] Target coords
     use_van_lanen: bool,
-    direct_mode: &str,
-    direct_threshold: f64,
+    direct_threshold: u64,
     num_exp: i32,
 ) -> PyResult<(
     (Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>),
@@ -292,21 +291,9 @@ fn fields_linear_filament_mlfmm(
     let currents = currents.as_slice()?;
     let eps = eps.as_slice()?;
 
-    let mode = match direct_mode_from_str(direct_mode) {
-        Ok(value) => value,
-        Err(msg) => {
-            let err: PyErr = PyInteropError::DimensionalityError {
-                msg: msg.to_string(),
-            }
-            .into();
-            return Err(err);
-        }
-    };
-
     let mut opts = MlfmmOptions::default();
     opts.use_van_lanen = use_van_lanen;
-    opts.direct_mode = mode;
-    if direct_threshold > 0.0 {
+    if direct_threshold > 0 {
         opts.direct_threshold = Some(direct_threshold);
     }
     if num_exp > 0 {

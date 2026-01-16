@@ -1,0 +1,26 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 212cbb7..d800930 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -12,6 +12,7 @@ option(ENABLE_EXAMPLES "build examples" ON)
+ option(ENABLE_BLAS "build with optimized BLAS library" ON)
+ option(ENABLE_SUPERLU "link with superlu" ON)
+ option(ENABLE_MKL_ALLOC "enable memory allocation with mkl" OFF)
++option(RAT_COMMON_BUILD_SHARED "Build ratcmn as shared library" OFF)
+ 
+ # compile commands for clangd
+ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+@@ -179,7 +180,12 @@ set(source_list
+ )
+ 
+ # add the common library
+-add_library(ratcmn SHARED ${source_list})
++if(RAT_COMMON_BUILD_SHARED)
++	set(_rat_common_lib_type SHARED)
++else()
++	set(_rat_common_lib_type STATIC)
++endif()
++add_library(ratcmn ${_rat_common_lib_type} ${source_list})
+ 
+ # Add an alias so that library can be used inside the build tree, e.g. when testing
+ add_library(Rat::Common ALIAS ratcmn)

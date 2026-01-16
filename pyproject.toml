@@ -61,3 +61,6 @@ select = [
 
 [tool.coverage.report]
 fail_under = 100
+
+[tool.pytest.ini_options]
+norecursedirs = ["vendor", "target", ".venv", "dist", "build"]

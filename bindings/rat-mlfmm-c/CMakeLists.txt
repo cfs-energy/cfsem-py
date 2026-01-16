@@ -75,6 +75,7 @@ add_custom_target(jsoncpp_copy ALL DEPENDS ${JsonCPP_LIBRARY})
 
 set(BUILD_SMOKE_TEST OFF CACHE BOOL "" FORCE)
 set(ALLOW_BLAS_LAPACK_MACOS ON CACHE BOOL "" FORCE)
+set(STATIC_LIB ON CACHE BOOL "" FORCE)
 add_subdirectory(${ARMADILLO_SRC_DIR} ${CMAKE_BINARY_DIR}/armadillo-build EXCLUDE_FROM_ALL)
 set(Armadillo_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake CACHE PATH "" FORCE)
 file(WRITE ${CMAKE_BINARY_DIR}/armadillo-build/ArmadilloLibraryDepends.cmake

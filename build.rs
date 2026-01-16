@@ -9,14 +9,14 @@ fn main() {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let wrapper_dir = manifest_dir.join("bindings").join("rat-mlfmm-c");
-    let rat_mlfmm_dir = manifest_dir.join("vendor").join("rat-mlfmm-v2.020.4");
-    let rat_common_dir = manifest_dir.join("vendor").join("rat-common-v2.020.4");
-    let jsoncpp_dir = manifest_dir.join("vendor").join("jsoncpp-1.9.6");
+    let rat_mlfmm_dir = manifest_dir.join("vendor").join("rat-mlfmm");
+    let rat_common_dir = manifest_dir.join("vendor").join("rat-common");
+    let jsoncpp_dir = manifest_dir.join("vendor").join("jsoncpp");
     let armadillo_dir = manifest_dir.join("vendor").join("armadillo-15.2.3");
     let armadillo_tar = manifest_dir
         .join("vendor")
         .join("armadillo-15.2.3.tar.xz");
-    let tclap_dir = manifest_dir.join("vendor").join("tclap-1.2.5");
+    let tclap_dir = manifest_dir.join("vendor").join("tclap");
     let boost_dir = manifest_dir.join("vendor").join("boost-boost-1.90.0");
 
     ensure_submodules(

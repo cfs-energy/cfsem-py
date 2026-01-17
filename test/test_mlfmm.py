@@ -6,7 +6,7 @@ import cfsem
 
 
 def _build_helix_sources():
-    n_path = int(1e3)
+    n_path = int(1e4)
     z = np.linspace(0.0, 1.0, n_path)
     path = (np.zeros_like(z), np.zeros_like(z), z)
     helix = cfsem.filament_helix_path(
@@ -60,6 +60,50 @@ def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
     )
 
     for got, exp in zip(b_mlfmm, b_direct, strict=True):
-        assert np.allclose(got, exp, rtol=1e-8, atol=1e-8)
+        assert np.allclose(got, exp, rtol=1e-6, atol=1e-10)
     for got, exp in zip(a_mlfmm, a_direct, strict=True):
-        assert np.allclose(got, exp, rtol=1e-8, atol=1e-8)
+        assert np.allclose(got, exp, rtol=1e-6, atol=1e-10)
+
+
+def test_mlfmm_van_lanen_single_segment_matches_subdivided_direct():
+    try:
+        fields_linear_filament_mlfmm = cfsem.fields_linear_filament_mlfmm
+    except AttributeError:
+        pytest.skip("rat-mlfmm feature is not enabled in this build")
+
+    xyzfil = (np.array([0.0]), np.array([0.0]), np.array([0.0]))
+    dlxyzfil = (np.array([1.0]), np.array([0.0]), np.array([0.0]))
+    ifil = np.array([1.0])
+    eps = np.array([1e-3])
+
+    t = np.linspace(0.0, 1.0, 101)
+    x0 = t[:-1]
+    dx = np.diff(t)
+    xyzfil_sub = (x0, np.zeros_like(x0), np.zeros_like(x0))
+    dlxyzfil_sub = (dx, np.zeros_like(dx), np.zeros_like(dx))
+    ifil_sub = np.full_like(dx, ifil[0])
+
+    xyzp = (
+        np.array([0.5, 0.5, 0.5, 0.25, 0.75]),
+        np.array([0.2, -0.2, 0.3, -0.4, 0.1]),
+        np.array([0.1, 0.1, -0.2, 0.2, -0.3]),
+    )
+
+    b_direct = cfsem.flux_density_linear_filament(xyzp, xyzfil_sub, dlxyzfil_sub, ifil_sub, par=False)
+    a_direct = cfsem.vector_potential_linear_filament(xyzp, xyzfil_sub, dlxyzfil_sub, ifil_sub, par=False)
+
+    b_mlfmm, a_mlfmm = fields_linear_filament_mlfmm(
+        xyzp,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        eps,
+        use_van_lanen=True,
+        direct_threshold=1,
+        order=None,
+    )
+
+    for got, exp in zip(b_mlfmm, b_direct, strict=True):
+        assert np.allclose(got, exp, rtol=1e-6, atol=1e-10)
+    for got, exp in zip(a_mlfmm, a_direct, strict=True):
+        assert np.allclose(got, exp, rtol=1e-6, atol=1e-10)

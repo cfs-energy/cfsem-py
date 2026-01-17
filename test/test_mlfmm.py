@@ -23,7 +23,7 @@ def _build_helix_sources():
     return xyzfil, dlxyzfil, ifil, eps
 
 
-def _cube_targets(center, half_len, points_per_axis=5):
+def _cube_targets(center, half_len, points_per_axis=11):
     grid = np.linspace(-half_len, half_len, points_per_axis)
     xg, yg, zg = np.meshgrid(grid, grid, grid, indexing="ij")
     x = xg.ravel() + center[0]
@@ -32,7 +32,7 @@ def _cube_targets(center, half_len, points_per_axis=5):
     return x, y, z
 
 
-@mark.parametrize("half_len", [5.1, 100.0])
+@mark.parametrize("half_len", [5.025, 100.0])
 @mark.parametrize("direct_threshold", [0, int(1e3), int(1e12)])
 @mark.parametrize("use_van_lanen", [False, True])
 def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
@@ -43,7 +43,7 @@ def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
 
     xyzfil, dlxyzfil, ifil, eps = _build_helix_sources()
     center = (0.0, 0.0, 0.5)
-    xyzp = _cube_targets(center=center, half_len=half_len, points_per_axis=5)
+    xyzp = _cube_targets(center=center, half_len=half_len, points_per_axis=11)
 
     b_direct = cfsem.flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par=False)
     a_direct = cfsem.vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par=False)
@@ -56,7 +56,7 @@ def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
         eps,
         use_van_lanen=use_van_lanen,
         direct_threshold=direct_threshold,
-        order=None,
+        order=12,
     )
 
     for got, exp in zip(b_mlfmm, b_direct, strict=True):

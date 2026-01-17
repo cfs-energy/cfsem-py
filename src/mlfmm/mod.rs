@@ -132,10 +132,10 @@ impl Context {
 
         self.set_van_lanen(opts.use_van_lanen)?;
         self.set_direct_mode(ffi::RatMlfmmDirectMode::Threshold)?;
-        let threshold = opts.direct_threshold.unwrap_or(DEFAULT_DIRECT_THRESHOLD);
+        let threshold = opts.direct_threshold.unwrap_or(DEFAULT_DIRECT_THRESHOLD).max(1);
         self.set_direct_threshold_count(threshold)?;
-        if let Some(num_exp) = opts.num_exp {
-            self.set_num_exp(num_exp)?;
+        if let Some(order) = opts.order {
+            self.set_num_exp(order)?;
         }
         Ok(())
     }
@@ -151,7 +151,7 @@ impl Drop for Context {
 pub struct MlfmmOptions {
     pub use_van_lanen: bool,
     pub direct_threshold: Option<u64>,
-    pub num_exp: Option<i32>,
+    pub order: Option<i32>,
 }
 
 impl Default for MlfmmOptions {
@@ -159,27 +159,40 @@ impl Default for MlfmmOptions {
         Self {
             use_van_lanen: true,
             direct_threshold: None,
-            num_exp: None,
+            order: None,
         }
     }
 }
 
 const DEFAULT_DIRECT_THRESHOLD: u64 = 10_000_000;
 
-/// rs_xyz: segment start points; drs_xyz: delta from start to end.
+/// MLFMM calculation of B-field and A-field from linear filament segments.
+///
+/// Args:
+///     xyzp: observation points (x, y, z), shape (3, N).
+///     xyzfil: filament segment start points (x, y, z), shape (3, M).
+///     dlxyzfil: segment deltas from start to end (x, y, z), shape (3, M).
+///     ifil: filament segment currents, length M.
+///     eps: Van Lanen softening parameter, length M.
+///     opts: MLFMM options (direct threshold, Van Lanen, etc.).
+///     out_b_xyz: output B-field components (x, y, z), length N each.
+///     out_a_xyz: output A-field components (x, y, z), length N each.
+///
+/// Returns:
+///     Ok(()) on success, Err(String) on failure.
 pub fn fields_linear_filament_mlfmm(
-    rs_xyz: (&[f64], &[f64], &[f64]),
-    drs_xyz: (&[f64], &[f64], &[f64]),
-    currents: &[f64],
+    xyzp: (&[f64], &[f64], &[f64]),
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    ifil: &[f64],
     eps: &[f64],
-    targets_xyz: (&[f64], &[f64], &[f64]),
     opts: Option<&MlfmmOptions>,
     out_b_xyz: (&mut [f64], &mut [f64], &mut [f64]),
     out_a_xyz: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), String> {
     let mut ctx = Context::from_options(opts)?;
-    ctx.set_sources_linear(rs_xyz, drs_xyz, currents, eps)?;
-    ctx.set_targets(targets_xyz)?;
+    ctx.set_sources_linear(xyzfil, dlxyzfil, ifil, eps)?;
+    ctx.set_targets(xyzp)?;
     ctx.compute_ba(out_b_xyz, out_a_xyz)
 }
 
@@ -214,12 +227,6 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs_x = [0.25, 0.75];
-        let rs_y = [0.0, 0.0];
-        let rs_z = [0.0, 0.0];
-        let drs_x = [0.5, 0.5];
-        let drs_y = [0.0, 0.0];
-        let drs_z = [0.0, 0.0];
         let eps = [1e-6, 1e-6];
 
         let targets_x = [0.25, 0.75, 0.5];
@@ -245,7 +252,7 @@ mod tests {
         let opts = MlfmmOptions {
             use_van_lanen: false,
             direct_threshold: Some(1_000_000),
-            num_exp: None,
+            order: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];
         let mut by_mlfmm = vec![0.0; xp.len()];
@@ -254,11 +261,11 @@ mod tests {
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
         fields_linear_filament_mlfmm(
-            (&rs_x, &rs_y, &rs_z),
-            (&drs_x, &drs_y, &drs_z),
+            (&targets_x, &targets_y, &targets_z),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
             &ifil,
             &eps,
-            (&targets_x, &targets_y, &targets_z),
             Some(&opts),
             (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
             (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),
@@ -293,12 +300,6 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs_x = [0.25, 0.75];
-        let rs_y = [0.0, 0.0];
-        let rs_z = [0.0, 0.0];
-        let drs_x = [0.5, 0.5];
-        let drs_y = [0.0, 0.0];
-        let drs_z = [0.0, 0.0];
         let eps = [1e-3, 1e-3];
 
         let targets_x = [0.25, 0.75, 0.5];
@@ -323,8 +324,8 @@ mod tests {
 
         let opts = MlfmmOptions {
             use_van_lanen: true,
-            direct_threshold: Some(0),
-            num_exp: None,
+            direct_threshold: Some(1),
+            order: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];
         let mut by_mlfmm = vec![0.0; xp.len()];
@@ -333,11 +334,11 @@ mod tests {
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
         fields_linear_filament_mlfmm(
-            (&rs_x, &rs_y, &rs_z),
-            (&drs_x, &drs_y, &drs_z),
+            (&targets_x, &targets_y, &targets_z),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
             &ifil,
             &eps,
-            (&targets_x, &targets_y, &targets_z),
             Some(&opts),
             (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
             (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),
@@ -372,12 +373,6 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs_x = [0.25, 0.75];
-        let rs_y = [0.0, 0.0];
-        let rs_z = [0.0, 0.0];
-        let drs_x = [0.5, 0.5];
-        let drs_y = [0.0, 0.0];
-        let drs_z = [0.0, 0.0];
         let eps = [1e-6, 1e-6];
 
         let targets_x = [0.25, 0.75, 0.5];
@@ -403,7 +398,7 @@ mod tests {
         let opts = MlfmmOptions {
             use_van_lanen: false,
             direct_threshold: Some(1_000_000),
-            num_exp: None,
+            order: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];
         let mut by_mlfmm = vec![0.0; xp.len()];
@@ -412,11 +407,11 @@ mod tests {
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
         fields_linear_filament_mlfmm(
-            (&rs_x, &rs_y, &rs_z),
-            (&drs_x, &drs_y, &drs_z),
+            (&targets_x, &targets_y, &targets_z),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
             &ifil,
             &eps,
-            (&targets_x, &targets_y, &targets_z),
             Some(&opts),
             (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
             (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),
@@ -451,12 +446,6 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let rs_x = [0.25, 0.75];
-        let rs_y = [0.0, 0.0];
-        let rs_z = [0.0, 0.0];
-        let drs_x = [0.5, 0.5];
-        let drs_y = [0.0, 0.0];
-        let drs_z = [0.0, 0.0];
         let eps = [1e-3, 1e-3];
 
         let targets_x = [0.25, 0.75, 0.5];
@@ -481,8 +470,8 @@ mod tests {
 
         let opts = MlfmmOptions {
             use_van_lanen: true,
-            direct_threshold: Some(0),
-            num_exp: None,
+            direct_threshold: Some(1),
+            order: None,
         };
         let mut bx_mlfmm = vec![0.0; xp.len()];
         let mut by_mlfmm = vec![0.0; xp.len()];
@@ -491,11 +480,11 @@ mod tests {
         let mut ay_mlfmm = vec![0.0; xp.len()];
         let mut az_mlfmm = vec![0.0; xp.len()];
         fields_linear_filament_mlfmm(
-            (&rs_x, &rs_y, &rs_z),
-            (&drs_x, &drs_y, &drs_z),
+            (&targets_x, &targets_y, &targets_z),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
             &ifil,
             &eps,
-            (&targets_x, &targets_y, &targets_z),
             Some(&opts),
             (&mut bx_mlfmm, &mut by_mlfmm, &mut bz_mlfmm),
             (&mut ax_mlfmm, &mut ay_mlfmm, &mut az_mlfmm),

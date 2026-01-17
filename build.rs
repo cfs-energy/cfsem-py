@@ -131,6 +131,8 @@ fn main() {
     println!("cargo:rustc-link-lib=static=armadillo");
     println!("cargo:rustc-link-lib=z");
     if target_os == "macos" {
+        println!("cargo:rustc-link-lib=c++");
+        println!("cargo:rustc-link-lib=c++abi");
         println!("cargo:rustc-link-lib=framework=Accelerate");
     }
     let _ = lib_dir;

@@ -259,36 +259,36 @@ fn flux_density_linear_filament(
 
 /// Python bindings for cfsemrs::mlfmm::fields_linear_filament_mlfmm
 #[cfg(feature = "rat-mlfmm")]
-#[pyfunction(signature = (rs_xyz, drs_xyz, currents, eps, targets_xyz, use_van_lanen = true, direct_threshold = 10000000, num_exp = 0))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, eps, use_van_lanen = true, direct_threshold = 10000000, order = None))]
 fn fields_linear_filament_mlfmm(
-    rs_xyz: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ), // [m] Filament segment start coords
-    drs_xyz: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ), // [m] Filament delta from start to end
-    currents: PyReadonlyArray1<f64>, // [A] filament current
-    eps: PyReadonlyArray1<f64>,      // [m] van Lanen softening parameter
-    targets_xyz: (
+    xyzp: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [m] Target coords
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament segment start coords
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament delta from start to end
+    ifil: PyReadonlyArray1<f64>, // [A] filament current
+    eps: PyReadonlyArray1<f64>,      // [m] van Lanen softening parameter
     use_van_lanen: bool,
     direct_threshold: u64,
-    num_exp: i32,
+    order: Option<i32>,
 ) -> PyResult<(
     (Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>),
     (Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>),
 )> {
-    _3tup_slice_ro!(rs_xyz);
-    _3tup_slice_ro!(drs_xyz);
-    _3tup_slice_ro!(targets_xyz);
-    let currents = currents.as_slice()?;
+    _3tup_slice_ro!(xyzp);
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let ifil = ifil.as_slice()?;
     let eps = eps.as_slice()?;
 
     let mut opts = MlfmmOptions::default();
@@ -296,20 +296,22 @@ fn fields_linear_filament_mlfmm(
     if direct_threshold > 0 {
         opts.direct_threshold = Some(direct_threshold);
     }
-    if num_exp > 0 {
-        opts.num_exp = Some(num_exp);
+    if let Some(order) = order {
+        if order > 0 {
+            opts.order = Some(order);
+        }
     }
 
-    let n = targets_xyz.0.len();
+    let n = xyzp.0.len();
     let (mut bx, mut by, mut bz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     let (mut ax, mut ay, mut az) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
 
     match crate::mlfmm::fields_linear_filament_mlfmm(
-        rs_xyz,
-        drs_xyz,
-        currents,
+        xyzp,
+        xyzfil,
+        dlxyzfil,
+        ifil,
         eps,
-        targets_xyz,
         Some(&opts),
         (&mut bx, &mut by, &mut bz),
         (&mut ax, &mut ay, &mut az),

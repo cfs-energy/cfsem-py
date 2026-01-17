@@ -237,49 +237,49 @@ def vector_potential_linear_filament(
 
 
 def fields_linear_filament_mlfmm(
+    xyzp: Array3xN,
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     ifil: NDArray[float64],
     eps: NDArray[float64],
-    xyzp: Array3xN,
     *,
     use_van_lanen: bool = True,
     direct_threshold: int = 10_000_000,
-    num_exp: int = 0,
+    order: int | None = None,
 ) -> tuple[Array3xN, Array3xN]:
     """
     MLFMM calculation for B- and A-field contributions from many filament segments
     to many observation points.
 
     Args:
+        xyzp: [m] x,y,z coords of observation points
         xyzfil: [m] x,y,z coords of filament segment start points
         dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
         eps: [m] van Lanen softening parameter
-        xyzp: [m] x,y,z coords of observation points
         use_van_lanen: Whether to use Van Lanen kernel
         direct_threshold: Interaction count threshold for direct evaluation
-        num_exp: Number of multipole expansions (0 uses library default)
+        order: Multipole expansion order (None uses library default)
 
     Returns:
         (B, A) tuples of [T] and [Wb/m] field components at observation points
     """
     if em_fields_linear_filament_mlfmm is None:
         raise RuntimeError("rat-mlfmm feature is not enabled in this build")
+    xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
-    xyzp = _3tup_contig(xyzp)
     ifil = ascontiguousarray(ifil).ravel()
     eps = ascontiguousarray(eps).ravel()
     return em_fields_linear_filament_mlfmm(
+        xyzp,
         xyzfil,
         dlxyzfil,
         ifil,
         eps,
-        xyzp,
         use_van_lanen,
         direct_threshold,
-        num_exp,
+        0 if order is None else int(order),
     )
 
 

@@ -37,7 +37,7 @@ def _cube_targets(center, half_len, points_per_axis=5):
 @mark.parametrize("use_van_lanen", [False, True])
 def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
     try:
-        fields_mlfmm = cfsem.fields_linear_filament_mlfmm
+        fields_linear_filament_mlfmm = cfsem.fields_linear_filament_mlfmm
     except AttributeError:
         pytest.skip("rat-mlfmm feature is not enabled in this build")
 
@@ -48,15 +48,15 @@ def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
     b_direct = cfsem.flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par=False)
     a_direct = cfsem.vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par=False)
 
-    b_mlfmm, a_mlfmm = fields_mlfmm(
+    b_mlfmm, a_mlfmm = fields_linear_filament_mlfmm(
+        xyzp,
         xyzfil,
         dlxyzfil,
         ifil,
         eps,
-        xyzp,
         use_van_lanen=use_van_lanen,
         direct_threshold=direct_threshold,
-        num_exp=0,
+        order=None,
     )
 
     for got, exp in zip(b_mlfmm, b_direct, strict=True):

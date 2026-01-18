@@ -28,7 +28,7 @@ use crate::{MU0_OVER_4PI, macros::*};
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
 /// * `out`:      (T) bx, by, bz at observation points, each length `n`
-pub fn flux_density_linear_filament_par(
+pub fn flux_density_point_segment_par(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
@@ -44,7 +44,7 @@ pub fn flux_density_linear_filament_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            flux_density_linear_filament((xp, yp, zp), xyzfil, dlxyzfil, ifil, (bx, by, bz))
+            flux_density_point_segment((xp, yp, zp), xyzfil, dlxyzfil, ifil, (bx, by, bz))
         })?;
 
     Ok(())
@@ -62,7 +62,7 @@ pub fn flux_density_linear_filament_par(
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
 /// * `out`:      (T) bx, by, bz at observation points, each length `n`
-pub fn flux_density_linear_filament(
+pub fn flux_density_point_segment(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
@@ -103,7 +103,7 @@ pub fn flux_density_linear_filament(
             let obs = (xp[j], yp[j], zp[j]); // [m]
 
             // Field contributions
-            let (bxc, byc, bzc) = flux_density_linear_filament_scalar((fil0, fil1, current), obs);
+            let (bxc, byc, bzc) = flux_density_point_segment_scalar((fil0, fil1, current), obs);
             bx[j] += bxc;
             by[j] += byc;
             bz[j] += bzc;
@@ -126,7 +126,7 @@ pub fn flux_density_linear_filament(
 /// # Returns
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
-pub fn flux_density_linear_filament_scalar(
+pub fn flux_density_point_segment_scalar(
     xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
     xyzobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
@@ -189,7 +189,7 @@ pub fn flux_density_linear_filament_scalar(
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
 /// * `out`:      (V-s/m) ax, ay, az at observation points, each length `n`
-pub fn vector_potential_linear_filament_par(
+pub fn vector_potential_point_segment_par(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
@@ -205,7 +205,7 @@ pub fn vector_potential_linear_filament_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            vector_potential_linear_filament((xp, yp, zp), xyzfil, dlxyzfil, ifil, (bx, by, bz))
+            vector_potential_point_segment((xp, yp, zp), xyzfil, dlxyzfil, ifil, (bx, by, bz))
         })?;
 
     Ok(())
@@ -223,7 +223,7 @@ pub fn vector_potential_linear_filament_par(
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
 /// * `out`:      (V-s/m) ax, ay, az at observation points, each length `n`
-pub fn vector_potential_linear_filament(
+pub fn vector_potential_point_segment(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
@@ -265,7 +265,7 @@ pub fn vector_potential_linear_filament(
 
             // Field contributions
             let (axc, ayc, azc) =
-                vector_potential_linear_filament_scalar((fil0, fil1, current), obs);
+                vector_potential_point_segment_scalar((fil0, fil1, current), obs);
             ax[j] += axc;
             ay[j] += ayc;
             az[j] += azc;
@@ -289,7 +289,7 @@ pub fn vector_potential_linear_filament(
 ///
 /// * `a`:        (V-s/m) Vector potential x, y, z components
 #[inline]
-pub fn vector_potential_linear_filament_scalar(
+pub fn vector_potential_point_segment_scalar(
     xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
     xyzobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
@@ -329,13 +329,13 @@ pub fn vector_potential_linear_filament_scalar(
 /// # Returns
 ///
 /// * `jxb`:        (N/m^3) Body force density
-pub fn body_force_density_linear_filament_scalar(
+pub fn body_force_density_point_segment_scalar(
     xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
     xyzobs: (f64, f64, f64),
     jobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
     // Get magnetic flux density at target point
-    let (bx, by, bz) = flux_density_linear_filament_scalar(xyzifil, xyzobs); // [T]
+    let (bx, by, bz) = flux_density_point_segment_scalar(xyzifil, xyzobs); // [T]
 
     // Take JxB Lorentz force
     cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
@@ -354,7 +354,7 @@ pub fn body_force_density_linear_filament_scalar(
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 /// * `out`:       (N/m^3) Body force density x, y, z components
-pub fn body_force_density_linear_filament(
+pub fn body_force_density_point_segment(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
@@ -397,7 +397,7 @@ pub fn body_force_density_linear_filament(
 
             // [V-s/m] vector potential contribution of this filament to this observation point
             let (jxbx, jxby, jxbz) =
-                body_force_density_linear_filament_scalar((fil0, fil1, ifil[i]), obs, jj);
+                body_force_density_point_segment_scalar((fil0, fil1, ifil[i]), obs, jj);
             outx[j] += jxbx;
             outy[j] += jxby;
             outz[j] += jxbz;
@@ -422,7 +422,7 @@ pub fn body_force_density_linear_filament(
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 /// * `out`:       (N/m^3) Body force density x, y, z components
-pub fn body_force_density_linear_filament_par(
+pub fn body_force_density_point_segment_par(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
@@ -440,7 +440,7 @@ pub fn body_force_density_linear_filament_par(
     (outxc, outyc, outzc, xpc, ypc, zpc, jxc, jyc, jzc)
         .into_par_iter()
         .try_for_each(|(outx, outy, outz, xp, yp, zp, jx, jy, jz)| {
-            body_force_density_linear_filament(
+            body_force_density_point_segment(
                 xyzfil,
                 dlxyzfil,
                 ifil,
@@ -483,7 +483,7 @@ mod test {
                 &mut vec![0.0; ndiscr - 1],
                 &mut vec![0.0; ndiscr - 1],
             );
-            body_force_density_linear_filament(
+            body_force_density_point_segment(
                 (&x[..ndiscr - 1], &y[..ndiscr - 1], &z[..ndiscr - 1]),
                 dl,
                 &vec![ni; x.len()][..],
@@ -536,7 +536,7 @@ mod test {
                     &mut vec![0.0; ndiscr - 1],
                     &mut vec![0.0; ndiscr - 1],
                 );
-                body_force_density_linear_filament(
+                body_force_density_point_segment(
                     (&xi[..ndiscr - 1], &yi[..ndiscr - 1], &zi[..ndiscr - 1]),
                     dli,
                     &vec![ni * nj; xi.len() - 1][..],
@@ -603,7 +603,7 @@ mod test {
         let outx = &mut [0.0; NFIL - 1];
         let outy = &mut [0.0; NFIL - 1];
         let outz = &mut [0.0; NFIL - 1];
-        vector_potential_linear_filament(
+        vector_potential_point_segment(
             (&xmid2, &ymid2, &zmid2),
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
@@ -637,7 +637,7 @@ mod test {
             let mut outy = [0.0];
             let mut outz = [0.0];
 
-            vector_potential_linear_filament(
+            vector_potential_point_segment(
                 (&[x], &[y], &[z]),
                 (&xyz, &xyz, &xyz),
                 (&dlxyz, &dlxyz, &dlxyz),
@@ -702,7 +702,7 @@ mod test {
                     let mut bx = [0.0];
                     let mut by = [0.0];
                     let mut bz = [0.0];
-                    flux_density_linear_filament(
+                    flux_density_point_segment(
                         (&[*x], &[*y], &[*z]),
                         (&xyz, &xyz, &xyz),
                         (&dlxyz, &dlxyz, &dlxyz),
@@ -757,8 +757,8 @@ mod test {
         let out5 = &mut [5.0; NOBS];
 
         // Flux density
-        flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, (out0, out1, out2)).unwrap();
-        flux_density_linear_filament_par(xyzp, xyzfil, dlxyzfil, ifil, (out3, out4, out5)).unwrap();
+        flux_density_point_segment(xyzp, xyzfil, dlxyzfil, ifil, (out0, out1, out2)).unwrap();
+        flux_density_point_segment_par(xyzp, xyzfil, dlxyzfil, ifil, (out3, out4, out5)).unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out3[i]);
             assert_eq!(out1[i], out4[i]);
@@ -774,8 +774,8 @@ mod test {
         let out5 = &mut [5.0; NOBS];
 
         // Vector potential
-        vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, (out0, out1, out2)).unwrap();
-        vector_potential_linear_filament_par(xyzp, xyzfil, dlxyzfil, ifil, (out3, out4, out5))
+        vector_potential_point_segment(xyzp, xyzfil, dlxyzfil, ifil, (out0, out1, out2)).unwrap();
+        vector_potential_point_segment_par(xyzp, xyzfil, dlxyzfil, ifil, (out3, out4, out5))
             .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out3[i]);

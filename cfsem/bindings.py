@@ -182,6 +182,7 @@ def flux_density_linear_filament(
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     ifil: NDArray[float64],
+    wire_radius: float = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -193,6 +194,7 @@ def flux_density_linear_filament(
         xyzfil: [m] x,y,z coords of filament segment start points
         dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
+        wire_radius: [m] filament radius
         par: Whether to use CPU parallelism
 
     Returns:
@@ -202,7 +204,7 @@ def flux_density_linear_filament(
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
-    return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
+    return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
 
 
 flux_density_biot_savart = flux_density_linear_filament  # For backwards-compatibility
@@ -623,6 +625,7 @@ def body_force_density_linear_filament(
     ifil: NDArray[float64],
     obs: Array3xN,
     j: Array3xN,
+    wire_radius: float = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -635,6 +638,7 @@ def body_force_density_linear_filament(
         ifil: [A] filament current
         obs: [m] x,y,z coords of observation locations
         j: [A/m^2] current density vector at observation locations
+        wire_radius: [m] filament radius
         par: Whether to use CPU parallelism
 
     Returns:
@@ -645,7 +649,9 @@ def body_force_density_linear_filament(
     ifil = ascontiguousarray(ifil).ravel()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
-    jxbx, jxby, jxbz = em_body_force_density_linear_filament(xyzfil, dlxyzfil, ifil, obs, j, par)  # [N/m^3]
+    jxbx, jxby, jxbz = em_body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par
+    )  # [N/m^3]
 
     return jxbx, jxby, jxbz  # type: ignore
 

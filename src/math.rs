@@ -152,7 +152,7 @@ pub fn cylindrical_to_cartesian(r: f64, phi: f64, z: f64) -> (f64, f64, f64) {
 
 /// Decompose two filament endpoints into a midpoint and a length vector
 #[inline]
-pub fn decompose_filament(
+pub(crate) fn decompose_filament(
     start: (f64, f64, f64),
     end: (f64, f64, f64),
 ) -> ((f64, f64, f64), (f64, f64, f64)) {
@@ -165,6 +165,95 @@ pub fn decompose_filament(
     ); // [m] filament midpoint
 
     (midpoint, dl)
+}
+
+pub(crate) struct PointLineDistance {
+    pub(crate) perp: f64,
+    pub(crate) dist_a: f64,
+    pub(crate) dist_b: f64,
+    pub(crate) frac: f64,
+    pub(crate) para_a: f64,
+    pub(crate) para_b: f64,
+    pub(crate) ab_norm: (f64, f64, f64),
+}
+
+/// Minimum perpendicular distance to the infinite line defined by endpoints,
+/// distances to each endpoint, clamp fraction based on `r_min`,
+/// and parallel distances from each endpoint to the target.
+pub(crate) fn point_line_distance_with_endpoints(
+    a: (f64, f64, f64),
+    b: (f64, f64, f64),
+    p: (f64, f64, f64),
+    r_min: f64,
+) -> PointLineDistance {
+    // Vectors and distances between points.
+    let ab = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
+    let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
+    let bp = (p.0 - b.0, p.1 - b.1, p.2 - b.2);
+
+    let dist_a_raw = rss3(ap.0, ap.1, ap.2);
+    let dist_b_raw = rss3(bp.0, bp.1, bp.2);
+
+    // Normalized segment vector.
+    // This might be zero, and that will be handled as late as possible to avoid disrupting
+    // calculations in nominal non-zero-length cases.
+    let ab2 = dot3(ab.0, ab.1, ab.2, ab.0, ab.1, ab.2); // (m^2) squared length.
+    let ab_len_inv = ab2.sqrt().recip();
+    let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
+
+    // Find the closest point on the infinite line defined by this segment to the target point.
+    let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2;
+    let closest = (
+        t.mul_add(ab.0, a.0),
+        t.mul_add(ab.1, a.1),
+        t.mul_add(ab.2, a.2),
+    );
+    let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
+    let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
+
+    let r_min = r_min.max(0.0);
+    let r_min_frac = r_min.max(f64::MIN_POSITIVE);
+
+    // Fraction of perpendicular distance to r_min, to be used for handling
+    // fields inside finite-thickness wires.
+    let frac = (perp_raw / r_min_frac).min(1.0);
+
+    // Clamped parallel, perpendicular, and direct distances from segment to target.
+    let perp = perp_raw.max(r_min);
+    let dist_a = dist_a_raw.max(r_min);
+    let dist_b = dist_b_raw.max(r_min);
+
+    let para_a = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) * ab_len_inv;
+    let para_b = dot3(bp.0, bp.1, bp.2, ab.0, ab.1, ab.2) * ab_len_inv;
+
+    // Handle zero-length special case.
+    if ab2 == 0.0 {
+        let r_min = r_min.max(0.0);
+        let r_min_frac = r_min.max(f64::MIN_POSITIVE);
+        let frac = (dist_a_raw / r_min_frac).min(1.0);
+        let dist_a = dist_a_raw.max(r_min);
+        let dist_b = dist_b_raw.max(r_min);
+        let perp = dist_a;
+        return PointLineDistance {
+            perp,
+            dist_a,
+            dist_b,
+            frac,
+            para_a: 0.0,
+            para_b: 0.0,
+            ab_norm: (0.0, 0.0, 0.0),
+        };
+    }
+
+    PointLineDistance {
+        perp,
+        dist_a,
+        dist_b,
+        frac,
+        para_a,
+        para_b,
+        ab_norm,
+    }
 }
 
 /// Clip NaN values to the provided value.

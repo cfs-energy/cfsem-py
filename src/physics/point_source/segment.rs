@@ -1,4 +1,5 @@
-//! Magnetics calculations for piecewise-linear current filaments.
+//! Magnetics calculations for piecewise-linear current filaments
+//! in point-source form.
 
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
@@ -7,136 +8,11 @@ use rayon::{
 
 use crate::{
     chunksize,
-    math::{clip_nan, cross3, cross3f, decompose_filament, dot3, dot3f, rss3},
+    math::{cross3, cross3f, decompose_filament, dot3f, rss3},
 };
 
 use crate::{MU0_OVER_4PI, macros::*};
 
-const MIN_WIRE_RADIUS: f64 = 1e-10;
-
-/// Estimate the mutual inductance between two piecewise-linear current filaments.
-///
-/// Uses filament midpoints as field source and target.
-///
-/// # Arguments
-///
-/// * `xyzfil0`:         (m) filament origin coordinates for first path, length `n`
-/// * `dlxyzfil0`:       (m) filament segment lengths for first path, length `n`
-/// * `xyzfil1`:         (m) filament origin coordinates for second path, length `n`
-/// * `dlxyzfil1`:       (m) filament segment lengths for second path, length `n`
-/// * `self_inductance`: Flag for whether this calc is being used for self-inductance,
-///                      in which case segment self-field terms are replaced with a hand-calc
-///
-/// # Commentary
-///
-/// Uses Neumann's Formula for the mutual inductance of arbitrary loops, which is
-/// originally from \[2\] and can be found in a more friendly format on wikipedia.
-///
-/// When `self_inductance` flag is set, zeroes-out the contributions from self-pairings
-/// to resolve the thin-filament self-inductance singularity and replaces the
-/// segment self-inductance term with an analytic value from equation 4 (with Y=1/2) of \[3\],
-/// which is a scalar-per-length value for low-frequency operation (uniform section current).
-///
-/// # Assumptions
-///
-/// * Thin, well-behaved filaments
-/// * Uniform current distribution within segments
-///     * Low frequency operation; no skin effect
-///       (which would reduce the segment self-field term)
-/// * Vacuum permeability everywhere
-/// * Each filament has a constant current in all segments
-///   (otherwise we need an inductance matrix)
-///
-/// # References
-///
-///   \[1\] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. \[Online\].
-///         Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
-///
-///   \[2\] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-///         Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103).
-///
-///   \[3\] R. Dengler, “Self inductance of a wire loop as a curve integral,”
-///         AEM, vol. 5, no. 1, p. 1, Jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331).
-pub fn inductance_piecewise_linear_filaments(
-    xyzfil0: (&[f64], &[f64], &[f64]),
-    dlxyzfil0: (&[f64], &[f64], &[f64]),
-    xyzfil1: (&[f64], &[f64], &[f64]),
-    dlxyzfil1: (&[f64], &[f64], &[f64]),
-    self_inductance: bool,
-) -> Result<f64, &'static str> {
-    // Unpack
-    let (xfil0, yfil0, zfil0) = xyzfil0;
-    let (dlxfil0, dlyfil0, dlzfil0) = dlxyzfil0;
-    let (xfil1, yfil1, zfil1) = xyzfil1;
-    let (dlxfil1, dlyfil1, dlzfil1) = dlxyzfil1;
-
-    // Check lengths; Error if they do not match
-    let n = xfil0.len();
-    check_length!(n, xfil0, yfil0, zfil0, dlxfil0, dlyfil0, dlzfil0);
-
-    let m = xfil1.len();
-    check_length!(m, xfil1, yfil1, zfil1, dlxfil1, dlyfil1, dlzfil1);
-
-    if self_inductance && m != n {
-        return Err(
-            "For self-inductance runs, the two paths must be the same length and should be identical",
-        );
-    }
-
-    let mut inductance: f64 = 0.0; // [H], although it is in [m] until the final calc
-    let mut total_length: f64 = 0.0; // [m]
-    for i in 0..n {
-        // Filament i midpoint
-        let dlxi = dlxfil0[i]; // [m]
-        let dlyi = dlyfil0[i]; // [m]
-        let dlzi = dlzfil0[i]; // [m]
-        let xmidi = dlxi.mul_add(0.5, xfil0[i]); // [m]
-        let ymidi = dlyi.mul_add(0.5, yfil0[i]); // [m]
-        let zmidi = dlzi.mul_add(0.5, zfil0[i]); // [m]
-
-        // Accumulate total length if we need it
-        if self_inductance {
-            total_length += rss3(dlxi, dlyi, dlzi);
-        }
-
-        for j in 0..m {
-            // Skip self-interaction terms which are handled separately
-            if self_inductance && i == j {
-                continue;
-            }
-
-            // Filament j midpoint
-            let dlxj = dlxfil1[j]; // [m]
-            let dlyj = dlyfil1[j]; // [m]
-            let dlzj = dlzfil1[j]; // [m]
-            let xmidj = dlxj.mul_add(0.5, xfil1[j]); // [m]
-            let ymidj = dlyj.mul_add(0.5, yfil1[j]); // [m]
-            let zmidj = dlzj.mul_add(0.5, zfil1[j]); // [m]
-
-            // Distance between midpoints
-            let rx = xmidi - xmidj;
-            let ry = ymidi - ymidj;
-            let rz = zmidi - zmidj;
-            let dist = rss3(rx, ry, rz);
-
-            // Dot product of segment vectors
-            let dxdot = dot3(dlxi, dlyi, dlzi, dlxj, dlyj, dlzj);
-
-            inductance += dxdot / dist;
-        }
-    }
-
-    // Add self-inductance of individual filament segments
-    // if this is a self-inductance calc
-    if self_inductance {
-        inductance += 0.5 * total_length;
-    }
-
-    // Finally, do the shared constant factor
-    inductance *= MU0_OVER_4PI;
-
-    Ok(inductance)
-}
 
 /// Biot-Savart calculation for B-field contribution from many current filament
 /// segments to many observation points.
@@ -151,14 +27,12 @@ pub fn inductance_piecewise_linear_filaments(
 /// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `m`
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
 /// * `out`:      (T) bx, by, bz at observation points, each length `n`
 pub fn flux_density_linear_filament_par(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     // Chunk inputs
@@ -170,14 +44,7 @@ pub fn flux_density_linear_filament_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            flux_density_linear_filament(
-                (xp, yp, zp),
-                xyzfil,
-                dlxyzfil,
-                ifil,
-                wire_radius,
-                (bx, by, bz),
-            )
+            flux_density_linear_filament((xp, yp, zp), xyzfil, dlxyzfil, ifil, (bx, by, bz))
         })?;
 
     Ok(())
@@ -194,14 +61,12 @@ pub fn flux_density_linear_filament_par(
 /// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `m`
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
 /// * `out`:      (T) bx, by, bz at observation points, each length `n`
 pub fn flux_density_linear_filament(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     // Unpack
@@ -238,8 +103,7 @@ pub fn flux_density_linear_filament(
             let obs = (xp[j], yp[j], zp[j]); // [m]
 
             // Field contributions
-            let (bxc, byc, bzc) =
-                flux_density_linear_filament_scalar((fil0, fil1, current), wire_radius, obs);
+            let (bxc, byc, bzc) = flux_density_linear_filament_scalar((fil0, fil1, current), obs);
             bx[j] += bxc;
             by[j] += byc;
             bz[j] += bzc;
@@ -252,46 +116,11 @@ pub fn flux_density_linear_filament(
 /// Biot-Savart calculation for B-field contribution one filament
 /// to one observation point.
 ///
-/// Uses the formula for continuous current distribution and finite wire thickness.
-/// Inside the wire radius, the field blends linearly to zero at the center.
-///
-/// Draws from Griffiths eq'n 5.37 with inspiration from rat-mlfmm's "Van Lanen" kernel
-/// to replace the expensive sine functions with geometric equivalents.
-///
-///        p (target)
-///        *
-///       /|\
-///      / | \
-///   ap/  |  \bp
-///    / ∠a|∠b \
-///   /    |    \
-///  a-----m-----b  -> I  
-///        |
-///        |  d_perp (from line to p)
-///        |
-///        q (closest point on line)
-///
-/// The base formula is
-///
-/// $ |B| = \frac{\mu_0 I}{4 \pi \r_\perp} (sin(\theta_b) - sin(\theta_a)) $
-///
-/// with the direction determined by $ \hat{dL} \times \hat r $ with $r$ defined from the
-/// midpoint of the segment.
-///
-/// The otherwise-expensive sine functions are evaluated directly using distance magnitudes.
-///
-/// Inside the wire radius, the formula is modified to blend linearly to zero at the wire center.
-///
-/// ## References
-///
-/// * \[1\] D. J. Griffiths, Introduction to electrodynamics, Fourth edition. Boston: Pearson, 2014.
-/// * \[2\] J. van Nugteren and N. Deelen, “rat-mlfmm,” GitLab repository. Accessed: Jan. 16, 2026. [Online].
-///         Available: https://gitlab.com/Project-Rat/rat-mlfmm/-/tree/1e1d387522fafac50c0540af1ebb15d1d506d33d
+/// Uses filament midpoint as field source.
 ///
 /// # Arguments
 ///
 /// * `xyzifil`:   (m, m, A) Filament start and end coords and current
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
 /// * `xyzp`:     (m) Observation point coords
 ///
 /// # Returns
@@ -299,77 +128,51 @@ pub fn flux_density_linear_filament(
 /// * `b`:        (T) Magnetic flux density (B-field)
 pub fn flux_density_linear_filament_scalar(
     xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    wire_radius: f64,
     xyzobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
-    use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
-
     // Unpack
-    let (start, end, ifil) = xyzifil;
+    let (xyz0, xyz1, ifil) = xyzifil;
     let (xp, yp, zp) = xyzobs;
 
-    // Get length delta and normalized direction
-    let dl = (end.0 - start.0, end.1 - start.1, end.2 - start.2);
-    let mid = (
-        start.0 + dl.0 / 2.0,
-        start.1 + dl.1 / 2.0,
-        start.2 + dl.2 / 2.0,
-    );
+    // Get filament midpoint and length vector
+    let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
 
-    // Vector from segment midpoint to observation point for determining
-    // the direction of the field
-    let r = (xp - mid.0, yp - mid.1, zp - mid.2); // [m]
-    let rmag = rss3(r.0, r.1, r.2); // [m^2]
-    let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
+    // Get distance from middle of the filament segment to the observation point
+    let rx: f64 = xp - xmid; // [m]
+    let ry = yp - ymid; // [m]
+    let rz = zp - zmid; // [m]
 
-    // Get perpendicular distance and distance from each endpoint to the target,
-    // and a fraction between 0 and 1 representing how far the point is from the center of the wire
-    // to the edge of the wire.
-    // All 3 distances are clamped to at least the wire radius.
-    let PointLineDistance {
-        perp,
-        dist_a,
-        dist_b,
-        frac,
-        para_a,
-        para_b,
-        ab_norm: dlhat,
-    } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
+    // Now that we've resolved the part of the calculation that involves a wide dynamic range,
+    // which drives the need for 64-bit floats to control roundoff error,
+    // we can switch to 32-bit floats for the majority of the calculation without incurring
+    // excessive error, before converting back to 64-bit float so that we maintain
+    // acceptable error during summation downstream.
+    let (rx, ry, rz) = (rx as f32, ry as f32, rz as f32);
+    let dl = (dl.0 as f32, dl.1 as f32, dl.2 as f32);
+    let ifil = ifil as f32;
 
-    // Sine of the angle formed by the lines from the target to each endpoint
-    // and the line of the filament.
-    let sin_theta_a = (para_a / dist_a) as f32;
-    let sin_theta_b = (para_b / dist_b) as f32;
-
-    // Geometric component of B-field magnitude,
-    // including linear falloff inside finite-thickness wire.
-    let geometric_factor = frac as f32 * (sin_theta_b - sin_theta_a);
+    // Do 1/r^3 operation with an ordering that improves float error by eliminating
+    // the actual cube operation and using fused multiply-add to reduce roundoff events,
+    // then rolling the result into the factor that is constant between all contributions.
+    let sumsq = dot3f(rx, ry, rz, rx, ry, rz);
+    let rnorm3_inv = sumsq.powf(-1.5); // [m^-3]
 
     // This factor is constant across all x, y, and z components
-    let c = MU0_OVER_4PI as f32 * geometric_factor; // Relatively insensitive to resolution
-    let c2 = ifil / perp; // (A/m) Relatively sensitive to resolution
+    let c = (MU0_OVER_4PI as f32) * ifil * rnorm3_inv;
 
-    // Direction of cross(dL, r), the direction of the field.
-    let (cx, cy, cz) = cross3f(
-        dlhat.0 as f32,
-        dlhat.1 as f32,
-        dlhat.2 as f32,
-        rhat.0 as f32,
-        rhat.1 as f32,
-        rhat.2 as f32,
-    ); // (dimensionless)
+    // Evaluate the cross products for each axis component
+    // separately using mul_add which would not be assumed usable
+    // in a more general implementation.
+    let (cx, cy, cz) = cross3f(dl.0, dl.1, dl.2, rx, ry, rz);
 
     // Assemble final B-field components
     // and upcast back to 64-bit float so that summation operations
     // downstream do not incur excessive roundoff error.
-    if frac > 1e6 * f64::EPSILON || perp < MIN_WIRE_RADIUS {
-        let bx = (c * cx) as f64 * c2; // [T]
-        let by = (c * cy) as f64 * c2;
-        let bz = (c * cz) as f64 * c2;
-        return (bx, by, bz);
-    } else {
-        return (0.0, 0.0, 0.0);
-    }
+    let bx = (c * cx) as f64; // [T]
+    let by = (c * cy) as f64;
+    let bz = (c * cz) as f64;
+
+    (bx, by, bz)
 }
 
 /// Vector potential calculation for A-field contribution from many current filament
@@ -520,7 +323,6 @@ pub fn vector_potential_linear_filament_scalar(
 /// # Arguments
 ///
 /// * `xyzifil`:   (m, m, A) Filament start and end coords and current
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 ///
@@ -529,12 +331,11 @@ pub fn vector_potential_linear_filament_scalar(
 /// * `jxb`:        (N/m^3) Body force density
 pub fn body_force_density_linear_filament_scalar(
     xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    wire_radius: f64,
     xyzobs: (f64, f64, f64),
     jobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
     // Get magnetic flux density at target point
-    let (bx, by, bz) = flux_density_linear_filament_scalar(xyzifil, wire_radius, xyzobs); // [T]
+    let (bx, by, bz) = flux_density_linear_filament_scalar(xyzifil, xyzobs); // [T]
 
     // Take JxB Lorentz force
     cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
@@ -550,7 +351,6 @@ pub fn body_force_density_linear_filament_scalar(
 /// * `xyzifil`:   (m, m, A) Filament start and end coords and current
 /// * `dlxyzfil`:  (m) Filament segment length deltas, each length `m`
 /// * `ifil`:      (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 /// * `out`:       (N/m^3) Body force density x, y, z components
@@ -558,7 +358,6 @@ pub fn body_force_density_linear_filament(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -598,7 +397,7 @@ pub fn body_force_density_linear_filament(
 
             // [V-s/m] vector potential contribution of this filament to this observation point
             let (jxbx, jxby, jxbz) =
-                body_force_density_linear_filament_scalar((fil0, fil1, ifil[i]), wire_radius, obs, jj);
+                body_force_density_linear_filament_scalar((fil0, fil1, ifil[i]), obs, jj);
             outx[j] += jxbx;
             outy[j] += jxby;
             outz[j] += jxbz;
@@ -620,7 +419,6 @@ pub fn body_force_density_linear_filament(
 /// * `xyzifil`:   (m, m, A) Filament start and end coords and current
 /// * `dlxyzfil`:  (m) Filament segment length deltas, each length `m`
 /// * `ifil`:      (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 /// * `out`:       (N/m^3) Body force density x, y, z components
@@ -628,7 +426,6 @@ pub fn body_force_density_linear_filament_par(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -647,7 +444,6 @@ pub fn body_force_density_linear_filament_par(
                 xyzfil,
                 dlxyzfil,
                 ifil,
-                wire_radius,
                 (xp, yp, zp),
                 (jx, jy, jz),
                 (outx, outy, outz),
@@ -663,6 +459,7 @@ mod test {
 
     use super::*;
     use crate::testing::*;
+    use crate::physics::linear_filament::inductance_piecewise_linear_filaments;
 
     /// Make sure the forces have the right sign
     /// and self-forces sum to zero within discretization error
@@ -690,7 +487,6 @@ mod test {
                 (&x[..ndiscr - 1], &y[..ndiscr - 1], &z[..ndiscr - 1]),
                 dl,
                 &vec![ni; x.len()][..],
-                0.0,
                 (&x[..ndiscr - 1], &y[..ndiscr - 1], &z[..ndiscr - 1]),
                 dl,
                 (jxbx, jxby, jxbz),
@@ -744,7 +540,6 @@ mod test {
                     (&xi[..ndiscr - 1], &yi[..ndiscr - 1], &zi[..ndiscr - 1]),
                     dli,
                     &vec![ni * nj; xi.len() - 1][..],
-                    0.0,
                     mid,
                     dlj,
                     (jxbx, jxby, jxbz),
@@ -912,7 +707,6 @@ mod test {
                         (&xyz, &xyz, &xyz),
                         (&dlxyz, &dlxyz, &dlxyz),
                         &[1.0],
-                        0.0,
                         (&mut bx, &mut by, &mut bz),
                     )
                     .unwrap();
@@ -963,10 +757,8 @@ mod test {
         let out5 = &mut [5.0; NOBS];
 
         // Flux density
-        flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, 0.0, (out0, out1, out2))
-            .unwrap();
-        flux_density_linear_filament_par(xyzp, xyzfil, dlxyzfil, ifil, 0.0, (out3, out4, out5))
-            .unwrap();
+        flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, (out0, out1, out2)).unwrap();
+        flux_density_linear_filament_par(xyzp, xyzfil, dlxyzfil, ifil, (out3, out4, out5)).unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out3[i]);
             assert_eq!(out1[i], out4[i]);

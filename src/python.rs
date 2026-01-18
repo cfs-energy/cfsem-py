@@ -212,6 +212,7 @@ fn flux_density_circular_filament(
 
 /// Python bindings for cfsemrs::physics::linear_filament::flux_density_linear_filament
 #[pyfunction]
+#[pyo3(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius=0.0, par=true))]
 fn flux_density_linear_filament(
     xyzp: (
         PyReadonlyArray1<f64>,
@@ -229,6 +230,7 @@ fn flux_density_linear_filament(
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
     ifil: PyReadonlyArray1<f64>, // [A] filament current
+    wire_radius: f64,            // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -246,7 +248,14 @@ fn flux_density_linear_filament(
         true => physics::linear_filament::flux_density_linear_filament_par,
         false => physics::linear_filament::flux_density_linear_filament,
     };
-    match func(xyzp, xyzfil, dlxyzfil, ifil, (&mut bx, &mut by, &mut bz)) {
+    match func(
+        xyzp,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        wire_radius,
+        (&mut bx, &mut by, &mut bz),
+    ) {
         Ok(x) => x,
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -723,6 +732,7 @@ fn body_force_density_circular_filament_cartesian(
 
 /// Python bindings for cfsemrs::physics::body_force_density_linear_filament
 #[pyfunction]
+#[pyo3(signature = (xyzfil, dlxyzfil, ifil, obs, j, wire_radius=0.0, par=true))]
 fn body_force_density_linear_filament(
     xyzfil: (
         PyReadonlyArray1<f64>,
@@ -745,6 +755,7 @@ fn body_force_density_linear_filament(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [A/m^2] current density at observation points
+    wire_radius: f64, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -766,7 +777,7 @@ fn body_force_density_linear_filament(
     let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     let out = (&mut outx[..], &mut outy[..], &mut outz[..]);
 
-    match func(xyzfil, dlxyzfil, ifil, obs, j, out) {
+    match func(xyzfil, dlxyzfil, ifil, wire_radius, obs, j, out) {
         Ok(_) => (),
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

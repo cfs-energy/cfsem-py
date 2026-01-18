@@ -245,6 +245,7 @@ mod tests {
             (&xfil, &yfil, &zfil),
             (&dlx, &dly, &dlz),
             &ifil,
+            0.0,
             (&mut bx, &mut by, &mut bz),
         )
         .expect("linear filament calc failed");
@@ -318,6 +319,7 @@ mod tests {
             (&xfil, &yfil, &zfil),
             (&dlx, &dly, &dlz),
             &ifil,
+            0.0,
             (&mut bx, &mut by, &mut bz),
         )
         .expect("linear filament calc failed");

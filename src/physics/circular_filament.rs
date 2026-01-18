@@ -1020,6 +1020,7 @@ mod test {
                 ),
                 dl1,
                 &vec![1.0; x.len()][..],
+                0.0,
                 (&midpoints(&xi), &midpoints(&yi), &midpoints(&zi)),
                 j2,
                 (outxi, outyi, outzi),
@@ -1099,6 +1100,7 @@ mod test {
                 ),
                 dlxyzfil,
                 &ifil[..],
+                0.0,
                 (xcontrib, ycontrib, zcontrib),
             )
             .unwrap();

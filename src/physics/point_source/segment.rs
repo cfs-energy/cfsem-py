@@ -13,7 +13,6 @@ use crate::{
 
 use crate::{MU0_OVER_4PI, macros::*};
 
-
 /// Biot-Savart calculation for B-field contribution from many current filament
 /// segments to many observation points.
 ///
@@ -264,8 +263,7 @@ pub fn vector_potential_point_segment(
             let obs = (xp[j], yp[j], zp[j]); // [m]
 
             // Field contributions
-            let (axc, ayc, azc) =
-                vector_potential_point_segment_scalar((fil0, fil1, current), obs);
+            let (axc, ayc, azc) = vector_potential_point_segment_scalar((fil0, fil1, current), obs);
             ax[j] += axc;
             ay[j] += ayc;
             az[j] += azc;
@@ -458,8 +456,8 @@ mod test {
     use std::f64::consts::PI;
 
     use super::*;
-    use crate::testing::*;
     use crate::physics::linear_filament::inductance_piecewise_linear_filaments;
+    use crate::testing::*;
 
     /// Make sure the forces have the right sign
     /// and self-forces sum to zero within discretization error

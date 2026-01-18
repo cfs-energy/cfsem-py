@@ -7,7 +7,7 @@ use rayon::{
 
 use crate::{
     chunksize,
-    math::{clip_nan, cross3, cross3f, decompose_filament, dot3, dot3f, rss3},
+    math::{cross3, cross3f, decompose_filament, dot3, rss3},
 };
 
 use crate::{MU0_OVER_4PI, macros::*};
@@ -343,7 +343,7 @@ pub fn flux_density_linear_filament_scalar(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let geometric_factor = frac as f32 * (sin_theta_b - sin_theta_a);
+    let geometric_factor = -frac as f32 * (sin_theta_b - sin_theta_a);
 
     // This factor is constant across all x, y, and z components
     let c = MU0_OVER_4PI as f32 * geometric_factor; // Relatively insensitive to resolution
@@ -597,8 +597,12 @@ pub fn body_force_density_linear_filament(
             let jj = (jx[j], jy[j], jz[j]); // [A/m^2] current density vector at obs point
 
             // [V-s/m] vector potential contribution of this filament to this observation point
-            let (jxbx, jxby, jxbz) =
-                body_force_density_linear_filament_scalar((fil0, fil1, ifil[i]), wire_radius, obs, jj);
+            let (jxbx, jxby, jxbz) = body_force_density_linear_filament_scalar(
+                (fil0, fil1, ifil[i]),
+                wire_radius,
+                obs,
+                jj,
+            );
             outx[j] += jxbx;
             outy[j] += jxby;
             outz[j] += jxbz;
@@ -662,6 +666,7 @@ mod test {
     use std::f64::consts::PI;
 
     use super::*;
+    use crate::physics::point_source::segment::flux_density_point_segment;
     use crate::testing::*;
 
     /// Make sure the forces have the right sign
@@ -760,6 +765,102 @@ mod test {
                 assert!(approx(0.0, jxby_sum, rtol, atol));
                 assert!(jxbz_sum.signum() == (zif - zjf).signum());
             }
+        }
+    }
+
+    /// Compare single-segment Biot-Savart against discretized point-source segments.
+    #[test]
+    fn test_flux_density_against_point_segment_discretization() {
+        let (rtol, atol) = (1e-3, 1e-6);
+
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let ifil = [1.0];
+
+        let xfil = [start.0];
+        let yfil = [start.1];
+        let zfil = [start.2];
+        let dlx = [end.0 - start.0];
+        let dly = [end.1 - start.1];
+        let dlz = [end.2 - start.2];
+        let xyzfil = (&xfil[..], &yfil[..], &zfil[..]);
+        let dlxyz = (&dlx[..], &dly[..], &dlz[..]);
+
+        let ngrid = 10;
+        let span = 10.0;
+        let xvals: Vec<f64> = (0..ngrid)
+            .map(|i| -span + (2.0 * span) * (i as f64) / (ngrid as f64 - 1.0))
+            .collect();
+        let yvals = xvals.clone();
+        let zvals = xvals.clone();
+
+        let total = ngrid * ngrid * ngrid;
+        let mut xp = Vec::with_capacity(total);
+        let mut yp = Vec::with_capacity(total);
+        let mut zp = Vec::with_capacity(total);
+        for &x in &xvals {
+            for &y in &yvals {
+                for &z in &zvals {
+                    xp.push(x);
+                    yp.push(y);
+                    zp.push(z);
+                }
+            }
+        }
+        let xyzp = (&xp[..], &yp[..], &zp[..]);
+
+        let mut bx = vec![0.0; total];
+        let mut by = vec![0.0; total];
+        let mut bz = vec![0.0; total];
+        flux_density_linear_filament(xyzp, xyzfil, dlxyz, &ifil, 0.0, (&mut bx, &mut by, &mut bz))
+            .unwrap();
+
+        let nseg = 1000;
+        let dz = (end.2 - start.2) / nseg as f64;
+        let mut xfil_ps = Vec::with_capacity(nseg);
+        let mut yfil_ps = Vec::with_capacity(nseg);
+        let mut zfil_ps = Vec::with_capacity(nseg);
+        for i in 0..nseg {
+            xfil_ps.push(start.0);
+            yfil_ps.push(start.1);
+            zfil_ps.push(start.2 + dz * i as f64);
+        }
+        let dlx = vec![0.0; nseg];
+        let dly = vec![0.0; nseg];
+        let dlz = vec![dz; nseg];
+        let ifil_ps = vec![1.0; nseg];
+
+        let mut bx_ps = vec![0.0; total];
+        let mut by_ps = vec![0.0; total];
+        let mut bz_ps = vec![0.0; total];
+        flux_density_point_segment(
+            xyzp,
+            (&xfil_ps, &yfil_ps, &zfil_ps),
+            (&dlx, &dly, &dlz),
+            &ifil_ps,
+            (&mut bx_ps, &mut by_ps, &mut bz_ps),
+        )
+        .unwrap();
+
+        for i in 0..xp.len() {
+            assert!(
+                approx(bx[i], bx_ps[i], rtol, atol),
+                "bx is {}, should be {}",
+                bx[i],
+                bx_ps[i]
+            );
+            assert!(
+                approx(by[i], by_ps[i], rtol, atol),
+                "by is {}, should be {}",
+                by[i],
+                by_ps[i]
+            );
+            assert!(
+                approx(bz[i], bz_ps[i], rtol, atol),
+                "bz is {}, should be {}",
+                bz[i],
+                bz_ps[i]
+            );
         }
     }
 

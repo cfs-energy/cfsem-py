@@ -132,7 +132,10 @@ impl Context {
 
         self.set_van_lanen(opts.use_van_lanen)?;
         self.set_direct_mode(ffi::RatMlfmmDirectMode::Threshold)?;
-        let threshold = opts.direct_threshold.unwrap_or(DEFAULT_DIRECT_THRESHOLD).max(1);
+        let threshold = opts
+            .direct_threshold
+            .unwrap_or(DEFAULT_DIRECT_THRESHOLD)
+            .max(1);
         self.set_direct_threshold_count(threshold)?;
         if let Some(order) = opts.order {
             self.set_num_exp(order)?;

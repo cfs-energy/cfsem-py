@@ -286,7 +286,7 @@ fn fields_linear_filament_mlfmm(
         PyReadonlyArray1<f64>,
     ), // [m] Filament delta from start to end
     ifil: PyReadonlyArray1<f64>, // [A] filament current
-    eps: PyReadonlyArray1<f64>,      // [m] van Lanen softening parameter
+    eps: PyReadonlyArray1<f64>,  // [m] van Lanen softening parameter
     use_van_lanen: bool,
     direct_threshold: u64,
     order: Option<i32>,
@@ -755,7 +755,7 @@ fn body_force_density_linear_filament(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [A/m^2] current density at observation points
-    wire_radius: f64, // [m] filament radius
+    wire_radius: f64,            // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice

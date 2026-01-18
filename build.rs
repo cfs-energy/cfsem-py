@@ -31,12 +31,7 @@ fn main() {
         ],
     );
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
-    apply_vendor_patches(
-        &manifest_dir,
-        &patches_dir,
-        &rat_common_dir,
-        &rat_mlfmm_dir,
-    );
+    apply_vendor_patches(&manifest_dir, &patches_dir, &rat_common_dir, &rat_mlfmm_dir);
 
     let mut cfg = cmake::Config::new(&wrapper_dir);
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
@@ -282,7 +277,11 @@ fn apply_vendor_patches(
                 .status()
                 .expect("failed to run git apply");
             if !status.success() {
-                panic!("failed to apply patch {} in {}", patch.display(), repo_dir.display());
+                panic!(
+                    "failed to apply patch {} in {}",
+                    patch.display(),
+                    repo_dir.display()
+                );
             }
             continue;
         }

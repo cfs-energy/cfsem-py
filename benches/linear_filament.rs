@@ -52,6 +52,7 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
                                 (&xfil[..], &yfil[..], &zfil[..]),
                                 (&dlxfil[..], &dlyfil[..], &dlzfil[..]),
                                 &ifil[..],
+                                0.0,
                                 (&mut bx, &mut by, &mut bz),
                             )
                             .unwrap(),
@@ -78,6 +79,7 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
                                 (&xfil[..], &yfil[..], &zfil[..]),
                                 (&dlxfil[..], &dlyfil[..], &dlzfil[..]),
                                 &ifil[..],
+                                0.0,
                                 (&mut bx, &mut by, &mut bz),
                             )
                             .unwrap(),

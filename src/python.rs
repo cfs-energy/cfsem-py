@@ -212,7 +212,6 @@ fn flux_density_circular_filament(
 
 /// Python bindings for cfsemrs::physics::linear_filament::flux_density_linear_filament
 #[pyfunction]
-#[pyo3(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius=0.0, par=true))]
 fn flux_density_linear_filament(
     xyzp: (
         PyReadonlyArray1<f64>,
@@ -230,7 +229,7 @@ fn flux_density_linear_filament(
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
     ifil: PyReadonlyArray1<f64>, // [A] filament current
-    wire_radius: f64,            // [m] filament radius
+    wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -239,6 +238,7 @@ fn flux_density_linear_filament(
     _3tup_slice_ro!(xyzfil);
     _3tup_slice_ro!(dlxyzfil);
     let ifil = ifil.as_slice()?;
+    let wire_radius = wire_radius.as_slice()?;
 
     // Do calculations
     let n = xyzp.0.len();

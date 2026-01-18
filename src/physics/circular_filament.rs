@@ -1100,7 +1100,7 @@ mod test {
                 ),
                 dlxyzfil,
                 &ifil[..],
-                0.0,
+                &vec![0.0; ifil.len()],
                 (xcontrib, ycontrib, zcontrib),
             )
             .unwrap();

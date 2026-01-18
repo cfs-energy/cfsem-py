@@ -5,7 +5,7 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
-from numpy import ascontiguousarray, float64, zeros_like
+from numpy import asarray, ascontiguousarray, float64, full, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -182,7 +182,7 @@ def flux_density_linear_filament(
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     ifil: NDArray[float64],
-    wire_radius: float = 0.0,
+    wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -194,7 +194,7 @@ def flux_density_linear_filament(
         xyzfil: [m] x,y,z coords of filament segment start points
         dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
-        wire_radius: [m] filament radius
+        wire_radius: [m] filament radius, scalar or array of length `m`
         par: Whether to use CPU parallelism
 
     Returns:
@@ -204,6 +204,9 @@ def flux_density_linear_filament(
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(ifil.size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
     return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
 
 

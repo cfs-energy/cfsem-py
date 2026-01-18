@@ -151,14 +151,14 @@ pub fn inductance_piecewise_linear_filaments(
 /// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `m`
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
+/// * `wire_radius`: (m) (Half-) thickness of conductor, length `m`
 /// * `out`:      (T) bx, by, bz at observation points, each length `n`
 pub fn flux_density_linear_filament_par(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
+    wire_radius: &[f64],
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     // Chunk inputs
@@ -194,14 +194,14 @@ pub fn flux_density_linear_filament_par(
 /// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `m`
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
+/// * `wire_radius`: (m) (Half-) thickness of conductor, length `m`
 /// * `out`:      (T) bx, by, bz at observation points, each length `n`
 pub fn flux_density_linear_filament(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
+    wire_radius: &[f64],
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     // Unpack
@@ -216,7 +216,7 @@ pub fn flux_density_linear_filament(
     let n = xfil.len();
     let m = xp.len();
     check_length!(m, xp, yp, zp, bx, by, bz);
-    check_length!(n, xfil, yfil, zfil, dlxfil, dlyfil, dlzfil, ifil);
+    check_length!(n, xfil, yfil, zfil, dlxfil, dlyfil, dlzfil, ifil, wire_radius);
 
     // Zero output
     bx.fill(0.0);
@@ -239,7 +239,7 @@ pub fn flux_density_linear_filament(
 
             // Field contributions
             let (bxc, byc, bzc) =
-                flux_density_linear_filament_scalar((fil0, fil1, current), wire_radius, obs);
+                flux_density_linear_filament_scalar((fil0, fil1, current), wire_radius[i], obs);
             bx[j] += bxc;
             by[j] += byc;
             bz[j] += bzc;
@@ -812,7 +812,14 @@ mod test {
         let mut bx = vec![0.0; total];
         let mut by = vec![0.0; total];
         let mut bz = vec![0.0; total];
-        flux_density_linear_filament(xyzp, xyzfil, dlxyz, &ifil, 0.0, (&mut bx, &mut by, &mut bz))
+        flux_density_linear_filament(
+            xyzp,
+            xyzfil,
+            dlxyz,
+            &ifil,
+            &[0.0],
+            (&mut bx, &mut by, &mut bz),
+        )
             .unwrap();
 
         let nseg = 1000;
@@ -1013,7 +1020,7 @@ mod test {
                         (&xyz, &xyz, &xyz),
                         (&dlxyz, &dlxyz, &dlxyz),
                         &[1.0],
-                        0.0,
+                        &[0.0],
                         (&mut bx, &mut by, &mut bz),
                     )
                     .unwrap();
@@ -1064,9 +1071,24 @@ mod test {
         let out5 = &mut [5.0; NOBS];
 
         // Flux density
-        flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, 0.0, (out0, out1, out2))
-            .unwrap();
-        flux_density_linear_filament_par(xyzp, xyzfil, dlxyzfil, ifil, 0.0, (out3, out4, out5))
+        let wire_radius = vec![0.0; ifil.len()];
+        flux_density_linear_filament(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            ifil,
+            &wire_radius,
+            (out0, out1, out2),
+        )
+        .unwrap();
+        flux_density_linear_filament_par(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            ifil,
+            &wire_radius,
+            (out3, out4, out5),
+        )
             .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out3[i]);

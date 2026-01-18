@@ -243,12 +243,13 @@ mod tests {
         let mut bx = vec![0.0; xp.len()];
         let mut by = vec![0.0; xp.len()];
         let mut bz = vec![0.0; xp.len()];
+        let wire_radius = vec![0.0; ifil.len()];
         flux_density_linear_filament(
             (&xp, &yp, &zp),
             (&xfil, &yfil, &zfil),
             (&dlx, &dly, &dlz),
             &ifil,
-            0.0,
+            &wire_radius,
             (&mut bx, &mut by, &mut bz),
         )
         .expect("linear filament calc failed");
@@ -317,12 +318,13 @@ mod tests {
         let mut bx = vec![0.0; xp.len()];
         let mut by = vec![0.0; xp.len()];
         let mut bz = vec![0.0; xp.len()];
+        let wire_radius = vec![0.0; ifil.len()];
         flux_density_linear_filament(
             (&xp, &yp, &zp),
             (&xfil, &yfil, &zfil),
             (&dlx, &dly, &dlz),
             &ifil,
-            0.0,
+            &wire_radius,
             (&mut bx, &mut by, &mut bz),
         )
         .expect("linear filament calc failed");

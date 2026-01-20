@@ -90,6 +90,7 @@ def main() -> None:
     ax_line_x.set_xlabel("x [m]")
     ax_line_x.set_ylabel("|B| [T]")
     ax_line_x.set_title("Slice along x (z = 0)")
+    ax_line_x.set_ylim(0.0, np.max(bmag[mid_idx, :]))
     ax_line_x.grid(True, alpha=0.3)
     ax_line_x.legend(frameon=False)
 

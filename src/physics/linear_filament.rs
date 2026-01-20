@@ -216,7 +216,17 @@ pub fn flux_density_linear_filament(
     let n = xfil.len();
     let m = xp.len();
     check_length!(m, xp, yp, zp, bx, by, bz);
-    check_length!(n, xfil, yfil, zfil, dlxfil, dlyfil, dlzfil, ifil, wire_radius);
+    check_length!(
+        n,
+        xfil,
+        yfil,
+        zfil,
+        dlxfil,
+        dlyfil,
+        dlzfil,
+        ifil,
+        wire_radius
+    );
 
     // Zero output
     bx.fill(0.0);
@@ -345,9 +355,9 @@ pub fn flux_density_linear_filament_scalar(
     // including linear falloff inside finite-thickness wire.
     let geometric_factor = -frac as f32 * (sin_theta_b - sin_theta_a);
 
-    // This factor is constant across all x, y, and z components
-    let c = MU0_OVER_4PI as f32 * geometric_factor; // Relatively insensitive to resolution
-    let c2 = ifil / perp; // (A/m) Relatively sensitive to resolution
+    // This factor is constant across all x, y, and z components.
+    let c = MU0_OVER_4PI as f32 * geometric_factor; // Relatively insensitive to resolution.
+    let c2 = ifil / perp; // (A/m) Relatively sensitive to resolution.
 
     // Direction of cross(dL, r), the direction of the field.
     let (cx, cy, cz) = cross3f(
@@ -359,13 +369,15 @@ pub fn flux_density_linear_filament_scalar(
         rhat.2 as f32,
     ); // (dimensionless)
 
-    // Assemble final B-field components
+    // Assemble final B-field components.
     // and upcast back to 64-bit float so that summation operations
     // downstream do not incur excessive roundoff error.
-    if frac > 1e6 * f64::EPSILON || perp < MIN_WIRE_RADIUS {
-        let bx = (c * cx) as f64 * c2; // [T]
-        let by = (c * cy) as f64 * c2;
-        let bz = (c * cz) as f64 * c2;
+    let bx = (c * cx) as f64 * c2; // [T]
+    let by = (c * cy) as f64 * c2;
+    let bz = (c * cz) as f64 * c2;
+
+    // Finally, determine whether we are clipping to zero.
+    if frac > 1e6 * f64::EPSILON {
         return (bx, by, bz);
     } else {
         return (0.0, 0.0, 0.0);
@@ -820,7 +832,7 @@ mod test {
             &[0.0],
             (&mut bx, &mut by, &mut bz),
         )
-            .unwrap();
+        .unwrap();
 
         let nseg = 1000;
         let dz = (end.2 - start.2) / nseg as f64;
@@ -1089,7 +1101,7 @@ mod test {
             &wire_radius,
             (out3, out4, out5),
         )
-            .unwrap();
+        .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out3[i]);
             assert_eq!(out1[i], out4[i]);

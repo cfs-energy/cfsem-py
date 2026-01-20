@@ -228,7 +228,7 @@ fn flux_density_linear_filament(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
-    ifil: PyReadonlyArray1<f64>, // [A] filament current
+    ifil: PyReadonlyArray1<f64>,        // [A] filament current
     wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {

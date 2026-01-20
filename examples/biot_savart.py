@@ -84,7 +84,7 @@ def main() -> None:
     ax_map.plot([0.0, 0.0], [-0.5, 0.5], color="white", linewidth=2.0)
     ax_map.set_xlabel("x [m]")
     ax_map.set_ylabel("z [m]")
-    ax_map.set_title("B-field magnitude (log10)")
+    ax_map.set_title("Linear Filament\nB-field magnitude (log10)")
     cbar = fig.colorbar(im, ax=ax_map)
     cbar.set_label("log10(|B|) [T]")
 
@@ -124,14 +124,14 @@ def main() -> None:
     )
     ax_err_map.set_xlabel("x [m]")
     ax_err_map.set_ylabel("z [m]")
-    ax_err_map.set_title("Point-segment error magnitude (log10)")
+    ax_err_map.set_title("Point-segment discretization\nerror magnitude (log10)")
     cbar_err = fig.colorbar(im_err, ax=ax_err_map)
     cbar_err.set_label("log10(|ΔB|) [T]")
 
     ax_err_x.plot(x, err[mid_idx, :], color="black")
     ax_err_x.set_xlabel("x [m]")
     ax_err_x.set_ylabel("|ΔB| [T]")
-    ax_err_x.set_title("Point-segment error slice along x (z = 0)")
+    ax_err_x.set_title("Point-segment discretization\nerror slice along x (z = 0)")
     ax_err_x.grid(True, alpha=0.3)
 
     ax_err_z.set_axis_off()
@@ -164,14 +164,14 @@ def main() -> None:
         )
         ax_mlfmm_map.set_xlabel("x [m]")
         ax_mlfmm_map.set_ylabel("z [m]")
-        ax_mlfmm_map.set_title("MLFMM error vs point segment (log10)")
+        ax_mlfmm_map.set_title("MLFMM (point-segment expansion)\nerror vs point segment (log10)")
         cbar_m = fig.colorbar(im_m, ax=ax_mlfmm_map)
         cbar_m.set_label("log10(|ΔB|) [T]")
 
         ax_mlfmm_x.plot(x, err_m[mid_idx, :], color="black")
         ax_mlfmm_x.set_xlabel("x [m]")
         ax_mlfmm_x.set_ylabel("|ΔB| [T]")
-        ax_mlfmm_x.set_title("MLFMM error slice along x (z = 0)")
+        ax_mlfmm_x.set_title("MLFMM (point-segment expansion)\nerror slice along x (z = 0)")
         ax_mlfmm_x.grid(True, alpha=0.3)
 
         ax_line_z.plot(
@@ -201,7 +201,7 @@ def main() -> None:
         bmag_vl = np.sqrt(bx_vl * bx_vl + by_vl * by_vl + bz_vl * bz_vl).reshape(xx.shape)
         err_vl = np.abs(bmag_vl - bmag)
         # err_vl = np.where(mask, np.nan, err_vl)
-        err_vl_log10 = np.log10(err_vl)
+        err_vl_log10 = np.log10(err_vl + 1e-30)
 
         im_vl = ax_vl_map.imshow(
             err_vl_log10,
@@ -212,20 +212,20 @@ def main() -> None:
         )
         ax_vl_map.set_xlabel("x [m]")
         ax_vl_map.set_ylabel("z [m]")
-        ax_vl_map.set_title("MLFMM (van Lanen direct) error vs linear (log10)")
+        ax_vl_map.set_title("MLFMM (linear-filament direct)\nerror vs linear (log10)")
         cbar_vl = fig.colorbar(im_vl, ax=ax_vl_map)
         cbar_vl.set_label("log10(|ΔB|) [T]")
 
         ax_vl_x.plot(x, err_vl[mid_idx, :], color="black")
         ax_vl_x.set_xlabel("x [m]")
         ax_vl_x.set_ylabel("|ΔB| [T]")
-        ax_vl_x.set_title("Van Lanen error slice along x (z = 0)")
+        ax_vl_x.set_title("MLFMM (linear-filament direct)\nerror slice along x (z = 0)")
         ax_vl_x.grid(True, alpha=0.3)
 
         ax_vl_z.plot(z, err_vl[:, mid_idx], color="black")
         ax_vl_z.set_xlabel("z [m]")
         ax_vl_z.set_ylabel("|ΔB| [T]")
-        ax_vl_z.set_title("Van Lanen error slice along z (x = 0)")
+        ax_vl_z.set_title("MLFMM (linear-filament direct)\nerror slice along z (x = 0)")
         ax_vl_z.grid(True, alpha=0.3)
 
         n_targets = xyzp[0].size
@@ -233,16 +233,16 @@ def main() -> None:
         n_point = ifil_ps.size * n_targets
         n_mlfmm = ifil_ps.size * n_targets
         n_mlfmm_vl = ifil.size * n_targets
-        print(f"Linear filament:            {t_linear:.3f} s ({n_linear:1e} interactions)")
-        print(f"Point segment:              {t_point:.3f} s ({n_point:1e} interactions)")
-        print(f"MLFMM (point-segment exp.): {t_mlfmm:.3f} s ({n_mlfmm:1e} interactions)")
-        print(f"MLFMM (VL direct):          {t_mlfmm_vl:.3f} s ({n_mlfmm_vl:1e} interactions)")
+        print(f"Linear filament (cfsem direct): {t_linear:.3f} s ({n_linear:.1e} interactions)")
+        print(f"Point segment (cfsem direct):   {t_point:.3f} s ({n_point:.1e} interactions)")
+        print(f"MLFMM (point-segment exp.):     {t_mlfmm:.3f} s ({n_mlfmm:.1e} interactions)")
+        print(f"MLFMM (linear-filament direct): {t_mlfmm_vl:.3f} s ({n_mlfmm_vl:.1e} interactions)")
     except RuntimeError:
         n_targets = xyzp[0].size
         n_linear = ifil.size * n_targets
         n_point = ifil_ps.size * n_targets
-        print(f"Linear filament: {t_linear:.3f} s ({n_linear:1e} interactions)")
-        print(f"Point segment:   {t_point:.3f} s ({n_point:1e} interactions)")
+        print(f"Linear filament (cfsem direct): {t_linear:.3f} s ({n_linear:.1e} interactions)")
+        print(f"Point segment (cfsem direct):   {t_point:.3f} s ({n_point:.1e} interactions)")
         for ax in (ax_mlfmm_map, ax_mlfmm_x, ax_mlfmm_z, ax_vl_map, ax_vl_x, ax_vl_z):
             ax.text(0.5, 0.5, "MLFMM not available", ha="center", va="center")
             ax.set_axis_off()

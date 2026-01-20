@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 import cfsem
 
@@ -23,9 +24,11 @@ def main() -> None:
 
     # Use a small wire radius to avoid singularities on-axis.
     wire_radius = 0.01
+    t0 = time.perf_counter()
     bx, by, bz = cfsem.flux_density_linear_filament(
         xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
     )
+    t_linear = time.perf_counter() - t0
 
     bmag = np.sqrt(bx * bx + by * by + bz * bz).reshape(xx.shape)
     bmag_log10 = np.log10(bmag + 1e-30)
@@ -43,9 +46,11 @@ def main() -> None:
     xyzfil_ps = (xfil_ps, yfil_ps, zfil_ps)
     dlxyzfil_ps = (dlx_ps, dly_ps, dlz_ps)
 
+    t0 = time.perf_counter()
     bx_ps, by_ps, bz_ps = cfsem.flux_density_point_segment(
         xyzp, xyzfil_ps, dlxyzfil_ps, ifil_ps, par=True
     )
+    t_point = time.perf_counter() - t0
     bmag_ps = np.sqrt(bx_ps * bx_ps + by_ps * by_ps + bz_ps * bz_ps).reshape(xx.shape)
 
     fig, axs = plt.subplots(
@@ -131,16 +136,18 @@ def main() -> None:
     ax_err_z.set_axis_off()
 
     try:
+        t0 = time.perf_counter()
         b_mlfmm, _ = cfsem.fields_linear_filament_mlfmm(
             xyzp,
             xyzfil_ps,
             dlxyzfil_ps,
             ifil_ps,
             np.full(nseg, 1e-6),
-            use_van_lanen=False,
+            use_van_lanen=True,
             direct_threshold=10_000_000,
             order=None,
         )
+        t_mlfmm = time.perf_counter() - t0
         bx_m, by_m, bz_m = b_mlfmm
         bmag_m = np.sqrt(bx_m * bx_m + by_m * by_m + bz_m * bz_m).reshape(xx.shape)
         err_m = np.abs(bmag_m - bmag_ps)
@@ -166,8 +173,22 @@ def main() -> None:
         ax_mlfmm_x.set_title("MLFMM error slice along x (z = 0)")
         ax_mlfmm_x.grid(True, alpha=0.3)
 
+        ax_line_z.plot(
+            z,
+            bmag_m[:, mid_idx],
+            color="lime",
+            linestyle=":",
+            label="mlfmm",
+        )
+        ax_line_z.legend(frameon=False)
+
         ax_mlfmm_z.set_axis_off()
+        print(f"Linear filament: {t_linear:.3f} s")
+        print(f"Point segment:  {t_point:.3f} s")
+        print(f"MLFMM:         {t_mlfmm:.3f} s")
     except RuntimeError:
+        print(f"Linear filament: {t_linear:.3f} s")
+        print(f"Point segment:  {t_point:.3f} s")
         for ax in (ax_mlfmm_map, ax_mlfmm_x, ax_mlfmm_z):
             ax.text(0.5, 0.5, "MLFMM not available", ha="center", va="center")
             ax.set_axis_off()

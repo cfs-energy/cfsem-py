@@ -128,10 +128,11 @@ def main() -> None:
     cbar_err = fig.colorbar(im_err, ax=ax_err_map)
     cbar_err.set_label("log10(|ΔB|) [T]")
 
-    ax_err_x.plot(x, err[mid_idx, :], color="black")
+    rel_err_x = err[mid_idx, :] / (bmag[mid_idx, :] + 1e-30)
+    ax_err_x.plot(x, rel_err_x, color="black")
     ax_err_x.set_xlabel("x [m]")
-    ax_err_x.set_ylabel("|ΔB| [T]")
-    ax_err_x.set_title("Point-segment discretization\nerror slice along x (z = 0)")
+    ax_err_x.set_ylabel("relative error")
+    ax_err_x.set_title("Point-segment discretization\nrelative error slice along x (z = 0)")
     ax_err_x.grid(True, alpha=0.3)
 
     ax_err_z.set_axis_off()
@@ -168,10 +169,11 @@ def main() -> None:
         cbar_m = fig.colorbar(im_m, ax=ax_mlfmm_map)
         cbar_m.set_label("log10(|ΔB|) [T]")
 
-        ax_mlfmm_x.plot(x, err_m[mid_idx, :], color="black")
+        rel_err_m_x = err_m[mid_idx, :] / (bmag_ps[mid_idx, :] + 1e-30)
+        ax_mlfmm_x.plot(x, rel_err_m_x, color="black")
         ax_mlfmm_x.set_xlabel("x [m]")
-        ax_mlfmm_x.set_ylabel("|ΔB| [T]")
-        ax_mlfmm_x.set_title("MLFMM (point-segment expansion)\nerror slice along x (z = 0)")
+        ax_mlfmm_x.set_ylabel("relative error")
+        ax_mlfmm_x.set_title("MLFMM (point-segment expansion)\nrelative error slice along x (z = 0)")
         ax_mlfmm_x.grid(True, alpha=0.3)
 
         ax_line_z.plot(
@@ -216,10 +218,11 @@ def main() -> None:
         cbar_vl = fig.colorbar(im_vl, ax=ax_vl_map)
         cbar_vl.set_label("log10(|ΔB|) [T]")
 
-        ax_vl_x.plot(x, err_vl[mid_idx, :], color="black")
+        rel_err_vl_x = err_vl[mid_idx, :] / (bmag[mid_idx, :] + 1e-30)
+        ax_vl_x.plot(x, rel_err_vl_x, color="black")
         ax_vl_x.set_xlabel("x [m]")
-        ax_vl_x.set_ylabel("|ΔB| [T]")
-        ax_vl_x.set_title("MLFMM (linear-filament direct)\nerror slice along x (z = 0)")
+        ax_vl_x.set_ylabel("relative error")
+        ax_vl_x.set_title("MLFMM (linear-filament direct)\nrelative error slice along x (z = 0)")
         ax_vl_x.grid(True, alpha=0.3)
 
         ax_vl_z.plot(z, err_vl[:, mid_idx], color="black")

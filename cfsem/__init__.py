@@ -17,6 +17,7 @@ from cfsem.bindings import (
     flux_density_circular_filament_cartesian,
     flux_density_dipole,
     flux_density_linear_filament,
+    flux_density_point_segment,
     gs_operator_order2,
     gs_operator_order4,
     inductance_piecewise_linear_filaments,
@@ -24,6 +25,7 @@ from cfsem.bindings import (
     rotate_filaments_about_path,
     vector_potential_circular_filament,
     vector_potential_linear_filament,
+    vector_potential_point_segment,
     vector_potential_dipole,
 )
 from cfsem.types import Array3xN
@@ -66,6 +68,8 @@ __all__ = [
     "mutual_inductance_circular_to_linear",
     "flux_density_dipole",
     "vector_potential_dipole",
+    "flux_density_point_segment",
+    "vector_potential_point_segment",
     "body_force_density_circular_filament_cartesian",
     "body_force_density_linear_filament",
 ]

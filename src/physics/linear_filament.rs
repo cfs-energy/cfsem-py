@@ -265,8 +265,9 @@ pub fn flux_density_linear_filament(
 /// Uses the formula for continuous current distribution and finite wire thickness.
 /// Inside the wire radius, the field blends linearly to zero at the center.
 ///
-/// Draws from Griffiths eq'n 5.37 with inspiration from rat-mlfmm's "Van Lanen" kernel
-/// to replace the expensive sine functions with geometric equivalents.
+/// Draws from Griffiths eq'n 5.37 and Zahn eq'n 5.4.17 with inspiration from
+/// rat-mlfmm's Van Lanen kernel to replace the expensive sine functions with geometric
+/// equivalents and to provide handling of the singularity near the filament axis.
 ///
 ///        p (target)
 ///        *
@@ -285,8 +286,8 @@ pub fn flux_density_linear_filament(
 ///
 /// $ |B| = \frac{\mu_0 I}{4 \pi \r_\perp} (sin(\theta_b) - sin(\theta_a)) $
 ///
-/// with the direction determined by $ \hat{dL} \times \hat r $ with $r$ defined from the
-/// midpoint of the segment.
+/// with the direction determined by $ \hat{dL} \times \hat r $ with $r$ defined perpendicular
+/// from the axis of the filament to the target point.
 ///
 /// The otherwise-expensive sine functions are evaluated directly using distance magnitudes.
 ///
@@ -297,6 +298,8 @@ pub fn flux_density_linear_filament(
 /// * \[1\] D. J. Griffiths, Introduction to electrodynamics, Fourth edition. Boston: Pearson, 2014.
 /// * \[2\] J. van Nugteren and N. Deelen, “rat-mlfmm,” GitLab repository. Accessed: Jan. 16, 2026. [Online].
 ///         Available: https://gitlab.com/Project-Rat/rat-mlfmm/-/tree/1e1d387522fafac50c0540af1ebb15d1d506d33d
+/// * \[3\] M. Zahn, “5.4: The Vector Potential,” Engineering LibreTexts. Accessed: Jan. 20, 2026. [Online]. 
+///         Available: https://eng.libretexts.org/Bookshelves/Electrical_Engineering/Electro-Optics/Electromagnetic_Field_Theory%3A_A_Problem_Solving_Approach_(Zahn)/05%3A_The_Magnetic_Field/5.04%3A_The_Vector_Potential
 ///
 /// # Arguments
 ///

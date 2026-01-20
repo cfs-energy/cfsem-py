@@ -12,8 +12,6 @@ use crate::{
 
 use crate::{MU0_OVER_4PI, macros::*};
 
-const MIN_WIRE_RADIUS: f64 = 1e-10;
-
 /// Estimate the mutual inductance between two piecewise-linear current filaments.
 ///
 /// Uses filament midpoints as field source and target.
@@ -298,7 +296,7 @@ pub fn flux_density_linear_filament(
 /// * \[1\] D. J. Griffiths, Introduction to electrodynamics, Fourth edition. Boston: Pearson, 2014.
 /// * \[2\] J. van Nugteren and N. Deelen, “rat-mlfmm,” GitLab repository. Accessed: Jan. 16, 2026. [Online].
 ///         Available: https://gitlab.com/Project-Rat/rat-mlfmm/-/tree/1e1d387522fafac50c0540af1ebb15d1d506d33d
-/// * \[3\] M. Zahn, “5.4: The Vector Potential,” Engineering LibreTexts. Accessed: Jan. 20, 2026. [Online]. 
+/// * \[3\] M. Zahn, “5.4: The Vector Potential,” Engineering LibreTexts. Accessed: Jan. 20, 2026. [Online].
 ///         Available: https://eng.libretexts.org/Bookshelves/Electrical_Engineering/Electro-Optics/Electromagnetic_Field_Theory%3A_A_Problem_Solving_Approach_(Zahn)/05%3A_The_Magnetic_Field/5.04%3A_The_Vector_Potential
 ///
 /// # Arguments
@@ -320,14 +318,6 @@ pub fn flux_density_linear_filament_scalar(
     // Unpack
     let (start, end, ifil) = xyzifil;
     let (xp, yp, zp) = xyzobs;
-
-    // Get length delta and normalized direction
-    let dl = (end.0 - start.0, end.1 - start.1, end.2 - start.2);
-    let mid = (
-        start.0 + dl.0 / 2.0,
-        start.1 + dl.1 / 2.0,
-        start.2 + dl.2 / 2.0,
-    );
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing how far the point is from the center of the wire

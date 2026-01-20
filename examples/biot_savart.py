@@ -31,7 +31,7 @@ def main() -> None:
     bmag_log10 = np.log10(bmag + 1e-30)
 
     # Discretize into point-segment sources for comparison.
-    nseg = 200
+    nseg = 1000
     dz = 1.0 / nseg
     xfil_ps = np.zeros(nseg)
     yfil_ps = np.zeros(nseg)
@@ -104,7 +104,9 @@ def main() -> None:
     ax_line_z.legend(frameon=False)
 
     err = np.abs(bmag - bmag_ps)
-    err_log10 = np.log10(err + 1e-30)
+    mask = np.abs(xx) < wire_radius
+    err = np.where(mask, np.nan, err)
+    err_log10 = np.log10(err)
 
     im_err = ax_err_map.imshow(
         err_log10,
@@ -115,21 +117,17 @@ def main() -> None:
     )
     ax_err_map.set_xlabel("x [m]")
     ax_err_map.set_ylabel("z [m]")
-    ax_err_map.set_title("Error magnitude (log10)")
+    ax_err_map.set_title("Point-segment error magnitude (log10)")
     cbar_err = fig.colorbar(im_err, ax=ax_err_map)
     cbar_err.set_label("log10(|ΔB|) [T]")
 
     ax_err_x.plot(x, err[mid_idx, :], color="black")
     ax_err_x.set_xlabel("x [m]")
     ax_err_x.set_ylabel("|ΔB| [T]")
-    ax_err_x.set_title("Error slice along x (z = 0)")
+    ax_err_x.set_title("Point-segment error slice along x (z = 0)")
     ax_err_x.grid(True, alpha=0.3)
 
-    ax_err_z.plot(z, err[:, mid_idx], color="black")
-    ax_err_z.set_xlabel("z [m]")
-    ax_err_z.set_ylabel("|ΔB| [T]")
-    ax_err_z.set_title("Error slice along z (x = 0)")
-    ax_err_z.grid(True, alpha=0.3)
+    ax_err_z.set_axis_off()
 
     try:
         b_mlfmm, _ = cfsem.fields_linear_filament_mlfmm(
@@ -145,7 +143,8 @@ def main() -> None:
         bx_m, by_m, bz_m = b_mlfmm
         bmag_m = np.sqrt(bx_m * bx_m + by_m * by_m + bz_m * bz_m).reshape(xx.shape)
         err_m = np.abs(bmag_m - bmag_ps)
-        err_m_log10 = np.log10(err_m + 1e-30)
+        err_m = np.where(mask, np.nan, err_m)
+        err_m_log10 = np.log10(err_m)
 
         im_m = ax_mlfmm_map.imshow(
             err_m_log10,
@@ -166,11 +165,7 @@ def main() -> None:
         ax_mlfmm_x.set_title("MLFMM error slice along x (z = 0)")
         ax_mlfmm_x.grid(True, alpha=0.3)
 
-        ax_mlfmm_z.plot(z, err_m[:, mid_idx], color="black")
-        ax_mlfmm_z.set_xlabel("z [m]")
-        ax_mlfmm_z.set_ylabel("|ΔB| [T]")
-        ax_mlfmm_z.set_title("MLFMM error slice along z (x = 0)")
-        ax_mlfmm_z.grid(True, alpha=0.3)
+        ax_mlfmm_z.set_axis_off()
     except RuntimeError:
         for ax in (ax_mlfmm_map, ax_mlfmm_x, ax_mlfmm_z):
             ax.text(0.5, 0.5, "MLFMM not available", ha="center", va="center")

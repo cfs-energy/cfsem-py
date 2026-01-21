@@ -211,7 +211,7 @@ fn flux_density_circular_filament(
 }
 
 /// Python bindings for cfsemrs::physics::linear_filament::flux_density_linear_filament
-#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius=0.0, par=true))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par=true))]
 fn flux_density_linear_filament(
     xyzp: (
         PyReadonlyArray1<f64>,
@@ -229,7 +229,7 @@ fn flux_density_linear_filament(
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
     ifil: PyReadonlyArray1<f64>, // [A] filament current
-    wire_radius: &PyAny,         // [m] filament radius
+    wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -238,15 +238,7 @@ fn flux_density_linear_filament(
     _3tup_slice_ro!(xyzfil);
     _3tup_slice_ro!(dlxyzfil);
     let ifil = ifil.as_slice()?;
-    let wire_radius_arr;
-    let wire_radius_vec;
-    let wire_radius = if let Ok(wr) = wire_radius.extract::<f64>() {
-        wire_radius_vec = vec![wr; ifil.len()];
-        &wire_radius_vec[..]
-    } else {
-        wire_radius_arr = wire_radius.extract::<PyReadonlyArray1<f64>>()?;
-        wire_radius_arr.as_slice()?
-    };
+    let wire_radius = wire_radius.as_slice()?;
 
     // Do calculations
     let n = xyzp.0.len();
@@ -396,7 +388,7 @@ fn fields_linear_filament_mlfmm(
 }
 
 /// Python bindings for cfsemrs::physics::linear_filament::vector_potential_linear_filament
-#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius=0.0, par=true))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par=true))]
 fn vector_potential_linear_filament(
     xyzp: (
         PyReadonlyArray1<f64>,
@@ -414,7 +406,7 @@ fn vector_potential_linear_filament(
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
     ifil: PyReadonlyArray1<f64>, // [A] filament current
-    wire_radius: &PyAny,         // [m] filament radius
+    wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -423,15 +415,7 @@ fn vector_potential_linear_filament(
     _3tup_slice_ro!(xyzfil);
     _3tup_slice_ro!(dlxyzfil);
     let ifil = ifil.as_slice()?;
-    let wire_radius_arr;
-    let wire_radius_vec;
-    let wire_radius = if let Ok(wr) = wire_radius.extract::<f64>() {
-        wire_radius_vec = vec![wr; ifil.len()];
-        &wire_radius_vec[..]
-    } else {
-        wire_radius_arr = wire_radius.extract::<PyReadonlyArray1<f64>>()?;
-        wire_radius_arr.as_slice()?
-    };
+    let wire_radius = wire_radius.as_slice()?;
 
     // Do calculations
     let n = xyzp.0.len();

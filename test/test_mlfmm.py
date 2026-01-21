@@ -65,7 +65,7 @@ def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_linear_fila
         assert np.allclose(got, exp, rtol=1e-6, atol=1e-10)
 
 
-def test_mlfmm_van_lanen_single_segment_matches_subdivided_direct():
+def test_mlfmm_linear_filament_single_segment_matches_subdivided_direct():
     try:
         fields_linear_filament_mlfmm = cfsem.fields_linear_filament_mlfmm
     except AttributeError:

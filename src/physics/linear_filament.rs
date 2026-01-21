@@ -7,7 +7,7 @@ use rayon::{
 
 use crate::{
     chunksize,
-    math::{cross3, cross3f, decompose_filament, dot3, rss3},
+    math::{cross3, cross3f, dot3, rss3},
 };
 
 use crate::{MU0_OVER_4PI, macros::*};
@@ -571,10 +571,10 @@ pub fn vector_potential_linear_filament_scalar(
     } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
 
     // Finite segment length log-form with quadratic blend to zero at axis.
-    let k1 = (-para_b + dist_b).max(0.0);
-    let k2 = (-para_a + dist_a).max(0.0);
+    let k1 = -para_b + dist_b;
+    let k2 = -para_a + dist_a;
     let frac2 = frac * frac; // Quadratic fall-off (as opposed to linear for B-field)
-    let a_mag = frac2 * MU0_OVER_4PI * ifil * libm::log(k1 / k2);
+    let a_mag = frac2 * MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0));
 
     // Direction is always aligned with the segment.
     let (ax, ay, az) = (a_mag * dlhat.0, a_mag * dlhat.1, a_mag * dlhat.2);
@@ -1006,7 +1006,11 @@ mod test {
         // magnetic flux through a surface bounded by filament 2. The flux through
         // filament 2 due to 1 ampere of current in filament 1 is the mutual inductance.
         // (We are stretching the applicability of Stokes' therorem because the filaments
-        // are not closed loops)
+        // are not closed loops).
+        //
+        // Because inductance_piecewise_linear_filaments uses Neumann's formula, which is
+        // exactly equivalent to the point-source formulation of the vector potential,
+        // we expect a small amount of error to the finite-length segment formula here.
         let a_dot_dl: Vec<f64> = (0..NFIL - 1)
             .map(|i| outx[i] * dlxfil2[i] + outy[i] * dlyfil2[i] + outz[i] * dlzfil2[i])
             .collect();
@@ -1019,7 +1023,12 @@ mod test {
             false,
         )
         .unwrap();
-        assert!(approx(m, m_from_a, 1e-10, 1e-15));
+        assert!(
+            approx(m, m_from_a, 1e-2, 1e-15),
+            "m = {:.3e}, m_from_a = {:.3e}",
+            m,
+            m_from_a
+        );
 
         let vp = |x: f64, y: f64, z: f64| {
             let mut outx = [0.0];
@@ -1045,7 +1054,7 @@ mod test {
         // finite diff delta needs to be small enough to be accurate
         // but large enough that we can tell the difference between adjacent points
         // that are very far from the origin
-        let eps = 1e-7;
+        let eps = 1e-9;
         for x in vals.iter() {
             for y in vals.iter() {
                 for z in vals.iter() {
@@ -1102,9 +1111,25 @@ mod test {
                     )
                     .unwrap();
 
-                    assert!(approx(bx[0], ca[0], 1e-6, 1e-15));
-                    assert!(approx(by[0], ca[1], 1e-6, 1e-15));
-                    assert!(approx(bz[0], ca[2], 1e-6, 1e-15));
+                    println!("x,y,z = {:.2},{:.2},{:.2}", x, y, z);
+                    assert!(
+                        approx(bx[0], ca[0], 1e-6, 1e-15),
+                        "bx = {:.3e}, ca[0] = {:.3e}",
+                        bx[0],
+                        ca[0]
+                    );
+                    assert!(
+                        approx(by[0], ca[1], 1e-6, 1e-15),
+                        "by = {:.3e}, ca[1] = {:.3e}",
+                        by[0],
+                        ca[1]
+                    );
+                    assert!(
+                        approx(bz[0], ca[2], 1e-6, 1e-15),
+                        "bz = {:.3e}, ca[2] = {:.3e}",
+                        bz[0],
+                        ca[2],
+                    );
                 }
             }
         }

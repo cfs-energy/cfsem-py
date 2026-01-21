@@ -849,7 +849,7 @@ mod test {
     /// Compare single-segment Biot-Savart against discretized point-source segments.
     #[test]
     fn test_flux_density_against_point_segment_discretization() {
-        let (rtol, atol) = (1e-3, 1e-6);
+        let (rtol, atol) = (1e-6, 1e-12);
 
         let start = (0.0, 0.0, -0.5);
         let end = (0.0, 0.0, 0.5);
@@ -864,7 +864,7 @@ mod test {
         let xyzfil = (&xfil[..], &yfil[..], &zfil[..]);
         let dlxyz = (&dlx[..], &dly[..], &dlz[..]);
 
-        let ngrid = 10;
+        let ngrid = 100;
         let span = 10.0;
         let xvals: Vec<f64> = (0..ngrid)
             .map(|i| -span + (2.0 * span) * (i as f64) / (ngrid as f64 - 1.0))
@@ -967,7 +967,7 @@ mod test {
         let xyzfil = (&xfil[..], &yfil[..], &zfil[..]);
         let dlxyz = (&dlx[..], &dly[..], &dlz[..]);
 
-        let ngrid = 10;
+        let ngrid = 100;
         let span = 10.0;
         let xvals: Vec<f64> = (0..ngrid)
             .map(|i| -span + (2.0 * span) * (i as f64) / (ngrid as f64 - 1.0))

@@ -829,7 +829,7 @@ fn body_force_density_circular_filament_cartesian(
 
 /// Python bindings for cfsemrs::physics::body_force_density_linear_filament
 #[pyfunction]
-#[pyo3(signature = (xyzfil, dlxyzfil, ifil, obs, j, wire_radius=0.0, par=true))]
+#[pyo3(signature = (xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par=true))]
 fn body_force_density_linear_filament(
     xyzfil: (
         PyReadonlyArray1<f64>,
@@ -852,7 +852,7 @@ fn body_force_density_linear_filament(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [A/m^2] current density at observation points
-    wire_radius: f64,            // [m] filament radius
+    wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
@@ -862,6 +862,7 @@ fn body_force_density_linear_filament(
     let ifil = ifil.as_slice()?;
     _3tup_slice_ro!(obs);
     _3tup_slice_ro!(j);
+    let wire_radius = wire_radius.as_slice()?;
 
     // Select variant
     let func = match par {

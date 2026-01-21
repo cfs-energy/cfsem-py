@@ -45,8 +45,13 @@ def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_linear_fila
     center = (0.0, 0.0, 0.5)
     xyzp = _cube_targets(center=center, half_len=half_len, points_per_axis=11)
 
-    b_direct = cfsem.flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par=False)
-    a_direct = cfsem.vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par=False)
+    wire_radius = np.zeros_like(ifil)
+    b_direct = cfsem.flux_density_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par=False
+    )
+    a_direct = cfsem.vector_potential_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par=False
+    )
 
     b_mlfmm, a_mlfmm = fields_linear_filament_mlfmm(
         xyzp,
@@ -89,8 +94,13 @@ def test_mlfmm_linear_filament_single_segment_matches_subdivided_direct():
         np.array([0.1, 0.1, -0.2, 0.2, -0.3]),
     )
 
-    b_direct = cfsem.flux_density_linear_filament(xyzp, xyzfil_sub, dlxyzfil_sub, ifil_sub, par=False)
-    a_direct = cfsem.vector_potential_linear_filament(xyzp, xyzfil_sub, dlxyzfil_sub, ifil_sub, par=False)
+    wire_radius_sub = np.zeros_like(ifil_sub)
+    b_direct = cfsem.flux_density_linear_filament(
+        xyzp, xyzfil_sub, dlxyzfil_sub, ifil_sub, wire_radius_sub, par=False
+    )
+    a_direct = cfsem.vector_potential_linear_filament(
+        xyzp, xyzfil_sub, dlxyzfil_sub, ifil_sub, wire_radius_sub, par=False
+    )
 
     b_mlfmm, a_mlfmm = fields_linear_filament_mlfmm(
         xyzp,

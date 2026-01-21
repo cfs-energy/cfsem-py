@@ -8,8 +8,10 @@
   * Exposed as `cfsem::mlfmm::fields_linear_filament_mlfmm` when `rat-mlfmm` feature is enabled
   * Add vendored dependencies and thin C FFI to support those bindings
   * Available on Windows, linux, and macOS only; disabled on other platforms
+* !Remove `flux_density_biot_savart` backwards-compatibility alias
 * !Upgrade `flux_density_linear_filament`, `vector_potential_linear_filament`, and `body_force_density_linear_filament` functions
   * Now handle finite wire length and finite wire thickness analytically
+  * New `wire_radius` input
   * Removed mixed-precision section from flux density calculation in favor of all f64; this no longer affects overall throughput
     * For both linear_filament and point_segment variants
   * Old point-source segment formulations moved to `point_source::segment` module and available as `flux_density_point_segment` and `vector_potential_point_segment` functions

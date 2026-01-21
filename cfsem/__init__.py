@@ -12,7 +12,6 @@ from cfsem.bindings import (
     fields_linear_filament_mlfmm,
     filament_helix_path,
     flux_circular_filament,
-    flux_density_biot_savart,
     flux_density_circular_filament,
     flux_density_circular_filament_cartesian,
     flux_density_dipole,
@@ -40,7 +39,6 @@ https://www.physics.nist.gov/cuu/pdf/wall_2018.pdf .
 
 __all__ = [
     "flux_circular_filament",
-    "flux_density_biot_savart",
     "flux_density_linear_filament",
     "flux_density_circular_filament",
     "gs_operator_order2",

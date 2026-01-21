@@ -3,6 +3,12 @@
 import os
 
 import numpy as np
+
+if os.getenv("CFSEM_TESTING"):
+    import matplotlib
+
+    matplotlib.use("Agg")
+
 from matplotlib import pyplot as plt
 
 from cfsem import MU_0, flux_density_circular_filament

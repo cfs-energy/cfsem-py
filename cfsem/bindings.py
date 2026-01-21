@@ -242,7 +242,6 @@ def flux_density_point_segment(
     return em_flux_density_point_segment(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
-flux_density_biot_savart = flux_density_linear_filament  # For backwards-compatibility
 
 
 def vector_potential_linear_filament(
@@ -695,7 +694,7 @@ def body_force_density_linear_filament(
     ifil: NDArray[float64],
     obs: Array3xN,
     j: Array3xN,
-    wire_radius: float = 0.0,
+    wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -708,7 +707,7 @@ def body_force_density_linear_filament(
         ifil: [A] filament current
         obs: [m] x,y,z coords of observation locations
         j: [A/m^2] current density vector at observation locations
-        wire_radius: [m] filament radius
+        wire_radius: [m] filament radius, scalar or array of length `m`
         par: Whether to use CPU parallelism
 
     Returns:
@@ -719,6 +718,9 @@ def body_force_density_linear_filament(
     ifil = ascontiguousarray(ifil).ravel()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(ifil.size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
     jxbx, jxby, jxbz = em_body_force_density_linear_filament(
         xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par
     )  # [N/m^3]

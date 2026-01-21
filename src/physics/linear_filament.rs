@@ -620,7 +620,7 @@ pub fn body_force_density_linear_filament_scalar(
 /// * `xyzifil`:   (m, m, A) Filament start and end coords and current
 /// * `dlxyzfil`:  (m) Filament segment length deltas, each length `m`
 /// * `ifil`:      (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
+/// * `wire_radius`: (m) (Half-) thickness of conductor, length `m`
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 /// * `out`:       (N/m^3) Body force density x, y, z components
@@ -628,7 +628,7 @@ pub fn body_force_density_linear_filament(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -646,7 +646,17 @@ pub fn body_force_density_linear_filament(
     let n = xfil.len();
     let m = xp.len();
 
-    check_length!(n, xfil, yfil, zfil, dlxfil, dlyfil, dlzfil);
+    check_length!(
+        n,
+        xfil,
+        yfil,
+        zfil,
+        dlxfil,
+        dlyfil,
+        dlzfil,
+        ifil,
+        wire_radius
+    );
     check_length!(m, xp, yp, zp, jx, jy, jz, outx, outy, outz);
 
     // Zero output
@@ -669,7 +679,7 @@ pub fn body_force_density_linear_filament(
             // [V-s/m] vector potential contribution of this filament to this observation point
             let (jxbx, jxby, jxbz) = body_force_density_linear_filament_scalar(
                 (fil0, fil1, ifil[i]),
-                wire_radius,
+                wire_radius[i],
                 obs,
                 jj,
             );
@@ -694,7 +704,7 @@ pub fn body_force_density_linear_filament(
 /// * `xyzifil`:   (m, m, A) Filament start and end coords and current
 /// * `dlxyzfil`:  (m) Filament segment length deltas, each length `m`
 /// * `ifil`:      (A) Filament current, length `m`
-/// * `wire_radius`: (m) (Half-) thickness of conductor.
+/// * `wire_radius`: (m) (Half-) thickness of conductor, length `m`
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 /// * `out`:       (N/m^3) Body force density x, y, z components
@@ -702,7 +712,7 @@ pub fn body_force_density_linear_filament_par(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
-    wire_radius: f64,
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -766,8 +776,8 @@ mod test {
             body_force_density_linear_filament(
                 (&x[..ndiscr - 1], &y[..ndiscr - 1], &z[..ndiscr - 1]),
                 dl,
-                &vec![ni; x.len()][..],
-                0.0,
+                &vec![ni; ndiscr - 1][..],
+                &vec![0.0; ndiscr - 1][..],
                 (&x[..ndiscr - 1], &y[..ndiscr - 1], &z[..ndiscr - 1]),
                 dl,
                 (jxbx, jxby, jxbz),
@@ -821,7 +831,7 @@ mod test {
                     (&xi[..ndiscr - 1], &yi[..ndiscr - 1], &zi[..ndiscr - 1]),
                     dli,
                     &vec![ni * nj; xi.len() - 1][..],
-                    0.0,
+                    &vec![0.0; xi.len() - 1][..],
                     mid,
                     dlj,
                     (jxbx, jxby, jxbz),

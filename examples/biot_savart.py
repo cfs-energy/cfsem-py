@@ -1,8 +1,16 @@
 from __future__ import annotations
 
-import numpy as np
-import matplotlib.pyplot as plt
+import os
 import time
+
+import numpy as np
+
+if os.getenv("CFSEM_TESTING"):
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 
 import cfsem
 
@@ -14,7 +22,7 @@ def main() -> None:
     ifil = np.array([1.0])
 
     # Sample plane: x-z plane at y=0 to show end effects.
-    n = 2001
+    n = 21 if os.getenv("CFSEM_TESTING") else 2001
     x = np.linspace(-1.0, 1.0, n)
     z = np.linspace(-1.0, 1.0, n)
     xx, zz = np.meshgrid(x, z, indexing="xy")

@@ -398,6 +398,7 @@ mod tests {
             (&xfil, &yfil, &zfil),
             (&dlx, &dly, &dlz),
             &ifil,
+            &vec![0.0; ifil.len()],
             (&mut ax, &mut ay, &mut az),
         )
         .expect("vector potential calc failed");
@@ -471,6 +472,7 @@ mod tests {
             (&xfil, &yfil, &zfil),
             (&dlx, &dly, &dlz),
             &ifil,
+            &vec![0.0; ifil.len()],
             (&mut ax, &mut ay, &mut az),
         )
         .expect("vector potential calc failed");

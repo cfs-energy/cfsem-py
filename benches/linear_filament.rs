@@ -135,12 +135,14 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
                     b.iter(|| {
                         let n = xobs.len();
                         let (mut bx, mut by, mut bz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+                        let wire_radius = vec![0.0; ifil.len()];
                         black_box(
                             vector_potential_linear_filament(
                                 (&xobs[..], &yobs[..], &zobs[..]),
                                 (&xfil[..], &yfil[..], &zfil[..]),
                                 (&dlxfil[..], &dlyfil[..], &dlzfil[..]),
                                 &ifil[..],
+                                &wire_radius,
                                 (&mut bx, &mut by, &mut bz),
                             )
                             .unwrap(),
@@ -161,12 +163,14 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
                     b.iter(|| {
                         let n = xobs.len();
                         let (mut bx, mut by, mut bz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+                        let wire_radius = vec![0.0; ifil.len()];
                         black_box(
                             vector_potential_linear_filament_par(
                                 (&xobs[..], &yobs[..], &zobs[..]),
                                 (&xfil[..], &yfil[..], &zfil[..]),
                                 (&dlxfil[..], &dlyfil[..], &dlzfil[..]),
                                 &ifil[..],
+                                &wire_radius,
                                 (&mut bx, &mut by, &mut bz),
                             )
                             .unwrap(),

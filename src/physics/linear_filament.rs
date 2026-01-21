@@ -13,7 +13,7 @@ use crate::{
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.
-const MIN_WIRE_THICKNESS: f64 = 1e-10; 
+const MIN_WIRE_THICKNESS: f64 = 1e-10;
 
 /// Estimate the mutual inductance between two piecewise-linear current filaments.
 ///
@@ -284,7 +284,7 @@ pub fn flux_density_linear_filament(
 ///        |
 ///        q (closest point on line)
 ///```
-/// 
+///
 /// The base formula is
 ///
 /// $ |B| = \frac{\mu_0 I}{4 \pi r_\perp}  (sin(\theta_b) - sin(\theta_a)) $
@@ -403,12 +403,14 @@ pub fn flux_density_linear_filament_scalar(
 /// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `m`
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
+/// * `wire_radius`: (m) (Half-) thickness of conductor, length `m`
 /// * `out`:      (V-s/m) ax, ay, az at observation points, each length `n`
 pub fn vector_potential_linear_filament_par(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
+    wire_radius: &[f64],
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     // Chunk inputs
@@ -420,7 +422,14 @@ pub fn vector_potential_linear_filament_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            vector_potential_linear_filament((xp, yp, zp), xyzfil, dlxyzfil, ifil, (bx, by, bz))
+            vector_potential_linear_filament(
+                (xp, yp, zp),
+                xyzfil,
+                dlxyzfil,
+                ifil,
+                wire_radius,
+                (bx, by, bz),
+            )
         })?;
 
     Ok(())
@@ -437,12 +446,14 @@ pub fn vector_potential_linear_filament_par(
 /// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `m`
 /// * `dlxyzfil`: (m) Filament segment length deltas, each length `m`
 /// * `ifil`:     (A) Filament current, length `m`
+/// * `wire_radius`: (m) (Half-) thickness of conductor, length `m`
 /// * `out`:      (V-s/m) ax, ay, az at observation points, each length `n`
 pub fn vector_potential_linear_filament(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     ifil: &[f64],
+    wire_radius: &[f64],
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     // Unpack
@@ -457,7 +468,17 @@ pub fn vector_potential_linear_filament(
     let n = xfil.len();
     let m = xp.len();
     check_length!(m, xp, yp, zp, ax, ay, az);
-    check_length!(n, xfil, yfil, zfil, dlxfil, dlyfil, dlzfil, ifil);
+    check_length!(
+        n,
+        xfil,
+        yfil,
+        zfil,
+        dlxfil,
+        dlyfil,
+        dlzfil,
+        ifil,
+        wire_radius
+    );
 
     // Zero output
     ax.fill(0.0);
@@ -480,7 +501,7 @@ pub fn vector_potential_linear_filament(
 
             // Field contributions
             let (axc, ayc, azc) =
-                vector_potential_linear_filament_scalar((fil0, fil1, current), obs);
+                vector_potential_linear_filament_scalar((fil0, fil1, current), wire_radius[i], obs);
             ax[j] += axc;
             ay[j] += ayc;
             az[j] += azc;
@@ -493,9 +514,9 @@ pub fn vector_potential_linear_filament(
 /// Vector potential (A-field) from a linear current filament segment to an observation point.
 ///
 /// Uses the formula for finite segment length and finite wire thickness.
-/// 
+///
 /// The base formula implemented here is:
-/// 
+///
 /// $$
 /// A_z
 /// = \frac{\mu_0 I}{4\pi}\int_{-L/2}^{L/2}
@@ -508,10 +529,10 @@ pub fn vector_potential_linear_filament(
 /// }
 /// )
 /// $$
-/// 
+///
 /// This has been manipulated to formulate in terms of components of the distance from the
 /// filament endpoints and filament axis to the target point:
-/// 
+///
 /// $$ k1 = -||bp_\parallel|| + ||bp|| $$
 /// $$ k2 = -||ap_\parallel|| + ||ap|| $$
 /// $$ A_\parallel = \frac{\mu_0 I}{4 \pi} \ln (\frac{k1}{k2}) $$
@@ -540,7 +561,7 @@ pub fn vector_potential_linear_filament_scalar(
     // to the edge of the wire.
     // All 3 distances are clamped to at least the wire radius.
     let PointLineDistance {
-        perp: perp,
+        perp,
         dist_a,
         dist_b,
         frac,
@@ -552,7 +573,7 @@ pub fn vector_potential_linear_filament_scalar(
     // Finite segment length log-form with quadratic blend to zero at axis.
     let k1 = (-para_b + dist_b).max(0.0);
     let k2 = (-para_a + dist_a).max(0.0);
-    let frac2 = frac * frac;  // Quadratic fall-off (as opposed to linear for B-field)
+    let frac2 = frac * frac; // Quadratic fall-off (as opposed to linear for B-field)
     let a_mag = frac2 * MU0_OVER_4PI * ifil * libm::log(k1 / k2);
 
     // Direction is always aligned with the segment.
@@ -975,6 +996,7 @@ mod test {
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
             &[1.0],
+            &[0.0],
             (outx, outy, outz),
         )
         .unwrap();
@@ -1009,6 +1031,7 @@ mod test {
                 (&xyz, &xyz, &xyz),
                 (&dlxyz, &dlxyz, &dlxyz),
                 &[1.0],
+                &[0.0],
                 (&mut outx, &mut outy, &mut outz),
             )
             .unwrap();
@@ -1070,9 +1093,9 @@ mod test {
                     let mut by = [0.0];
                     let mut bz = [0.0];
                     flux_density_linear_filament(
-                        (&[*x], &[*y], &[*z]),
-                        (&xyz, &xyz, &xyz),
-                        (&dlxyz, &dlxyz, &dlxyz),
+                        (&[*x][..], &[*y][..], &[*z][..]),
+                        (&xyz[..], &xyz[..], &xyz[..]),
+                        (&dlxyz[..], &dlxyz[..], &dlxyz[..]),
                         &[1.0],
                         &[0.0],
                         (&mut bx, &mut by, &mut bz),
@@ -1159,9 +1182,25 @@ mod test {
         let out5 = &mut [5.0; NOBS];
 
         // Vector potential
-        vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, (out0, out1, out2)).unwrap();
-        vector_potential_linear_filament_par(xyzp, xyzfil, dlxyzfil, ifil, (out3, out4, out5))
-            .unwrap();
+        let wire_radius = vec![0.0; ifil.len()];
+        vector_potential_linear_filament(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            ifil,
+            &wire_radius,
+            (out0, out1, out2),
+        )
+        .unwrap();
+        vector_potential_linear_filament_par(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            ifil,
+            &wire_radius,
+            (out3, out4, out5),
+        )
+        .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out3[i]);
             assert_eq!(out1[i], out4[i]);

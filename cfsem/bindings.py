@@ -250,6 +250,7 @@ def vector_potential_linear_filament(
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     ifil: NDArray[float64],
+    wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -261,6 +262,7 @@ def vector_potential_linear_filament(
         xyzfil: [m] x,y,z coords of filament segment start points
         dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
+        wire_radius: [m] filament radius, scalar or array of length `m`
         par: Whether to use CPU parallelism
 
     Returns:
@@ -270,7 +272,12 @@ def vector_potential_linear_filament(
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
-    return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(ifil.size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
+    return em_vector_potential_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
+    )
 
 
 def vector_potential_point_segment(

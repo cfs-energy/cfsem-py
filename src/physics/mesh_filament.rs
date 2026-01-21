@@ -89,7 +89,7 @@ where
             //    with unit current in edge 1 in order to extract A/I.
             let (midpoint2, dl2) = decompose_filament(start2, end2);
             let (ax_per_amp, ay_per_amp, az_per_amp) =
-                vector_potential_linear_filament_scalar(xyzifil1, midpoint2);
+                vector_potential_linear_filament_scalar(xyzifil1, 0.0, midpoint2);
 
             //    Take M = dot((A/I), dL)
             let m = dot3(ax_per_amp, ay_per_amp, az_per_amp, dl2.0, dl2.1, dl2.2);

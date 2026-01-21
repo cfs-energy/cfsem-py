@@ -55,6 +55,12 @@ Benchmarks are configured in Cargo.toml, and can be run via cargo:
 cargo bench
 ```
 
+To build the docs with katex math rendering:
+
+```bash
+RUSTDOCFLAGS="--html-in-header=katex-header.html" cargo rustdoc --open
+```
+
 ## Development - Python
 
 Requirements

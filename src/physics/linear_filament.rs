@@ -12,6 +12,9 @@ use crate::{
 
 use crate::{MU0_OVER_4PI, macros::*};
 
+/// (m) minimum representable nonzero wire thickness.
+const MIN_WIRE_THICKNESS: f64 = 1e-10; 
+
 /// Estimate the mutual inductance between two piecewise-linear current filaments.
 ///
 /// Uses filament midpoints as field source and target.
@@ -264,9 +267,10 @@ pub fn flux_density_linear_filament(
 /// Inside the wire radius, the field blends linearly to zero at the center.
 ///
 /// Draws from Griffiths eq'n 5.37 and Zahn eq'n 5.4.17 with inspiration from
-/// rat-mlfmm's Van Lanen kernel to replace the expensive sine functions with geometric
+/// rat-mlfmm's van Lanen kernel to replace the expensive sine functions with geometric
 /// equivalents and to provide handling of the singularity near the filament axis.
 ///
+/// ```text
 ///        p (target)
 ///        *
 ///       /|\
@@ -279,12 +283,13 @@ pub fn flux_density_linear_filament(
 ///        |  d_perp (from line to p)
 ///        |
 ///        q (closest point on line)
-///
+///```
+/// 
 /// The base formula is
 ///
-/// $ |B| = \frac{\mu_0 I}{4 \pi \r_\perp} (sin(\theta_b) - sin(\theta_a)) $
+/// $ |B| = \frac{\mu_0 I}{4 \pi r_\perp}  (sin(\theta_b) - sin(\theta_a)) $
 ///
-/// with the direction determined by $ \hat{dL} \times \hat r $ with $r$ defined perpendicular
+/// with the direction determined by $ \hat{dL} \times \hat r_\perp $ with $r_\perp$ defined perpendicular
 /// from the axis of the filament to the target point.
 ///
 /// The otherwise-expensive sine functions are evaluated directly using distance magnitudes.
@@ -378,7 +383,7 @@ pub fn flux_density_linear_filament_scalar(
     let bz = (c * cz) as f64 * c2;
 
     // Finally, determine whether we are clipping to zero.
-    if frac > 1e6 * f64::EPSILON {
+    if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {
         return (bx, by, bz);
     } else {
         return (0.0, 0.0, 0.0);
@@ -485,10 +490,31 @@ pub fn vector_potential_linear_filament(
     Ok(())
 }
 
-/// Vector potential (A-field) from a linear current
-/// filament segment to an observation point.
+/// Vector potential (A-field) from a linear current filament segment to an observation point.
 ///
-/// Uses filament midpoint as field source.
+/// Uses the formula for finite segment length and finite wire thickness.
+/// 
+/// The base formula implemented here is:
+/// 
+/// $$
+/// A_z
+/// = \frac{\mu_0 I}{4\pi}\int_{-L/2}^{L/2}
+/// \frac{dz'}{\sqrt{(z-z')^2+r^2}}
+/// = \frac{\mu_0 I}{4\pi}\ln(
+/// \frac{
+/// -z + \frac{L}{2} + \sqrt{(z-\frac{L}{2})^2 + r^2}
+/// }{
+/// -(z+\frac{L}{2}) + \sqrt{(z+\frac{L}{2})^2 + r^2}
+/// }
+/// )
+/// $$
+/// 
+/// This has been manipulated to formulate in terms of components of the distance from the
+/// filament endpoints and filament axis to the target point:
+/// 
+/// $$ k1 = -||bp_\parallel|| + ||bp|| $$
+/// $$ k2 = -||ap_\parallel|| + ||ap|| $$
+/// $$ A_\parallel = \frac{\mu_0 I}{4 \pi} \ln (\frac{k1}{k2}) $$
 ///
 /// # Arguments
 ///
@@ -501,28 +527,43 @@ pub fn vector_potential_linear_filament(
 #[inline]
 pub fn vector_potential_linear_filament_scalar(
     xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
+    wire_radius: f64,
     xyzobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
+    use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
+
     // Unpack
-    let (xyz0, xyz1, ifil) = xyzifil;
+    let (start, end, ifil) = xyzifil;
 
-    // Get filament midpoint and length vector
-    let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
+    // Get perpendicular distance and distance from each endpoint to the target,
+    // and a fraction between 0 and 1 representing how far the point is from the center of the wire
+    // to the edge of the wire.
+    // All 3 distances are clamped to at least the wire radius.
+    let PointLineDistance {
+        perp: perp,
+        dist_a,
+        dist_b,
+        frac,
+        para_a,
+        para_b,
+        ab_norm: dlhat,
+    } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
 
-    // [m] vector from filament midpoint to obs point
-    let (rx, ry, rz) = (xyzobs.0 - xmid, xyzobs.1 - ymid, xyzobs.2 - zmid);
-    let rnorm = rss3(rx, ry, rz);
+    // Finite segment length log-form with quadratic blend to zero at axis.
+    let k1 = (-para_b + dist_b).max(0.0);
+    let k2 = (-para_a + dist_a).max(0.0);
+    let frac2 = frac * frac;  // Quadratic fall-off (as opposed to linear for B-field)
+    let a_mag = frac2 * MU0_OVER_4PI * ifil * libm::log(k1 / k2);
 
-    // Scale factor shared between all components of A
-    let c = MU0_OVER_4PI * (ifil / rnorm);
+    // Direction is always aligned with the segment.
+    let (ax, ay, az) = (a_mag * dlhat.0, a_mag * dlhat.1, a_mag * dlhat.2);
 
-    // Vector potential is linear in the current and segment length
-    // and goes like 1/R from the segment to the observation point.
-    let ax = c * dl.0;
-    let ay = c * dl.1;
-    let az = c * dl.2;
-
-    (ax, ay, az)
+    // Finally, determine whether we are clipping to zero.
+    if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {
+        return (ax, ay, az);
+    } else {
+        return (0.0, 0.0, 0.0);
+    }
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current

@@ -6,7 +6,7 @@
 	url = https://github.com/open-source-parsers/jsoncpp.git
 [submodule "vendor/tclap"]
 	path = vendor/tclap
-	url = git@github.com:mirror/tclap.git
+	url = https://github.com/mirror/tclap.git
 [submodule "vendor/rat-common"]
 	path = vendor/rat-common
 	url = https://gitlab.com/Project-Rat/rat-common.git

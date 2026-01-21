@@ -44,6 +44,7 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
 )
+
 try:
     from .cfsem import (
         fields_linear_filament_mlfmm as em_fields_linear_filament_mlfmm,
@@ -242,8 +243,6 @@ def flux_density_point_segment(
     return em_flux_density_point_segment(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
-
-
 def vector_potential_linear_filament(
     xyzp: Array3xN,
     xyzfil: Array3xN,
@@ -274,9 +273,7 @@ def vector_potential_linear_filament(
     if asarray(wire_radius).ndim == 0:
         wire_radius = full(ifil.size, float(wire_radius))
     wire_radius = ascontiguousarray(wire_radius).ravel()
-    return em_vector_potential_linear_filament(
-        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
-    )
+    return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
 
 
 def vector_potential_point_segment(

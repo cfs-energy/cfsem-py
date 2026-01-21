@@ -7,7 +7,7 @@ use rayon::{
 
 use crate::{
     chunksize,
-    math::{cross3, cross3f, dot3, rss3},
+    math::{cross3, dot3, rss3},
 };
 
 use crate::{MU0_OVER_4PI, macros::*};
@@ -355,32 +355,27 @@ pub fn flux_density_linear_filament_scalar(
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
-    let sin_theta_a = (para_a / dist_a) as f32;
-    let sin_theta_b = (para_b / dist_b) as f32;
+    let sin_theta_a = para_a / dist_a; // (dimensionless)
+    let sin_theta_b = para_b / dist_b; // (dimensionless)
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let c = -frac as f32 * (sin_theta_b - sin_theta_a);
+    let geometric_factor = -frac * (sin_theta_b - sin_theta_a); // (dimensionless)
 
     // This factor is constant across all x, y, and z components.
-    let c2 = MU0_OVER_4PI * ifil / perp; // (A/m) Relatively sensitive to resolution.
+    let c = geometric_factor * MU0_OVER_4PI * ifil / perp; // (A/m)
 
     // Direction of cross(dL, r), the direction of the field.
-    let (cx, cy, cz) = cross3f(
-        dlhat.0 as f32,
-        dlhat.1 as f32,
-        dlhat.2 as f32,
-        perp_hat.0 as f32,
-        perp_hat.1 as f32,
-        perp_hat.2 as f32,
+    let (cx, cy, cz) = cross3(
+        dlhat.0, dlhat.1, dlhat.2, perp_hat.0, perp_hat.1, perp_hat.2,
     ); // (dimensionless)
 
     // Assemble final B-field components.
     // and upcast back to 64-bit float so that summation operations
     // downstream do not incur excessive roundoff error.
-    let bx = (c * cx) as f64 * c2; // [T]
-    let by = (c * cy) as f64 * c2;
-    let bz = (c * cz) as f64 * c2;
+    let bx = c * cx; // [T]
+    let by = c * cy; // [T]
+    let bz = c * cz; // [T]
 
     // Finally, determine whether we are clipping to zero.
     if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {

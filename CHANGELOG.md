@@ -1,12 +1,17 @@
 # Changelog
 
-## 3.2.0 2025-01-16
+## 4.0.0 2025-01-16
 
 ### Added
 
-* Add `rat_mlfmm` module with limited bindings to Project Rat's multipole methods for B-field and A-field
+* Add `mlfmm` module with limited bindings to Project Rat's multipole methods for B-field and A-field
   * Exposed as `cfsem::mlfmm::fields_linear_filament_mlfmm` when `rat-mlfmm` feature is enabled
-* Add vendored dependencies and thin C FFI to support those bindings
+  * Add vendored dependencies and thin C FFI to support those bindings
+  * Available on Windows, linux, and macOS only; disabled on other platforms
+* !Upgrade `flux_density_linear_filament`, `vector_potential_linear_filament`, and `body_force_density_linear_filament` functions
+  * Now handle finite wire length and finite wire thickness analytically
+  * Old point-source segment formulations moved to `point_source::segment` module and available as `flux_density_point_segment` and `vector_potential_point_segment` functions
+* Add `biot_savart.py` and `vector_potential.py` examples with plots comparing linear filament, point segment, and multipole calcs 
 
 ## 3.1.0 2025-12-19
 

@@ -8,7 +8,7 @@ use rayon::{
 
 use crate::{
     chunksize,
-    math::{cross3, cross3f, decompose_filament, dot3f, rss3},
+    math::{cross3, decompose_filament, dot3, rss3},
 };
 
 use crate::{MU0_OVER_4PI, macros::*};
@@ -146,30 +146,30 @@ pub fn flux_density_point_segment_scalar(
     // we can switch to 32-bit floats for the majority of the calculation without incurring
     // excessive error, before converting back to 64-bit float so that we maintain
     // acceptable error during summation downstream.
-    let (rx, ry, rz) = (rx as f32, ry as f32, rz as f32);
-    let dl = (dl.0 as f32, dl.1 as f32, dl.2 as f32);
-    let ifil = ifil as f32;
+    let (rx, ry, rz) = (rx, ry, rz);
+    let dl = (dl.0, dl.1, dl.2);
+    let ifil = ifil;
 
     // Do 1/r^3 operation with an ordering that improves float error by eliminating
     // the actual cube operation and using fused multiply-add to reduce roundoff events,
     // then rolling the result into the factor that is constant between all contributions.
-    let sumsq = dot3f(rx, ry, rz, rx, ry, rz);
+    let sumsq = dot3(rx, ry, rz, rx, ry, rz);
     let rnorm3_inv = sumsq.powf(-1.5); // [m^-3]
 
     // This factor is constant across all x, y, and z components
-    let c = (MU0_OVER_4PI as f32) * ifil * rnorm3_inv;
+    let c = (MU0_OVER_4PI) * ifil * rnorm3_inv;
 
     // Evaluate the cross products for each axis component
     // separately using mul_add which would not be assumed usable
     // in a more general implementation.
-    let (cx, cy, cz) = cross3f(dl.0, dl.1, dl.2, rx, ry, rz);
+    let (cx, cy, cz) = cross3(dl.0, dl.1, dl.2, rx, ry, rz);
 
     // Assemble final B-field components
     // and upcast back to 64-bit float so that summation operations
     // downstream do not incur excessive roundoff error.
-    let bx = (c * cx) as f64; // [T]
-    let by = (c * cy) as f64;
-    let bz = (c * cz) as f64;
+    let bx = c * cx; // [T]
+    let by = c * cy;
+    let bz = c * cz;
 
     (bx, by, bz)
 }

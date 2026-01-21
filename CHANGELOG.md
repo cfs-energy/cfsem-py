@@ -10,6 +10,7 @@
   * Available on Windows, linux, and macOS only; disabled on other platforms
 * !Upgrade `flux_density_linear_filament`, `vector_potential_linear_filament`, and `body_force_density_linear_filament` functions
   * Now handle finite wire length and finite wire thickness analytically
+  * Removed mixed-precision section from flux density calculation in favor of all f64; this no longer affects overall throughput
   * Old point-source segment formulations moved to `point_source::segment` module and available as `flux_density_point_segment` and `vector_potential_point_segment` functions
 * Add `biot_savart.py` and `vector_potential.py` examples with plots comparing linear filament, point segment, and multipole calcs 
 

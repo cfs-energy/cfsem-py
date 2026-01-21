@@ -228,7 +228,7 @@ fn flux_density_linear_filament(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
-    ifil: PyReadonlyArray1<f64>, // [A] filament current
+    ifil: PyReadonlyArray1<f64>,        // [A] filament current
     wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
@@ -312,7 +312,7 @@ fn flux_density_point_segment(
 
 /// Python bindings for cfsemrs::mlfmm::fields_linear_filament_mlfmm
 #[cfg(feature = "rat-mlfmm")]
-#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, eps, use_van_lanen = true, direct_threshold = 10000000, order = None))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, eps, use_linear_filament = true, direct_threshold = 10000000, order = None))]
 fn fields_linear_filament_mlfmm(
     xyzp: (
         PyReadonlyArray1<f64>,
@@ -331,7 +331,7 @@ fn fields_linear_filament_mlfmm(
     ), // [m] Filament delta from start to end
     ifil: PyReadonlyArray1<f64>, // [A] filament current
     eps: PyReadonlyArray1<f64>,  // [m] van Lanen softening parameter
-    use_van_lanen: bool,
+    use_linear_filament: bool,
     direct_threshold: u64,
     order: Option<i32>,
 ) -> PyResult<(
@@ -345,7 +345,7 @@ fn fields_linear_filament_mlfmm(
     let eps = eps.as_slice()?;
 
     let mut opts = MlfmmOptions::default();
-    opts.use_van_lanen = use_van_lanen;
+    opts.use_linear_filament = use_linear_filament;
     if direct_threshold > 0 {
         opts.direct_threshold = Some(direct_threshold);
     }
@@ -405,7 +405,7 @@ fn vector_potential_linear_filament(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
-    ifil: PyReadonlyArray1<f64>, // [A] filament current
+    ifil: PyReadonlyArray1<f64>,        // [A] filament current
     wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
     par: bool,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {

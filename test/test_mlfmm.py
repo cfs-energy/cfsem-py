@@ -34,8 +34,8 @@ def _cube_targets(center, half_len, points_per_axis=11):
 
 @mark.parametrize("half_len", [5.025, 100.0])
 @mark.parametrize("direct_threshold", [0, int(1e3), int(1e12)])
-@mark.parametrize("use_van_lanen", [False, True])
-def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
+@mark.parametrize("use_linear_filament", [False, True])
+def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_linear_filament):
     try:
         fields_linear_filament_mlfmm = cfsem.fields_linear_filament_mlfmm
     except AttributeError:
@@ -54,7 +54,7 @@ def test_mlfmm_fields_against_direct(half_len, direct_threshold, use_van_lanen):
         dlxyzfil,
         ifil,
         eps,
-        use_van_lanen=use_van_lanen,
+        use_linear_filament=use_linear_filament,
         direct_threshold=direct_threshold,
         order=12,
     )
@@ -98,7 +98,7 @@ def test_mlfmm_van_lanen_single_segment_matches_subdivided_direct():
         dlxyzfil,
         ifil,
         eps,
-        use_van_lanen=True,
+        use_linear_filament=True,
         direct_threshold=1,
         order=None,
     )

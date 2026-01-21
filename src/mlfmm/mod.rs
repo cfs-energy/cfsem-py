@@ -130,7 +130,7 @@ impl Context {
             }
         };
 
-        self.set_van_lanen(opts.use_van_lanen)?;
+        self.set_van_lanen(opts.use_linear_filament)?;
         self.set_direct_mode(ffi::RatMlfmmDirectMode::Threshold)?;
         let threshold = opts
             .direct_threshold
@@ -152,7 +152,7 @@ impl Drop for Context {
 
 #[derive(Clone, Debug)]
 pub struct MlfmmOptions {
-    pub use_van_lanen: bool,
+    pub use_linear_filament: bool,
     pub direct_threshold: Option<u64>,
     pub order: Option<i32>,
 }
@@ -160,7 +160,7 @@ pub struct MlfmmOptions {
 impl Default for MlfmmOptions {
     fn default() -> Self {
         Self {
-            use_van_lanen: true,
+            use_linear_filament: true,
             direct_threshold: None,
             order: None,
         }
@@ -177,7 +177,7 @@ const DEFAULT_DIRECT_THRESHOLD: u64 = 10_000_000;
 ///     dlxyzfil: segment deltas from start to end (x, y, z), shape (3, M).
 ///     ifil: filament segment currents, length M.
 ///     eps: Van Lanen softening parameter, length M.
-///     opts: MLFMM options (direct threshold, Van Lanen, etc.).
+///     opts: MLFMM options (direct threshold, linear filament kernel, etc.).
 ///     out_b_xyz: output B-field components (x, y, z), length N each.
 ///     out_a_xyz: output A-field components (x, y, z), length N each.
 ///
@@ -255,7 +255,7 @@ mod tests {
         .expect("linear filament calc failed");
 
         let opts = MlfmmOptions {
-            use_van_lanen: false,
+            use_linear_filament: false,
             direct_threshold: Some(1_000_000),
             order: None,
         };
@@ -330,7 +330,7 @@ mod tests {
         .expect("linear filament calc failed");
 
         let opts = MlfmmOptions {
-            use_van_lanen: true,
+            use_linear_filament: true,
             direct_threshold: Some(1),
             order: None,
         };
@@ -404,7 +404,7 @@ mod tests {
         .expect("vector potential calc failed");
 
         let opts = MlfmmOptions {
-            use_van_lanen: false,
+            use_linear_filament: false,
             direct_threshold: Some(1_000_000),
             order: None,
         };
@@ -478,7 +478,7 @@ mod tests {
         .expect("vector potential calc failed");
 
         let opts = MlfmmOptions {
-            use_van_lanen: true,
+            use_linear_filament: true,
             direct_threshold: Some(1),
             order: None,
         };

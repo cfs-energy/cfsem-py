@@ -315,7 +315,7 @@ def fields_linear_filament_mlfmm(
     ifil: NDArray[float64],
     eps: NDArray[float64],
     *,
-    use_van_lanen: bool = True,
+    use_linear_filament: bool = True,
     direct_threshold: int = 10_000_000,
     order: int | None = None,
 ) -> tuple[Array3xN, Array3xN]:
@@ -329,7 +329,7 @@ def fields_linear_filament_mlfmm(
         dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
         eps: [m] van Lanen softening parameter
-        use_van_lanen: Whether to use Van Lanen kernel
+        use_linear_filament: Whether to use linear-filament kernel
         direct_threshold: Interaction count threshold for direct evaluation
         order: Multipole expansion order (None uses library default)
 
@@ -349,7 +349,7 @@ def fields_linear_filament_mlfmm(
         dlxyzfil,
         ifil,
         eps,
-        use_van_lanen,
+        use_linear_filament,
         direct_threshold,
         0 if order is None else int(order),
     )

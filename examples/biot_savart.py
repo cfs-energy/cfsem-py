@@ -145,7 +145,7 @@ def main() -> None:
             dlxyzfil_ps,
             ifil_ps,
             np.full(nseg, 1e-6),
-            use_van_lanen=False,
+            use_linear_filament=False,
             direct_threshold=1,  # Always MLFMM to test multipole expansion
             order=None,
         )
@@ -194,7 +194,7 @@ def main() -> None:
             dlxyzfil,
             ifil,
             np.full(ifil.size, 1e-6),
-            use_van_lanen=True,
+            use_linear_filament=True,
             direct_threshold=1,  # Still direct method in this case
             order=None,
         )

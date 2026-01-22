@@ -1,6 +1,7 @@
 """Calculate the B-field from a Helmholtz coil pair."""
 
 import os
+import time
 
 import numpy as np
 
@@ -33,9 +34,10 @@ rmesh_flat = rmesh.flatten()
 zmesh_flat = zmesh.flatten()
 
 # Calculate the B-field at every mesh point using cfsem.
-Br_flat, Bz_flat = flux_density_circular_filament(
-    ifil, rfil, zfil, rmesh_flat, zmesh_flat
-)
+t0 = time.perf_counter()
+Br_flat, Bz_flat = flux_density_circular_filament(ifil, rfil, zfil, rmesh_flat, zmesh_flat)
+elapsed = time.perf_counter() - t0
+print(f"Computed Helmholtz coil field at {rmesh.size} locations in {elapsed:.6f} s")
 
 
 Br = Br_flat.reshape(rmesh.shape)

@@ -116,9 +116,11 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
     if target_os == "linux" {
-        println!("cargo:rustc-link-arg=-Wl,--whole-archive");
-        println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
-        println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
+        let rat_mlfmm_c_archive = lib_dir.join("librat_mlfmm_c.a");
+        println!(
+            "cargo:rustc-link-arg=-Wl,--whole-archive,{},--no-whole-archive",
+            rat_mlfmm_c_archive.to_string_lossy()
+        );
         println!("cargo:rustc-link-arg=-Wl,--no-undefined");
         println!("cargo:rustc-link-arg=-Wl,--start-group");
     } else {
@@ -145,7 +147,6 @@ fn main() {
 
     rerun_if_changed(&wrapper_dir.join("CMakeLists.txt"));
     rerun_if_changed(&wrapper_dir.join("src/rat_mlfmm_c.cpp"));
-    rerun_if_changed(&wrapper_dir.join("src/rat_mlfmm_c_err.cpp"));
     rerun_if_changed(&wrapper_dir.join("include/rat_mlfmm_c.h"));
     rerun_if_changed(&wrapper_dir.join("cmake/FindJsonCPP.cmake"));
     rerun_if_changed(&wrapper_dir.join("cmake/FindTCLAP.cmake"));

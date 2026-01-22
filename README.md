@@ -73,12 +73,6 @@ To install in the active python environment, do
 uv pip install -e . --group dev
 ```
 
-To build the Rust bindings only, do
-
-```bash
-maturin develop --release --features=python
-```
-
 No part of installation requires root. If access issues are encountered, this can likely be resolved by using a virtual environment.
 
 Some computationally-expensive calculations are written in Rust. These calculations and their python bindings are installed from pre-built binaries when installing from pypi or compiled during local development installation, with no intervention from the user in either case. Symmetric bindings with docstrings are available in the `bindings.py` module and re-exported at the library level.

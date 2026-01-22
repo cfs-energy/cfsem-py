@@ -199,7 +199,6 @@ endif()
 
 add_library(rat_mlfmm_c STATIC
     src/rat_mlfmm_c.cpp
-    src/rat_mlfmm_c_err.cpp
 )
 
 target_compile_features(rat_mlfmm_c PRIVATE cxx_std_14)

@@ -3,6 +3,7 @@
 #include <armadillo>
 #include <exception>
 #include <new>
+#include <string>
 #include <vector>
 
 #include "currentsources.hh"
@@ -10,7 +11,21 @@
 #include "mlfmm.hh"
 #include "settings.hh"
 
-extern "C" void rat_mlfmm_set_last_error(const char *msg);
+namespace {
+thread_local std::string g_last_error;
+}
+
+extern "C" void rat_mlfmm_set_last_error(const char *msg) {
+    if (msg) {
+        g_last_error = msg;
+    } else {
+        g_last_error.clear();
+    }
+}
+
+extern "C" const char *rat_mlfmm_last_error(void) {
+    return g_last_error.c_str();
+}
 
 namespace {
 struct Context {

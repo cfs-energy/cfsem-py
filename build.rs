@@ -225,7 +225,14 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
     }
 
     let status = Command::new("git")
-        .args(["submodule", "update", "--init", "--recursive"])
+        .args([
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "--depth",
+            "1",
+        ])
         .current_dir(manifest_dir)
         .status()
         .expect("failed to run git submodule update");

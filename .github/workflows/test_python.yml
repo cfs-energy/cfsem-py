@@ -37,7 +37,7 @@ jobs:
 
     - name: Initialize submodules
       if: steps.cache-vendor.outputs.cache-hit != 'true'
-      run: git submodule update --init --recursive --depth 1 --shallow-submodules
+      run: git submodule update --init --recursive --depth 1
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable

@@ -119,6 +119,7 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,--whole-archive");
         println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
         println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
+        println!("cargo:rustc-link-arg=-Wl,--no-undefined");
         println!("cargo:rustc-link-arg=-Wl,--start-group");
     } else {
         println!("cargo:rustc-link-lib=static=rat_mlfmm_c");

@@ -116,8 +116,12 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
     if target_os == "linux" {
+        let rat_mlfmm_c_archive = lib_dir.join("librat_mlfmm_c.a");
         println!("cargo:rustc-link-arg=-Wl,--whole-archive");
-        println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
+        println!(
+            "cargo:rustc-link-arg={}",
+            rat_mlfmm_c_archive.to_string_lossy()
+        );
         println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
     } else {
         println!("cargo:rustc-link-lib=static=rat_mlfmm_c");

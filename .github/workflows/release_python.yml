@@ -45,6 +45,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install OpenBLAS (linux)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -116,6 +118,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           architecture: ${{ matrix.platform.target }}
+      - name: Install OpenBLAS (windows)
+        shell: pwsh
+        run: |
+          $triplet = if ("${{ matrix.platform.target }}" -eq "x86") { "x86-windows" } else { "x64-windows" }
+          & "C:\vcpkg\vcpkg.exe" install "openblas:$triplet"
+          "CMAKE_PREFIX_PATH=C:\vcpkg\installed\$triplet" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:

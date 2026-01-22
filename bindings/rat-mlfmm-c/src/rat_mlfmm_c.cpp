@@ -15,7 +15,7 @@ namespace {
 thread_local std::string g_last_error;
 }
 
-extern "C" void rat_mlfmm_set_last_error(const char *msg) {
+extern "C" RAT_MLFMM_C_API void rat_mlfmm_set_last_error(const char *msg) {
     if (msg) {
         g_last_error = msg;
     } else {
@@ -23,7 +23,7 @@ extern "C" void rat_mlfmm_set_last_error(const char *msg) {
     }
 }
 
-extern "C" const char *rat_mlfmm_last_error(void) {
+extern "C" RAT_MLFMM_C_API const char *rat_mlfmm_last_error(void) {
     return g_last_error.c_str();
 }
 

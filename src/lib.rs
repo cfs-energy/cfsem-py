@@ -36,7 +36,9 @@ pub(crate) fn chunksize(nelem: usize) -> usize {
         .unwrap_or(NonZeroUsize::MIN)
         .get();
 
-    (nelem / ncores).max(1)
+    let ncores = ncores / 2; // Heuristic for physical cores
+
+    (nelem / ncores).max(1024) // Heuristic for thread overhead
 }
 
 #[macro_use]

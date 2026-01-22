@@ -16,6 +16,9 @@
     * For both linear_filament and point_segment variants
   * Old point-source segment formulations moved to `point_source::segment` module and available as `flux_density_point_segment` and `vector_potential_point_segment` functions
 * Add `biot_savart.py` and `vector_potential.py` examples with plots comparing linear filament, point segment, and multipole calcs 
+* Improve parallelism heuristics
+    * Minimum chunk size of 1024
+    * Use half of available parallelism as heuristic for physical cores
 
 ## 3.1.0 2025-12-19
 

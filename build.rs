@@ -196,14 +196,8 @@ fn main() {
     if target_os == "linux" {
         println!("cargo:rustc-link-lib=openblas");
         println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
-        println!(
-            "cargo:rustc-link-arg-cdylib={}",
-            rat_mlfmm_lib.display()
-        );
-        println!(
-            "cargo:rustc-link-arg-cdylib={}",
-            rat_common_lib.display()
-        );
+        println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_lib.display());
+        println!("cargo:rustc-link-arg-cdylib={}", rat_common_lib.display());
         println!("cargo:rustc-link-arg-cdylib=-Wl,--no-whole-archive");
     }
     if target_os == "macos" {

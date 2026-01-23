@@ -183,6 +183,9 @@ fn main() {
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
+    if target_os == "linux" {
+        println!("cargo:rustc-link-arg=-Wl,--start-group");
+    }
     println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
     println!("cargo:rustc-link-lib=static=ratmlfmm");
     println!("cargo:rustc-link-lib=static=ratcmn");
@@ -192,13 +195,12 @@ fn main() {
     println!("cargo:rustc-link-lib=static=boost_chrono");
     println!("cargo:rustc-link-lib=static=jsoncpp");
     println!("cargo:rustc-link-lib=static=armadillo");
+    if target_os == "linux" {
+        println!("cargo:rustc-link-arg=-Wl,--end-group");
+    }
     println!("cargo:rustc-link-lib=z");
     if target_os == "linux" {
         println!("cargo:rustc-link-lib=openblas");
-        println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
-        println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_lib.display());
-        println!("cargo:rustc-link-arg-cdylib={}", rat_common_lib.display());
-        println!("cargo:rustc-link-arg-cdylib=-Wl,--no-whole-archive");
     }
     if target_os == "macos" {
         println!(

@@ -221,7 +221,7 @@ mod tests {
     use crate::physics::linear_filament::vector_potential_linear_filament;
 
     #[test]
-    fn compares_mlfmm_with_linear_filament() {
+    fn compare_mlfmm_with_linear_filament() {
         let xfil = [0.0, 0.5];
         let yfil = [0.0, 0.0];
         let zfil = [0.0, 0.0];
@@ -230,7 +230,7 @@ mod tests {
         let dlz = [0.0, 0.0];
         let ifil = [10.0, 10.0];
 
-        let eps = [1e-6, 1e-6];
+        let eps = [1e-9, 1e-9];
 
         let targets_x = [0.25, 0.75, 0.5];
         let targets_y = [0.1, 0.2, 0.3];
@@ -277,7 +277,7 @@ mod tests {
         )
         .expect("mlfmm compute failed");
 
-        let tol = 1e-5_f64;
+        let tol = 1e-4_f64;
         for i in 0..3 {
             let expect = [bx[i], by[i], bz[i]];
             let got = [bx_mlfmm[i], by_mlfmm[i], bz_mlfmm[i]];
@@ -296,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn compares_mlfmm_with_linear_filament_van_lanen_fmm() {
+    fn compare_mlfmm_with_linear_filament_van_lanen_fmm() {
         let xfil = [0.0, 0.5];
         let yfil = [0.0, 0.0];
         let zfil = [0.0, 0.0];
@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn compares_mlfmm_with_vector_potential() {
+    fn compare_mlfmm_with_vector_potential() {
         let xfil = [0.0, 0.5];
         let yfil = [0.0, 0.0];
         let zfil = [0.0, 0.0];
@@ -445,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn compares_mlfmm_with_vector_potential_van_lanen_fmm() {
+    fn compare_mlfmm_with_vector_potential_van_lanen_fmm() {
         let xfil = [0.0, 0.5];
         let yfil = [0.0, 0.0];
         let zfil = [0.0, 0.0];

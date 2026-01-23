@@ -33,6 +33,74 @@ fn main() {
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
     apply_vendor_patches(&manifest_dir, &patches_dir, &rat_common_dir, &rat_mlfmm_dir);
 
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let cpu_flag = resolve_cpu_flag(&target_arch);
+    let (c_flags_release, c_flags_debug) = compose_c_flags(&cpu_flag);
+    let (cxx_flags_release, cxx_flags_debug) = compose_cxx_flags(&cpu_flag);
+    let build_profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
+    let is_release = build_profile == "release";
+
+    let rat_mlfmm_c_src = wrapper_dir.join("src").join("rat_mlfmm_c.cpp");
+    let rat_mlfmm_c_include = wrapper_dir.join("include");
+    let rat_mlfmm_include = rat_mlfmm_dir.join("include");
+    let rat_common_include = rat_common_dir.join("include");
+    let boost_include = boost_dir.clone();
+    let boost_extra_includes = [
+        boost_dir.join("libs").join("asio").join("include"),
+        boost_dir.join("libs").join("chrono").join("include"),
+        boost_dir.join("libs").join("filesystem").join("include"),
+        boost_dir.join("libs").join("iostreams").join("include"),
+        boost_dir.join("libs").join("system").join("include"),
+        boost_dir.join("libs").join("thread").join("include"),
+    ];
+    let rat_common_shim = out_dir.join("rat-common-include");
+    let rat_common_shim_dest = rat_common_shim.join("rat").join("common");
+    std::fs::create_dir_all(&rat_common_shim_dest)
+        .unwrap_or_else(|err| panic!("failed to create {rat_common_shim_dest:?}: {err}"));
+    if let Ok(entries) = std::fs::read_dir(&rat_common_include) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("hh") {
+                continue;
+            }
+            if let Some(name) = path.file_name() {
+                let dest = rat_common_shim_dest.join(name);
+                let _ = std::fs::copy(&path, dest);
+            }
+        }
+    }
+    let armadillo_include = armadillo_dir.join("include");
+    let jsoncpp_include = jsoncpp_dir.join("include");
+    let mut cc_build = cc::Build::new();
+    cc_build.cpp(true);
+    cc_build.file(&rat_mlfmm_c_src);
+    cc_build.include(&rat_mlfmm_c_include);
+    cc_build.include(&rat_mlfmm_include);
+    cc_build.include(&rat_common_shim);
+    cc_build.include(&armadillo_include);
+    cc_build.include(&jsoncpp_include);
+    cc_build.include(&boost_include);
+    for include in &boost_extra_includes {
+        cc_build.include(include);
+    }
+    cc_build.define("RAT_MLFMM_C_BUILD", None);
+    cc_build.define("RAT_DOUBLE_PRECISION", None);
+    cc_build.flag_if_supported("-std=c++14");
+    cc_build.flag_if_supported("-fPIC");
+    if is_release {
+        for flag in cxx_flags_release.split_whitespace() {
+            cc_build.flag(flag);
+        }
+    } else {
+        for flag in cxx_flags_debug.split_whitespace() {
+            cc_build.flag(flag);
+        }
+    }
+    cc_build.out_dir(&out_dir);
+    cc_build.compile("rat_mlfmm_c");
+
     let mut cfg = cmake::Config::new(&wrapper_dir);
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
     let build_type = if profile == "release" {
@@ -40,11 +108,6 @@ fn main() {
     } else {
         "Debug"
     };
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let cpu_flag = resolve_cpu_flag(&target_arch);
-    let (c_flags_release, c_flags_debug) = compose_c_flags(&cpu_flag);
-    let (cxx_flags_release, cxx_flags_debug) = compose_cxx_flags(&cpu_flag);
     let boost_cxxflags = compose_boost_cxxflags(&cpu_flag);
     cfg.profile(build_type);
     cfg.define("CMAKE_BUILD_TYPE", build_type);
@@ -96,8 +159,12 @@ fn main() {
     let bin_dir = dst.join("build").join("bin");
     let rat_common_lib_dir = dst.join("build").join("rat-common-build").join("lib");
     let rat_mlfmm_lib_dir = dst.join("build").join("rat-mlfmm-build").join("lib");
+    let rat_common_lib = rat_common_lib_dir.join("libratcmn.a");
+    let rat_mlfmm_lib = rat_mlfmm_lib_dir.join("libratmlfmm.a");
+    let rat_mlfmm_c_lib = out_dir.join("librat_mlfmm_c.a");
     let boost_lib_dir = dst.join("build").join("boost-install").join("lib");
     let armadillo_lib_dir = dst.join("build").join("armadillo-build");
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!(
         "cargo:rustc-link-search=native={}",
@@ -115,20 +182,7 @@ fn main() {
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
-    if target_os == "linux" {
-        let rat_mlfmm_c_archive = lib_dir.join("librat_mlfmm_c.a");
-        println!("cargo:rustc-link-arg=-Wl,--whole-archive");
-        println!(
-            "cargo:rustc-link-arg={}",
-            rat_mlfmm_c_archive.to_string_lossy()
-        );
-        println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
-        println!("cargo:rustc-link-arg=-Wl,--undefined=rat_mlfmm_last_error");
-        println!("cargo:rustc-link-arg=-Wl,--undefined=rat_mlfmm_context_create");
-        println!("cargo:rustc-link-arg=-Wl,--start-group");
-    } else {
-        println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
-    }
+    println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
     println!("cargo:rustc-link-lib=static=ratmlfmm");
     println!("cargo:rustc-link-lib=static=ratcmn");
     println!("cargo:rustc-link-lib=static=boost_filesystem");
@@ -137,11 +191,20 @@ fn main() {
     println!("cargo:rustc-link-lib=static=boost_chrono");
     println!("cargo:rustc-link-lib=static=jsoncpp");
     println!("cargo:rustc-link-lib=static=armadillo");
-    if target_os == "linux" {
-        println!("cargo:rustc-link-arg=-Wl,--end-group");
-    }
     println!("cargo:rustc-link-lib=z");
     if target_os == "macos" {
+        println!(
+            "cargo:rustc-link-arg-cdylib=-Wl,-force_load,{}",
+            rat_mlfmm_c_lib.display()
+        );
+        println!(
+            "cargo:rustc-link-arg-cdylib=-Wl,-force_load,{}",
+            rat_mlfmm_lib.display()
+        );
+        println!(
+            "cargo:rustc-link-arg-cdylib=-Wl,-force_load,{}",
+            rat_common_lib.display()
+        );
         println!("cargo:rustc-link-lib=c++");
         println!("cargo:rustc-link-lib=c++abi");
         println!("cargo:rustc-link-lib=framework=Accelerate");

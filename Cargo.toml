@@ -29,6 +29,7 @@ criterion = "0.8.1"
 itertools = "0.14.0"
 
 [build-dependencies]
+cc = "1.2.54"
 cmake = "0.1.57"
 zip = "7.1.0"
 

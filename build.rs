@@ -299,6 +299,9 @@ fn compose_boost_cxxflags(cpu_flag: &Option<String>) -> String {
     if let Some(flag) = cpu_flag {
         flags.push(flag);
     }
+    if cfg!(not(target_os = "windows")) {
+        flags.push("-fPIC");
+    }
     flags.join(" ")
 }
 

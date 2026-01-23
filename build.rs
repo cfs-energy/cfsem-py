@@ -183,34 +183,27 @@ fn main() {
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
+    let static_libs = [
+        "rat_mlfmm_c",
+        "ratmlfmm",
+        "ratcmn",
+        "boost_filesystem",
+        "boost_iostreams",
+        "boost_thread",
+        "boost_chrono",
+        "jsoncpp",
+        "armadillo",
+    ];
     if target_os == "linux" {
-        println!("cargo:rustc-link-arg=-Wl,--start-group");
-    }
-    println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
-    println!("cargo:rustc-link-lib=static=ratmlfmm");
-    println!("cargo:rustc-link-lib=static=ratcmn");
-    println!("cargo:rustc-link-lib=static=boost_filesystem");
-    println!("cargo:rustc-link-lib=static=boost_iostreams");
-    println!("cargo:rustc-link-lib=static=boost_thread");
-    println!("cargo:rustc-link-lib=static=boost_chrono");
-    println!("cargo:rustc-link-lib=static=jsoncpp");
-    println!("cargo:rustc-link-lib=static=armadillo");
-    if target_os == "linux" {
-        println!("cargo:rustc-link-arg=-Wl,--end-group");
+        emit_link_group(&static_libs);
+    } else {
+        for lib in &static_libs {
+            println!("cargo:rustc-link-lib=static={lib}");
+        }
     }
     println!("cargo:rustc-link-lib=z");
     if target_os == "linux" {
         println!("cargo:rustc-link-lib=openblas");
-        println!("cargo:rustc-link-arg-cdylib=-Wl,--start-group");
-        println!(
-            "cargo:rustc-link-arg-cdylib=-Wl,-l:{}",
-            rat_mlfmm_lib.file_name().unwrap().to_string_lossy()
-        );
-        println!(
-            "cargo:rustc-link-arg-cdylib=-Wl,-l:{}",
-            rat_common_lib.file_name().unwrap().to_string_lossy()
-        );
-        println!("cargo:rustc-link-arg-cdylib=-Wl,--end-group");
     }
     if target_os == "macos" {
         println!(
@@ -313,6 +306,14 @@ fn compose_boost_cxxflags(cpu_flag: &Option<String>) -> String {
         flags.push("-fPIC");
     }
     flags.join(" ")
+}
+
+fn emit_link_group(static_libs: &[&str]) {
+    println!("cargo:rustc-link-arg=-Wl,--start-group");
+    for lib in static_libs {
+        println!("cargo:rustc-link-lib=static={lib}");
+    }
+    println!("cargo:rustc-link-arg=-Wl,--end-group");
 }
 
 fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {

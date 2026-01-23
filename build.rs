@@ -295,6 +295,10 @@ fn compose_c_flags(cpu_flag: &Option<String>) -> (String, String) {
         release.push(flag);
         debug.push(flag);
     }
+    if cfg!(not(target_os = "windows")) {
+        release.push("-fPIC");
+        debug.push("-fPIC");
+    }
     (release.join(" "), debug.join(" "))
 }
 

@@ -198,10 +198,6 @@ fn main() {
         println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
         println!(
             "cargo:rustc-link-arg-cdylib={}",
-            rat_mlfmm_c_lib.display()
-        );
-        println!(
-            "cargo:rustc-link-arg-cdylib={}",
             rat_mlfmm_lib.display()
         );
         println!(

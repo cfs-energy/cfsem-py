@@ -194,6 +194,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=armadillo");
     println!("cargo:rustc-link-lib=z");
     if target_os == "linux" {
+        println!("cargo:rustc-link-lib=openblas");
         println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
         println!(
             "cargo:rustc-link-arg-cdylib={}",

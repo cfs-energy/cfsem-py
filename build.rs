@@ -192,6 +192,22 @@ fn main() {
     println!("cargo:rustc-link-lib=static=jsoncpp");
     println!("cargo:rustc-link-lib=static=armadillo");
     println!("cargo:rustc-link-lib=z");
+    if target_os == "linux" {
+        println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
+        println!(
+            "cargo:rustc-link-arg-cdylib={}",
+            rat_mlfmm_c_lib.display()
+        );
+        println!(
+            "cargo:rustc-link-arg-cdylib={}",
+            rat_mlfmm_lib.display()
+        );
+        println!(
+            "cargo:rustc-link-arg-cdylib={}",
+            rat_common_lib.display()
+        );
+        println!("cargo:rustc-link-arg-cdylib=-Wl,--no-whole-archive");
+    }
     if target_os == "macos" {
         println!(
             "cargo:rustc-link-arg-cdylib=-Wl,-force_load,{}",

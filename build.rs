@@ -115,6 +115,7 @@ fn main() {
     cfg.define("CMAKE_CXX_FLAGS_RELEASE", &cxx_flags_release);
     cfg.define("CMAKE_C_FLAGS_DEBUG", &c_flags_debug);
     cfg.define("CMAKE_CXX_FLAGS_DEBUG", &cxx_flags_debug);
+    cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
     cfg.define("CFSEM_BOOST_CXXFLAGS", &boost_cxxflags);
     cfg.define(
         "CFSEM_EXPECT_RELEASE",
@@ -182,11 +183,9 @@ fn main() {
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
-    if target_os != "linux" {
-        println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
-        println!("cargo:rustc-link-lib=static=ratmlfmm");
-        println!("cargo:rustc-link-lib=static=ratcmn");
-    }
+    println!("cargo:rustc-link-lib=static=rat_mlfmm_c");
+    println!("cargo:rustc-link-lib=static=ratmlfmm");
+    println!("cargo:rustc-link-lib=static=ratcmn");
     println!("cargo:rustc-link-lib=static=boost_filesystem");
     println!("cargo:rustc-link-lib=static=boost_iostreams");
     println!("cargo:rustc-link-lib=static=boost_thread");

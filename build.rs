@@ -201,6 +201,16 @@ fn main() {
     println!("cargo:rustc-link-lib=z");
     if target_os == "linux" {
         println!("cargo:rustc-link-lib=openblas");
+        println!("cargo:rustc-link-arg-cdylib=-Wl,--start-group");
+        println!(
+            "cargo:rustc-link-arg-cdylib=-Wl,-l:{}",
+            rat_mlfmm_lib.file_name().unwrap().to_string_lossy()
+        );
+        println!(
+            "cargo:rustc-link-arg-cdylib=-Wl,-l:{}",
+            rat_common_lib.file_name().unwrap().to_string_lossy()
+        );
+        println!("cargo:rustc-link-arg-cdylib=-Wl,--end-group");
     }
     if target_os == "macos" {
         println!(

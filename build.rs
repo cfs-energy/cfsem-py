@@ -183,7 +183,8 @@ fn main() {
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
-    let static_libs = [
+    let python_feature = env::var_os("CARGO_FEATURE_PYTHON").is_some();
+    let mut static_libs = vec![
         "rat_mlfmm_c",
         "boost_filesystem",
         "boost_iostreams",
@@ -192,7 +193,9 @@ fn main() {
         "jsoncpp",
         "armadillo",
     ];
-    let python_feature = env::var_os("CARGO_FEATURE_PYTHON").is_some();
+    if target_os == "linux" && python_feature {
+        static_libs.retain(|lib| *lib != "rat_mlfmm_c");
+    }
     if target_os == "linux" {
         emit_link_group(&static_libs);
     } else {
@@ -210,6 +213,7 @@ fn main() {
         if python_feature {
             println!("cargo:rustc-link-arg-cdylib=-Wl,--no-as-needed");
             println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
+            println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_c_lib.display());
             println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_lib.display());
             println!("cargo:rustc-link-arg-cdylib={}", rat_common_lib.display());
             println!("cargo:rustc-link-arg-cdylib=-Wl,--no-whole-archive");

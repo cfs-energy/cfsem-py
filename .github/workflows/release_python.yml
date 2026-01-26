@@ -45,8 +45,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install OpenBLAS (linux)
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -54,6 +52,8 @@ jobs:
           args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: auto
+          before-script: |
+            yum install -y clang libstdc++-devel openblas-devel
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist
       - name: Upload wheels
@@ -92,6 +92,8 @@ jobs:
           args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: musllinux_1_2
+          before-script: |
+            yum install -y clang libstdc++-devel openblas-devel
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist
       - name: Upload wheels

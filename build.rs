@@ -42,6 +42,13 @@ fn main() {
                 .join("include")
                 .join("boost")
                 .join("assert.hpp"),
+            boost_dir
+                .join("libs")
+                .join("iterator")
+                .join("include")
+                .join("boost")
+                .join("iterator")
+                .join("iterator_facade.hpp"),
         ],
     );
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
@@ -72,6 +79,7 @@ fn main() {
         boost_dir.join("libs").join("chrono").join("include"),
         boost_dir.join("libs").join("config").join("include"),
         boost_dir.join("libs").join("filesystem").join("include"),
+        boost_dir.join("libs").join("iterator").join("include"),
         boost_dir.join("libs").join("iostreams").join("include"),
         boost_dir.join("libs").join("system").join("include"),
         boost_dir.join("libs").join("thread").join("include"),

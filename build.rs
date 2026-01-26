@@ -36,6 +36,12 @@ fn main() {
                 .join("include")
                 .join("boost")
                 .join("config.hpp"),
+            boost_dir
+                .join("libs")
+                .join("assert")
+                .join("include")
+                .join("boost")
+                .join("assert.hpp"),
         ],
     );
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
@@ -62,6 +68,7 @@ fn main() {
     let boost_include = boost_dir.clone();
     let boost_extra_includes = [
         boost_dir.join("libs").join("asio").join("include"),
+        boost_dir.join("libs").join("assert").join("include"),
         boost_dir.join("libs").join("chrono").join("include"),
         boost_dir.join("libs").join("config").join("include"),
         boost_dir.join("libs").join("filesystem").join("include"),

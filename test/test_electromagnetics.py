@@ -33,10 +33,16 @@ def test_body_force_density(r, z, par):
     jxbx1, jxby1, jxbz1 = cfsem.body_force_density_linear_filament(
         xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par=par
     )
+    jxbx2, jxby2, jxbz2 = cfsem.body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, 0.0, par=par
+    )
 
     assert np.allclose(jxbx, jxbx1, rtol=1e-2, atol=1e-9)
     assert np.allclose(jxby, jxby1, rtol=1e-2, atol=1e-9)
     assert np.allclose(jxbz, jxbz1, rtol=1e-2, atol=1e-9)
+    assert np.allclose(jxbx1, jxbx2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(jxby1, jxby2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(jxbz1, jxbz2, rtol=1e-12, atol=1e-12)
 
 
 @mark.parametrize("r", [0.775 * 2, np.pi])

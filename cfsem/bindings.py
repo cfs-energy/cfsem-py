@@ -333,7 +333,7 @@ def fields_linear_filament_mlfmm(
         (B, A) tuples of [T] and [Wb/m] field components at observation points
     """
     if em_fields_linear_filament_mlfmm is None:
-        raise RuntimeError("rat-mlfmm feature is not enabled in this build")
+        raise RuntimeError("rat-mlfmm feature is not enabled in this build")  # pragma: no cover
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)

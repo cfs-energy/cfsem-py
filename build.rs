@@ -210,6 +210,7 @@ fn main() {
     }
     println!("cargo:rustc-link-lib=z");
     if target_os == "linux" {
+        println!("cargo:rustc-link-lib=stdc++");
         println!("cargo:rustc-link-lib=openblas");
         if python_feature {
             println!("cargo:rustc-link-arg-cdylib=-Wl,--no-as-needed");

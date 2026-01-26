@@ -74,6 +74,7 @@ fn main() {
     let armadillo_include = armadillo_dir.join("include");
     let jsoncpp_include = jsoncpp_dir.join("include");
     let mut cc_build = cc::Build::new();
+    cc_build.cargo_metadata(false); // We emit rat_mlfmm_c link directives ourselves to avoid duplicate archives.
     cc_build.cpp(true);
     cc_build.file(&rat_mlfmm_c_src);
     cc_build.include(&rat_mlfmm_c_include);

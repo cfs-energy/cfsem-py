@@ -371,8 +371,6 @@ pub fn flux_density_linear_filament_scalar(
     ); // (dimensionless)
 
     // Assemble final B-field components.
-    // and upcast back to 64-bit float so that summation operations
-    // downstream do not incur excessive roundoff error.
     let bx = c * cx; // [T]
     let by = c * cy; // [T]
     let bz = c * cz; // [T]

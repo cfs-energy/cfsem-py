@@ -51,6 +51,7 @@ fn main() {
                 .join("iterator_facade.hpp"),
         ],
     );
+    ensure_boost_headers(&boost_dir);
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
     apply_vendor_patches(&manifest_dir, &patches_dir, &rat_common_dir, &rat_mlfmm_dir);
 
@@ -472,6 +473,45 @@ fn apply_vendor_patches(
     }
 
     let _ = manifest_dir;
+}
+
+fn ensure_boost_headers(boost_dir: &Path) {
+    let boost_headers = boost_dir.join("boost");
+    if boost_headers.is_dir() {
+        return;
+    }
+    // Boost's git superproject does not include the generated `boost/` header tree.
+    // Running `bootstrap.sh` + `b2 headers` creates it so includes like <boost/assert.hpp> work.
+    let bootstrap = boost_dir.join("bootstrap.sh");
+    if !bootstrap.exists() {
+        panic!(
+            "Boost headers missing and bootstrap.sh not found at {}",
+            bootstrap.display()
+        );
+    }
+    let status = Command::new(&bootstrap)
+        .current_dir(boost_dir)
+        .status()
+        .unwrap_or_else(|err| panic!("failed to run {}: {err}", bootstrap.display()));
+    if !status.success() {
+        panic!("Boost bootstrap failed with status {}", status);
+    }
+    let b2 = boost_dir.join("b2");
+    // Generate the consolidated headers into `boost/` for downstream compilers.
+    let status = Command::new(&b2)
+        .current_dir(boost_dir)
+        .arg("headers")
+        .status()
+        .unwrap_or_else(|err| panic!("failed to run {}: {err}", b2.display()));
+    if !status.success() {
+        panic!("Boost header generation failed with status {}", status);
+    }
+    if !boost_headers.is_dir() {
+        panic!(
+            "Boost header generation completed but {} is still missing",
+            boost_headers.display()
+        );
+    }
 }
 
 fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_zip: &Path) {

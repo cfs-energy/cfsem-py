@@ -220,6 +220,7 @@ fn main() {
         println!("cargo:rustc-link-lib=static=ratmlfmm");
         println!("cargo:rustc-link-lib=static=ratcmn");
     } else if target_os == "linux" {
+        println!("cargo:rustc-link-arg-cdylib=-Wl,--no-as-needed");
         println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
         println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_c_lib.display());
         println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_lib.display());

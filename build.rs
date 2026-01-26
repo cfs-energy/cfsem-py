@@ -53,10 +53,6 @@ fn main() {
         ensure_tool("clang");
         ensure_tool("clang++");
         ensure_tool("ld.lld");
-        c_flags_release.push_str(" -fuse-ld=lld");
-        c_flags_debug.push_str(" -fuse-ld=lld");
-        cxx_flags_release.push_str(" -fuse-ld=lld");
-        cxx_flags_debug.push_str(" -fuse-ld=lld");
     }
 
     let rat_mlfmm_c_src = wrapper_dir.join("src").join("rat_mlfmm_c.cpp");
@@ -96,7 +92,6 @@ fn main() {
     cc_build.cpp(true);
     if target_os == "linux" {
         cc_build.compiler("clang++");
-        cc_build.flag_if_supported("-fuse-ld=lld");
     }
     cc_build.file(&rat_mlfmm_c_src);
     cc_build.include(&rat_mlfmm_c_include);
@@ -141,6 +136,9 @@ fn main() {
     if target_os == "linux" {
         cfg.define("CMAKE_C_COMPILER", "clang");
         cfg.define("CMAKE_CXX_COMPILER", "clang++");
+        cfg.define("CMAKE_EXE_LINKER_FLAGS", "-fuse-ld=lld");
+        cfg.define("CMAKE_SHARED_LINKER_FLAGS", "-fuse-ld=lld");
+        cfg.define("CMAKE_MODULE_LINKER_FLAGS", "-fuse-ld=lld");
     }
     cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
     cfg.define("CFSEM_BOOST_CXXFLAGS", &boost_cxxflags);

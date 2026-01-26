@@ -194,10 +194,11 @@ fn main() {
         "jsoncpp",
         "armadillo",
     ];
-    if target_os == "linux" && python_feature {
-        static_libs.retain(|lib| *lib != "rat_mlfmm_c");
+    if target_os == "linux" && !python_feature {
+        static_libs.insert(1, "ratmlfmm");
+        static_libs.insert(2, "ratcmn");
     }
-    if target_os == "linux" {
+    if target_os == "linux" && !python_feature {
         emit_link_group(&static_libs);
     } else {
         for lib in &static_libs {
@@ -207,19 +208,14 @@ fn main() {
     if !python_feature {
         println!("cargo:rustc-link-lib=static=ratmlfmm");
         println!("cargo:rustc-link-lib=static=ratcmn");
+    } else if target_os == "linux" {
+        println!("cargo:rustc-link-lib=static:+whole-archive=ratmlfmm");
+        println!("cargo:rustc-link-lib=static:+whole-archive=ratcmn");
     }
     println!("cargo:rustc-link-lib=z");
     if target_os == "linux" {
         println!("cargo:rustc-link-lib=stdc++");
         println!("cargo:rustc-link-lib=openblas");
-        if python_feature {
-            println!("cargo:rustc-link-arg-cdylib=-Wl,--no-as-needed");
-            println!("cargo:rustc-link-arg-cdylib=-Wl,--whole-archive");
-            println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_c_lib.display());
-            println!("cargo:rustc-link-arg-cdylib={}", rat_mlfmm_lib.display());
-            println!("cargo:rustc-link-arg-cdylib={}", rat_common_lib.display());
-            println!("cargo:rustc-link-arg-cdylib=-Wl,--no-whole-archive");
-        }
     }
     if target_os == "macos" {
         println!(

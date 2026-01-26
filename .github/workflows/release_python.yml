@@ -53,7 +53,7 @@ jobs:
           sccache: 'true'
           manylinux: auto
           before-script: |
-            yum install -y clang libstdc++-devel openblas-devel
+            yum install -y clang lld libstdc++-devel openblas-devel
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist
       - name: Upload wheels
@@ -93,7 +93,7 @@ jobs:
           sccache: 'true'
           manylinux: musllinux_1_2
           before-script: |
-            yum install -y clang libstdc++-devel openblas-devel
+            yum install -y clang lld libstdc++-devel openblas-devel
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist
       - name: Upload wheels

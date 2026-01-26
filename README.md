@@ -10,7 +10,7 @@ When building the `mlfmm` feature, some system dependencies are needed.
 
 * cmake
 * C/C++ toolchain (clang + make)
-  * Linux: clang, libstdc++-12-dev
+  * Linux: clang, lld, libstdc++-12-dev
   * NOTE: the g++ toolchain does not work for this project due to dependency ordering issues during linking
     when building cdylib builds for the python extension library.
 * git (for submodules)

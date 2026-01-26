@@ -43,7 +43,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Install Linux build deps
-      run: sudo apt-get update && sudo apt-get install -y clang libstdc++-12-dev
+      run: sudo apt-get update && sudo apt-get install -y clang lld libstdc++-12-dev
 
     - name: Install uv
       uses: astral-sh/setup-uv@v5

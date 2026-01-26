@@ -28,6 +28,12 @@ fn main() {
             jsoncpp_dir.join("CMakeLists.txt"),
             tclap_dir.join("CMakeLists.txt"),
             boost_dir.join("tools/build/src/engine/build.sh"),
+            boost_dir
+                .join("libs")
+                .join("config")
+                .join("include")
+                .join("boost")
+                .join("config.hpp"),
         ],
     );
     ensure_armadillo_extracted(&armadillo_dir, &armadillo_zip);
@@ -50,6 +56,7 @@ fn main() {
     let boost_extra_includes = [
         boost_dir.join("libs").join("asio").join("include"),
         boost_dir.join("libs").join("chrono").join("include"),
+        boost_dir.join("libs").join("config").join("include"),
         boost_dir.join("libs").join("filesystem").join("include"),
         boost_dir.join("libs").join("iostreams").join("include"),
         boost_dir.join("libs").join("system").join("include"),

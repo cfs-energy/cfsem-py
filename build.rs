@@ -45,10 +45,19 @@ fn main() {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let cpu_flag = resolve_cpu_flag(&target_arch);
-    let (c_flags_release, c_flags_debug) = compose_c_flags(&cpu_flag);
-    let (cxx_flags_release, cxx_flags_debug) = compose_cxx_flags(&cpu_flag);
+    let (mut c_flags_release, mut c_flags_debug) = compose_c_flags(&cpu_flag);
+    let (mut cxx_flags_release, mut cxx_flags_debug) = compose_cxx_flags(&cpu_flag);
     let build_profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
     let is_release = build_profile == "release";
+    if target_os == "linux" {
+        ensure_tool("clang");
+        ensure_tool("clang++");
+        ensure_tool("ld.lld");
+        c_flags_release.push_str(" -fuse-ld=lld");
+        c_flags_debug.push_str(" -fuse-ld=lld");
+        cxx_flags_release.push_str(" -fuse-ld=lld");
+        cxx_flags_debug.push_str(" -fuse-ld=lld");
+    }
 
     let rat_mlfmm_c_src = wrapper_dir.join("src").join("rat_mlfmm_c.cpp");
     let rat_mlfmm_c_include = wrapper_dir.join("include");
@@ -85,6 +94,10 @@ fn main() {
     let mut cc_build = cc::Build::new();
     cc_build.cargo_metadata(false); // We emit rat_mlfmm_c link directives ourselves to avoid duplicate archives.
     cc_build.cpp(true);
+    if target_os == "linux" {
+        cc_build.compiler("clang++");
+        cc_build.flag_if_supported("-fuse-ld=lld");
+    }
     cc_build.file(&rat_mlfmm_c_src);
     cc_build.include(&rat_mlfmm_c_include);
     cc_build.include(&rat_mlfmm_include);
@@ -125,6 +138,10 @@ fn main() {
     cfg.define("CMAKE_CXX_FLAGS_RELEASE", &cxx_flags_release);
     cfg.define("CMAKE_C_FLAGS_DEBUG", &c_flags_debug);
     cfg.define("CMAKE_CXX_FLAGS_DEBUG", &cxx_flags_debug);
+    if target_os == "linux" {
+        cfg.define("CMAKE_C_COMPILER", "clang");
+        cfg.define("CMAKE_CXX_COMPILER", "clang++");
+    }
     cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
     cfg.define("CFSEM_BOOST_CXXFLAGS", &boost_cxxflags);
     cfg.define(
@@ -498,5 +515,11 @@ fn ensure_armadillo_extracted(armadillo_dir: &Path, armadillo_zip: &Path) {
                     .unwrap_or_else(|err| panic!("failed to set perms {outpath:?}: {err}"));
             }
         }
+    }
+}
+
+fn ensure_tool(tool: &str) {
+    if Command::new(tool).arg("--version").output().is_err() {
+        panic!("{tool} not found in PATH");
     }
 }

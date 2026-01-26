@@ -136,11 +136,20 @@ fn main() {
         let deploy = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
         cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &deploy);
     } else {
+        if python_feature && target_os == "linux" {
+            cfg.define("BUILD_SHARED_LIBS", "ON");
+            cfg.define("RAT_MLFMM_BUILD_SHARED", "ON");
+            cfg.define("RAT_COMMON_BUILD_SHARED", "ON");
+        }
         cfg.define("BLA_STATIC", "ON");
         if target_os == "windows" {
             cfg.define("CMAKE_FIND_LIBRARY_SUFFIXES", ".lib;.a");
         } else if target_os == "linux" {
-            cfg.define("CMAKE_FIND_LIBRARY_SUFFIXES", ".a");
+            if python_feature {
+                cfg.define("CMAKE_FIND_LIBRARY_SUFFIXES", ".so;.a");
+            } else {
+                cfg.define("CMAKE_FIND_LIBRARY_SUFFIXES", ".a");
+            }
         }
     }
     cfg.define("RAT_MLFMM_DIR", rat_mlfmm_dir.to_str().unwrap());
@@ -216,8 +225,17 @@ fn main() {
         println!("cargo:rustc-link-lib=static=ratmlfmm");
         println!("cargo:rustc-link-lib=static=ratcmn");
     } else if target_os == "linux" {
-        println!("cargo:rustc-link-lib=static:+whole-archive=ratmlfmm");
-        println!("cargo:rustc-link-lib=static:+whole-archive=ratcmn");
+        println!("cargo:rustc-link-lib=dylib=ratmlfmm");
+        println!("cargo:rustc-link-lib=dylib=ratcmn");
+        println!("cargo:rustc-link-arg-cdylib=-Wl,-rpath,$ORIGIN");
+        println!(
+            "cargo:rustc-link-arg-cdylib=-Wl,-rpath,{}",
+            rat_mlfmm_lib_dir.display()
+        );
+        println!(
+            "cargo:rustc-link-arg-cdylib=-Wl,-rpath,{}",
+            rat_common_lib_dir.display()
+        );
     }
     println!("cargo:rustc-link-lib=z");
     if target_os == "linux" {

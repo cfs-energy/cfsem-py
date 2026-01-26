@@ -30,25 +30,6 @@ fn main() {
             jsoncpp_dir.join("CMakeLists.txt"),
             tclap_dir.join("CMakeLists.txt"),
             boost_dir.join("tools/build/src/engine/build.sh"),
-            boost_dir
-                .join("libs")
-                .join("config")
-                .join("include")
-                .join("boost")
-                .join("config.hpp"),
-            boost_dir
-                .join("libs")
-                .join("assert")
-                .join("include")
-                .join("boost")
-                .join("assert.hpp"),
-            boost_dir
-                .join("libs")
-                .join("iterator")
-                .join("include")
-                .join("boost")
-                .join("iterator")
-                .join("iterator_facade.hpp"),
         ],
     );
     ensure_boost_headers(&boost_dir);
@@ -74,17 +55,6 @@ fn main() {
     let rat_mlfmm_include = rat_mlfmm_dir.join("include");
     let rat_common_include = rat_common_dir.join("include");
     let boost_include = boost_dir.clone();
-    let boost_extra_includes = [
-        boost_dir.join("libs").join("asio").join("include"),
-        boost_dir.join("libs").join("assert").join("include"),
-        boost_dir.join("libs").join("chrono").join("include"),
-        boost_dir.join("libs").join("config").join("include"),
-        boost_dir.join("libs").join("filesystem").join("include"),
-        boost_dir.join("libs").join("iterator").join("include"),
-        boost_dir.join("libs").join("iostreams").join("include"),
-        boost_dir.join("libs").join("system").join("include"),
-        boost_dir.join("libs").join("thread").join("include"),
-    ];
     let rat_common_shim = out_dir.join("rat-common-include");
     let rat_common_shim_dest = rat_common_shim.join("rat").join("common");
     std::fs::create_dir_all(&rat_common_shim_dest)
@@ -116,9 +86,6 @@ fn main() {
     cc_build.include(&armadillo_include);
     cc_build.include(&jsoncpp_include);
     cc_build.include(&boost_include);
-    for include in &boost_extra_includes {
-        cc_build.include(include);
-    }
     cc_build.define("RAT_MLFMM_C_BUILD", None);
     cc_build.define("RAT_DOUBLE_PRECISION", None);
     cc_build.flag_if_supported("-std=c++14");

@@ -8,6 +8,8 @@ fn main() {
         return;
     }
 
+    let python_feature = env::var_os("CARGO_FEATURE_PYTHON").is_some();
+
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let patches_dir = manifest_dir.join("bindings").join("vendor-patches");
     let wrapper_dir = manifest_dir.join("bindings").join("rat-mlfmm-c");
@@ -200,7 +202,6 @@ fn main() {
     if bin_dir.exists() {
         println!("cargo:rustc-link-search=native={}", bin_dir.display());
     }
-    let python_feature = env::var_os("CARGO_FEATURE_PYTHON").is_some();
     let mut static_libs = vec![
         "rat_mlfmm_c",
         "boost_filesystem",

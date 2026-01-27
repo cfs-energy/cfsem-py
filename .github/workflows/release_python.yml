@@ -69,6 +69,12 @@ jobs:
               dnf -y install --skip-broken clang lld libstdc++-devel openblas-devel || true;
             fi
 
+            if command -v apt-get >/dev/null 2>&1; then
+              echo "Found apt-get package manager";
+              apt-get update;
+              apt-get install -y clang lld libstdc++-12-dev libopenblas-dev || true;
+            fi
+
             if command -v microdnf >/dev/null 2>&1; then
               echo "Found microdnf package manager";
               microdnf -y update;
@@ -90,7 +96,8 @@ jobs:
             fi
 
             if ! command -v ld.lld >/dev/null 2>&1; then
-              echo "warning: ld.lld not found after install; continuing without it" >&2
+              echo "warning: ld.lld not found after install" >&2;
+              exit 1
             fi
       - name: Install auditwheel
         run: python -m pip install auditwheel

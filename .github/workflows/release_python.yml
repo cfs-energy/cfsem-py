@@ -58,6 +58,15 @@ jobs:
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
 
+            # aarch64 runner is newer
+            if command -v dnf >/dev/null 2>&1; then
+              echo "Found dnf package manager";
+              dnf -y makecache;
+              dnf -y update;
+              dnf -y install --skip-broken clang lld libstdc++-devel openblas-devel || true;
+            fi
+
+            # manylinux2014 runner is based on centos7
             if command -v yum >/dev/null 2>&1; then
               echo "Found yum package manager";
               yum -y makecache;

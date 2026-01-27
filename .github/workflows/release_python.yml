@@ -72,7 +72,7 @@ jobs:
             if command -v apt-get >/dev/null 2>&1; then
               echo "Found apt-get package manager";
               apt-get update;
-              apt-get install -y clang lld libstdc++-12-dev libopenblas-dev || true;
+              apt-get install -y clang lld g++ libstdc++-dev libopenblas-dev || true;
             fi
 
             if command -v microdnf >/dev/null 2>&1; then

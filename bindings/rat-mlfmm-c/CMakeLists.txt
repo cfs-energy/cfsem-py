@@ -184,7 +184,11 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         endif()
         message(STATUS "Boost build stdout (tail):\n${_boost_stdout_tail}")
         message(STATUS "Boost build stderr (tail):\n${_boost_stderr_tail}")
-        message(FATAL_ERROR "Boost build failed with code ${_boost_build_result}")
+        if(WIN32 AND EXISTS "${_boost_filesystem}" AND EXISTS "${_boost_iostreams}" AND EXISTS "${_boost_thread}" AND EXISTS "${_boost_chrono}")
+            message(WARNING "Boost build reported failure (${_boost_build_result}) but required libs are present; continuing.")
+        else()
+            message(FATAL_ERROR "Boost build failed with code ${_boost_build_result}")
+        endif()
     endif()
 endif()
 

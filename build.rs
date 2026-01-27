@@ -309,6 +309,9 @@ fn extract_target_cpu_from_rustflags() -> Option<String> {
 }
 
 fn compose_c_flags(cpu_flag: &Option<String>) -> (String, String) {
+    if cfg!(target_os = "windows") {
+        return ("/O2".to_string(), "/O2 /Zi".to_string());
+    }
     let mut release = vec!["-O3"];
     let mut debug = vec!["-O3", "-g"];
     if let Some(flag) = cpu_flag {
@@ -327,6 +330,9 @@ fn compose_cxx_flags(cpu_flag: &Option<String>) -> (String, String) {
 }
 
 fn compose_boost_cxxflags(cpu_flag: &Option<String>) -> String {
+    if cfg!(target_os = "windows") {
+        return "/O2".to_string();
+    }
     let mut flags = vec!["-O3"];
     if let Some(flag) = cpu_flag {
         flags.push(flag);

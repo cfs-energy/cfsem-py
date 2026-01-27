@@ -59,15 +59,23 @@ jobs:
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
             if command -v dnf >/dev/null 2>&1; then
               dnf -y makecache
-              dnf -y install clang lld libstdc++-devel openblas-devel
+              dnf -y install clang lld libstdc++-devel openblas-devel || dnf -y install clang llvm libstdc++-devel openblas-devel
             elif command -v yum >/dev/null 2>&1; then
               yum -y makecache
-              yum -y install clang lld libstdc++-devel openblas-devel
+              yum -y install clang lld libstdc++-devel openblas-devel || {
+                yum -y install centos-release-scl
+                yum -y install llvm-toolset-7 clang llvm-toolset-7-llvm libstdc++-devel openblas-devel
+                source /opt/rh/llvm-toolset-7/enable
+              }
             elif command -v microdnf >/dev/null 2>&1; then
               microdnf -y update
-              microdnf -y install clang lld libstdc++-devel openblas-devel
+              microdnf -y install clang lld libstdc++-devel openblas-devel || microdnf -y install clang llvm libstdc++-devel openblas-devel
             else
               echo "No supported package manager found" >&2
+              exit 1
+            fi
+            if ! command -v ld.lld >/dev/null 2>&1; then
+              echo "ld.lld not found after install" >&2
               exit 1
             fi
       - name: Install auditwheel

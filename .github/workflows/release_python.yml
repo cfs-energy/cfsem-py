@@ -53,7 +53,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
-          manylinux: auto
+          manylinux: 2_28
           before-script-linux: |
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py

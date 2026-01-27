@@ -146,8 +146,12 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         COMMAND ${_boost_b2} ${_boost_b2_args}
         WORKING_DIRECTORY ${BOOST_SRC_DIR}
         RESULT_VARIABLE _boost_build_result
+        OUTPUT_VARIABLE _boost_build_stdout
+        ERROR_VARIABLE _boost_build_stderr
     )
     if(NOT _boost_build_result EQUAL 0)
+        message(STATUS "Boost build stdout:\n${_boost_build_stdout}")
+        message(STATUS "Boost build stderr:\n${_boost_build_stderr}")
         message(FATAL_ERROR "Boost build failed with code ${_boost_build_result}")
     endif()
 endif()

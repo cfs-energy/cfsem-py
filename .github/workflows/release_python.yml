@@ -54,7 +54,7 @@ jobs:
           args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: auto
-          before-script: |
+          before-script-linux: |
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
             yum install -y clang lld libstdc++-devel openblas-devel
@@ -100,7 +100,7 @@ jobs:
           args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: musllinux_1_2
-          before-script: |
+          before-script-linux: |
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
             yum install -y clang lld libstdc++-devel openblas-devel

@@ -116,8 +116,12 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
             COMMAND ${_boost_bootstrap}
             WORKING_DIRECTORY ${BOOST_SRC_DIR}
             RESULT_VARIABLE _boost_bootstrap_result
+            OUTPUT_VARIABLE _boost_bootstrap_stdout
+            ERROR_VARIABLE _boost_bootstrap_stderr
         )
         if(NOT _boost_bootstrap_result EQUAL 0)
+            message(STATUS "Boost bootstrap stdout:\n${_boost_bootstrap_stdout}")
+            message(STATUS "Boost bootstrap stderr:\n${_boost_bootstrap_stderr}")
             message(FATAL_ERROR "Boost bootstrap failed with code ${_boost_bootstrap_result}")
         endif()
     endif()
@@ -142,6 +146,8 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         --prefix=${BOOST_INSTALL_DIR}
         install
     )
+    message(STATUS "Boost b2 path: ${_boost_b2}")
+    message(STATUS "Boost b2 args: ${_boost_b2_args}")
     execute_process(
         COMMAND ${_boost_b2} ${_boost_b2_args}
         WORKING_DIRECTORY ${BOOST_SRC_DIR}

@@ -53,6 +53,8 @@ jobs:
           sccache: 'true'
           manylinux: auto
           before-script: |
+            git config --global --add safe.directory /github/workspace
+            git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
             yum install -y clang lld libstdc++-devel openblas-devel
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist
@@ -93,6 +95,8 @@ jobs:
           sccache: 'true'
           manylinux: musllinux_1_2
           before-script: |
+            git config --global --add safe.directory /github/workspace
+            git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
             yum install -y clang lld libstdc++-devel openblas-devel
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist

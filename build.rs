@@ -449,27 +449,50 @@ fn ensure_boost_headers(boost_dir: &Path) {
     }
     // Boost's git superproject does not include the generated `boost/` header tree.
     // Running `bootstrap.sh` + `b2 headers` creates it so includes like <boost/assert.hpp> work.
-    let bootstrap = boost_dir.join("bootstrap.sh");
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    // Windows uses bootstrap.bat and b2.exe; Unix uses bootstrap.sh and b2.
+    let bootstrap = if target_os == "windows" {
+        boost_dir.join("bootstrap.bat")
+    } else {
+        boost_dir.join("bootstrap.sh")
+    };
     if !bootstrap.exists() {
         panic!(
             "Boost headers missing and bootstrap.sh not found at {}",
             bootstrap.display()
         );
     }
-    let status = Command::new(&bootstrap)
-        .current_dir(boost_dir)
-        .status()
-        .unwrap_or_else(|err| panic!("failed to run {}: {err}", bootstrap.display()));
+    let status = if target_os == "windows" {
+        Command::new("cmd")
+            .current_dir(boost_dir)
+            .args(["/C", bootstrap.to_str().unwrap()])
+            .status()
+    } else {
+        Command::new(&bootstrap).current_dir(boost_dir).status()
+    }
+    .unwrap_or_else(|err| panic!("failed to run {}: {err}", bootstrap.display()));
     if !status.success() {
         panic!("Boost bootstrap failed with status {}", status);
     }
-    let b2 = boost_dir.join("b2");
+    // b2 headers generates the consolidated boost/ headers directory from the repo layout.
+    let b2 = if target_os == "windows" {
+        boost_dir.join("b2.exe")
+    } else {
+        boost_dir.join("b2")
+    };
     // Generate the consolidated headers into `boost/` for downstream compilers.
-    let status = Command::new(&b2)
-        .current_dir(boost_dir)
-        .arg("headers")
-        .status()
-        .unwrap_or_else(|err| panic!("failed to run {}: {err}", b2.display()));
+    let status = if target_os == "windows" {
+        Command::new("cmd")
+            .current_dir(boost_dir)
+            .args(["/C", b2.to_str().unwrap(), "headers"])
+            .status()
+    } else {
+        Command::new(&b2)
+            .current_dir(boost_dir)
+            .arg("headers")
+            .status()
+    }
+    .unwrap_or_else(|err| panic!("failed to run {}: {err}", b2.display()));
     if !status.success() {
         panic!("Boost header generation failed with status {}", status);
     }

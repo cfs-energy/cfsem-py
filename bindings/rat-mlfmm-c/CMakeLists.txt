@@ -103,9 +103,17 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         set(_boost_variant "release")
     endif()
 
-    if(NOT EXISTS "${BOOST_SRC_DIR}/b2")
+    if(WIN32)
+        set(_boost_bootstrap ${BOOST_SRC_DIR}/bootstrap.bat)
+        set(_boost_b2 ${BOOST_SRC_DIR}/b2.exe)
+    else()
+        set(_boost_bootstrap ${BOOST_SRC_DIR}/bootstrap.sh)
+        set(_boost_b2 ${BOOST_SRC_DIR}/b2)
+    endif()
+
+    if(NOT EXISTS "${_boost_b2}")
         execute_process(
-            COMMAND ${BOOST_SRC_DIR}/bootstrap.sh
+            COMMAND ${_boost_bootstrap}
             WORKING_DIRECTORY ${BOOST_SRC_DIR}
             RESULT_VARIABLE _boost_bootstrap_result
         )
@@ -135,7 +143,7 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         install
     )
     execute_process(
-        COMMAND ${BOOST_SRC_DIR}/b2 ${_boost_b2_args}
+        COMMAND ${_boost_b2} ${_boost_b2_args}
         WORKING_DIRECTORY ${BOOST_SRC_DIR}
         RESULT_VARIABLE _boost_build_result
     )

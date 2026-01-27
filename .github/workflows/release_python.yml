@@ -59,8 +59,8 @@ jobs:
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
             yum -y makecache
             yum -y update
-            yum -y install clang lld libstdc++-devel openblas-devel
-            yum -y install centos-release-scl
+            # yum -y install clang lld libstdc++-devel openblas-devel
+            # yum -y install centos-release-scl
             yum -y install llvm-toolset-7 clang llvm-toolset-7-llvm libstdc++-devel openblas-devel
             if [ -f /opt/rh/llvm-toolset-7/enable ]; then
               source /opt/rh/llvm-toolset-7/enable

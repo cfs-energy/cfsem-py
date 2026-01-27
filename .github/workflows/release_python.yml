@@ -57,7 +57,7 @@ jobs:
           before-script-linux: |
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
-            yum install -y clang lld libstdc++-devel openblas-devel
+            sudo apt-get install -y clang lld libstdc++-12-dev libopenblas-dev
       - name: Install auditwheel
         run: python -m pip install auditwheel
       - name: Repair wheels
@@ -103,7 +103,7 @@ jobs:
           before-script-linux: |
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
-            yum install -y clang lld libstdc++-devel openblas-devel
+            sudo apt-get install -y clang lld libstdc++-12-dev libopenblas-dev
       - name: Install auditwheel
         run: python -m pip install auditwheel
       - name: Repair wheels

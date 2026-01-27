@@ -23,6 +23,8 @@ jobs:
     steps:
 
     - uses: actions/checkout@v4
+    - name: Mark workspace as safe for git
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
     - name: Initialize submodules
       run: git submodule update --init --recursive --depth 1

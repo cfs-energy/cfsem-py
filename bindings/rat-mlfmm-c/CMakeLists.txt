@@ -138,6 +138,9 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         --with-iostreams
         --with-thread
         --with-chrono
+        -sNO_ICU=1
+        -sNO_LZMA=1
+        -sNO_ZSTD=1
         link=static
         runtime-link=static
         variant=${_boost_variant}

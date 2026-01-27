@@ -58,6 +58,9 @@ jobs:
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
 
+            echo "PATH=$PATH";
+            ls -la /usr/bin | grep -E 'dnf|microdnf|yum|apt|apk' || true;
+
             # aarch64 runner is newer
             if command -v dnf >/dev/null 2>&1; then
               echo "Found dnf package manager";

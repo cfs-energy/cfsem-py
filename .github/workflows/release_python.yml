@@ -47,8 +47,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y clang lld libstdc++-12-dev libopenblas-dev
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -59,30 +57,15 @@ jobs:
           before-script-linux: |
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
-            if command -v dnf >/dev/null 2>&1; then
-              dnf -y makecache
-              dnf -y install clang lld libstdc++-devel openblas-devel || \
-                dnf -y install clang llvm libstdc++-devel openblas-devel || \
-                echo "warning: missing packages in dnf; continuing without them"
-            elif command -v yum >/dev/null 2>&1; then
-              yum -y makecache
-              yum -y install clang lld libstdc++-devel openblas-devel || {
-                yum -y install centos-release-scl || true
-                yum -y install llvm-toolset-7 clang llvm-toolset-7-llvm libstdc++-devel openblas-devel || \
-                  echo "warning: missing packages in yum/scl; continuing without them"
-                if [ -f /opt/rh/llvm-toolset-7/enable ]; then
-                  source /opt/rh/llvm-toolset-7/enable
-                fi
-              }
-            elif command -v microdnf >/dev/null 2>&1; then
-              microdnf -y update
-              microdnf -y install clang lld libstdc++-devel openblas-devel || \
-                microdnf -y install clang llvm libstdc++-devel openblas-devel || \
-                echo "warning: missing packages in microdnf; continuing without them"
-            else
-              echo "No supported package manager found" >&2
-              # exit 1
+            yum -y makecache
+            yum -y update
+            yum -y install clang lld libstdc++-devel openblas-devel
+            yum -y install centos-release-scl
+            yum -y install llvm-toolset-7 clang llvm-toolset-7-llvm libstdc++-devel openblas-devel
+            if [ -f /opt/rh/llvm-toolset-7/enable ]; then
+              source /opt/rh/llvm-toolset-7/enable
             fi
+
             if ! command -v ld.lld >/dev/null 2>&1; then
               echo "warning: ld.lld not found after install; continuing without it" >&2
             fi
@@ -178,7 +161,7 @@ jobs:
         run: |
           Get-ChildItem -Recurse -Filter b2.log -Path target | ForEach-Object {
             Write-Host "=== $($_.FullName) ==="
-            Get-Content $_.FullName -Tail 200
+            Get-Content $_.FullName -Tail 1000
           }
       - name: Install delvewheel
         run: python -m pip install delvewheel

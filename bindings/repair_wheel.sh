@@ -53,6 +53,12 @@ case "$(uname -s)" in
       exit 1
     fi
     for wheel in "${wheels[@]}"; do
+      if [[ "${wheel}" == *musllinux* ]]; then
+        # auditwheel targets glibc/manylinux and cannot parse musllinux wheels.
+        # musllinux wheels are expected to work as-built without auditwheel repair.
+        echo "Skipping auditwheel for musllinux wheel: ${wheel}"
+        continue
+      fi
       auditwheel repair "${wheel}" -w "${output_dir}"
     done
     ;;

@@ -365,6 +365,22 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
                 manifest_dir.to_str().unwrap(),
             ])
             .status();
+        let vendor_root = manifest_dir.join("vendor");
+        let _ = Command::new("git")
+            .args(["config", "--global", "--add", "safe.directory", "*"])
+            .status();
+        if let Ok(entries) = std::fs::read_dir(&vendor_root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(dir) = path.to_str() {
+                        let _ = Command::new("git")
+                            .args(["config", "--global", "--add", "safe.directory", dir])
+                            .status();
+                    }
+                }
+            }
+        }
     }
 
     let status = Command::new("git")

@@ -355,7 +355,7 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
         return;
     }
 
-    if env::var_os("CI").is_some() {
+    if env::var_os("CI").is_some() || env::var_os("GITHUB_ACTIONS").is_some() {
         let _ = Command::new("git")
             .args([
                 "config",

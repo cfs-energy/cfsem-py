@@ -146,8 +146,8 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
-      - name: Install delocate
-        run: python -m pip install delocate
+      - name: Install delvewheel
+        run: python -m pip install delvewheel
       - name: Repair wheels
         run: bindings/repair_wheel.sh dist
       - name: Upload wheels

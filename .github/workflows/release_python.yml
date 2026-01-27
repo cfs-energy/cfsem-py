@@ -57,7 +57,16 @@ jobs:
           before-script-linux: |
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
-            apt-get install -y clang lld libstdc++-12-dev libopenblas-dev
+            if command -v dnf >/dev/null 2>&1; then
+              dnf -y install clang lld libstdc++-devel openblas-devel
+            elif command -v yum >/dev/null 2>&1; then
+              yum -y install clang lld libstdc++-devel openblas-devel
+            elif command -v microdnf >/dev/null 2>&1; then
+              microdnf -y install clang lld libstdc++-devel openblas-devel
+            else
+              echo "No supported package manager found" >&2
+              exit 1
+            fi
       - name: Install auditwheel
         run: python -m pip install auditwheel
       - name: Repair wheels
@@ -100,10 +109,6 @@ jobs:
           args: ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: musllinux_1_2
-          before-script-linux: |
-            git config --global --add safe.directory /github/workspace
-            git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
-            apt-get install -y clang lld libstdc++-12-dev libopenblas-dev
       - name: Install auditwheel
         run: python -m pip install auditwheel
       - name: Repair wheels

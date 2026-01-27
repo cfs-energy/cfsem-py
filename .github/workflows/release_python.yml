@@ -166,9 +166,15 @@ jobs:
         run: |
           Get-ChildItem -Recurse -Filter b2.log -Path target | ForEach-Object {
             Write-Host "=== $($_.FullName) ==="
+            Write-Host "=== $($_.FullName) (head 200) ==="
+            Get-Content $_.FullName -TotalCount 200
             Get-Content $_.FullName -Tail 5000
             Write-Host "=== $($_.FullName) (error scan) ==="
-            Get-Content $_.FullName | Select-String -CaseSensitive -Pattern 'error','failed','LNK','fatal' | Select-Object -Last 200
+            Get-Content $_.FullName | Select-String -CaseSensitive -Pattern 'error','failed','LNK','fatal' -Context 2,2 | Select-Object -Last 200
+          }
+          Get-ChildItem -Recurse -Path target -Include *.err,*.log | ForEach-Object {
+            Write-Host "=== $($_.FullName) ==="
+            Get-Content $_.FullName -Tail 200
           }
       - name: Install delvewheel
         run: python -m pip install delvewheel

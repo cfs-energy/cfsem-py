@@ -32,7 +32,9 @@ jobs:
       id: cache-vendor
       uses: actions/cache/restore@v4
       with:
-        path: vendor
+        path: |
+          vendor
+          .git/modules/vendor
         key: ${{ runner.os }}-vendor-bump2-${{ steps.submodule-cache.outputs.hash }}
 
     - name: Initialize submodules
@@ -72,5 +74,7 @@ jobs:
       if: ${{ success() }}
       uses: actions/cache/save@v4
       with:
-        path: vendor
+        path: |
+          vendor
+          .git/modules/vendor
         key: ${{ runner.os }}-vendor-bump2-${{ steps.submodule-cache.outputs.hash }}

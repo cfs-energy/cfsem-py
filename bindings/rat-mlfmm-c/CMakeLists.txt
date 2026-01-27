@@ -146,6 +146,14 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         --prefix=${BOOST_INSTALL_DIR}
         install
     )
+    if(WIN32)
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            set(_boost_address_model 64)
+        else()
+            set(_boost_address_model 32)
+        endif()
+        list(APPEND _boost_b2_args address-model=${_boost_address_model})
+    endif()
     message(STATUS "Boost b2 path: ${_boost_b2}")
     message(STATUS "Boost b2 args: ${_boost_b2_args}")
     execute_process(

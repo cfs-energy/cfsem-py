@@ -355,6 +355,18 @@ fn ensure_submodules(manifest_dir: &Path, required_paths: &[PathBuf]) {
         return;
     }
 
+    if env::var_os("CI").is_some() {
+        let _ = Command::new("git")
+            .args([
+                "config",
+                "--global",
+                "--add",
+                "safe.directory",
+                manifest_dir.to_str().unwrap(),
+            ])
+            .status();
+    }
+
     let status = Command::new("git")
         .args([
             "submodule",

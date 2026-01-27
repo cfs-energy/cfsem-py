@@ -66,6 +66,12 @@ jobs:
               dnf -y install --skip-broken clang lld libstdc++-devel openblas-devel || true;
             fi
 
+            if command -v microdnf >/dev/null 2>&1; then
+              echo "Found microdnf package manager";
+              microdnf -y update;
+              microdnf -y install clang lld libstdc++-devel openblas-devel || true;
+            fi
+
             # manylinux2014 runner is based on centos7
             if command -v yum >/dev/null 2>&1; then
               echo "Found yum package manager";

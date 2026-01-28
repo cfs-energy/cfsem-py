@@ -241,7 +241,7 @@ pub(crate) fn point_line_distance_with_endpoints(
     // Clamp distances only if we are inside the minimum radius
     let perp = match frac < 1.0 {
         false => perp,
-        true => r_min_frac
+        true => r_min_frac,
     };
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance

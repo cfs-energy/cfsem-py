@@ -160,7 +160,8 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         endif()
         list(APPEND _boost_b2_args toolset=msvc architecture=x86)
         list(APPEND _boost_b2_args address-model=${_boost_address_model})
-        # MSVC doesn't provide POSIX headers/APIs; disable pthread probes and fallocate checks.
+        # Force Windows target to skip POSIX-only config probes (pthread/fallocate).
+        list(APPEND _boost_b2_args target-os=windows)
         list(APPEND _boost_b2_args -sNO_PTHREAD=1)
         list(APPEND _boost_b2_args define=BOOST_FILESYSTEM_NO_FALLOCATE)
     endif()

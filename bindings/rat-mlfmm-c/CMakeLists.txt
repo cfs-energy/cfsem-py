@@ -143,6 +143,7 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         -sNO_ZSTD=1
         -sNO_ZLIB=1
         -sNO_BZIP2=1
+        define=BOOST_REGEX_NO_ICU
         link=static
         runtime-link=static
         variant=${_boost_variant}
@@ -159,9 +160,9 @@ if(NOT EXISTS "${_boost_filesystem}" OR NOT EXISTS "${_boost_iostreams}" OR NOT 
         endif()
         list(APPEND _boost_b2_args toolset=msvc architecture=x86)
         list(APPEND _boost_b2_args address-model=${_boost_address_model})
+        # MSVC doesn't provide POSIX headers/APIs; disable pthread probes and fallocate checks.
         list(APPEND _boost_b2_args -sNO_PTHREAD=1)
         list(APPEND _boost_b2_args define=BOOST_FILESYSTEM_NO_FALLOCATE)
-        list(APPEND _boost_b2_args define=BOOST_REGEX_NO_ICU)
     endif()
     message(STATUS "Boost b2 path: ${_boost_b2}")
     message(STATUS "Boost b2 args: ${_boost_b2_args}")

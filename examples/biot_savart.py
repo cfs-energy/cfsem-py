@@ -37,7 +37,7 @@ def main() -> None:
     ifil = np.full(3, 1.0)
 
     # Sample plane: x-z plane at y=0 to show end effects.
-    n = 21 if os.getenv("CFSEM_TESTING") else 2001
+    n = 20 if os.getenv("CFSEM_TESTING") else 2000
     x = np.linspace(-1.0, 1.0, n)
     z = np.linspace(-1.0, 1.0, n)
     xx, zz = np.meshgrid(x, z, indexing="xy")
@@ -66,7 +66,8 @@ def main() -> None:
     dlz_ps = []
     ifil_ps = []
 
-    for start, dl in zip(vertices, zip(*dlxyzfil)):
+    # Build extra-finely-discretized filaments for point-segment calc.
+    for start, dl in zip(vertices, zip(*dlxyzfil, strict=True), strict=True):
         dl = np.array(dl)
         dseg = dl / nseg
         seg_starts = start + dseg * np.arange(nseg)[:, None]
@@ -90,6 +91,7 @@ def main() -> None:
     )
     ifil_ps = np.concatenate(ifil_ps)
 
+    # Run point-segment calcs.
     t0 = time.perf_counter()
     bx_ps, by_ps, bz_ps = cfsem.flux_density_point_segment(
         xyzp, xyzfil_ps, dlxyzfil_ps, ifil_ps, par=True

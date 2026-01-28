@@ -37,7 +37,7 @@ def main() -> None:
     ifil = np.full(3, 1.0)
 
     # Sample plane: x-z plane at y=0 to show end effects.
-    n = 21 if os.getenv("CFSEM_TESTING") else 2001
+    n = 20 if os.getenv("CFSEM_TESTING") else 2000
     x = np.linspace(-1.0, 1.0, n)
     z = np.linspace(-1.0, 1.0, n)
     xx, zz = np.meshgrid(x, z, indexing="xy")
@@ -63,7 +63,8 @@ def main() -> None:
     dlz_ps = []
     ifil_ps = []
 
-    for start, dl in zip(vertices, zip(*dlxyzfil)):
+    # Build extra-finely-discretized filaments for point-segment calc.
+    for start, dl in zip(vertices, zip(*dlxyzfil, strict=True), strict=True):
         dl = np.array(dl)
         dseg = dl / nseg
         seg_starts = start + dseg * np.arange(nseg)[:, None]
@@ -87,6 +88,7 @@ def main() -> None:
     )
     ifil_ps = np.concatenate(ifil_ps)
 
+    # Run point-segment calcs.
     t0 = time.perf_counter()
     ax_ps, ay_ps, az_ps = cfsem.vector_potential_point_segment(
         xyzp, xyzfil_ps, dlxyzfil_ps, ifil_ps, par=True
@@ -94,6 +96,7 @@ def main() -> None:
     t_point = time.perf_counter() - t0
     amag_ps = np.sqrt(ax_ps * ax_ps + ay_ps * ay_ps + az_ps * az_ps).reshape(xx.shape)
 
+    # Plot
     fig, axs = plt.subplots(
         2,
         3,
@@ -153,6 +156,7 @@ def main() -> None:
 
     err = np.abs(amag - amag_ps)
 
+    # Mask out regions near the wire, where the point segments become singular
     def segment_distance(x0: float, z0: float, x1: float, z1: float) -> np.ndarray:
         vx = x1 - x0
         vz = z1 - z0

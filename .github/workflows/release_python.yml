@@ -208,6 +208,9 @@ jobs:
           "CMAKE_PREFIX_PATH=C:\vcpkg\installed\$triplet" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          RUST_LOG: cc=debug
+          CARGO_TERM_VERBOSE: "true"
         with:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.maturin_args }}

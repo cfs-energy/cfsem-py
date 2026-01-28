@@ -191,8 +191,8 @@ pub(crate) fn point_line_distance_with_endpoints(
     let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
     let bp = (p.0 - b.0, p.1 - b.1, p.2 - b.2);
 
-    let dist_a_raw = rss3(ap.0, ap.1, ap.2);
-    let dist_b_raw = rss3(bp.0, bp.1, bp.2);
+    let dist_a = rss3(ap.0, ap.1, ap.2);
+    let dist_b = rss3(bp.0, bp.1, bp.2);
 
     // Normalized segment vector.
     // This might be zero, and that will be handled as late as possible to avoid disrupting
@@ -202,37 +202,48 @@ pub(crate) fn point_line_distance_with_endpoints(
     let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
 
     // Find the closest point on the infinite line defined by this segment to the target point.
-    let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2;
+    let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2; // Normed projected location
     let closest = (
         t.mul_add(ab.0, a.0),
         t.mul_add(ab.1, a.1),
         t.mul_add(ab.2, a.2),
-    );
+    ); // (m) closest point on infinite line
     let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
-    let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
+    let perp = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
 
     let r_min = r_min.max(0.0);
     let r_min_frac = r_min.max(f64::MIN_POSITIVE);
 
+    let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
+    // FUTURE: can para_b be calculated as (para_a - ab_len) to reduce flops?
+    let para_b = dot3(bp.0, bp.1, bp.2, ab_norm.0, ab_norm.1, ab_norm.2);
+
+    // Unsigned distance function for clamping.
+    // Are we behind, in front, or alongside the segment?
+    let min_dist = match t {
+        x if x <= 0.0 => dist_a, // Behind
+        x if x >= 1.0 => dist_b, // In front
+        _ => perp,               // Alongside
+    };
+
     // Fraction of perpendicular distance to r_min, to be used for handling
     // fields inside finite-thickness wires.
-    let frac = (perp_raw / r_min_frac).min(1.0);
+    let frac = (min_dist / r_min_frac).min(1.0);
 
-    // Clamped parallel, perpendicular, and direct distances from segment to target.
-    let perp = perp_raw.max(r_min);
-    let dist_a = dist_a_raw.max(r_min);
-    let dist_b = dist_b_raw.max(r_min);
-
-    let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
-    let para_b = dot3(bp.0, bp.1, bp.2, ab_norm.0, ab_norm.1, ab_norm.2);
+    // Clamp distances only if we are inside the minimum radius
+    let (perp, dist_a, dist_b) = if frac < 1.0 {
+        (perp.max(r_min), dist_a.max(r_min), dist_b.max(r_min))
+    } else {
+        (perp, dist_a, dist_b)
+    };
 
     // Handle zero-length special case.
     if ab2 == 0.0 {
         let r_min = r_min.max(0.0);
         let r_min_frac = r_min.max(f64::MIN_POSITIVE);
-        let frac = (dist_a_raw / r_min_frac).min(1.0);
-        let dist_a = dist_a_raw.max(r_min);
-        let dist_b = dist_b_raw.max(r_min);
+        let frac = (dist_a / r_min_frac).min(1.0);
+        let dist_a = dist_a.max(r_min);
+        let dist_b = dist_b.max(r_min);
         let perp = dist_a;
         return PointLineDistance {
             perp,

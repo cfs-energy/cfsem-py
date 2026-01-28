@@ -58,6 +58,11 @@ jobs:
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
 
+            if [ "${{ matrix.platform.target }}" != "x86_64" ] && [ "${{ matrix.platform.target }}" != "aarch64" ]; then
+              echo "Skipping linux before-script for target ${{ matrix.platform.target }}"
+              exit 0
+            fi
+
             echo "PATH=$PATH";
             ls -la /usr/bin | grep -E 'dnf|microdnf|yum|apt|apk' || true;
 

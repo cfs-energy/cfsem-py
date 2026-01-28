@@ -994,7 +994,6 @@ mod test {
     /// Centerline values should be finite and not NaN.
     #[test]
     fn test_flux_density_centerline_finite() {
-        let wire_radius = 0.1;
         let start = (0.0, 0.0, -0.5);
         let end = (0.0, 0.0, 0.5);
         let ifil = [1.0];
@@ -1005,27 +1004,30 @@ mod test {
         let dly = [end.1 - start.1];
         let dlz = [end.2 - start.2];
 
-        let xp = [0.0, 0.0, 0.0];
-        let yp = [0.0, 0.0, 0.0];
-        let zp = [-0.25, 0.0, 0.25];
+        let z_points = [-0.5, -0.25, 0.0, 0.25, 0.5];
+        let xp: Vec<f64> = vec![0.0; z_points.len()];
+        let yp: Vec<f64> = vec![0.0; z_points.len()];
+        let zp: Vec<f64> = z_points.to_vec();
 
-        let mut bx = [0.0; 3];
-        let mut by = [0.0; 3];
-        let mut bz = [0.0; 3];
-        flux_density_linear_filament(
-            (&xp, &yp, &zp),
-            (&xfil, &yfil, &zfil),
-            (&dlx, &dly, &dlz),
-            &ifil,
-            &[wire_radius],
-            (&mut bx, &mut by, &mut bz),
-        )
-        .unwrap();
+        for &wire_radius in &[0.0, 0.01, 0.1] {
+            let mut bx = vec![0.0; z_points.len()];
+            let mut by = vec![0.0; z_points.len()];
+            let mut bz = vec![0.0; z_points.len()];
+            flux_density_linear_filament(
+                (&xp, &yp, &zp),
+                (&xfil, &yfil, &zfil),
+                (&dlx, &dly, &dlz),
+                &ifil,
+                &[wire_radius],
+                (&mut bx, &mut by, &mut bz),
+            )
+            .unwrap();
 
-        for i in 0..xp.len() {
-            assert!(bx[i].is_finite(), "bx[{}] is {}", i, bx[i]);
-            assert!(by[i].is_finite(), "by[{}] is {}", i, by[i]);
-            assert!(bz[i].is_finite(), "bz[{}] is {}", i, bz[i]);
+            for i in 0..z_points.len() {
+                assert!(bx[i].is_finite(), "bx[{}] is {}", i, bx[i]);
+                assert!(by[i].is_finite(), "by[{}] is {}", i, by[i]);
+                assert!(bz[i].is_finite(), "bz[{}] is {}", i, bz[i]);
+            }
         }
     }
 
@@ -1189,7 +1191,6 @@ mod test {
     /// Centerline values should be finite and not NaN.
     #[test]
     fn test_vector_potential_centerline_finite() {
-        let wire_radius = 0.1;
         let start = (0.0, 0.0, -0.5);
         let end = (0.0, 0.0, 0.5);
         let ifil = [1.0];
@@ -1200,27 +1201,30 @@ mod test {
         let dly = [end.1 - start.1];
         let dlz = [end.2 - start.2];
 
-        let xp = [0.0, 0.0, 0.0];
-        let yp = [0.0, 0.0, 0.0];
-        let zp = [-0.25, 0.0, 0.25];
+        let z_points = [-0.5, -0.25, 0.0, 0.25, 0.5];
+        let xp: Vec<f64> = vec![0.0; z_points.len()];
+        let yp: Vec<f64> = vec![0.0; z_points.len()];
+        let zp: Vec<f64> = z_points.to_vec();
 
-        let mut ax = [0.0; 3];
-        let mut ay = [0.0; 3];
-        let mut az = [0.0; 3];
-        vector_potential_linear_filament(
-            (&xp, &yp, &zp),
-            (&xfil, &yfil, &zfil),
-            (&dlx, &dly, &dlz),
-            &ifil,
-            &[wire_radius],
-            (&mut ax, &mut ay, &mut az),
-        )
-        .unwrap();
+        for &wire_radius in &[0.0, 0.01, 0.1] {
+            let mut ax = vec![0.0; z_points.len()];
+            let mut ay = vec![0.0; z_points.len()];
+            let mut az = vec![0.0; z_points.len()];
+            vector_potential_linear_filament(
+                (&xp, &yp, &zp),
+                (&xfil, &yfil, &zfil),
+                (&dlx, &dly, &dlz),
+                &ifil,
+                &[wire_radius],
+                (&mut ax, &mut ay, &mut az),
+            )
+            .unwrap();
 
-        for i in 0..xp.len() {
-            assert!(ax[i].is_finite(), "ax[{}] is {}", i, ax[i]);
-            assert!(ay[i].is_finite(), "ay[{}] is {}", i, ay[i]);
-            assert!(az[i].is_finite(), "az[{}] is {}", i, az[i]);
+            for i in 0..z_points.len() {
+                assert!(ax[i].is_finite(), "ax[{}] is {}", i, ax[i]);
+                assert!(ay[i].is_finite(), "ay[{}] is {}", i, ay[i]);
+                assert!(az[i].is_finite(), "az[{}] is {}", i, az[i]);
+            }
         }
     }
 

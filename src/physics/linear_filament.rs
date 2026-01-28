@@ -1132,6 +1132,98 @@ mod test {
         }
     }
 
+    /// Check quadratic falloff inside finite wire radius.
+    #[test]
+    fn test_vector_potential_quadratic_falloff_inside_wire() {
+        let (rtol, atol) = (1e-10, 1e-14);
+        let wire_radius = 0.1;
+
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let ifil = [1.0];
+        let xfil = [start.0];
+        let yfil = [start.1];
+        let zfil = [start.2];
+        let dlx = [end.0 - start.0];
+        let dly = [end.1 - start.1];
+        let dlz = [end.2 - start.2];
+
+        let ratios = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0];
+        let xp: Vec<f64> = ratios.iter().map(|r| r * wire_radius).collect();
+        let yp: Vec<f64> = vec![0.0; ratios.len()];
+        let zp: Vec<f64> = vec![0.0; ratios.len()];
+
+        let mut ax = vec![0.0; ratios.len()];
+        let mut ay = vec![0.0; ratios.len()];
+        let mut az = vec![0.0; ratios.len()];
+        vector_potential_linear_filament(
+            (&xp, &yp, &zp),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            &[wire_radius],
+            (&mut ax, &mut ay, &mut az),
+        )
+        .unwrap();
+
+        let amag: Vec<f64> = ax
+            .iter()
+            .zip(ay.iter())
+            .zip(az.iter())
+            .map(|((ax, ay), az)| (ax * ax + ay * ay + az * az).sqrt())
+            .collect();
+
+        let a_edge = amag[0];
+        for (i, &ratio) in ratios.iter().enumerate() {
+            let expected = a_edge * ratio * ratio;
+            assert!(
+                approx(expected, amag[i], rtol, atol),
+                "ratio {}: |A| = {:.6e}, expected {:.6e}",
+                ratio,
+                amag[i],
+                expected
+            );
+        }
+    }
+
+    /// Centerline values should be finite and not NaN.
+    #[test]
+    fn test_vector_potential_centerline_finite() {
+        let wire_radius = 0.1;
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let ifil = [1.0];
+        let xfil = [start.0];
+        let yfil = [start.1];
+        let zfil = [start.2];
+        let dlx = [end.0 - start.0];
+        let dly = [end.1 - start.1];
+        let dlz = [end.2 - start.2];
+
+        let xp = [0.0, 0.0, 0.0];
+        let yp = [0.0, 0.0, 0.0];
+        let zp = [-0.25, 0.0, 0.25];
+
+        let mut ax = [0.0; 3];
+        let mut ay = [0.0; 3];
+        let mut az = [0.0; 3];
+        vector_potential_linear_filament(
+            (&xp, &yp, &zp),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            &[wire_radius],
+            (&mut ax, &mut ay, &mut az),
+        )
+        .unwrap();
+
+        for i in 0..xp.len() {
+            assert!(ax[i].is_finite(), "ax[{}] is {}", i, ax[i]);
+            assert!(ay[i].is_finite(), "ay[{}] is {}", i, ay[i]);
+            assert!(az[i].is_finite(), "az[{}] is {}", i, az[i]);
+        }
+    }
+
     /// Check that B = curl(A)
     #[test]
     fn test_vector_potential() {

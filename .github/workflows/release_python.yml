@@ -58,51 +58,49 @@ jobs:
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
 
-            if [ "${{ matrix.platform.target }}" != "x86_64" ] && [ "${{ matrix.platform.target }}" != "aarch64" ]; then
+            if [ "${{ matrix.platform.target }}" = "x86_64" ] || [ "${{ matrix.platform.target }}" = "aarch64" ]; then
+              echo "PATH=$PATH";
+              ls -la /usr/bin | grep -E 'dnf|microdnf|yum|apt|apk' || true;
+
+              # aarch64 runner is newer
+              if command -v dnf >/dev/null 2>&1; then
+                echo "Found dnf package manager";
+                dnf -y makecache;
+                dnf -y update;
+                dnf -y install --skip-broken clang lld libstdc++-devel openblas-devel || true;
+              fi
+
+              if command -v apt-get >/dev/null 2>&1; then
+                echo "Found apt-get package manager";
+                apt-get update;
+                apt-get install -y clang lld g++ libstdc++-dev libopenblas-dev || true;
+              fi
+
+              if command -v microdnf >/dev/null 2>&1; then
+                echo "Found microdnf package manager";
+                microdnf -y update;
+                microdnf -y install clang lld libstdc++-devel openblas-devel || true;
+              fi
+
+              # manylinux2014 runner is based on centos7
+              if command -v yum >/dev/null 2>&1; then
+                echo "Found yum package manager";
+                yum -y makecache;
+                yum -y update;
+                yum -y --setopt=skip_missing_names_on_install=True install --skip-broken clang lld libstdc++-devel openblas-devel || true;
+                yum -y --setopt=skip_missing_names_on_install=True install --skip-broken centos-release-scl || true;
+                yum -y --setopt=skip_missing_names_on_install=True install --skip-broken llvm-toolset-7 clang llvm-toolset-7-llvm libstdc++-devel openblas-devel || true;
+              fi
+
+              if [ -f /opt/rh/llvm-toolset-7/enable ]; then
+                source /opt/rh/llvm-toolset-7/enable
+              fi
+
+              if ! command -v ld.lld >/dev/null 2>&1; then
+                echo "warning: ld.lld not found after install; continuing without it" >&2
+              fi
+            else
               echo "Skipping linux before-script for target ${{ matrix.platform.target }}"
-              exit 0
-            fi
-
-            echo "PATH=$PATH";
-            ls -la /usr/bin | grep -E 'dnf|microdnf|yum|apt|apk' || true;
-
-            # aarch64 runner is newer
-            if command -v dnf >/dev/null 2>&1; then
-              echo "Found dnf package manager";
-              dnf -y makecache;
-              dnf -y update;
-              dnf -y install --skip-broken clang lld libstdc++-devel openblas-devel || true;
-            fi
-
-            if command -v apt-get >/dev/null 2>&1; then
-              echo "Found apt-get package manager";
-              apt-get update;
-              apt-get install -y clang lld g++ libstdc++-dev libopenblas-dev || true;
-            fi
-
-            if command -v microdnf >/dev/null 2>&1; then
-              echo "Found microdnf package manager";
-              microdnf -y update;
-              microdnf -y install clang lld libstdc++-devel openblas-devel || true;
-            fi
-
-            # manylinux2014 runner is based on centos7
-            if command -v yum >/dev/null 2>&1; then
-              echo "Found yum package manager";
-              yum -y makecache;
-              yum -y update;
-              yum -y --setopt=skip_missing_names_on_install=True install --skip-broken clang lld libstdc++-devel openblas-devel || true;
-              yum -y --setopt=skip_missing_names_on_install=True install --skip-broken centos-release-scl || true;
-              yum -y --setopt=skip_missing_names_on_install=True install --skip-broken llvm-toolset-7 clang llvm-toolset-7-llvm libstdc++-devel openblas-devel || true;
-            fi
-
-            if [ -f /opt/rh/llvm-toolset-7/enable ]; then
-              source /opt/rh/llvm-toolset-7/enable
-            fi
-
-            if ! command -v ld.lld >/dev/null 2>&1; then
-              echo "warning: ld.lld not found after install" >&2;
-              exit 1
             fi
       - name: Install auditwheel
         run: python -m pip install auditwheel

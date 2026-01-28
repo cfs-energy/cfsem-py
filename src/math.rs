@@ -199,7 +199,8 @@ pub(crate) fn point_line_distance_with_endpoints(
     // This might be zero, and that will be handled as late as possible to avoid disrupting
     // calculations in nominal non-zero-length cases.
     let ab2 = dot3(ab.0, ab.1, ab.2, ab.0, ab.1, ab.2); // (m^2) squared length.
-    let ab_len_inv = ab2.sqrt().recip();
+    let ab_len = ab2.sqrt();
+    let ab_len_inv = ab_len.recip();
     let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
 
     // Find the closest point on the infinite line defined by this segment to the target point.
@@ -221,9 +222,9 @@ pub(crate) fn point_line_distance_with_endpoints(
     let r_min = r_min.max(0.0);
     let r_min_frac = r_min.max(f64::MIN_POSITIVE);
 
+    // Parallel distances from each endpoint to the target
     let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
-    // FUTURE: can para_b be calculated as (para_a - ab_len) to reduce flops?
-    let para_b = dot3(bp.0, bp.1, bp.2, ab_norm.0, ab_norm.1, ab_norm.2);
+    let para_b = para_a - ab_len;
 
     // Unsigned distance function for clamping.
     // Are we behind, in front, or alongside the segment?
@@ -238,11 +239,14 @@ pub(crate) fn point_line_distance_with_endpoints(
     let frac = (min_dist / r_min_frac).min(1.0);
 
     // Clamp distances only if we are inside the minimum radius
-    let (perp, dist_a, dist_b) = if frac < 1.0 {
-        (perp.max(r_min), dist_a.max(r_min), dist_b.max(r_min))
-    } else {
-        (perp, dist_a, dist_b)
+    let perp = match frac < 1.0 {
+        false => perp,
+        true => r_min_frac
     };
+
+    // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
+    let dist_a = (perp * perp + para_a * para_a).sqrt();
+    let dist_b = (perp * perp + para_b * para_b).sqrt();
 
     // Handle zero-length special case.
     if ab2 == 0.0 {

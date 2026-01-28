@@ -12,6 +12,7 @@
 * Add `biot_savart.py` and `vector_potential.py` examples with plots comparing linear filament and point-segment calcs 
 * Improve parallelism heuristics to use half of available parallelism as heuristic for physical cores
     * Prevents oversubscription on systems with hyperthreading
+* Use x86-64-v3 reference CPU instead of manually listing instruction sets
 
 ## 3.1.0 2025-12-19
 

@@ -61,6 +61,20 @@ jobs:
             git config --global --add safe.directory /github/workspace
             git config --global --add safe.directory /home/runner/work/cfsem-py/cfsem-py
 
+            if [ "${{ matrix.platform.target }}" = "aarch64" ]; then
+              export CC=clang
+              export CXX=clang++
+
+              # discover GCC version/triple inside the container
+              GCC_VER="$(gcc -dumpversion)"
+              GCC_TRIPLE="$(gcc -dumpmachine)"
+
+              export CXXFLAGS="--gcc-toolchain=/usr -stdlib=libstdc++ \
+                -isystem /usr/include/c++/${GCC_VER} \
+                -isystem /usr/include/c++/${GCC_VER}/${GCC_TRIPLE} \
+                -isystem /usr/include/c++/${GCC_VER}/backward"
+            fi
+
             if [ "${{ matrix.platform.target }}" = "x86_64" ] || [ "${{ matrix.platform.target }}" = "aarch64" ]; then
               echo "PATH=$PATH";
               ls -la /usr/bin | grep -E 'dnf|microdnf|yum|apt|apk' || true;

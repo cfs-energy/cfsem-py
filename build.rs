@@ -40,8 +40,12 @@ fn main() {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let cpu_flag = resolve_cpu_flag(&target_arch);
-    let (mut c_flags_release, mut c_flags_debug) = compose_c_flags(&cpu_flag);
-    let (mut cxx_flags_release, mut cxx_flags_debug) = compose_cxx_flags(&cpu_flag);
+    let extra_c_flags = env::var("CFLAGS").ok();
+    let extra_cxx_flags = env::var("CXXFLAGS").ok();
+    let (mut c_flags_release, mut c_flags_debug) =
+        compose_c_flags(&cpu_flag, extra_c_flags.as_deref());
+    let (mut cxx_flags_release, mut cxx_flags_debug) =
+        compose_cxx_flags(&cpu_flag, extra_cxx_flags.as_deref());
     let build_profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
     let is_release = build_profile == "release";
     if target_os == "linux" {
@@ -109,7 +113,7 @@ fn main() {
     } else {
         "Debug"
     };
-    let boost_cxxflags = compose_boost_cxxflags(&cpu_flag);
+    let boost_cxxflags = compose_boost_cxxflags(&cpu_flag, extra_cxx_flags.as_deref());
     cfg.profile(build_type);
     cfg.define("CMAKE_BUILD_TYPE", build_type);
     cfg.define("CMAKE_C_FLAGS_RELEASE", &c_flags_release);
@@ -308,7 +312,7 @@ fn extract_target_cpu_from_rustflags() -> Option<String> {
     None
 }
 
-fn compose_c_flags(cpu_flag: &Option<String>) -> (String, String) {
+fn compose_c_flags(cpu_flag: &Option<String>, extra_flags: Option<&str>) -> (String, String) {
     if cfg!(target_os = "windows") {
         return ("/O2".to_string(), "/O2 /Zi".to_string());
     }
@@ -322,14 +326,18 @@ fn compose_c_flags(cpu_flag: &Option<String>) -> (String, String) {
         release.push("-fPIC");
         debug.push("-fPIC");
     }
+    if let Some(extra) = extra_flags {
+        release.push(extra);
+        debug.push(extra);
+    }
     (release.join(" "), debug.join(" "))
 }
 
-fn compose_cxx_flags(cpu_flag: &Option<String>) -> (String, String) {
-    compose_c_flags(cpu_flag)
+fn compose_cxx_flags(cpu_flag: &Option<String>, extra_flags: Option<&str>) -> (String, String) {
+    compose_c_flags(cpu_flag, extra_flags)
 }
 
-fn compose_boost_cxxflags(cpu_flag: &Option<String>) -> String {
+fn compose_boost_cxxflags(cpu_flag: &Option<String>, extra_flags: Option<&str>) -> String {
     if cfg!(target_os = "windows") {
         return "/O2".to_string();
     }
@@ -339,6 +347,9 @@ fn compose_boost_cxxflags(cpu_flag: &Option<String>) -> String {
     }
     if cfg!(not(target_os = "windows")) {
         flags.push("-fPIC");
+    }
+    if let Some(extra) = extra_flags {
+        flags.push(extra);
     }
     flags.join(" ")
 }

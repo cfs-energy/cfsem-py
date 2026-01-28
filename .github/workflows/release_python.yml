@@ -70,7 +70,7 @@ jobs:
                 echo "Found dnf package manager";
                 dnf -y makecache;
                 dnf -y update;
-                dnf -y install --skip-broken clang lld libstdc++-devel openblas-devel || true;
+                dnf -y install --skip-broken clang lld gcc gcc-c++ libstdc++-devel openblas-devel || true;
               fi
 
               if command -v apt-get >/dev/null 2>&1; then
@@ -82,7 +82,7 @@ jobs:
               if command -v microdnf >/dev/null 2>&1; then
                 echo "Found microdnf package manager";
                 microdnf -y update;
-                microdnf -y install clang lld libstdc++-devel openblas-devel || true;
+                microdnf -y install clang lld gcc gcc-c++ libstdc++-devel openblas-devel || true;
               fi
 
               # manylinux2014 runner is based on centos7
@@ -90,13 +90,20 @@ jobs:
                 echo "Found yum package manager";
                 yum -y makecache;
                 yum -y update;
-                yum -y --setopt=skip_missing_names_on_install=True install --skip-broken clang lld libstdc++-devel openblas-devel || true;
+                yum -y --setopt=skip_missing_names_on_install=True install --skip-broken clang lld gcc gcc-c++ libstdc++-devel openblas-devel || true;
                 yum -y --setopt=skip_missing_names_on_install=True install --skip-broken centos-release-scl || true;
-                yum -y --setopt=skip_missing_names_on_install=True install --skip-broken llvm-toolset-7 clang llvm-toolset-7-llvm libstdc++-devel openblas-devel || true;
+                yum -y --setopt=skip_missing_names_on_install=True install --skip-broken llvm-toolset-7 clang llvm-toolset-7-llvm gcc gcc-c++ libstdc++-devel openblas-devel || true;
               fi
 
               if [ -f /opt/rh/llvm-toolset-7/enable ]; then
                 source /opt/rh/llvm-toolset-7/enable
+              fi
+
+              if [ "${{ matrix.platform.target }}" = "aarch64" ]; then
+                # Clang on manylinux doesn't always discover libstdc++ headers without help.
+                export CC=clang
+                export CXX=clang++
+                export CXXFLAGS="--gcc-toolchain=/usr -stdlib=libstdc++"
               fi
 
               if ! command -v ld.lld >/dev/null 2>&1; then

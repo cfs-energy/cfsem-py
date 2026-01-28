@@ -951,6 +951,98 @@ mod test {
         }
     }
 
+    /// Check linear falloff inside finite wire radius.
+    #[test]
+    fn test_flux_density_linear_falloff_inside_wire() {
+        let (rtol, atol) = (1e-10, 1e-14);
+        let wire_radius = 0.1;
+
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let ifil = [1.0];
+        let xfil = [start.0];
+        let yfil = [start.1];
+        let zfil = [start.2];
+        let dlx = [end.0 - start.0];
+        let dly = [end.1 - start.1];
+        let dlz = [end.2 - start.2];
+
+        let ratios = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0];
+        let xp: Vec<f64> = ratios.iter().map(|r| r * wire_radius).collect();
+        let yp: Vec<f64> = vec![0.0; ratios.len()];
+        let zp: Vec<f64> = vec![0.0; ratios.len()];
+
+        let mut bx = vec![0.0; ratios.len()];
+        let mut by = vec![0.0; ratios.len()];
+        let mut bz = vec![0.0; ratios.len()];
+        flux_density_linear_filament(
+            (&xp, &yp, &zp),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            &[wire_radius],
+            (&mut bx, &mut by, &mut bz),
+        )
+        .unwrap();
+
+        let bmag: Vec<f64> = bx
+            .iter()
+            .zip(by.iter())
+            .zip(bz.iter())
+            .map(|((bx, by), bz)| (bx * bx + by * by + bz * bz).sqrt())
+            .collect();
+
+        let b_edge = bmag[0];
+        for (i, &ratio) in ratios.iter().enumerate() {
+            let expected = b_edge * ratio;
+            assert!(
+                approx(expected, bmag[i], rtol, atol),
+                "ratio {}: |B| = {:.6e}, expected {:.6e}",
+                ratio,
+                bmag[i],
+                expected
+            );
+        }
+    }
+
+    /// Centerline values should be finite and not NaN.
+    #[test]
+    fn test_flux_density_centerline_finite() {
+        let wire_radius = 0.1;
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let ifil = [1.0];
+        let xfil = [start.0];
+        let yfil = [start.1];
+        let zfil = [start.2];
+        let dlx = [end.0 - start.0];
+        let dly = [end.1 - start.1];
+        let dlz = [end.2 - start.2];
+
+        let xp = [0.0, 0.0, 0.0];
+        let yp = [0.0, 0.0, 0.0];
+        let zp = [-0.25, 0.0, 0.25];
+
+        let mut bx = [0.0; 3];
+        let mut by = [0.0; 3];
+        let mut bz = [0.0; 3];
+        flux_density_linear_filament(
+            (&xp, &yp, &zp),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            &[wire_radius],
+            (&mut bx, &mut by, &mut bz),
+        )
+        .unwrap();
+
+        for i in 0..xp.len() {
+            assert!(bx[i].is_finite(), "bx[{}] is {}", i, bx[i]);
+            assert!(by[i].is_finite(), "by[{}] is {}", i, by[i]);
+            assert!(bz[i].is_finite(), "bz[{}] is {}", i, bz[i]);
+        }
+    }
+
     /// Compare single-segment vector potential against discretized point-source segments.
     #[test]
     fn test_vector_potential_against_point_segment_discretization() {

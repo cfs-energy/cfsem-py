@@ -322,7 +322,6 @@ pub fn flux_density_linear_filament_scalar(
 
     // Unpack
     let (start, end, ifil) = xyzifil;
-    let (xp, yp, zp) = xyzobs;
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing how far the point is from the center of the wire
@@ -330,6 +329,7 @@ pub fn flux_density_linear_filament_scalar(
     // All 3 distances are clamped to at least the wire radius.
     let PointLineDistance {
         perp,
+        perp_hat,
         dist_a,
         dist_b,
         frac,
@@ -337,21 +337,6 @@ pub fn flux_density_linear_filament_scalar(
         para_b,
         ab_norm: dlhat,
     } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
-
-    // Perpendicular unit vector from the line to the target for field direction.
-    let ap = (xp - start.0, yp - start.1, zp - start.2);
-    let ap_para = dot3(ap.0, ap.1, ap.2, dlhat.0, dlhat.1, dlhat.2);
-    let perp_vec = (
-        ap.0 - ap_para * dlhat.0,
-        ap.1 - ap_para * dlhat.1,
-        ap.2 - ap_para * dlhat.2,
-    );
-    let perp_inv = if perp > 0.0 { 1.0 / perp } else { 0.0 };
-    let perp_hat = (
-        perp_vec.0 * perp_inv,
-        perp_vec.1 * perp_inv,
-        perp_vec.2 * perp_inv,
-    );
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
@@ -561,6 +546,7 @@ pub fn vector_potential_linear_filament_scalar(
         para_a,
         para_b,
         ab_norm: dlhat,
+        perp_hat: _,
     } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
 
     // Finite segment length log-form with quadratic blend to zero at axis.

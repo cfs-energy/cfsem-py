@@ -169,6 +169,7 @@ pub(crate) fn decompose_filament(
 
 pub(crate) struct PointLineDistance {
     pub(crate) perp: f64,
+    pub(crate) perp_hat: (f64, f64, f64),
     pub(crate) dist_a: f64,
     pub(crate) dist_b: f64,
     pub(crate) frac: f64,
@@ -210,6 +211,12 @@ pub(crate) fn point_line_distance_with_endpoints(
     ); // (m) closest point on infinite line
     let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
     let perp = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
+    let perp_hat = if perp > 0.0 {
+        let inv = perp.recip();
+        (dp.0 * inv, dp.1 * inv, dp.2 * inv)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
 
     let r_min = r_min.max(0.0);
     let r_min_frac = r_min.max(f64::MIN_POSITIVE);
@@ -247,6 +254,7 @@ pub(crate) fn point_line_distance_with_endpoints(
         let perp = dist_a;
         return PointLineDistance {
             perp,
+            perp_hat: (0.0, 0.0, 0.0),
             dist_a,
             dist_b,
             frac,
@@ -258,6 +266,7 @@ pub(crate) fn point_line_distance_with_endpoints(
 
     PointLineDistance {
         perp,
+        perp_hat,
         dist_a,
         dist_b,
         frac,

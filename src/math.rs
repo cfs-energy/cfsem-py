@@ -223,8 +223,8 @@ pub(crate) fn point_line_distance_with_endpoints(
     let dist_a = dist_a_raw.max(r_min);
     let dist_b = dist_b_raw.max(r_min);
 
-    let para_a = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) * ab_len_inv;
-    let para_b = dot3(bp.0, bp.1, bp.2, ab.0, ab.1, ab.2) * ab_len_inv;
+    let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
+    let para_b = dot3(bp.0, bp.1, bp.2, ab_norm.0, ab_norm.1, ab_norm.2);
 
     // Handle zero-length special case.
     if ab2 == 0.0 {

@@ -237,6 +237,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          RUST_LOG: cc=debug
+          CARGO_TERM_VERBOSE: "true"
         with:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.maturin_args }}

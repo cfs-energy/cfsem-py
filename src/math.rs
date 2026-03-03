@@ -192,13 +192,32 @@ pub(crate) fn point_line_distance_with_endpoints(
     let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
     let bp = (p.0 - b.0, p.1 - b.1, p.2 - b.2);
 
-    let dist_a = rss3(ap.0, ap.1, ap.2);
-    let dist_b = rss3(bp.0, bp.1, bp.2);
-
     // Normalized segment vector.
     // This might be zero, and that will be handled as late as possible to avoid disrupting
     // calculations in nominal non-zero-length cases.
     let ab2 = dot3(ab.0, ab.1, ab.2, ab.0, ab.1, ab.2); // (m^2) squared length.
+    // Handle zero-length special case before any division by segment length.
+    if ab2 == 0.0 {
+        let r_min = r_min.max(0.0);
+        let r_min_frac = r_min.max(f64::MIN_POSITIVE);
+        let dist_a = rss3(ap.0, ap.1, ap.2);
+        let dist_b = rss3(bp.0, bp.1, bp.2);
+        let frac = (dist_a / r_min_frac).min(1.0);
+        let dist_a = dist_a.max(r_min);
+        let dist_b = dist_b.max(r_min);
+        let perp = dist_a;
+        return PointLineDistance {
+            perp,
+            perp_hat: (0.0, 0.0, 0.0),
+            dist_a,
+            dist_b,
+            frac,
+            para_a: 0.0,
+            para_b: 0.0,
+            ab_norm: (0.0, 0.0, 0.0),
+        };
+    }
+
     let ab_len = ab2.sqrt();
     let ab_len_inv = ab_len.recip();
     let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
@@ -226,17 +245,12 @@ pub(crate) fn point_line_distance_with_endpoints(
     let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
     let para_b = para_a - ab_len;
 
-    // Unsigned distance function for clamping.
-    // Are we behind, in front, or alongside the segment?
-    let min_dist = match t {
-        x if x <= 0.0 => dist_a, // Behind
-        x if x >= 1.0 => dist_b, // In front
-        _ => perp,               // Alongside
-    };
-
     // Fraction of perpendicular distance to r_min, to be used for handling
     // fields inside finite-thickness wires.
-    let frac = (min_dist / r_min_frac).min(1.0);
+    //
+    // Use the unclamped perpendicular distance to the infinite line regardless
+    // of whether the projection is inside or outside the segment.
+    let frac = (perp / r_min_frac).min(1.0);
 
     // Clamp distances only if we are inside the minimum radius
     let perp = match frac < 1.0 {
@@ -247,26 +261,6 @@ pub(crate) fn point_line_distance_with_endpoints(
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
     let dist_a = (perp * perp + para_a * para_a).sqrt();
     let dist_b = (perp * perp + para_b * para_b).sqrt();
-
-    // Handle zero-length special case.
-    if ab2 == 0.0 {
-        let r_min = r_min.max(0.0);
-        let r_min_frac = r_min.max(f64::MIN_POSITIVE);
-        let frac = (dist_a / r_min_frac).min(1.0);
-        let dist_a = dist_a.max(r_min);
-        let dist_b = dist_b.max(r_min);
-        let perp = dist_a;
-        return PointLineDistance {
-            perp,
-            perp_hat: (0.0, 0.0, 0.0),
-            dist_a,
-            dist_b,
-            frac,
-            para_a: 0.0,
-            para_b: 0.0,
-            ab_norm: (0.0, 0.0, 0.0),
-        };
-    }
 
     PointLineDistance {
         perp,

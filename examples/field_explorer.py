@@ -180,7 +180,7 @@ def compute_field(
     }
 
 
-def build_figure(
+def build_figures(
     mode: str,
     n_sides: int,
     wire_radius: float,
@@ -205,20 +205,22 @@ def build_figure(
 
     value_title = "|B| [T]" if mode == "b" else "|A| [T m]"
     title_prefix = "B-field" if mode == "b" else "Vector Potential"
+    geometry_label = (
+        "Straight line"
+        if n_sides == 1
+        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
+    )
 
-    fig = make_subplots(
-        rows=2,
+    top_fig = make_subplots(
+        rows=1,
         cols=2,
-        horizontal_spacing=0.25,
-        vertical_spacing=0.22,
+        horizontal_spacing=0.15,
         subplot_titles=[
             f"{title_prefix} magnitude (log10)",
             "Slice along x (z = 0)",
-            "Point-segment error (log10)",
-            "Slice along z (x = 0)",
         ],
     )
-    fig.add_trace(
+    top_fig.add_trace(
         go.Heatmap(
             x=x,
             y=z,
@@ -237,7 +239,7 @@ def build_figure(
         col=1,
     )
     if show_filament_line:
-        fig.add_trace(
+        top_fig.add_trace(
             go.Scatter(
                 x=path_x,
                 y=path_z,
@@ -249,7 +251,7 @@ def build_figure(
             row=1,
             col=1,
         )
-    fig.add_trace(
+    top_fig.add_trace(
         go.Scatter(
             x=x,
             y=mag_linear[mid, :],
@@ -260,7 +262,7 @@ def build_figure(
         row=1,
         col=2,
     )
-    fig.add_trace(
+    top_fig.add_trace(
         go.Scatter(
             x=x,
             y=mag_point[mid, :],
@@ -271,67 +273,14 @@ def build_figure(
         row=1,
         col=2,
     )
-    fig.add_trace(
-        go.Heatmap(
-            x=x,
-            y=z,
-            z=err_log10,
-            colorscale="Viridis",
-            colorbar={
-                "title": f"log10(delta {value_title})",
-                "thickness": 14,
-                "x": 0.6,
-                "xanchor": "right",
-            },
-            zmin=np.nanmin(err_log10),
-            zmax=np.nanmax(err_log10),
-        ),
-        row=2,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=z,
-            y=mag_linear[:, mid],
-            mode="lines",
-            line={"color": "black", "width": 2},
-            name="Linear filament (z-slice)",
-            showlegend=False,
-        ),
-        row=2,
-        col=2,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=z,
-            y=mag_point[:, mid],
-            mode="lines",
-            line={"color": "deepskyblue", "width": 2, "dash": "dash"},
-            name="Point segment (z-slice)",
-            showlegend=False,
-        ),
-        row=2,
-        col=2,
-    )
-
-    fig.update_xaxes(title_text="x [m]", row=1, col=1)
-    fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
-    fig.update_xaxes(title_text="x [m]", row=1, col=2)
-    fig.update_yaxes(title_text=value_title, row=1, col=2)
-    fig.update_xaxes(title_text="x [m]", row=2, col=1)
-    fig.update_yaxes(title_text="z [m]", row=2, col=1, scaleanchor="x3", scaleratio=1.0)
-    fig.update_xaxes(title_text="z [m]", row=2, col=2)
-    fig.update_yaxes(title_text=value_title, row=2, col=2)
-
-    geometry_label = (
-        "Straight line"
-        if n_sides == 1
-        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
-    )
-    fig.update_layout(
-        height=920,
+    top_fig.update_xaxes(title_text="x [m]", row=1, col=1)
+    top_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
+    top_fig.update_xaxes(title_text="x [m]", row=1, col=2)
+    top_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    top_fig.update_layout(
+        height=460,
         title=f"{title_prefix}: {geometry_label}, rotation {rotation_deg:.0f} deg",
-        margin={"l": 50, "r": 20, "t": 130, "b": 60},
+        margin={"l": 50, "r": 20, "t": 110, "b": 45},
         legend={
             "orientation": "h",
             "x": 0.5,
@@ -341,7 +290,68 @@ def build_figure(
             "bgcolor": "rgba(255,255,255,0.8)",
         },
     )
-    return fig
+
+    bottom_fig = make_subplots(
+        rows=1,
+        cols=2,
+        horizontal_spacing=0.15,
+        subplot_titles=[
+            "Point-segment error (log10)",
+            "Slice along z (x = 0)",
+        ],
+    )
+    bottom_fig.add_trace(
+        go.Heatmap(
+            x=x,
+            y=z,
+            z=err_log10,
+            colorscale="Viridis",
+            colorbar={
+                "title": f"log10(delta {value_title})",
+                "thickness": 14,
+                "x": -0.15,
+                "xanchor": "left",
+            },
+            zmin=np.nanmin(err_log10),
+            zmax=np.nanmax(err_log10),
+        ),
+        row=1,
+        col=1,
+    )
+    bottom_fig.add_trace(
+        go.Scatter(
+            x=z,
+            y=mag_linear[:, mid],
+            mode="lines",
+            line={"color": "black", "width": 2},
+            name="Linear filament (z-slice)",
+            showlegend=False,
+        ),
+        row=1,
+        col=2,
+    )
+    bottom_fig.add_trace(
+        go.Scatter(
+            x=z,
+            y=mag_point[:, mid],
+            mode="lines",
+            line={"color": "deepskyblue", "width": 2, "dash": "dash"},
+            name="Point segment (z-slice)",
+            showlegend=False,
+        ),
+        row=1,
+        col=2,
+    )
+    bottom_fig.update_xaxes(title_text="x [m]", row=1, col=1)
+    bottom_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
+    bottom_fig.update_xaxes(title_text="z [m]", row=1, col=2)
+    bottom_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    bottom_fig.update_layout(
+        height=460,
+        margin={"l": 50, "r": 20, "t": 50, "b": 60},
+    )
+
+    return top_fig, bottom_fig
 
 
 def build_perf_summary(mode: str, n_sides: int, wire_radius: float, rotation_deg: float) -> str:
@@ -418,20 +428,38 @@ def create_app():
                         label="B-field",
                         value="b",
                         children=[
-                            dcc.Loading(
-                                type="circle",
-                                children=dcc.Graph(id="field-figure-b"),
-                            )
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-b-top"),
+                                ),
+                                style={"marginBottom": "0.5rem"},
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-b-bottom"),
+                                )
+                            ),
                         ],
                     ),
                     dcc.Tab(
                         label="Vector potential",
                         value="a",
                         children=[
-                            dcc.Loading(
-                                type="circle",
-                                children=dcc.Graph(id="field-figure-a"),
-                            )
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-a-top"),
+                                ),
+                                style={"marginBottom": "0.5rem"},
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-a-bottom"),
+                                )
+                            ),
                         ],
                     ),
                 ],
@@ -441,7 +469,8 @@ def create_app():
     )
 
     @app.callback(
-        Output("field-figure-b", "figure"),
+        Output("field-figure-b-top", "figure"),
+        Output("field-figure-b-bottom", "figure"),
         Output("perf-summary", "children"),
         Input("polygon-sides", "value"),
         Input("wire-radius", "value"),
@@ -461,14 +490,17 @@ def create_app():
         rotation = float(np.mod(rotation_deg, 360.0))
         show_line = "show" in show_filament_line
         if field_tab != "b":
-            return no_update, build_perf_summary("a", sides, radius, rotation)
+            return no_update, no_update, build_perf_summary("a", sides, radius, rotation)
+        top_fig, bottom_fig = build_figures("b", sides, radius, rotation, show_line)
         return (
-            build_figure("b", sides, radius, rotation, show_line),
+            top_fig,
+            bottom_fig,
             build_perf_summary("b", sides, radius, rotation),
         )
 
     @app.callback(
-        Output("field-figure-a", "figure"),
+        Output("field-figure-a-top", "figure"),
+        Output("field-figure-a-bottom", "figure"),
         Input("polygon-sides", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
@@ -483,12 +515,12 @@ def create_app():
         field_tab: str,
     ):
         if field_tab != "a":
-            return no_update
+            return no_update, no_update
         sides = int(n_sides)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         show_line = "show" in show_filament_line
-        return build_figure("a", sides, radius, rotation, show_line)
+        return build_figures("a", sides, radius, rotation, show_line)
 
     return app
 
@@ -500,8 +532,8 @@ def main() -> None:
         app.run(debug=True)
     else:
         # smoketest figures if we're not running the full gui
-        build_figure("b", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
-        build_figure("a", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
+        build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
+        build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
 
 
 if __name__ == "__main__":

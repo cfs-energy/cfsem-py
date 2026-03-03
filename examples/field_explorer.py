@@ -8,7 +8,7 @@ import numpy as np
 
 import cfsem
 
-GRID_SIZE = 30 if os.getenv("CFSEM_TESTING") else 90
+GRID_SIZE = 30 if os.getenv("CFSEM_TESTING") else 1000
 WIRE_RADIUS = 0.02
 PATH_RADIUS = 0.7
 DOMAIN = 1.0
@@ -177,10 +177,6 @@ def build_figure(mode: str, n_sides: int):
     err = data["err"]
     path_x = data["path_x"]
     path_z = data["path_z"]
-    t_linear = data["t_linear"]
-    t_point = data["t_point"]
-    n_linear = data["n_linear"]
-    n_point = data["n_point"]
 
     mag_log10 = np.log10(mag_linear + 1e-30)
     err_log10 = np.where(np.isnan(err), np.nan, np.log10(err + 1e-30))
@@ -192,8 +188,8 @@ def build_figure(mode: str, n_sides: int):
     fig = make_subplots(
         rows=2,
         cols=2,
-        horizontal_spacing=0.12,
-        vertical_spacing=0.16,
+        horizontal_spacing=0.25,
+        vertical_spacing=0.22,
         subplot_titles=[
             f"{title_prefix} magnitude (log10)",
             "Slice along x (z = 0)",
@@ -207,7 +203,12 @@ def build_figure(mode: str, n_sides: int):
             y=z,
             z=mag_log10,
             colorscale="Magma",
-            colorbar={"title": f"log10({value_title})", "x": 0.46},
+            colorbar={
+                "title": f"log10({value_title})",
+                "thickness": 14,
+                "x": -0.15,
+                "xanchor": "left",
+            },
             zmin=np.nanmin(mag_log10),
             zmax=np.nanmax(mag_log10),
         ),
@@ -254,7 +255,12 @@ def build_figure(mode: str, n_sides: int):
             y=z,
             z=err_log10,
             colorscale="Viridis",
-            colorbar={"title": f"log10(delta {value_title})", "x": 1.02},
+            colorbar={
+                "title": f"log10(delta {value_title})",
+                "thickness": 14,
+                "x": 0.6,
+                "xanchor": "right",
+            },
             zmin=np.nanmin(err_log10),
             zmax=np.nanmax(err_log10),
         ),
@@ -301,16 +307,28 @@ def build_figure(mode: str, n_sides: int):
         else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
     )
     fig.update_layout(
-        height=880,
-        title=(
-            f"{title_prefix}: {geometry_label} "
-            f"(linear: {t_linear:.3f}s / {n_linear:.2e} interactions, "
-            f"point-segment: {t_point:.3f}s / {n_point:.2e} interactions)"
-        ),
-        margin={"l": 50, "r": 10, "t": 75, "b": 45},
-        legend={"orientation": "h", "x": 0.5, "xanchor": "center", "y": 1.02},
+        height=920,
+        title=f"{title_prefix}: {geometry_label}",
+        margin={"l": 50, "r": 20, "t": 130, "b": 60},
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 1.08,
+            "yanchor": "bottom",
+            "bgcolor": "rgba(255,255,255,0.8)",
+        },
     )
     return fig
+
+
+def build_perf_summary(mode: str, n_sides: int) -> str:
+    data = compute_field(mode, n_sides)
+    label = "B-field" if mode == "b" else "Vector potential"
+    return (
+        f"{label} | linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
+        f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
+    )
 
 
 def create_app():
@@ -319,7 +337,7 @@ def create_app():
     app = Dash(__name__)
     app.layout = html.Div(
         [
-            html.H3("cfsem Biot-Savart and Vector Potential Explorer"),
+            html.H3("CFSEM Biot-Savart and Vector Potential"),
             html.P("Use the slider to set geometry: 1 is a straight line, 3-50 are closed polygons."),
             dcc.Slider(
                 id="polygon-sides",
@@ -329,6 +347,10 @@ def create_app():
                 value=3,
                 marks={1: "1", 10: "10", 20: "20", 30: "30", 40: "40", 50: "50"},
                 tooltip={"placement": "bottom", "always_visible": True},
+            ),
+            html.Div(
+                id="perf-summary",
+                style={"marginTop": "1.5rem", "marginBottom": "1.0rem", "fontFamily": "monospace"},
             ),
             dcc.Tabs(
                 id="field-tab",
@@ -345,11 +367,13 @@ def create_app():
 
     @app.callback(
         Output("field-figure", "figure"),
+        Output("perf-summary", "children"),
         Input("polygon-sides", "value"),
         Input("field-tab", "value"),
     )
     def update_figure(n_sides: int, field_tab: str):
-        return build_figure(field_tab, int(n_sides))
+        sides = int(n_sides)
+        return build_figure(field_tab, sides), build_perf_summary(field_tab, sides)
 
     return app
 

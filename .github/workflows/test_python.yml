@@ -36,8 +36,7 @@ jobs:
     - name: Test
       run: |
         # Install with dev deps
-        uv sync
-
+        uv venv
         uv pip install . --group dev
 
         # Python lint, test, and coverage

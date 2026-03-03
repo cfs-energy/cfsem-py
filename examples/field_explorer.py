@@ -355,7 +355,7 @@ def build_perf_summary(mode: str, n_sides: int, wire_radius: float, rotation_deg
 
 
 def create_app():
-    from dash import Dash, Input, Output, dcc, html
+    from dash import Dash, Input, Output, dcc, html, no_update
 
     app = Dash(__name__)
     app.layout = html.Div(
@@ -414,17 +414,34 @@ def create_app():
                 id="field-tab",
                 value="b",
                 children=[
-                    dcc.Tab(label="B-field", value="b"),
-                    dcc.Tab(label="Vector potential", value="a"),
+                    dcc.Tab(
+                        label="B-field",
+                        value="b",
+                        children=[
+                            dcc.Loading(
+                                type="circle",
+                                children=dcc.Graph(id="field-figure-b"),
+                            )
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Vector potential",
+                        value="a",
+                        children=[
+                            dcc.Loading(
+                                type="circle",
+                                children=dcc.Graph(id="field-figure-a"),
+                            )
+                        ],
+                    ),
                 ],
             ),
-            dcc.Graph(id="field-figure"),
         ],
         style={"maxWidth": "1200px", "margin": "0 auto", "padding": "1rem"},
     )
 
     @app.callback(
-        Output("field-figure", "figure"),
+        Output("field-figure-b", "figure"),
         Output("perf-summary", "children"),
         Input("polygon-sides", "value"),
         Input("wire-radius", "value"),
@@ -432,7 +449,7 @@ def create_app():
         Input("show-filament-line", "value"),
         Input("field-tab", "value"),
     )
-    def update_figure(
+    def update_b_figure(
         n_sides: int,
         wire_radius: float,
         rotation_deg: float,
@@ -443,10 +460,35 @@ def create_app():
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         show_line = "show" in show_filament_line
+        if field_tab != "b":
+            return no_update, build_perf_summary("a", sides, radius, rotation)
         return (
-            build_figure(field_tab, sides, radius, rotation, show_line),
-            build_perf_summary(field_tab, sides, radius, rotation),
+            build_figure("b", sides, radius, rotation, show_line),
+            build_perf_summary("b", sides, radius, rotation),
         )
+
+    @app.callback(
+        Output("field-figure-a", "figure"),
+        Input("polygon-sides", "value"),
+        Input("wire-radius", "value"),
+        Input("rotation-deg", "value"),
+        Input("show-filament-line", "value"),
+        Input("field-tab", "value"),
+    )
+    def update_a_figure(
+        n_sides: int,
+        wire_radius: float,
+        rotation_deg: float,
+        show_filament_line: list[str],
+        field_tab: str,
+    ):
+        if field_tab != "a":
+            return no_update
+        sides = int(n_sides)
+        radius = float(np.clip(wire_radius, 0.0, 0.1))
+        rotation = float(np.mod(rotation_deg, 360.0))
+        show_line = "show" in show_filament_line
+        return build_figure("a", sides, radius, rotation, show_line)
 
     return app
 

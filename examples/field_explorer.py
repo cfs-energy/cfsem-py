@@ -494,16 +494,14 @@ def create_app():
 
 
 def main() -> None:
-    if os.getenv("CFSEM_TESTING"):
-        try:
-            build_figure("b", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
-            build_figure("a", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
-        except ModuleNotFoundError:
-            return
-        return
-
     app = create_app()
-    app.run(debug=True)
+
+    if not os.getenv("CFSEM_TESTING"):
+        app.run(debug=True)
+    else:
+        # smoketest figures if we're not running the full gui
+        build_figure("b", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
+        build_figure("a", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
 
 
 if __name__ == "__main__":

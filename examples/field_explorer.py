@@ -9,7 +9,7 @@ import numpy as np
 import cfsem
 
 GRID_SIZE = 30 if os.getenv("CFSEM_TESTING") else 1000
-WIRE_RADIUS = 0.02
+DEFAULT_WIRE_RADIUS = 0.02
 PATH_RADIUS = 0.7
 DOMAIN = 1.0
 CURRENT = 1.0
@@ -34,10 +34,23 @@ def build_path_vertices(n_sides: int) -> np.ndarray:
     return np.column_stack((x, y, z))
 
 
+def rotate_vertices_y(vertices: np.ndarray, rotation_deg: float) -> np.ndarray:
+    theta = np.deg2rad(rotation_deg)
+    c = np.cos(theta)
+    s = np.sin(theta)
+    x = vertices[:, 0]
+    y = vertices[:, 1]
+    z = vertices[:, 2]
+    xr = c * x + s * z
+    zr = -s * x + c * z
+    return np.column_stack((xr, y, zr))
+
+
 def build_linear_filaments(
     n_sides: int,
+    rotation_deg: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[np.ndarray, ...], tuple[np.ndarray, ...], np.ndarray]:
-    vertices = build_path_vertices(n_sides)
+    vertices = rotate_vertices_y(build_path_vertices(n_sides), rotation_deg)
     if n_sides >= 3:
         starts = vertices
         ends = np.roll(vertices, -1, axis=0)
@@ -108,9 +121,11 @@ def segment_distance_map(xx: np.ndarray, zz: np.ndarray, starts: np.ndarray, end
     return dist
 
 
-@lru_cache(maxsize=256)
-def compute_field(mode: str, n_sides: int) -> dict[str, np.ndarray | float]:
-    vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(n_sides)
+@lru_cache(maxsize=8)
+def compute_field(
+    mode: str, n_sides: int, wire_radius: float, rotation_deg: float
+) -> dict[str, np.ndarray | float]:
+    vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(n_sides, rotation_deg)
     dl = ends - starts
 
     x = np.linspace(-DOMAIN, DOMAIN, GRID_SIZE)
@@ -122,11 +137,11 @@ def compute_field(mode: str, n_sides: int) -> dict[str, np.ndarray | float]:
     t0 = time.perf_counter()
     if mode == "b":
         vx, vy, vz = cfsem.flux_density_linear_filament(
-            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=WIRE_RADIUS, par=True
+            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
         )
     else:
         vx, vy, vz = cfsem.vector_potential_linear_filament(
-            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=WIRE_RADIUS, par=True
+            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
         )
     t_linear = time.perf_counter() - t0
 
@@ -147,7 +162,7 @@ def compute_field(mode: str, n_sides: int) -> dict[str, np.ndarray | float]:
     mag_point = np.sqrt(vx_ps * vx_ps + vy_ps * vy_ps + vz_ps * vz_ps).reshape(xx.shape)
 
     err = np.abs(mag_linear - mag_point)
-    near_wire = segment_distance_map(xx, zz, starts, ends) < WIRE_RADIUS
+    near_wire = segment_distance_map(xx, zz, starts, ends) < wire_radius
     err = np.where(near_wire, np.nan, err)
 
     return {
@@ -165,11 +180,17 @@ def compute_field(mode: str, n_sides: int) -> dict[str, np.ndarray | float]:
     }
 
 
-def build_figure(mode: str, n_sides: int):
+def build_figure(
+    mode: str,
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    show_filament_line: bool,
+):
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
-    data = compute_field(mode, n_sides)
+    data = compute_field(mode, n_sides, wire_radius, rotation_deg)
     x = data["x"]
     z = data["z"]
     mag_linear = data["mag_linear"]
@@ -215,18 +236,19 @@ def build_figure(mode: str, n_sides: int):
         row=1,
         col=1,
     )
-    fig.add_trace(
-        go.Scatter(
-            x=path_x,
-            y=path_z,
-            mode="lines",
-            line={"color": "white", "width": 3},
-            name="Path geometry",
-            showlegend=True,
-        ),
-        row=1,
-        col=1,
-    )
+    if show_filament_line:
+        fig.add_trace(
+            go.Scatter(
+                x=path_x,
+                y=path_z,
+                mode="lines",
+                line={"color": "white", "width": 3},
+                name="Path geometry",
+                showlegend=True,
+            ),
+            row=1,
+            col=1,
+        )
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -308,7 +330,7 @@ def build_figure(mode: str, n_sides: int):
     )
     fig.update_layout(
         height=920,
-        title=f"{title_prefix}: {geometry_label}",
+        title=f"{title_prefix}: {geometry_label}, rotation {rotation_deg:.0f} deg",
         margin={"l": 50, "r": 20, "t": 130, "b": 60},
         legend={
             "orientation": "h",
@@ -322,11 +344,12 @@ def build_figure(mode: str, n_sides: int):
     return fig
 
 
-def build_perf_summary(mode: str, n_sides: int) -> str:
-    data = compute_field(mode, n_sides)
+def build_perf_summary(mode: str, n_sides: int, wire_radius: float, rotation_deg: float) -> str:
+    data = compute_field(mode, n_sides, wire_radius, rotation_deg)
     label = "B-field" if mode == "b" else "Vector potential"
     return (
-        f"{label} | linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
+        f"{label} | wire radius: {wire_radius:.3f} m | rotation: {rotation_deg:.0f} deg | "
+        f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
         f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
     )
 
@@ -339,18 +362,53 @@ def create_app():
         [
             html.H3("CFSEM Biot-Savart and Vector Potential"),
             html.P("Use the slider to set geometry: 1 is a straight line, 3-50 are closed polygons."),
-            dcc.Slider(
-                id="polygon-sides",
-                min=1,
-                max=50,
-                step=1,
-                value=3,
-                marks={1: "1", 10: "10", 20: "20", 30: "30", 40: "40", 50: "50"},
-                tooltip={"placement": "bottom", "always_visible": True},
+            html.Div(
+                dcc.Slider(
+                    id="polygon-sides",
+                    min=1,
+                    max=50,
+                    step=1,
+                    value=3,
+                    marks={1: "1", 10: "10", 20: "20", 30: "30", 40: "40", 50: "50"},
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+                style={"paddingBottom": "0.5rem"},
+            ),
+            html.P("Wire radius [m]", style={"marginTop": "0.75rem", "marginBottom": "0.25rem"}),
+            html.Div(
+                dcc.Slider(
+                    id="wire-radius",
+                    min=0.0,
+                    max=0.1,
+                    step=0.001,
+                    value=DEFAULT_WIRE_RADIUS,
+                    marks={0.0: "0.00", 0.02: "0.02", 0.05: "0.05", 0.08: "0.08", 0.1: "0.10"},
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+                style={"paddingBottom": "0.5rem"},
+            ),
+            html.P("Rotation [deg]", style={"marginTop": "0.5rem", "marginBottom": "0.25rem"}),
+            html.Div(
+                dcc.Slider(
+                    id="rotation-deg",
+                    min=0,
+                    max=360,
+                    step=1,
+                    value=0,
+                    marks={0: "0", 90: "90", 180: "180", 270: "270", 360: "360"},
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+                style={"paddingBottom": "0.5rem"},
             ),
             html.Div(
                 id="perf-summary",
                 style={"marginTop": "1.5rem", "marginBottom": "1.0rem", "fontFamily": "monospace"},
+            ),
+            dcc.Checklist(
+                id="show-filament-line",
+                options=[{"label": "Show filament line", "value": "show"}],
+                value=["show"],
+                style={"marginBottom": "0.75rem"},
             ),
             dcc.Tabs(
                 id="field-tab",
@@ -369,11 +427,26 @@ def create_app():
         Output("field-figure", "figure"),
         Output("perf-summary", "children"),
         Input("polygon-sides", "value"),
+        Input("wire-radius", "value"),
+        Input("rotation-deg", "value"),
+        Input("show-filament-line", "value"),
         Input("field-tab", "value"),
     )
-    def update_figure(n_sides: int, field_tab: str):
+    def update_figure(
+        n_sides: int,
+        wire_radius: float,
+        rotation_deg: float,
+        show_filament_line: list[str],
+        field_tab: str,
+    ):
         sides = int(n_sides)
-        return build_figure(field_tab, sides), build_perf_summary(field_tab, sides)
+        radius = float(np.clip(wire_radius, 0.0, 0.1))
+        rotation = float(np.mod(rotation_deg, 360.0))
+        show_line = "show" in show_filament_line
+        return (
+            build_figure(field_tab, sides, radius, rotation, show_line),
+            build_perf_summary(field_tab, sides, radius, rotation),
+        )
 
     return app
 
@@ -381,8 +454,8 @@ def create_app():
 def main() -> None:
     if os.getenv("CFSEM_TESTING"):
         try:
-            build_figure("b", 3)
-            build_figure("a", 3)
+            build_figure("b", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
+            build_figure("a", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
         except ModuleNotFoundError:
             return
         return

@@ -34,7 +34,7 @@ def main() -> None:
         np.array([v1[1] - v0[1], v2[1] - v1[1], v0[1] - v2[1]]),
         np.array([v1[2] - v0[2], v2[2] - v1[2], v0[2] - v2[2]]),
     )
-    ifil = np.full(3, 1.0)
+    ifil = np.full(1, 1.0)
 
     # Sample plane: x-z plane at y=0 to show end effects.
     n = 20 if os.getenv("CFSEM_TESTING") else 2000
@@ -46,7 +46,7 @@ def main() -> None:
     xyzp = (xx.ravel(), yy.ravel(), zz.ravel())
 
     # Use a small wire radius to avoid singularities on-axis.
-    wire_radius = 0.01
+    wire_radius = 0.02
     t0 = time.perf_counter()
     bx, by, bz = cfsem.flux_density_linear_filament(
         xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True

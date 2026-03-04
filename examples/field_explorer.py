@@ -9,6 +9,7 @@ import numpy as np
 import cfsem
 
 GRID_SIZE = 30 if os.getenv("CFSEM_TESTING") else 1000
+EQUIV_GRID_SIZE = 20 if os.getenv("CFSEM_TESTING") else 240
 DEFAULT_WIRE_RADIUS = 0.02
 PATH_RADIUS = 0.7
 DOMAIN = 1.0
@@ -195,6 +196,77 @@ def compute_field(
     }
 
 
+@lru_cache(maxsize=8)
+def compute_field_equivalence(
+    n_sides: int, wire_radius: float, rotation_deg: float, n_subdivisions: int
+) -> dict[str, np.ndarray | float]:
+    vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(
+        n_sides, rotation_deg, n_subdivisions
+    )
+
+    x = np.linspace(-DOMAIN, DOMAIN, EQUIV_GRID_SIZE)
+    z = np.linspace(-DOMAIN, DOMAIN, EQUIV_GRID_SIZE)
+    xx, zz = np.meshgrid(x, z, indexing="xy")
+    yy = np.zeros_like(xx)
+    xyzp = (xx.ravel(), yy.ravel(), zz.ravel())
+    dx = x[1] - x[0] if x.size > 1 else 1e-3
+    eps = max(1e-6, 0.5 * abs(dx))
+    inv_2eps = 0.5 / eps
+
+    t0 = time.perf_counter()
+    bx, by, bz = cfsem.flux_density_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
+    )
+    t_b = time.perf_counter() - t0
+
+    def eval_a(dx_shift: float, dy_shift: float, dz_shift: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        xyzp_shift = (xyzp[0] + dx_shift, xyzp[1] + dy_shift, xyzp[2] + dz_shift)
+        return cfsem.vector_potential_linear_filament(
+            xyzp_shift, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
+        )
+
+    t0 = time.perf_counter()
+    ax_xm, ay_xm, az_xm = eval_a(-eps, 0.0, 0.0)
+    ax_xp, ay_xp, az_xp = eval_a(eps, 0.0, 0.0)
+    ax_ym, ay_ym, az_ym = eval_a(0.0, -eps, 0.0)
+    ax_yp, ay_yp, az_yp = eval_a(0.0, eps, 0.0)
+    ax_zm, ay_zm, az_zm = eval_a(0.0, 0.0, -eps)
+    ax_zp, ay_zp, az_zp = eval_a(0.0, 0.0, eps)
+    t_curl = time.perf_counter() - t0
+
+    daz_dy = (az_yp - az_ym) * inv_2eps
+    day_dz = (ay_zp - ay_zm) * inv_2eps
+    daz_dx = (az_xp - az_xm) * inv_2eps
+    dax_dz = (ax_zp - ax_zm) * inv_2eps
+    day_dx = (ay_xp - ay_xm) * inv_2eps
+    dax_dy = (ax_yp - ax_ym) * inv_2eps
+
+    curl_x = daz_dy - day_dz
+    curl_y = dax_dz - daz_dx
+    curl_z = day_dx - dax_dy
+
+    bmag = np.sqrt(bx * bx + by * by + bz * bz).reshape(xx.shape)
+    curl_mag = np.sqrt(curl_x * curl_x + curl_y * curl_y + curl_z * curl_z).reshape(xx.shape)
+    err = np.sqrt(
+        (bx - curl_x) * (bx - curl_x) + (by - curl_y) * (by - curl_y) + (bz - curl_z) * (bz - curl_z)
+    ).reshape(xx.shape)
+
+    npts = xyzp[0].size
+    return {
+        "x": x,
+        "z": z,
+        "bmag": bmag,
+        "curl_mag": curl_mag,
+        "err": err,
+        "path_x": np.r_[vertices[:, 0], vertices[0, 0]] if n_sides >= 3 else vertices[:, 0],
+        "path_z": np.r_[vertices[:, 2], vertices[0, 2]] if n_sides >= 3 else vertices[:, 2],
+        "t_b": t_b,
+        "t_curl": t_curl,
+        "n_b": float(ifil.size * npts),
+        "n_curl": float(6 * ifil.size * npts),
+    }
+
+
 def build_figures(
     mode: str,
     n_sides: int,
@@ -373,16 +445,187 @@ def build_figures(
     return top_fig, bottom_fig
 
 
+def build_equivalence_figures(
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    show_filament_line: bool,
+):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    data = compute_field_equivalence(n_sides, wire_radius, rotation_deg, n_subdivisions)
+    x = data["x"]
+    z = data["z"]
+    bmag = data["bmag"]
+    curl_mag = data["curl_mag"]
+    err = data["err"]
+    path_x = data["path_x"]
+    path_z = data["path_z"]
+
+    b_log10 = np.log10(bmag + 1e-30)
+    err_log10 = np.where(np.isnan(err), np.nan, np.log10(err + 1e-30))
+    mid = EQUIV_GRID_SIZE // 2
+    geometry_label = (
+        "Straight line"
+        if n_sides == 1
+        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
+    )
+
+    top_fig = make_subplots(
+        rows=1,
+        cols=2,
+        horizontal_spacing=0.15,
+        subplot_titles=[
+            "|B| from linear filament (log10)",
+            "Slice along x (z = 0): |B| vs |curl(A)|",
+        ],
+    )
+    top_fig.add_trace(
+        go.Heatmap(
+            x=x,
+            y=z,
+            z=b_log10,
+            colorscale="Magma",
+            colorbar={
+                "title": "log10(|B| [T])",
+                "thickness": 14,
+                "x": -0.15,
+                "xanchor": "left",
+            },
+            zmin=np.nanmin(b_log10),
+            zmax=np.nanmax(b_log10),
+        ),
+        row=1,
+        col=1,
+    )
+    if show_filament_line:
+        top_fig.add_trace(
+            go.Scatter(
+                x=path_x,
+                y=path_z,
+                mode="lines",
+                line={"color": "white", "width": 3},
+                name="Path geometry",
+                showlegend=True,
+            ),
+            row=1,
+            col=1,
+        )
+    top_fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=bmag[mid, :],
+            mode="lines",
+            line={"color": "black", "width": 2},
+            name="|B| (linear filament)",
+        ),
+        row=1,
+        col=2,
+    )
+    top_fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=curl_mag[mid, :],
+            mode="lines",
+            line={"color": "deepskyblue", "width": 2, "dash": "dash"},
+            name="|curl(A)|",
+        ),
+        row=1,
+        col=2,
+    )
+    top_fig.update_xaxes(title_text="x [m]", row=1, col=1)
+    top_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
+    top_fig.update_xaxes(title_text="x [m]", row=1, col=2)
+    top_fig.update_yaxes(title_text="Magnitude", row=1, col=2)
+    top_fig.update_layout(
+        height=460,
+        title=(
+            f"Field Equivalence: {geometry_label}, rotation {rotation_deg:.0f} deg, "
+            f"sub-divisions {n_subdivisions}"
+        ),
+        margin={"l": 50, "r": 20, "t": 110, "b": 45},
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 1.08,
+            "yanchor": "bottom",
+            "bgcolor": "rgba(255,255,255,0.8)",
+        },
+    )
+
+    bottom_fig = make_subplots(
+        rows=1,
+        cols=2,
+        horizontal_spacing=0.15,
+        subplot_titles=[
+            "|B - curl(A)| error (log10)",
+            "Error slice along z (x = 0)",
+        ],
+    )
+    bottom_fig.add_trace(
+        go.Heatmap(
+            x=x,
+            y=z,
+            z=err_log10,
+            colorscale="Viridis",
+            colorbar={
+                "title": "log10(|B-curl(A)|)",
+                "thickness": 14,
+                "x": -0.15,
+                "xanchor": "left",
+            },
+            zmin=np.nanmin(err_log10),
+            zmax=np.nanmax(err_log10),
+        ),
+        row=1,
+        col=1,
+    )
+    bottom_fig.add_trace(
+        go.Scatter(
+            x=z,
+            y=err[:, mid],
+            mode="lines",
+            line={"color": "firebrick", "width": 2},
+            name="|B-curl(A)| (z-slice)",
+            showlegend=False,
+        ),
+        row=1,
+        col=2,
+    )
+    bottom_fig.update_xaxes(title_text="x [m]", row=1, col=1)
+    bottom_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
+    bottom_fig.update_xaxes(title_text="z [m]", row=1, col=2)
+    bottom_fig.update_yaxes(title_text="Error magnitude", row=1, col=2)
+    bottom_fig.update_layout(
+        height=460,
+        margin={"l": 50, "r": 20, "t": 50, "b": 60},
+    )
+
+    return top_fig, bottom_fig
+
+
 def build_perf_summary(
     mode: str, n_sides: int, wire_radius: float, rotation_deg: float, n_subdivisions: int
 ) -> str:
-    data = compute_field(mode, n_sides, wire_radius, rotation_deg, n_subdivisions)
-    label = "B-field" if mode == "b" else "Vector potential"
+    if mode in ("b", "a"):
+        data = compute_field(mode, n_sides, wire_radius, rotation_deg, n_subdivisions)
+        label = "B-field" if mode == "b" else "Vector potential"
+        return (
+            f"{label} | wire radius: {wire_radius:.3f} m | rotation: {rotation_deg:.0f} deg | "
+            f"sub-divisions: {n_subdivisions} | "
+            f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
+            f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
+        )
+
+    data = compute_field_equivalence(n_sides, wire_radius, rotation_deg, n_subdivisions)
     return (
-        f"{label} | wire radius: {wire_radius:.3f} m | rotation: {rotation_deg:.0f} deg | "
-        f"sub-divisions: {n_subdivisions} | "
-        f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
-        f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
+        f"Field equivalence (B vs curl(A)) | wire radius: {wire_radius:.3f} m | "
+        f"rotation: {rotation_deg:.0f} deg | sub-divisions: {n_subdivisions} | "
+        f"B: {data['t_b']:.3f}s / {data['n_b']:.2e} interactions, "
+        f"curl(A): {data['t_curl']:.3f}s / {data['n_curl']:.2e} interactions"
     )
 
 
@@ -497,6 +740,25 @@ def create_app():
                             ),
                         ],
                     ),
+                    dcc.Tab(
+                        label="Field equivalence",
+                        value="eq",
+                        children=[
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-eq-top"),
+                                ),
+                                style={"marginBottom": "0.5rem"},
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-eq-bottom"),
+                                )
+                            ),
+                        ],
+                    ),
                 ],
             ),
         ],
@@ -528,7 +790,7 @@ def create_app():
         rotation = float(np.mod(rotation_deg, 360.0))
         show_line = "show" in show_filament_line
         if field_tab != "b":
-            return no_update, no_update, build_perf_summary("a", sides, radius, rotation, n_sub)
+            return no_update, no_update, build_perf_summary(field_tab, sides, radius, rotation, n_sub)
         top_fig, bottom_fig = build_figures("b", sides, radius, rotation, n_sub, show_line)
         return (
             top_fig,
@@ -563,6 +825,33 @@ def create_app():
         show_line = "show" in show_filament_line
         return build_figures("a", sides, radius, rotation, n_sub, show_line)
 
+    @app.callback(
+        Output("field-figure-eq-top", "figure"),
+        Output("field-figure-eq-bottom", "figure"),
+        Input("polygon-sides", "value"),
+        Input("segment-subdivisions", "value"),
+        Input("wire-radius", "value"),
+        Input("rotation-deg", "value"),
+        Input("show-filament-line", "value"),
+        Input("field-tab", "value"),
+    )
+    def update_equivalence_figure(
+        n_sides: int,
+        n_subdivisions: int,
+        wire_radius: float,
+        rotation_deg: float,
+        show_filament_line: list[str],
+        field_tab: str,
+    ):
+        if field_tab != "eq":
+            return no_update, no_update
+        sides = int(n_sides)
+        n_sub = int(np.clip(n_subdivisions, 1, 10))
+        radius = float(np.clip(wire_radius, 0.0, 0.1))
+        rotation = float(np.mod(rotation_deg, 360.0))
+        show_line = "show" in show_filament_line
+        return build_equivalence_figures(sides, radius, rotation, n_sub, show_line)
+
     return app
 
 
@@ -575,6 +864,7 @@ def main() -> None:
         # smoketest figures if we're not running the full gui
         build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
         build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
+        build_equivalence_figures(3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
 
 
 if __name__ == "__main__":

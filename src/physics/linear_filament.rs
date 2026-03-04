@@ -551,17 +551,24 @@ pub fn vector_potential_linear_filament_scalar(
         perp_hat: _,
     } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
 
-    // Finite segment length log-form with quadratic blend to zero at axis.
+    // Finite segment length log-form with quadratic gauge shift inside finite radius.
+    //
+    // The additive term is chosen so interior radial derivative is consistent with
+    // the linear-in-r B-field model used in `flux_density_linear_filament_scalar`.
     let k1 = -para_b + dist_b;
     let k2 = -para_a + dist_a;
+    let sin_theta_a = para_a / dist_a; // (dimensionless)
+    let sin_theta_b = para_b / dist_b; // (dimensionless)
+    let kappa = -MU0_OVER_4PI * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
     let frac2 = frac * frac; // Quadratic fall-off (as opposed to linear for B-field)
-    let a_mag = frac2 * MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0));
+    let a_edge = MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0));
+    let a_mag = a_edge + 0.5 * kappa * (1.0 - frac2);
 
     // Direction is always aligned with the segment.
     let (ax, ay, az) = (a_mag * dlhat.0, a_mag * dlhat.1, a_mag * dlhat.2);
 
     // Finally, determine whether we are clipping to zero.
-    if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {
+    if perp > MIN_WIRE_THICKNESS {
         return (ax, ay, az);
     } else {
         return (0.0, 0.0, 0.0);
@@ -1207,7 +1214,7 @@ mod test {
         }
     }
 
-    /// Check quadratic falloff inside finite wire radius.
+    /// Check quadratic gauge shift inside finite wire radius.
     #[test]
     fn test_vector_potential_quadratic_falloff_inside_wire() {
         let (rtol, atol) = (1e-10, 1e-14);
@@ -1249,8 +1256,17 @@ mod test {
             .collect();
 
         let a_edge = amag[0];
+        let pld = crate::math::point_line_distance_with_endpoints(
+            start,
+            end,
+            (wire_radius, 0.0, 0.0),
+            wire_radius,
+        );
+        let sin_theta_a = pld.para_a / pld.dist_a;
+        let sin_theta_b = pld.para_b / pld.dist_b;
+        let kappa = -MU0_OVER_4PI * ifil[0] * (sin_theta_b - sin_theta_a);
         for (i, &ratio) in ratios.iter().enumerate() {
-            let expected = a_edge * ratio * ratio;
+            let expected = a_edge + 0.5 * kappa * (1.0 - ratio * ratio);
             assert!(
                 approx(expected, amag[i], rtol, atol),
                 "ratio {}: |A| = {:.6e}, expected {:.6e}",
@@ -1342,6 +1358,61 @@ mod test {
                 assert!(az[i].is_finite(), "az[{}] is {}", i, az[i]);
             }
         }
+    }
+
+    #[test]
+    fn test_vector_potential_curl_matches_b_inside_wire() {
+        let (rtol, atol) = (5e-3, 1e-12);
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let ifil = 1.0;
+        let wire_radius = 0.1;
+        let p = (0.03, 0.04, 0.0); // Inside wire, away from endpoints.
+        let eps = 1e-6;
+
+        let a_at = |x: f64, y: f64, z: f64| {
+            vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, (x, y, z))
+        };
+
+        // da/dx
+        let (_ax0, ay0, az0) = a_at(p.0 - eps, p.1, p.2);
+        let (_ax1, ay1, az1) = a_at(p.0 + eps, p.1, p.2);
+        let daz_dx = (az1 - az0) / (2.0 * eps);
+        let day_dx = (ay1 - ay0) / (2.0 * eps);
+
+        // da/dy
+        let (ax0, _ay0, az0) = a_at(p.0, p.1 - eps, p.2);
+        let (ax1, _ay1, az1) = a_at(p.0, p.1 + eps, p.2);
+        let daz_dy = (az1 - az0) / (2.0 * eps);
+        let dax_dy = (ax1 - ax0) / (2.0 * eps);
+
+        // da/dz
+        let (ax0, ay0, _az0) = a_at(p.0, p.1, p.2 - eps);
+        let (ax1, ay1, _az1) = a_at(p.0, p.1, p.2 + eps);
+        let day_dz = (ay1 - ay0) / (2.0 * eps);
+        let dax_dz = (ax1 - ax0) / (2.0 * eps);
+
+        let curl_a = (daz_dy - day_dz, dax_dz - daz_dx, day_dx - dax_dy);
+        let b = flux_density_linear_filament_scalar((start, end, ifil), wire_radius, p);
+
+        assert!(
+            approx(b.0, curl_a.0, rtol, atol),
+            "bx = {:.6e}, curl_a.x = {:.6e}",
+            b.0,
+            curl_a.0
+        );
+        assert!(
+            approx(b.1, curl_a.1, rtol, atol),
+            "by = {:.6e}, curl_a.y = {:.6e}",
+            b.1,
+            curl_a.1
+        );
+        assert!(
+            approx(b.2, curl_a.2, rtol, atol),
+            "bz = {:.6e}, curl_a.z = {:.6e}",
+            b.2,
+            curl_a.2
+        );
     }
 
     /// Check that B = curl(A)

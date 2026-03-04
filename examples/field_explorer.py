@@ -119,22 +119,6 @@ def discretize_point_segments(
     return xyzfil_ps, dlxyzfil_ps, np.concatenate(ifil_ps)
 
 
-def segment_distance_map(xx: np.ndarray, zz: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
-    dist = np.full_like(xx, np.inf, dtype=float)
-    for start, end in zip(starts, ends, strict=True):
-        vx = end[0] - start[0]
-        vz = end[2] - start[2]
-        denom = vx * vx + vz * vz
-        if denom == 0.0:
-            continue
-        t = ((xx - start[0]) * vx + (zz - start[2]) * vz) / denom
-        t = np.clip(t, 0.0, 1.0)
-        projx = start[0] + t * vx
-        projz = start[2] + t * vz
-        dist = np.minimum(dist, np.sqrt((xx - projx) ** 2 + (zz - projz) ** 2))
-    return dist
-
-
 @lru_cache(maxsize=8)
 def compute_field(
     mode: str, n_sides: int, wire_radius: float, rotation_deg: float, n_subdivisions: int
@@ -178,8 +162,6 @@ def compute_field(
     mag_point = np.sqrt(vx_ps * vx_ps + vy_ps * vy_ps + vz_ps * vz_ps).reshape(xx.shape)
 
     err = np.abs(mag_linear - mag_point)
-    near_wire = segment_distance_map(xx, zz, starts, ends) < wire_radius
-    err = np.where(near_wire, np.nan, err)
 
     return {
         "x": x,
@@ -273,6 +255,7 @@ def build_figures(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
+    mask_axis_spikes: bool,
     show_filament_line: bool,
 ):
     import plotly.graph_objects as go
@@ -287,6 +270,9 @@ def build_figures(
     path_x = data["path_x"]
     path_z = data["path_z"]
 
+    if mask_axis_spikes:
+        mag_linear = np.where(mag_linear > 1e2, np.nan, mag_linear)
+        err = np.where(err > 1e2, np.nan, err)
     mag_log10 = np.log10(mag_linear + 1e-30)
     err_log10 = np.where(np.isnan(err), np.nan, np.log10(err + 1e-30))
     mid = GRID_SIZE // 2
@@ -450,6 +436,7 @@ def build_equivalence_figures(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
+    mask_axis_spikes: bool,
     show_filament_line: bool,
 ):
     import plotly.graph_objects as go
@@ -464,6 +451,9 @@ def build_equivalence_figures(
     path_x = data["path_x"]
     path_z = data["path_z"]
 
+    if mask_axis_spikes:
+        bmag = np.where(bmag > 1e2, np.nan, bmag)
+        err = np.where(err > 1e2, np.nan, err)
     b_log10 = np.log10(bmag + 1e-30)
     err_log10 = np.where(np.isnan(err), np.nan, np.log10(err + 1e-30))
     mid = EQUIV_GRID_SIZE // 2
@@ -698,6 +688,12 @@ def create_app():
                 value=["show"],
                 style={"marginBottom": "0.75rem"},
             ),
+            dcc.Checklist(
+                id="mask-axis-spikes",
+                options=[{"label": "Mask axis spikes > 1e2", "value": "mask"}],
+                value=[],
+                style={"marginBottom": "0.75rem"},
+            ),
             dcc.Tabs(
                 id="field-tab",
                 value="b",
@@ -773,6 +769,7 @@ def create_app():
         Input("segment-subdivisions", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
+        Input("mask-axis-spikes", "value"),
         Input("show-filament-line", "value"),
         Input("field-tab", "value"),
     )
@@ -781,6 +778,7 @@ def create_app():
         n_subdivisions: int,
         wire_radius: float,
         rotation_deg: float,
+        mask_axis_spikes: list[str],
         show_filament_line: list[str],
         field_tab: str,
     ):
@@ -788,10 +786,11 @@ def create_app():
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
+        mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
         if field_tab != "b":
             return no_update, no_update, build_perf_summary(field_tab, sides, radius, rotation, n_sub)
-        top_fig, bottom_fig = build_figures("b", sides, radius, rotation, n_sub, show_line)
+        top_fig, bottom_fig = build_figures("b", sides, radius, rotation, n_sub, mask_spikes, show_line)
         return (
             top_fig,
             bottom_fig,
@@ -805,6 +804,7 @@ def create_app():
         Input("segment-subdivisions", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
+        Input("mask-axis-spikes", "value"),
         Input("show-filament-line", "value"),
         Input("field-tab", "value"),
     )
@@ -813,6 +813,7 @@ def create_app():
         n_subdivisions: int,
         wire_radius: float,
         rotation_deg: float,
+        mask_axis_spikes: list[str],
         show_filament_line: list[str],
         field_tab: str,
     ):
@@ -822,8 +823,9 @@ def create_app():
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
+        mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
-        return build_figures("a", sides, radius, rotation, n_sub, show_line)
+        return build_figures("a", sides, radius, rotation, n_sub, mask_spikes, show_line)
 
     @app.callback(
         Output("field-figure-eq-top", "figure"),
@@ -832,6 +834,7 @@ def create_app():
         Input("segment-subdivisions", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
+        Input("mask-axis-spikes", "value"),
         Input("show-filament-line", "value"),
         Input("field-tab", "value"),
     )
@@ -840,6 +843,7 @@ def create_app():
         n_subdivisions: int,
         wire_radius: float,
         rotation_deg: float,
+        mask_axis_spikes: list[str],
         show_filament_line: list[str],
         field_tab: str,
     ):
@@ -849,8 +853,9 @@ def create_app():
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
+        mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
-        return build_equivalence_figures(sides, radius, rotation, n_sub, show_line)
+        return build_equivalence_figures(sides, radius, rotation, n_sub, mask_spikes, show_line)
 
     return app
 
@@ -862,9 +867,9 @@ def main() -> None:
         app.run(debug=True)
     else:
         # smoketest figures if we're not running the full gui
-        build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
-        build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
-        build_equivalence_figures(3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
+        build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
+        build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
+        build_equivalence_figures(3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
 
 
 if __name__ == "__main__":

@@ -49,14 +49,27 @@ def rotate_vertices_y(vertices: np.ndarray, rotation_deg: float) -> np.ndarray:
 def build_linear_filaments(
     n_sides: int,
     rotation_deg: float,
+    n_subdivisions: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[np.ndarray, ...], tuple[np.ndarray, ...], np.ndarray]:
     vertices = rotate_vertices_y(build_path_vertices(n_sides), rotation_deg)
     if n_sides >= 3:
-        starts = vertices
-        ends = np.roll(vertices, -1, axis=0)
+        starts_base = vertices
+        ends_base = np.roll(vertices, -1, axis=0)
     else:
-        starts = vertices[:-1]
-        ends = vertices[1:]
+        starts_base = vertices[:-1]
+        ends_base = vertices[1:]
+
+    n_sub = max(1, int(n_subdivisions))
+    if n_sub == 1:
+        starts = starts_base
+        ends = ends_base
+    else:
+        dvec = ends_base - starts_base
+        dsub = dvec / n_sub
+        base = np.repeat(starts_base, n_sub, axis=0)
+        frac = np.tile(np.arange(n_sub, dtype=float), starts_base.shape[0])[:, None]
+        starts = base + frac * np.repeat(dsub, n_sub, axis=0)
+        ends = starts + np.repeat(dsub, n_sub, axis=0)
 
     dl = ends - starts
     xyzfil = (starts[:, 0], starts[:, 1], starts[:, 2])
@@ -123,9 +136,11 @@ def segment_distance_map(xx: np.ndarray, zz: np.ndarray, starts: np.ndarray, end
 
 @lru_cache(maxsize=8)
 def compute_field(
-    mode: str, n_sides: int, wire_radius: float, rotation_deg: float
+    mode: str, n_sides: int, wire_radius: float, rotation_deg: float, n_subdivisions: int
 ) -> dict[str, np.ndarray | float]:
-    vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(n_sides, rotation_deg)
+    vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(
+        n_sides, rotation_deg, n_subdivisions
+    )
     dl = ends - starts
 
     x = np.linspace(-DOMAIN, DOMAIN, GRID_SIZE)
@@ -185,12 +200,13 @@ def build_figures(
     n_sides: int,
     wire_radius: float,
     rotation_deg: float,
+    n_subdivisions: int,
     show_filament_line: bool,
 ):
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
-    data = compute_field(mode, n_sides, wire_radius, rotation_deg)
+    data = compute_field(mode, n_sides, wire_radius, rotation_deg, n_subdivisions)
     x = data["x"]
     z = data["z"]
     mag_linear = data["mag_linear"]
@@ -279,7 +295,10 @@ def build_figures(
     top_fig.update_yaxes(title_text=value_title, row=1, col=2)
     top_fig.update_layout(
         height=460,
-        title=f"{title_prefix}: {geometry_label}, rotation {rotation_deg:.0f} deg",
+        title=(
+            f"{title_prefix}: {geometry_label}, rotation {rotation_deg:.0f} deg, "
+            f"sub-divisions {n_subdivisions}"
+        ),
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
         legend={
             "orientation": "h",
@@ -354,11 +373,14 @@ def build_figures(
     return top_fig, bottom_fig
 
 
-def build_perf_summary(mode: str, n_sides: int, wire_radius: float, rotation_deg: float) -> str:
-    data = compute_field(mode, n_sides, wire_radius, rotation_deg)
+def build_perf_summary(
+    mode: str, n_sides: int, wire_radius: float, rotation_deg: float, n_subdivisions: int
+) -> str:
+    data = compute_field(mode, n_sides, wire_radius, rotation_deg, n_subdivisions)
     label = "B-field" if mode == "b" else "Vector potential"
     return (
         f"{label} | wire radius: {wire_radius:.3f} m | rotation: {rotation_deg:.0f} deg | "
+        f"sub-divisions: {n_subdivisions} | "
         f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
         f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
     )
@@ -380,6 +402,19 @@ def create_app():
                     step=1,
                     value=3,
                     marks={1: "1", 10: "10", 20: "20", 30: "30", 40: "40", 50: "50"},
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+                style={"paddingBottom": "0.5rem"},
+            ),
+            html.P("Sub-divisions per segment", style={"marginTop": "0.5rem", "marginBottom": "0.25rem"}),
+            html.Div(
+                dcc.Slider(
+                    id="segment-subdivisions",
+                    min=1,
+                    max=10,
+                    step=1,
+                    value=1,
+                    marks={1: "1", 3: "3", 5: "5", 7: "7", 10: "10"},
                     tooltip={"placement": "bottom", "always_visible": True},
                 ),
                 style={"paddingBottom": "0.5rem"},
@@ -473,6 +508,7 @@ def create_app():
         Output("field-figure-b-bottom", "figure"),
         Output("perf-summary", "children"),
         Input("polygon-sides", "value"),
+        Input("segment-subdivisions", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("show-filament-line", "value"),
@@ -480,28 +516,31 @@ def create_app():
     )
     def update_b_figure(
         n_sides: int,
+        n_subdivisions: int,
         wire_radius: float,
         rotation_deg: float,
         show_filament_line: list[str],
         field_tab: str,
     ):
         sides = int(n_sides)
+        n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         show_line = "show" in show_filament_line
         if field_tab != "b":
-            return no_update, no_update, build_perf_summary("a", sides, radius, rotation)
-        top_fig, bottom_fig = build_figures("b", sides, radius, rotation, show_line)
+            return no_update, no_update, build_perf_summary("a", sides, radius, rotation, n_sub)
+        top_fig, bottom_fig = build_figures("b", sides, radius, rotation, n_sub, show_line)
         return (
             top_fig,
             bottom_fig,
-            build_perf_summary("b", sides, radius, rotation),
+            build_perf_summary("b", sides, radius, rotation, n_sub),
         )
 
     @app.callback(
         Output("field-figure-a-top", "figure"),
         Output("field-figure-a-bottom", "figure"),
         Input("polygon-sides", "value"),
+        Input("segment-subdivisions", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("show-filament-line", "value"),
@@ -509,6 +548,7 @@ def create_app():
     )
     def update_a_figure(
         n_sides: int,
+        n_subdivisions: int,
         wire_radius: float,
         rotation_deg: float,
         show_filament_line: list[str],
@@ -517,10 +557,11 @@ def create_app():
         if field_tab != "a":
             return no_update, no_update
         sides = int(n_sides)
+        n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         show_line = "show" in show_filament_line
-        return build_figures("a", sides, radius, rotation, show_line)
+        return build_figures("a", sides, radius, rotation, n_sub, show_line)
 
     return app
 
@@ -532,8 +573,8 @@ def main() -> None:
         app.run(debug=True)
     else:
         # smoketest figures if we're not running the full gui
-        build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
-        build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, True)
+        build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
+        build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, True)
 
 
 if __name__ == "__main__":

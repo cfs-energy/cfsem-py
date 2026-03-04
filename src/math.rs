@@ -134,6 +134,20 @@ pub fn dot3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> f32 {
     x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
 }
 
+/// Cubic smoothstep function; essentially a fast version of a sigmoid.
+///
+/// _______0, x < 0
+/// f(x) = 3x^2 - 2x^3, x in [0, 1]
+/// _______1, x > 1
+///
+/// The derivative at x=0,1 is exactly 0,
+/// but the second derivative is nonzero at both locations.
+#[inline]
+fn smoothstep(x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 /// Convert a point from cartesian to cylindrical coordinates.
 #[inline]
 pub fn cartesian_to_cylindrical(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
@@ -179,8 +193,11 @@ pub(crate) struct PointLineDistance {
 }
 
 /// Minimum perpendicular distance to the infinite line defined by endpoints,
-/// distances to each endpoint, clamp fraction based on `r_min`,
+/// distances to each endpoint, finite-thickness clamp fraction based on `r_min`,
 /// and parallel distances from each endpoint to the target.
+///
+/// Finite-thickness clamping fades out smoothly when the point projects outside
+/// the segment and moves away from the nearest endpoint along the segment axis.
 #[inline]
 pub(crate) fn point_line_distance_with_endpoints(
     a: (f64, f64, f64),
@@ -188,6 +205,8 @@ pub(crate) fn point_line_distance_with_endpoints(
     p: (f64, f64, f64),
     r_min: f64,
 ) -> PointLineDistance {
+    use crate::math::smoothstep;
+
     // Vectors and distances between points.
     let ab = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
     let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
@@ -219,6 +238,7 @@ pub(crate) fn point_line_distance_with_endpoints(
         };
     }
 
+    // Filament vector, length, and normalized direction
     let ab_len = ab2.sqrt();
     let ab_len_inv = ab_len.recip();
     let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
@@ -231,33 +251,38 @@ pub(crate) fn point_line_distance_with_endpoints(
         t.mul_add(ab.2, a.2),
     ); // (m) closest point on infinite line
     let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
-    let perp = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
-    let perp_hat = if perp > 0.0 {
-        let inv = perp.recip();
+    let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
+    let perp_hat = if perp_raw > 0.0 {
+        let inv = perp_raw.recip();
         (dp.0 * inv, dp.1 * inv, dp.2 * inv)
     } else {
         (0.0, 0.0, 0.0)
     };
 
-    let r_min = r_min.max(0.0);
-    let r_min_frac = r_min.max(f64::MIN_POSITIVE);
+    // Clamp r_min to prevent div/0
+    let r_min = r_min.max(f64::MIN_POSITIVE);
 
     // Parallel distances from each endpoint to the target
     let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
     let para_b = para_a - ab_len;
 
-    // Fraction of perpendicular distance to r_min, to be used for handling
-    // fields inside finite-thickness wires.
-    //
-    // Use the unclamped perpendicular distance to the infinite line regardless
-    // of whether the projection is inside or outside the segment.
-    let frac = (perp / r_min_frac).min(1.0);
+    // Distance beyond the nearest endpoint along the segment axis.
+    // This is zero when the perpendicular projection lies inside the segment.
+    let outside_overhang = (-para_a).max(para_b).max(0.0);
 
-    // Clamp distances only if we are inside the minimum radius
-    let perp = match frac < 1.0 {
-        false => perp,
-        true => r_min_frac,
+    // Smoothly turn off finite-thickness clamping outside segment projections
+    // so far-away axial points recover thin-segment behavior.
+    let endpoint_fade = 1.0 - smoothstep(outside_overhang / r_min);
+    let r_min_effective = r_min * endpoint_fade;
+
+    // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.
+    let frac = {
+        // let r_min_effective_frac = r_min_effective.max(f64::MIN_POSITIVE);
+        (perp_raw / r_min_effective).min(1.0)
     };
+
+    // Clamp distances only if we are inside the effective minimum radius.
+    let perp = perp_raw.max(r_min_effective);
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
     let dist_a = (perp * perp + para_a * para_a).sqrt();

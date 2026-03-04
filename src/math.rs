@@ -181,6 +181,7 @@ pub(crate) struct PointLineDistance {
 /// Minimum perpendicular distance to the infinite line defined by endpoints,
 /// distances to each endpoint, clamp fraction based on `r_min`,
 /// and parallel distances from each endpoint to the target.
+#[inline]
 pub(crate) fn point_line_distance_with_endpoints(
     a: (f64, f64, f64),
     b: (f64, f64, f64),

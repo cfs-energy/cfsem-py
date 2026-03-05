@@ -346,10 +346,10 @@ pub fn flux_density_linear_filament_scalar(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let geometric_factor = -frac * (sin_theta_b - sin_theta_a); // (dimensionless)
+    let kappa = -MU0_OVER_4PI * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
 
     // This factor is constant across all x, y, and z components.
-    let c = geometric_factor * MU0_OVER_4PI * ifil / perp; // (A/m)
+    let c = frac * kappa / perp; // (A/m)
 
     // Direction of cross(dL, r), the direction of the field.
     let (cx, cy, cz) = cross3(

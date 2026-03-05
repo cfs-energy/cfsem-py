@@ -199,6 +199,24 @@ def distribute_filaments_in_cylinder_section(
     )
 
 
+def segment_lines_xyz(starts: np.ndarray, ends: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n = starts.shape[0]
+    x = np.empty(3 * n, dtype=float)
+    y = np.empty(3 * n, dtype=float)
+    z = np.empty(3 * n, dtype=float)
+
+    x[0::3] = starts[:, 0]
+    x[1::3] = ends[:, 0]
+    x[2::3] = np.nan
+    y[0::3] = starts[:, 1]
+    y[1::3] = ends[:, 1]
+    y[2::3] = np.nan
+    z[0::3] = starts[:, 2]
+    z[1::3] = ends[:, 2]
+    z[2::3] = np.nan
+    return x, y, z
+
+
 @lru_cache(maxsize=8)
 def compute_field(
     mode: str, n_sides: int, wire_radius: float, rotation_deg: float, n_subdivisions: int
@@ -766,6 +784,110 @@ def build_equivalence_figures(
     return top_fig, bottom_fig
 
 
+def build_section_geometry_figure(
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    n_section_filaments: int,
+):
+    import plotly.graph_objects as go
+
+    vertices, starts, ends, _xyzfil, _dlxyzfil, ifil = build_linear_filaments(
+        n_sides, rotation_deg, n_subdivisions
+    )
+    dl = ends - starts
+    xyzfil_ref, dlxyzfil_ref, _ifil_ref, n_offsets = distribute_filaments_in_cylinder_section(
+        starts, dl, ifil, wire_radius, n_section_filaments
+    )
+    starts_ref = np.column_stack(xyzfil_ref)
+    ends_ref = starts_ref + np.column_stack(dlxyzfil_ref)
+
+    x_single, y_single, z_single = segment_lines_xyz(starts, ends)
+    x_dist, y_dist, z_dist = segment_lines_xyz(starts_ref, ends_ref)
+
+    if n_sides >= 3:
+        path = np.vstack((vertices, vertices[0]))
+    else:
+        path = vertices
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter3d(
+            x=x_single,
+            y=y_single,
+            z=z_single,
+            mode="lines",
+            line={"color": "black", "width": 4},
+            name="Single filaments",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=x_dist,
+            y=y_dist,
+            z=z_dist,
+            mode="lines",
+            line={"color": "deepskyblue", "width": 2},
+            opacity=0.4,
+            name="Distributed filaments",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter3d(
+            x=path[:, 0],
+            y=path[:, 1],
+            z=path[:, 2],
+            mode="lines",
+            line={"color": "firebrick", "width": 6},
+            name="Path centerline",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+
+    fig.update_layout(
+        height=620,
+        title={
+            "text": (
+                "Filament geometry overlay | "
+                f"single: {starts.shape[0]} segments, "
+                f"distributed: {starts_ref.shape[0]} filaments ({n_offsets}/segment)"
+            ),
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 0.98,
+            "yanchor": "top",
+            "pad": {"b": 5},
+        },
+        margin={"l": 40, "r": 20, "t": 45, "b": 30},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 0.93,
+            "yanchor": "top",
+            "bgcolor": "rgba(255,255,255,0.8)",
+        },
+    )
+    fig.update_scenes(
+        xaxis_title="x [m]",
+        yaxis_title="y [m]",
+        zaxis_title="z [m]",
+        aspectmode="data",
+        camera={"eye": {"x": 1.5, "y": 1.4, "z": 1.0}},
+    )
+    return fig
+
+
 def build_section_comparison_figures(
     mode: str,
     n_sides: int,
@@ -1138,7 +1260,7 @@ def create_app():
                         "value": "area",
                     }
                 ],
-                value=[],
+                value=["area"],
                 style={"marginBottom": "0.75rem"},
             ),
             dcc.Tabs(
@@ -1200,6 +1322,13 @@ def create_app():
                                     children=dcc.Graph(id="field-figure-cb-bottom"),
                                 )
                             ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-cb-geom"),
+                                ),
+                                style={"marginTop": "0.5rem"},
+                            ),
                         ],
                     ),
                     dcc.Tab(
@@ -1218,6 +1347,13 @@ def create_app():
                                     type="circle",
                                     children=dcc.Graph(id="field-figure-ca-bottom"),
                                 )
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-ca-geom"),
+                                ),
+                                style={"marginTop": "0.5rem"},
                             ),
                         ],
                     ),
@@ -1323,6 +1459,7 @@ def create_app():
     @app.callback(
         Output("field-figure-cb-top", "figure"),
         Output("field-figure-cb-bottom", "figure"),
+        Output("field-figure-cb-geom", "figure"),
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
         Input("wire-radius", "value"),
@@ -1345,7 +1482,7 @@ def create_app():
         field_tab: str,
     ):
         if field_tab != "cb":
-            return no_update, no_update
+            return no_update, no_update, no_update
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
@@ -1354,13 +1491,16 @@ def create_app():
         use_area_radius = "area" in section_radius_mode
         mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
-        return build_section_comparison_figures(
+        top_fig, bottom_fig = build_section_comparison_figures(
             "b", sides, radius, rotation, n_sub, n_section, use_area_radius, mask_spikes, show_line
         )
+        geom_fig = build_section_geometry_figure(sides, radius, rotation, n_sub, n_section)
+        return top_fig, bottom_fig, geom_fig
 
     @app.callback(
         Output("field-figure-ca-top", "figure"),
         Output("field-figure-ca-bottom", "figure"),
+        Output("field-figure-ca-geom", "figure"),
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
         Input("wire-radius", "value"),
@@ -1383,7 +1523,7 @@ def create_app():
         field_tab: str,
     ):
         if field_tab != "ca":
-            return no_update, no_update
+            return no_update, no_update, no_update
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
@@ -1392,9 +1532,11 @@ def create_app():
         use_area_radius = "area" in section_radius_mode
         mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
-        return build_section_comparison_figures(
+        top_fig, bottom_fig = build_section_comparison_figures(
             "a", sides, radius, rotation, n_sub, n_section, use_area_radius, mask_spikes, show_line
         )
+        geom_fig = build_section_geometry_figure(sides, radius, rotation, n_sub, n_section)
+        return top_fig, bottom_fig, geom_fig
 
     @app.callback(
         Output("field-figure-eq-top", "figure"),
@@ -1444,6 +1586,7 @@ def main() -> None:
         build_section_comparison_figures(
             "a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_FILAMENTS, False, False, True
         )
+        build_section_geometry_figure(3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_FILAMENTS)
         build_equivalence_figures(3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
 
 

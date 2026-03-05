@@ -784,6 +784,44 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
 
 
+@mark.parametrize("par", [True, False])
+def test_vector_potential_linear_self_inductance_against_wien(par):
+    # Build a single-turn circular loop as piecewise-linear filaments.
+    major_radius = 0.5  # [m]
+    minor_radius = 5e-3  # [m] finite conductor radius
+    ndiscr = 200
+    phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
+
+    x = major_radius * np.cos(phi)
+    y = major_radius * np.sin(phi)
+    z = np.zeros_like(x)
+
+    dx = x[1:] - x[:-1]
+    dy = y[1:] - y[:-1]
+    dz = z[1:] - z[:-1]
+
+    xyzfil = (x[:-1], y[:-1], z[:-1])
+    dlxyzfil = (dx, dy, dz)
+    ifil = np.ones_like(dx)  # [A]
+
+    # Integrate A·dl around the same loop; with 1 A current this equals self-inductance.
+    xyzp = (x[:-1] + 0.5 * dx, y[:-1] + 0.5 * dy, z[:-1] + 0.5 * dz)
+    ax, ay, az = cfsem.vector_potential_linear_filament(
+        xyzp=xyzp,
+        xyzfil=xyzfil,
+        dlxyzfil=dlxyzfil,
+        ifil=ifil,
+        wire_radius=minor_radius,
+        par=par,
+    )
+    l_from_a = float(np.sum(ax * dx + ay * dy + az * dz))  # [H]
+
+    l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))  # [H]
+
+    # Allow moderate error from polygonal discretization of the circular geometry.
+    assert l_from_a == approx(l_wien, rel=8e-2)
+
+
 def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
     
     # Create set of four non-overlapping coaxial rectangular coils and prescribed turn density

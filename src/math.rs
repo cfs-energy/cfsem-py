@@ -198,6 +198,7 @@ pub(crate) struct PointLineDistance {
 ///
 /// Finite-thickness clamping fades out smoothly when the point projects outside
 /// the segment and moves away from the nearest endpoint along the segment axis.
+/// The fade length is limited to the smaller of wire radius or half segment length.
 #[inline]
 pub(crate) fn point_line_distance_with_endpoints(
     a: (f64, f64, f64),
@@ -271,8 +272,10 @@ pub(crate) fn point_line_distance_with_endpoints(
     let outside_overhang = (-para_a).max(para_b).max(0.0);
 
     // Smoothly turn off finite-thickness clamping outside segment projections
-    // so far-away axial points recover thin-segment behavior.
-    let endpoint_fade = 1.0 - smoothstep(outside_overhang / r_min);
+    // so far-away axial points recover thin-segment behavior. In short segments,
+    // cap the fade length to half-segment so neighboring endpoint blends do not overlap.
+    let endpoint_fade_len = r_min.min(0.5 * ab_len);
+    let endpoint_fade = 1.0 - smoothstep(outside_overhang / endpoint_fade_len);
     let r_min_effective = r_min * endpoint_fade;
 
     // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.

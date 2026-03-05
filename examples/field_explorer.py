@@ -8,12 +8,13 @@ import numpy as np
 
 import cfsem
 
-GRID_SIZE = 30 if os.getenv("CFSEM_TESTING") else 1000
-EQUIV_GRID_SIZE = 20 if os.getenv("CFSEM_TESTING") else 1000
+GRID_SIZE = 31 if os.getenv("CFSEM_TESTING") else 1001
+EQUIV_GRID_SIZE = 21 if os.getenv("CFSEM_TESTING") else 1001
 DEFAULT_WIRE_RADIUS = 0.02
 PATH_RADIUS = 0.7
 DOMAIN = 1.0
 CURRENT = 1.0
+LOG10_FLOOR = -16.0
 
 
 def build_path_vertices(n_sides: int) -> np.ndarray:
@@ -272,8 +273,8 @@ def build_figures(
     if mask_axis_spikes:
         mag_linear = np.where(mag_linear > 1e2, np.nan, mag_linear)
         err = np.where(err > 1e2, np.nan, err)
-    mag_log10 = np.log10(mag_linear + 1e-30)
-    err_log10 = np.where(np.isnan(err), np.nan, np.log10(err + 1e-30))
+    mag_log10 = np.maximum(np.log10(mag_linear + 1e-30), LOG10_FLOOR)
+    err_log10 = np.where(np.isnan(err), np.nan, np.maximum(np.log10(err + 1e-30), LOG10_FLOOR))
     mid = GRID_SIZE // 2
 
     value_title = "|B| [T]" if mode == "b" else "|A| [T m]"
@@ -461,8 +462,8 @@ def build_equivalence_figures(
     if mask_axis_spikes:
         bmag = np.where(bmag > 1e2, np.nan, bmag)
         err = np.where(err > 1e2, np.nan, err)
-    b_log10 = np.log10(bmag + 1e-30)
-    err_log10 = np.where(np.isnan(err), np.nan, np.log10(err + 1e-30))
+    b_log10 = np.maximum(np.log10(bmag + 1e-30), LOG10_FLOOR)
+    err_log10 = np.where(np.isnan(err), np.nan, np.maximum(np.log10(err + 1e-30), LOG10_FLOOR))
     mid = EQUIV_GRID_SIZE // 2
     geometry_label = (
         "Straight line"

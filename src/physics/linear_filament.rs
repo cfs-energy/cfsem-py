@@ -1061,6 +1061,35 @@ mod test {
     }
 
     #[test]
+    fn test_point_line_distance_endpoint_fade_capped_by_half_segment() {
+        use crate::math::point_line_distance_with_endpoints;
+
+        let (rtol, atol) = (1e-12, 1e-15);
+        let start = (0.0, 0.0, 0.0);
+        let end = (0.0, 0.0, 0.1); // Segment length = 0.1 m, half-length = 0.05 m.
+        let wire_radius = 0.2; // Larger than half-length, so fade length should cap at 0.05 m.
+        let x = 0.01;
+
+        // At the endpoint plane, behavior should match in-segment clamping.
+        let at_endpoint =
+            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2), wire_radius);
+        assert!(approx(0.2, at_endpoint.perp, rtol, atol));
+        assert!(approx(0.05, at_endpoint.frac, rtol, atol));
+
+        // Halfway through the capped fade length: smoothstep(0.5) = 0.5.
+        let halfway =
+            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.025), wire_radius);
+        assert!(approx(0.1, halfway.perp, rtol, atol));
+        assert!(approx(0.1, halfway.frac, rtol, atol));
+
+        // At one half-segment beyond the endpoint projection, finite-thickness effect is off.
+        let outside =
+            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.05), wire_radius);
+        assert!(approx(x, outside.perp, rtol, atol));
+        assert!(approx(1.0, outside.frac, rtol, atol));
+    }
+
+    #[test]
     fn test_flux_density_endpoint_fade_recovers_thin_segment_outside_projection() {
         let (rtol, atol) = (1e-12, 1e-15);
         let wire_radius = 0.1;

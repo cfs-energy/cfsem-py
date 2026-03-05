@@ -325,9 +325,7 @@ pub fn flux_density_linear_filament_scalar(
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing finite-thickness blending:
-    // 0 at the wire axis, 1 at/above effective wire radius.
-    // Outside endpoint projections, this finite-thickness effect fades away
-    // with axial distance from the nearest endpoint.
+    // 0 at the wire axis, 1 at/above wire radius.
     let PointLineDistance {
         perp,
         perp_hat,
@@ -537,9 +535,7 @@ pub fn vector_potential_linear_filament_scalar(
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing finite-thickness blending:
-    // 0 at the wire axis, 1 at/above effective wire radius.
-    // Outside endpoint projections, this finite-thickness effect fades away
-    // with axial distance from the nearest endpoint.
+    // 0 at the wire axis, 1 at/above wire radius.
     let PointLineDistance {
         perp,
         dist_a,
@@ -1032,7 +1028,7 @@ mod test {
     }
 
     #[test]
-    fn test_point_line_distance_endpoint_fade_values() {
+    fn test_point_line_distance_endpoint_clamp_values() {
         use crate::math::point_line_distance_with_endpoints;
 
         let (rtol, atol) = (1e-12, 1e-15);
@@ -1047,51 +1043,21 @@ mod test {
         assert!(approx(0.1, at_endpoint.perp, rtol, atol));
         assert!(approx(0.2, at_endpoint.frac, rtol, atol));
 
-        // Halfway through the fade length, smoothstep(0.5) = 0.5.
+        // Outside endpoint projection, clamping behavior is unchanged without endpoint blending.
         let halfway =
             point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.05), wire_radius);
-        assert!(approx(0.05, halfway.perp, rtol, atol));
-        assert!(approx(0.4, halfway.frac, rtol, atol));
+        assert!(approx(0.1, halfway.perp, rtol, atol));
+        assert!(approx(0.2, halfway.frac, rtol, atol));
 
-        // One wire radius beyond the endpoint projection, finite-thickness effect is off.
+        // One wire radius beyond the endpoint projection remains clamped the same way.
         let outside =
             point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.1), wire_radius);
-        assert!(approx(x, outside.perp, rtol, atol));
-        assert!(approx(1.0, outside.frac, rtol, atol));
+        assert!(approx(0.1, outside.perp, rtol, atol));
+        assert!(approx(0.2, outside.frac, rtol, atol));
     }
 
     #[test]
-    fn test_point_line_distance_endpoint_fade_capped_by_half_segment() {
-        use crate::math::point_line_distance_with_endpoints;
-
-        let (rtol, atol) = (1e-12, 1e-15);
-        let start = (0.0, 0.0, 0.0);
-        let end = (0.0, 0.0, 0.1); // Segment length = 0.1 m, half-length = 0.05 m.
-        let wire_radius = 0.2; // Larger than half-length, so fade length should cap at 0.05 m.
-        let x = 0.01;
-
-        // At the endpoint plane, behavior should match in-segment clamping.
-        let at_endpoint =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2), wire_radius);
-        assert!(approx(0.2, at_endpoint.perp, rtol, atol));
-        assert!(approx(0.05, at_endpoint.frac, rtol, atol));
-
-        // Halfway through the capped fade length: smoothstep(0.5) = 0.5.
-        let halfway =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.025), wire_radius);
-        assert!(approx(0.1, halfway.perp, rtol, atol));
-        assert!(approx(0.1, halfway.frac, rtol, atol));
-
-        // At one half-segment beyond the endpoint projection, finite-thickness effect is off.
-        let outside =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.05), wire_radius);
-        assert!(approx(x, outside.perp, rtol, atol));
-        assert!(approx(1.0, outside.frac, rtol, atol));
-    }
-
-    #[test]
-    fn test_flux_density_endpoint_fade_recovers_thin_segment_outside_projection() {
-        let (rtol, atol) = (1e-12, 1e-15);
+    fn test_flux_density_no_endpoint_blend_differs_from_thin_outside_projection() {
         let wire_radius = 0.1;
         let start = (0.0, 0.0, -0.5);
         let end = (0.0, 0.0, 0.5);
@@ -1114,21 +1080,8 @@ mod test {
         }
 
         assert!(diff[0] > 0.0);
-        for i in 0..diff.len() - 1 {
-            assert!(
-                diff[i + 1] <= diff[i] * (1.0 + 1e-12) + 1e-18,
-                "diff should decrease with endpoint overhang: {:?}",
-                diff
-            );
-        }
-
-        // Once outside by >= wire radius, this should match thin-segment behavior.
-        let obs = (x, 0.0, end.2 + wire_radius);
-        let b_finite = flux_density_linear_filament_scalar((start, end, ifil), wire_radius, obs);
-        let b_thin = flux_density_linear_filament_scalar((start, end, ifil), 0.0, obs);
-        assert!(approx(b_thin.0, b_finite.0, rtol, atol));
-        assert!(approx(b_thin.1, b_finite.1, rtol, atol));
-        assert!(approx(b_thin.2, b_finite.2, rtol, atol));
+        assert!(diff[diff.len() - 1] > 0.0);
+        assert!(diff.iter().all(|d| d.is_finite()));
     }
 
     /// Centerline values should be finite and not NaN.
@@ -1338,8 +1291,7 @@ mod test {
     }
 
     #[test]
-    fn test_vector_potential_endpoint_fade_recovers_thin_segment_outside_projection() {
-        let (rtol, atol) = (1e-12, 1e-15);
+    fn test_vector_potential_no_endpoint_blend_differs_from_thin_outside_projection() {
         let wire_radius = 0.1;
         let start = (0.0, 0.0, -0.5);
         let end = (0.0, 0.0, 0.5);
@@ -1362,22 +1314,8 @@ mod test {
         }
 
         assert!(diff[0] > 0.0);
-        for i in 0..diff.len() - 1 {
-            assert!(
-                diff[i + 1] <= diff[i] * (1.0 + 1e-12) + 1e-18,
-                "diff should decrease with endpoint overhang: {:?}",
-                diff
-            );
-        }
-
-        // Once outside by >= wire radius, this should match thin-segment behavior.
-        let obs = (x, 0.0, end.2 + wire_radius);
-        let a_finite =
-            vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, obs);
-        let a_thin = vector_potential_linear_filament_scalar((start, end, ifil), 0.0, obs);
-        assert!(approx(a_thin.0, a_finite.0, rtol, atol));
-        assert!(approx(a_thin.1, a_finite.1, rtol, atol));
-        assert!(approx(a_thin.2, a_finite.2, rtol, atol));
+        assert!(diff[diff.len() - 1] > 0.0);
+        assert!(diff.iter().all(|d| d.is_finite()));
     }
 
     /// Centerline values should be finite and not NaN.

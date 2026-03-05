@@ -134,20 +134,6 @@ pub fn dot3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> f32 {
     x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
 }
 
-/// Cubic smoothstep function; essentially a fast version of a sigmoid.
-///
-/// _______0, x < 0
-/// f(x) = 3x^2 - 2x^3, x in [0, 1]
-/// _______1, x > 1
-///
-/// The derivative at x=0,1 is exactly 0,
-/// but the second derivative is nonzero at both locations.
-#[inline]
-fn smoothstep(x: f64) -> f64 {
-    let x = x.clamp(0.0, 1.0);
-    x * x * (3.0 - 2.0 * x)
-}
-
 /// Convert a point from cartesian to cylindrical coordinates.
 #[inline]
 pub fn cartesian_to_cylindrical(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
@@ -196,9 +182,8 @@ pub(crate) struct PointLineDistance {
 /// distances to each endpoint, finite-thickness clamp fraction based on `r_min`,
 /// and parallel distances from each endpoint to the target.
 ///
-/// Finite-thickness clamping fades out smoothly when the point projects outside
-/// the segment and moves away from the nearest endpoint along the segment axis.
-/// The fade length is limited to the smaller of wire radius or half segment length.
+/// Finite-thickness clamping is based only on wire radius and does not
+/// taper outside segment endpoint projections.
 #[inline]
 pub(crate) fn point_line_distance_with_endpoints(
     a: (f64, f64, f64),
@@ -206,8 +191,6 @@ pub(crate) fn point_line_distance_with_endpoints(
     p: (f64, f64, f64),
     r_min: f64,
 ) -> PointLineDistance {
-    use crate::math::smoothstep;
-
     // Vectors and distances between points.
     let ab = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
     let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
@@ -267,25 +250,11 @@ pub(crate) fn point_line_distance_with_endpoints(
     let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
     let para_b = para_a - ab_len;
 
-    // Distance beyond the nearest endpoint along the segment axis.
-    // This is zero when the perpendicular projection lies inside the segment.
-    let outside_overhang = (-para_a).max(para_b).max(0.0);
-
-    // Smoothly turn off finite-thickness clamping outside segment projections
-    // so far-away axial points recover thin-segment behavior. In short segments,
-    // cap the fade length to half-segment so neighboring endpoint blends do not overlap.
-    let endpoint_fade_len = r_min.min(0.5 * ab_len);
-    let endpoint_fade = 1.0 - smoothstep(outside_overhang / endpoint_fade_len);
-    let r_min_effective = r_min * endpoint_fade;
-
     // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.
-    let frac = {
-        // let r_min_effective_frac = r_min_effective.max(f64::MIN_POSITIVE);
-        (perp_raw / r_min_effective).min(1.0)
-    };
+    let frac = (perp_raw / r_min).min(1.0);
 
-    // Clamp distances only if we are inside the effective minimum radius.
-    let perp = perp_raw.max(r_min_effective);
+    // Clamp distances only if we are inside the minimum radius.
+    let perp = perp_raw.max(r_min);
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
     let dist_a = (perp * perp + para_a * para_a).sqrt();

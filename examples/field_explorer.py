@@ -351,6 +351,8 @@ def build_figures(
     top_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
     top_fig.update_xaxes(title_text="x [m]", row=1, col=2)
     top_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    top_fig.update_xaxes(showgrid=False)
+    top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
         title=(
@@ -358,6 +360,8 @@ def build_figures(
             f"sub-divisions {n_subdivisions}"
         ),
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
         legend={
             "orientation": "h",
             "x": 0.5,
@@ -423,9 +427,13 @@ def build_figures(
     bottom_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
     bottom_fig.update_xaxes(title_text="z [m]", row=1, col=2)
     bottom_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    bottom_fig.update_xaxes(showgrid=False)
+    bottom_fig.update_yaxes(showgrid=False)
     bottom_fig.update_layout(
         height=460,
         margin={"l": 50, "r": 20, "t": 50, "b": 60},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
     )
 
     return top_fig, bottom_fig
@@ -529,6 +537,8 @@ def build_equivalence_figures(
     top_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
     top_fig.update_xaxes(title_text="x [m]", row=1, col=2)
     top_fig.update_yaxes(title_text="Magnitude", row=1, col=2)
+    top_fig.update_xaxes(showgrid=False)
+    top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
         title=(
@@ -536,6 +546,8 @@ def build_equivalence_figures(
             f"sub-divisions {n_subdivisions}"
         ),
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
         legend={
             "orientation": "h",
             "x": 0.5,
@@ -589,9 +601,13 @@ def build_equivalence_figures(
     bottom_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
     bottom_fig.update_xaxes(title_text="z [m]", row=1, col=2)
     bottom_fig.update_yaxes(title_text="Error magnitude", row=1, col=2)
+    bottom_fig.update_xaxes(showgrid=False)
+    bottom_fig.update_yaxes(showgrid=False)
     bottom_fig.update_layout(
         height=460,
         margin={"l": 50, "r": 20, "t": 50, "b": 60},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
     )
 
     return top_fig, bottom_fig

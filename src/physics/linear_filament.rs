@@ -586,7 +586,7 @@ pub fn vector_potential_linear_filament_scalar(
     //
     // However, inside the conductor, some extra attention to the gauge is needed
     // in order to ensure that the field is both continuous at the edge and
-    // consistent with curl(A)=B.
+    // consistent with curl(A)=B under changing enclosed current.
     //
     // Here, we use a gauge shift (kappa, the factor shared with the B-field calc) to
     // ensure the the A-field inside the conductor is consistent with curl(A)=B

@@ -191,8 +191,7 @@ def compute_field_equivalence(
     xx, zz = np.meshgrid(x, z, indexing="xy")
     yy = np.zeros_like(xx)
     xyzp = (xx.ravel(), yy.ravel(), zz.ravel())
-    # dx = x[1] - x[0] if x.size > 1 else 1e-3
-    eps = 1e-9
+    eps = 1e-7
     inv_2eps = 0.5 / eps
 
     t0 = time.perf_counter()
@@ -201,7 +200,9 @@ def compute_field_equivalence(
     )
     t_b = time.perf_counter() - t0
 
-    def eval_a(dx_shift: float, dy_shift: float, dz_shift: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def eval_a(
+        dx_shift: float, dy_shift: float, dz_shift: float
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         xyzp_shift = (xyzp[0] + dx_shift, xyzp[1] + dy_shift, xyzp[2] + dz_shift)
         return cfsem.vector_potential_linear_filament(
             xyzp_shift, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
@@ -229,9 +230,7 @@ def compute_field_equivalence(
 
     bmag = np.sqrt(bx * bx + by * by + bz * bz).reshape(xx.shape)
     curl_mag = np.sqrt(curl_x * curl_x + curl_y * curl_y + curl_z * curl_z).reshape(xx.shape)
-    err = np.sqrt(
-        (bx - curl_x) * (bx - curl_x) + (by - curl_y) * (by - curl_y) + (bz - curl_z) * (bz - curl_z)
-    ).reshape(xx.shape)
+    err = np.sqrt((bx - curl_x) ** 2 + (by - curl_y) ** 2 + (bz - curl_z) ** 2).reshape(xx.shape)
 
     npts = xyzp[0].size
     return {

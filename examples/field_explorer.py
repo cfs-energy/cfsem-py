@@ -9,7 +9,7 @@ import numpy as np
 import cfsem
 
 GRID_SIZE = 30 if os.getenv("CFSEM_TESTING") else 1000
-EQUIV_GRID_SIZE = 20 if os.getenv("CFSEM_TESTING") else 240
+EQUIV_GRID_SIZE = 20 if os.getenv("CFSEM_TESTING") else 1000
 DEFAULT_WIRE_RADIUS = 0.02
 PATH_RADIUS = 0.7
 DOMAIN = 1.0
@@ -191,8 +191,8 @@ def compute_field_equivalence(
     xx, zz = np.meshgrid(x, z, indexing="xy")
     yy = np.zeros_like(xx)
     xyzp = (xx.ravel(), yy.ravel(), zz.ravel())
-    dx = x[1] - x[0] if x.size > 1 else 1e-3
-    eps = max(1e-6, 0.5 * abs(dx))
+    # dx = x[1] - x[0] if x.size > 1 else 1e-3
+    eps = 1e-9
     inv_2eps = 0.5 / eps
 
     t0 = time.perf_counter()

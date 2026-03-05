@@ -771,6 +771,71 @@ mod test {
     };
     use crate::testing::*;
 
+    fn distributed_filaments_rect_grid(
+        start: (f64, f64, f64),
+        end: (f64, f64, f64),
+        wire_radius: f64,
+        total_current: f64,
+        n_side: usize,
+    ) -> (
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+    ) {
+        assert!(n_side > 0);
+        // This helper is only for the test geometry used below (axis-aligned along z).
+        assert!(approx(start.0, end.0, 0.0, 1e-15));
+        assert!(approx(start.1, end.1, 0.0, 1e-15));
+
+        let mut xfil_ref = Vec::new();
+        let mut yfil_ref = Vec::new();
+        let mut zfil_ref = Vec::new();
+
+        let cell = 2.0 * wire_radius / n_side as f64;
+        for i in 0..n_side {
+            let x = start.0 - wire_radius + (i as f64 + 0.5) * cell;
+            for j in 0..n_side {
+                let y = start.1 - wire_radius + (j as f64 + 0.5) * cell;
+                let dx = x - start.0;
+                let dy = y - start.1;
+                if dx * dx + dy * dy <= wire_radius * wire_radius {
+                    xfil_ref.push(x);
+                    yfil_ref.push(y);
+                    zfil_ref.push(start.2);
+                }
+            }
+        }
+
+        let nsub = xfil_ref.len();
+        assert!(
+            nsub > 10000,
+            "expected more than 10000 distributed filaments, got {}",
+            nsub
+        );
+
+        let dlx_ref = vec![end.0 - start.0; nsub];
+        let dly_ref = vec![end.1 - start.1; nsub];
+        let dlz_ref = vec![end.2 - start.2; nsub];
+        let ifil_ref = vec![total_current / nsub as f64; nsub];
+        let wire_radius_ref = vec![0.0; nsub];
+
+        (
+            xfil_ref,
+            yfil_ref,
+            zfil_ref,
+            dlx_ref,
+            dly_ref,
+            dlz_ref,
+            ifil_ref,
+            wire_radius_ref,
+        )
+    }
+
     /// Make sure the forces have the right sign
     /// and self-forces sum to zero within discretization error
     #[test]
@@ -1025,6 +1090,109 @@ mod test {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn test_flux_density_against_distributed_filaments_equivalent_area() {
+        let wire_radius = 0.1;
+        let start = (0.0, 0.0, -1.0);
+        let end = (0.0, 0.0, 1.0);
+        let ifil = [1.0];
+        let xfil = [start.0];
+        let yfil = [start.1];
+        let zfil = [start.2];
+        let dlx = [end.0 - start.0];
+        let dly = [end.1 - start.1];
+        let dlz = [end.2 - start.2];
+
+        let (xfil_ref, yfil_ref, zfil_ref, dlx_ref, dly_ref, dlz_ref, ifil_ref, wire_radius_ref) =
+            distributed_filaments_rect_grid(start, end, wire_radius, ifil[0], 120);
+
+        // Sample in two regions:
+        // 1) along filament centerline (inside segment),
+        // 2) outside the conductor near the midpoint.
+        let axis_z = [-10.0, -0.4, 0.0, 0.4, 10.0];
+        let outside_x = [0.12, 0.16, 0.2, 0.3, 0.5, 10.0];
+        let mut xp = Vec::with_capacity(axis_z.len() + outside_x.len());
+        let mut yp = Vec::with_capacity(axis_z.len() + outside_x.len());
+        let mut zp = Vec::with_capacity(axis_z.len() + outside_x.len());
+
+        for &z in &axis_z {
+            xp.push(0.0);
+            yp.push(0.0);
+            zp.push(z);
+        }
+        for &x in &outside_x {
+            xp.push(x);
+            yp.push(0.0);
+            zp.push(0.0);
+        }
+
+        let mut bx = vec![0.0; xp.len()];
+        let mut by = vec![0.0; xp.len()];
+        let mut bz = vec![0.0; xp.len()];
+        flux_density_linear_filament(
+            (&xp[..], &yp[..], &zp[..]),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            &[wire_radius],
+            (&mut bx[..], &mut by[..], &mut bz[..]),
+        )
+        .unwrap();
+
+        let mut bx_ref = vec![0.0; xp.len()];
+        let mut by_ref = vec![0.0; xp.len()];
+        let mut bz_ref = vec![0.0; xp.len()];
+        flux_density_linear_filament(
+            (&xp[..], &yp[..], &zp[..]),
+            (&xfil_ref, &yfil_ref, &zfil_ref),
+            (&dlx_ref, &dly_ref, &dlz_ref),
+            &ifil_ref,
+            &wire_radius_ref,
+            (&mut bx_ref[..], &mut by_ref[..], &mut bz_ref[..]),
+        )
+        .unwrap();
+
+        let mut abs_err_axis = Vec::with_capacity(axis_z.len());
+        let mut rel_err_outside = Vec::with_capacity(outside_x.len());
+        for i in 0..xp.len() {
+            let b = rss3(bx[i], by[i], bz[i]);
+            let b_ref = rss3(bx_ref[i], by_ref[i], bz_ref[i]);
+            if i < axis_z.len() {
+                let err = (b - b_ref).abs();
+                assert!(err.is_finite());
+                abs_err_axis.push(err);
+            } else {
+                let denom = b_ref.abs().max(1e-30);
+                let err = (b - b_ref).abs() / denom;
+                assert!(err.is_finite());
+                rel_err_outside.push(err);
+            }
+        }
+
+        let max_abs_axis = abs_err_axis.iter().copied().fold(0.0, f64::max);
+        let max_rel_outside = rel_err_outside.iter().copied().fold(0.0, f64::max);
+        let mean_rel_outside = rel_err_outside.iter().sum::<f64>() / rel_err_outside.len() as f64;
+
+        assert!(
+            max_abs_axis < 1e-13,
+            "max axis absolute error too large: {:.6e}, abs_err_axis={:?}",
+            max_abs_axis,
+            abs_err_axis
+        );
+        assert!(
+            max_rel_outside < 1e-3,
+            "max outside relative error too large: {:.6e}, rel_err_outside={:?}",
+            max_rel_outside,
+            rel_err_outside
+        );
+        assert!(
+            mean_rel_outside < 1e-3,
+            "mean outside relative error too large: {:.6e}, rel_err_outside={:?}",
+            mean_rel_outside,
+            rel_err_outside
+        );
     }
 
     #[test]
@@ -1288,6 +1456,114 @@ mod test {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn test_vector_potential_against_distributed_filaments_equivalent_area() {
+        let wire_radius = 0.1;
+        let start = (0.0, 0.0, -1.0);
+        let end = (0.0, 0.0, 1.0);
+        let ifil = [1.0];
+        let xfil = [start.0];
+        let yfil = [start.1];
+        let zfil = [start.2];
+        let dlx = [end.0 - start.0];
+        let dly = [end.1 - start.1];
+        let dlz = [end.2 - start.2];
+
+        let (xfil_ref, yfil_ref, zfil_ref, dlx_ref, dly_ref, dlz_ref, ifil_ref, wire_radius_ref) =
+            distributed_filaments_rect_grid(start, end, wire_radius, ifil[0], 120);
+
+        // Sample in two regions:
+        // 1) along filament centerline (inside segment),
+        // 2) outside the conductor near the midpoint.
+        let axis_z = [-10.0, -0.4, 0.0, 0.4, 10.0];
+        let outside_x = [0.12, 0.16, 0.2, 0.3, 0.5, 10.0];
+        let mut xp = Vec::with_capacity(axis_z.len() + outside_x.len());
+        let mut yp = Vec::with_capacity(axis_z.len() + outside_x.len());
+        let mut zp = Vec::with_capacity(axis_z.len() + outside_x.len());
+
+        for &z in &axis_z {
+            xp.push(0.0);
+            yp.push(0.0);
+            zp.push(z);
+        }
+        for &x in &outside_x {
+            xp.push(x);
+            yp.push(0.0);
+            zp.push(0.0);
+        }
+
+        let mut ax = vec![0.0; xp.len()];
+        let mut ay = vec![0.0; xp.len()];
+        let mut az = vec![0.0; xp.len()];
+        vector_potential_linear_filament(
+            (&xp[..], &yp[..], &zp[..]),
+            (&xfil, &yfil, &zfil),
+            (&dlx, &dly, &dlz),
+            &ifil,
+            &[wire_radius],
+            (&mut ax[..], &mut ay[..], &mut az[..]),
+        )
+        .unwrap();
+
+        let mut ax_ref = vec![0.0; xp.len()];
+        let mut ay_ref = vec![0.0; xp.len()];
+        let mut az_ref = vec![0.0; xp.len()];
+        vector_potential_linear_filament(
+            (&xp[..], &yp[..], &zp[..]),
+            (&xfil_ref, &yfil_ref, &zfil_ref),
+            (&dlx_ref, &dly_ref, &dlz_ref),
+            &ifil_ref,
+            &wire_radius_ref,
+            (&mut ax_ref[..], &mut ay_ref[..], &mut az_ref[..]),
+        )
+        .unwrap();
+
+        let mut rel_err_axis = Vec::with_capacity(axis_z.len());
+        let mut rel_err_outside = Vec::with_capacity(outside_x.len());
+        for i in 0..xp.len() {
+            let a = rss3(ax[i], ay[i], az[i]);
+            let a_ref = rss3(ax_ref[i], ay_ref[i], az_ref[i]);
+            let denom = a_ref.abs().max(1e-30);
+            let err = (a - a_ref).abs() / denom;
+            assert!(err.is_finite());
+            if i < axis_z.len() {
+                rel_err_axis.push(err);
+            } else {
+                rel_err_outside.push(err);
+            }
+        }
+
+        let max_rel_axis = rel_err_axis.iter().copied().fold(0.0, f64::max);
+        let mean_rel_axis = rel_err_axis.iter().sum::<f64>() / rel_err_axis.len() as f64;
+        let max_rel_outside = rel_err_outside.iter().copied().fold(0.0, f64::max);
+        let mean_rel_outside = rel_err_outside.iter().sum::<f64>() / rel_err_outside.len() as f64;
+
+        assert!(
+            max_rel_axis < 1e-3,
+            "max axis relative error too large: {:.6e}, rel_err_axis={:?}",
+            max_rel_axis,
+            rel_err_axis
+        );
+        assert!(
+            mean_rel_axis < 1e-3,
+            "mean axis relative error too large: {:.6e}, rel_err_axis={:?}",
+            mean_rel_axis,
+            rel_err_axis
+        );
+        assert!(
+            max_rel_outside < 1e-3,
+            "max outside relative error too large: {:.6e}, rel_err_outside={:?}",
+            max_rel_outside,
+            rel_err_outside
+        );
+        assert!(
+            mean_rel_outside < 1e-3,
+            "mean outside relative error too large: {:.6e}, rel_err_outside={:?}",
+            mean_rel_outside,
+            rel_err_outside
+        );
     }
 
     #[test]

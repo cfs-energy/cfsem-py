@@ -551,17 +551,40 @@ pub fn vector_potential_linear_filament_scalar(
         perp_hat: _,
     } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
 
-    // Finite segment length log-form with quadratic gauge shift inside finite radius.
-    //
-    // The additive term is chosen so interior radial derivative is consistent with
-    // the linear-in-r B-field model used in `flux_density_linear_filament_scalar`.
-    let k1 = -para_b + dist_b;
-    let k2 = -para_a + dist_a;
+    // Sine of the angle formed by the lines from the target to each endpoint
+    // and the line of the filament.
     let sin_theta_a = para_a / dist_a; // (dimensionless)
     let sin_theta_b = para_b / dist_b; // (dimensionless)
+
+    // Geometric component of B-field magnitude,
+    // including linear falloff inside finite-thickness wire.
     let kappa = -MU0_OVER_4PI * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
-    let frac2 = frac * frac; // Quadratic fall-off (as opposed to linear for B-field)
+
+    // NOTE: up to this point, this has been the same as the B-field calculation.
+
+    // Finite segment length log-form for thin filament.
+    // If the raw observation point location is inside the conductor,
+    // then it is clipped to the nearest point on the surface of the conductor.
+    //
+    // The field shape inside the conductor is handled later; this separation
+    // is necessary due to the discontinuity in the J-field.
+    let k1 = -para_b + dist_b;
+    let k2 = -para_a + dist_a;
     let a_edge = MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0));
+
+    // Finite-thickness effect for points inside the conductor or near the endpoints.
+    //
+    // Outside the conductor, the gauge is already consistent with both curl(A)=B
+    // and with the evaluation of mutual inductances and voltages due to dA/dt.
+    //
+    // However, inside the conductor, some extra attention to the gauge is needed
+    // in order to ensure that the field is both continuous at the edge and
+    // consistent with curl(A)=B.
+    //
+    // Here, we use a gauge shift (kappa, the factor shared with the B-field calc) to
+    // ensure the the A-field inside the conductor is consistent with curl(A)=B
+    // both inside and outside the conductor.
+    let frac2 = frac * frac; // Quadratic fall-off (as opposed to linear for B-field)
     let a_mag = a_edge + 0.5 * kappa * (1.0 - frac2);
 
     // Direction is always aligned with the segment.

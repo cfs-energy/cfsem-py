@@ -178,7 +178,7 @@ pub(crate) struct PointLineDistance {
     pub(crate) ab_norm: (f64, f64, f64),
 }
 
-/// Minimum perpendicular distance to the infinite line defined by endpoints,
+/// Minimum perpendicular distance of point p to the infinite line defined by endpoints a and b,
 /// distances to each endpoint, finite-thickness clamp fraction based on `r_min`,
 /// and parallel distances from each endpoint to the target.
 ///

@@ -563,14 +563,14 @@ pub fn vector_potential_linear_filament_scalar(
     // then it is clipped to the nearest point on the surface of the conductor.
     //
     // The field shape inside the conductor is handled later; this separation
-    // is necessary due to the discontinuity in the J-field.
+    // is necessary due to the discontinuity in the current density vector field.
     let k1 = -para_b + dist_b; // (m)
     let k2 = -para_a + dist_a; // (m)
     let a_edge = MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0)); // (V-s/m)
 
     // Finite-thickness effect for points inside the conductor or near the endpoints.
     //
-    // Because the B-field is the derivative of the A-field, where the B-field falls off
+    // Because the B-field is the curl of the A-field, where the B-field falls off
     // linearly inside the conductor, the A-field falls off quadratically.
     // This constrains the _form_ of the variation of A inside the conductor, but leaves
     // a free integration constant known as the gauge.
@@ -585,7 +585,7 @@ pub fn vector_potential_linear_filament_scalar(
     // consistent with curl(A)=B under changing enclosed current.
     //
     // Here, we use a gauge shift (kappa, the factor shared with the B-field calc) to
-    // ensure the the A-field inside the conductor is consistent with curl(A)=B
+    // ensure the A-field inside the conductor is consistent with curl(A)=B
     // both inside and outside the conductor.
     let frac2 = frac * frac; // (dimensionless) Quadratic fall-off (vs. linear for B-field)
     let a_mag = a_edge + 0.5 * kappa * (1.0 - frac2); // (V-s/m) Gauge shift

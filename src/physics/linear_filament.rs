@@ -587,11 +587,14 @@ pub fn vector_potential_linear_filament_scalar(
     // Here, we use a gauge shift (kappa, the factor shared with the B-field calc) to
     // ensure the A-field inside the conductor is consistent with curl(A)=B
     // both inside and outside the conductor.
-    let frac2 = frac * frac; // (dimensionless) Quadratic fall-off (vs. linear for B-field)
-    let a_mag = a_edge + 0.5 * kappa * (1.0 - frac2); // (V-s/m) Gauge shift
+
+    // (dimensionless) Quadratic fall-off (vs. linear for B-field)
+    let blend = 0.5 * frac.mul_add(-frac, 1.0); //  1/2 (1 - frac^2)
+    // (V-s/m) a_mag = a_edge + 0.5 * kappa * (1 - frac^2), reworked for mul_add
+    let a_mag = kappa.mul_add(blend, a_edge); // (V-s/m) Gauge-shifted magnitude
 
     // Direction is always aligned with the segment.
-    // (V-s)
+    // (V-s) final vector potential
     let (ax, ay, az) = (a_mag * dlhat.0, a_mag * dlhat.1, a_mag * dlhat.2);
 
     // Finally, determine whether we are clipping to zero.

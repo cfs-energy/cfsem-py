@@ -257,8 +257,8 @@ pub(crate) fn point_line_distance_with_endpoints(
     let perp = perp_raw.max(r_min);
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
-    let dist_a = (perp * perp + para_a * para_a).sqrt();
-    let dist_b = (perp * perp + para_b * para_b).sqrt();
+    let dist_a = perp.mul_add(perp, para_a * para_a).sqrt();
+    let dist_b = perp.mul_add(perp, para_b * para_b).sqrt();
 
     PointLineDistance {
         perp,

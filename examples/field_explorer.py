@@ -16,7 +16,18 @@ PATH_RADIUS = 0.7
 DOMAIN = 1.0
 CURRENT = 1.0
 LOG10_FLOOR = -16.0
-DEFAULT_SECTION_FILAMENTS = 19
+DEFAULT_SECTION_GRID_N = 50
+MAX_SECTION_GRID_N = 400
+
+
+def normalize_section_grid_n(section_grid_n: int) -> int:
+    n = int(section_grid_n)
+    n = max(2, min(MAX_SECTION_GRID_N, n))
+    if n % 2 != 0:
+        n += 1
+        if n > MAX_SECTION_GRID_N:
+            n -= 2
+    return n
 
 
 def build_path_vertices(n_sides: int) -> np.ndarray:
@@ -123,17 +134,20 @@ def discretize_point_segments(
 
 
 @lru_cache(maxsize=256)
-def uniform_disk_offsets(n_points: int) -> np.ndarray:
-    n_points = max(1, int(n_points))
-    if n_points == 1:
-        return np.array([[0.0, 0.0]])
+def rectangular_disk_offsets(n_side: int) -> np.ndarray:
+    n_side = max(1, int(n_side))
+    cell = 2.0 / n_side
+    coords = -1.0 + (np.arange(n_side, dtype=float) + 0.5) * cell
+    uu, vv = np.meshgrid(coords, coords, indexing="xy")
+    offsets = np.column_stack((uu.ravel(), vv.ravel()))
+    mask = np.sum(offsets * offsets, axis=1) <= 1.0
+    return offsets[mask]
 
-    # Sunflower/Fibonacci packing for deterministic, near-uniform disk coverage.
-    i = np.arange(n_points, dtype=float)
-    golden_angle = np.pi * (3.0 - np.sqrt(5.0))
-    r = np.sqrt((i + 0.5) / n_points)
-    theta = i * golden_angle
-    return np.column_stack((r * np.cos(theta), r * np.sin(theta)))
+
+def distributed_section_summary_text(section_grid_n: int) -> str:
+    n_grid = normalize_section_grid_n(section_grid_n)
+    n_filaments = rectangular_disk_offsets(n_grid).shape[0]
+    return f"Distributed section: {n_grid}x{n_grid} grid -> {n_filaments} filaments per segment"
 
 
 def orthonormal_section_basis(dvec: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -142,14 +156,16 @@ def orthonormal_section_basis(dvec: np.ndarray) -> tuple[np.ndarray, np.ndarray]
         return np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])
     d_hat = dvec / dnorm
 
-    ref = np.array([0.0, 0.0, 1.0]) if abs(d_hat[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
-    u = np.cross(d_hat, ref)
+    # Prefer the projection of +y into the filament cross-section plane so the
+    # local section coordinate maps cleanly away from the y=0 evaluation plane.
+    y_hat = np.array([0.0, 1.0, 0.0])
+    u = y_hat - np.dot(y_hat, d_hat) * d_hat
     unorm = np.linalg.norm(u)
-    if unorm <= 0.0:
-        ref = np.array([1.0, 0.0, 0.0])
+    if unorm <= 1e-15:
+        ref = np.array([1.0, 0.0, 0.0]) if abs(d_hat[0]) < 0.9 else np.array([0.0, 0.0, 1.0])
         u = np.cross(d_hat, ref)
         unorm = np.linalg.norm(u)
-        if unorm <= 0.0:
+        if unorm <= 1e-15:
             return np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])
     u = u / unorm
     v = np.cross(d_hat, u)
@@ -161,10 +177,10 @@ def distribute_filaments_in_cylinder_section(
     dl: np.ndarray,
     current: np.ndarray,
     wire_radius: float,
-    n_section_filaments: int,
+    section_grid_n: int,
 ) -> tuple[tuple[np.ndarray, ...], tuple[np.ndarray, ...], np.ndarray, int]:
-    n_offsets = max(1, int(n_section_filaments))
-    if wire_radius <= 0.0 or n_offsets == 1:
+    n_grid = normalize_section_grid_n(section_grid_n)
+    if wire_radius <= 0.0:
         return (
             (starts[:, 0].copy(), starts[:, 1].copy(), starts[:, 2].copy()),
             (dl[:, 0].copy(), dl[:, 1].copy(), dl[:, 2].copy()),
@@ -172,7 +188,8 @@ def distribute_filaments_in_cylinder_section(
             1,
         )
 
-    offsets_uv = uniform_disk_offsets(n_offsets)
+    offsets_uv = rectangular_disk_offsets(n_grid)
+    n_offsets = offsets_uv.shape[0]
 
     starts_ref = []
     dl_ref = []
@@ -183,7 +200,27 @@ def distribute_filaments_in_cylinder_section(
         offsets_xyz = wire_radius * (
             offsets_uv[:, 0:1] * u.reshape(1, 3) + offsets_uv[:, 1:2] * v.reshape(1, 3)
         )
-        starts_ref.append(start.reshape(1, 3) + offsets_xyz)
+        starts_i = start.reshape(1, 3) + offsets_xyz
+
+        # Nudge any exact y=0 starts by an extremely small amount within the
+        # local section plane to avoid sampling singular/near-singular points.
+        on_eval_plane = np.isclose(starts_i[:, 1], 0.0, atol=1e-15)
+        if np.any(on_eval_plane):
+            use_u_dir = abs(u[1]) >= abs(v[1])
+            nudge_dir = u if use_u_dir else v
+            nudge_coord = 0 if use_u_dir else 1
+            nudge_mag = max(1e-12 * max(1.0, wire_radius), 1e-15)
+            if abs(nudge_dir[1]) > 1e-15:
+                signs = np.where(offsets_uv[on_eval_plane, nudge_coord] >= 0.0, 1.0, -1.0)
+                starts_i[on_eval_plane] += (nudge_mag * signs)[:, None] * nudge_dir.reshape(1, 3)
+            else:
+                dnorm = np.linalg.norm(dvec)
+                if dnorm > 0.0 and abs(dvec[1]) > 1e-15:
+                    d_hat = dvec / dnorm
+                    signs = np.where(offsets_uv[on_eval_plane, nudge_coord] >= 0.0, 1.0, -1.0)
+                    starts_i[on_eval_plane] += (nudge_mag * signs)[:, None] * d_hat.reshape(1, 3)
+
+        starts_ref.append(starts_i)
         dl_ref.append(np.repeat(dvec.reshape(1, 3), n_offsets, axis=0))
         current_ref.append(np.full(n_offsets, amp / n_offsets))
 
@@ -353,7 +390,7 @@ def compute_section_comparison_field(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
-    n_section_filaments: int,
+    section_grid_n: int,
     distributed_use_area_radius: bool,
 ) -> dict[str, np.ndarray | float]:
     vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(
@@ -379,7 +416,7 @@ def compute_section_comparison_field(
     t_model = time.perf_counter() - t0
 
     xyzfil_ref, dlxyzfil_ref, ifil_ref, n_offsets = distribute_filaments_in_cylinder_section(
-        starts, dl, ifil, wire_radius, n_section_filaments
+        starts, dl, ifil, wire_radius, section_grid_n
     )
     ref_wire_radius = (
         wire_radius / np.sqrt(n_offsets)
@@ -416,6 +453,7 @@ def compute_section_comparison_field(
         "n_model": float(ifil.size * npts),
         "n_ref": float(ifil_ref.size * npts),
         "n_offsets": float(n_offsets),
+        "section_grid_n": float(normalize_section_grid_n(section_grid_n)),
         "ref_wire_radius": float(ref_wire_radius),
     }
 
@@ -789,16 +827,18 @@ def build_section_geometry_figure(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
-    n_section_filaments: int,
+    section_grid_n: int,
 ):
     import plotly.graph_objects as go
+
+    section_grid_n = normalize_section_grid_n(section_grid_n)
 
     vertices, starts, ends, _xyzfil, _dlxyzfil, ifil = build_linear_filaments(
         n_sides, rotation_deg, n_subdivisions
     )
     dl = ends - starts
     xyzfil_ref, dlxyzfil_ref, _ifil_ref, n_offsets = distribute_filaments_in_cylinder_section(
-        starts, dl, ifil, wire_radius, n_section_filaments
+        starts, dl, ifil, wire_radius, section_grid_n
     )
     starts_ref = np.column_stack(xyzfil_ref)
     ends_ref = starts_ref + np.column_stack(dlxyzfil_ref)
@@ -858,7 +898,8 @@ def build_section_geometry_figure(
             "text": (
                 "Filament geometry overlay | "
                 f"single: {starts.shape[0]} segments, "
-                f"distributed: {starts_ref.shape[0]} filaments ({n_offsets}/segment)"
+                f"distributed: {starts_ref.shape[0]} filaments ({section_grid_n}x{section_grid_n} grid, "
+                f"{n_offsets}/segment)"
             ),
             "x": 0.5,
             "xanchor": "center",
@@ -894,7 +935,7 @@ def build_section_comparison_figures(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
-    n_section_filaments: int,
+    section_grid_n: int,
     distributed_use_area_radius: bool,
     mask_axis_spikes: bool,
     show_filament_line: bool,
@@ -908,7 +949,7 @@ def build_section_comparison_figures(
         wire_radius,
         rotation_deg,
         n_subdivisions,
-        n_section_filaments,
+        section_grid_n,
         distributed_use_area_radius,
     )
     x = data["x"]
@@ -919,6 +960,7 @@ def build_section_comparison_figures(
     path_x = data["path_x"]
     path_z = data["path_z"]
     n_offsets = int(data["n_offsets"])
+    n_grid = int(data["section_grid_n"])
     ref_wire_radius = float(data["ref_wire_radius"])
 
     if mask_axis_spikes:
@@ -996,7 +1038,7 @@ def build_section_comparison_figures(
             mode="lines",
             line={"color": "deepskyblue", "width": 2, "dash": "dash"},
             name=(
-                f"Uniform section ({n_offsets} fil/segment, "
+                f"Uniform section ({n_grid}x{n_grid} grid, {n_offsets} fil/segment, "
                 f"r={'0' if ref_wire_radius == 0.0 else f'{ref_wire_radius:.3g}'} m)"
             ),
         ),
@@ -1101,7 +1143,7 @@ def build_perf_summary(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
-    n_section_filaments: int = DEFAULT_SECTION_FILAMENTS,
+    section_grid_n: int = DEFAULT_SECTION_GRID_N,
     distributed_use_area_radius: bool = False,
 ) -> str:
     if mode in ("b", "a"):
@@ -1122,15 +1164,17 @@ def build_perf_summary(
             wire_radius,
             rotation_deg,
             n_subdivisions,
-            n_section_filaments,
+            section_grid_n,
             distributed_use_area_radius,
         )
         label = "B-field" if field_mode == "b" else "Vector potential"
         radius_mode = "area-equivalent" if distributed_use_area_radius else "zero-radius"
+        n_grid = int(data["section_grid_n"])
         return (
             f"{label} conductor-model check | wire radius: {wire_radius:.3f} m | "
             f"rotation: {rotation_deg:.0f} deg | sub-divisions: {n_subdivisions} | "
-            f"section filaments: {int(data['n_offsets'])} | distributed radius mode: {radius_mode} | "
+            f"section grid: {n_grid}x{n_grid} -> {int(data['n_offsets'])} fil/segment | "
+            f"distributed radius mode: {radius_mode} | "
             f"finite-thickness: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
             f"distributed section: {data['t_ref']:.3f}s / {data['n_ref']:.2e} interactions"
         )
@@ -1213,17 +1257,26 @@ def create_app():
                     html.Div(
                         [
                             html.P(
-                                "Distributed section filaments per segment",
+                                "Distributed section grid size (n x n)",
                                 style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
                             ),
                             dcc.Slider(
-                                id="section-filaments",
-                                min=1,
-                                max=200,
-                                step=1,
-                                value=DEFAULT_SECTION_FILAMENTS,
-                                marks={1: "1", 25: "25", 50: "50", 100: "100", 150: "150", 200: "200"},
+                                id="section-grid-size",
+                                min=2,
+                                max=MAX_SECTION_GRID_N,
+                                step=2,
+                                value=DEFAULT_SECTION_GRID_N,
+                                marks={2: "2", 50: "50", 100: "100", 200: "200", 300: "300", 400: "400"},
                                 tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                            html.Div(
+                                id="section-grid-summary",
+                                children=distributed_section_summary_text(DEFAULT_SECTION_GRID_N),
+                                style={
+                                    "marginTop": "0.35rem",
+                                    "fontFamily": "monospace",
+                                    "fontSize": "0.9rem",
+                                },
                             ),
                         ]
                     ),
@@ -1240,28 +1293,37 @@ def create_app():
                 id="perf-summary",
                 style={"marginTop": "1.5rem", "marginBottom": "1.0rem", "fontFamily": "monospace"},
             ),
-            dcc.Checklist(
-                id="show-filament-line",
-                options=[{"label": "Show filament line", "value": "show"}],
-                value=["show"],
-                style={"marginBottom": "0.75rem"},
-            ),
-            dcc.Checklist(
-                id="mask-axis-spikes",
-                options=[{"label": "Mask axis spikes > 1e2", "value": "mask"}],
-                value=[],
-                style={"marginBottom": "0.75rem"},
-            ),
-            dcc.Checklist(
-                id="section-radius-mode",
-                options=[
-                    {
-                        "label": "Distributed filaments use area-equivalent radius",
-                        "value": "area",
-                    }
+            html.Div(
+                [
+                    dcc.Checklist(
+                        id="show-filament-line",
+                        options=[{"label": "Show filament line", "value": "show"}],
+                        value=["show"],
+                    ),
+                    dcc.Checklist(
+                        id="mask-axis-spikes",
+                        options=[{"label": "Mask axis spikes > 1e2", "value": "mask"}],
+                        value=[],
+                    ),
+                    dcc.Checklist(
+                        id="section-radius-mode",
+                        options=[
+                            {
+                                "label": "Distributed filaments use area-equivalent radius",
+                                "value": "area",
+                            }
+                        ],
+                        value=["area"],
+                    ),
                 ],
-                value=["area"],
-                style={"marginBottom": "0.75rem"},
+                style={
+                    "display": "flex",
+                    "flexDirection": "row",
+                    "flexWrap": "wrap",
+                    "columnGap": "1.25rem",
+                    "rowGap": "0.5rem",
+                    "marginBottom": "0.75rem",
+                },
             ),
             dcc.Tabs(
                 id="field-tab",
@@ -1392,7 +1454,7 @@ def create_app():
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
         Input("show-filament-line", "value"),
-        Input("section-filaments", "value"),
+        Input("section-grid-size", "value"),
         Input("section-radius-mode", "value"),
         Input("field-tab", "value"),
     )
@@ -1403,7 +1465,7 @@ def create_app():
         rotation_deg: float,
         mask_axis_spikes: list[str],
         show_filament_line: list[str],
-        section_filaments: int,
+        section_grid_size: int,
         section_radius_mode: list[str],
         field_tab: str,
     ):
@@ -1411,20 +1473,28 @@ def create_app():
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
-        n_section = int(np.clip(section_filaments, 1, 200))
+        section_grid_n = normalize_section_grid_n(section_grid_size)
         use_area_radius = "area" in section_radius_mode
         mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
         if field_tab != "b":
             return no_update, no_update, build_perf_summary(
-                field_tab, sides, radius, rotation, n_sub, n_section, use_area_radius
+                field_tab, sides, radius, rotation, n_sub, section_grid_n, use_area_radius
             )
         top_fig, bottom_fig = build_figures("b", sides, radius, rotation, n_sub, mask_spikes, show_line)
         return (
             top_fig,
             bottom_fig,
-            build_perf_summary("b", sides, radius, rotation, n_sub, n_section, use_area_radius),
+            build_perf_summary("b", sides, radius, rotation, n_sub, section_grid_n, use_area_radius),
         )
+
+    @app.callback(
+        Output("section-grid-summary", "children"),
+        Input("section-grid-size", "value"),
+    )
+    def update_section_grid_summary(section_grid_size: int) -> str:
+        section_grid_n = normalize_section_grid_n(section_grid_size)
+        return distributed_section_summary_text(section_grid_n)
 
     @app.callback(
         Output("field-figure-a-top", "figure"),
@@ -1466,7 +1536,7 @@ def create_app():
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
         Input("show-filament-line", "value"),
-        Input("section-filaments", "value"),
+        Input("section-grid-size", "value"),
         Input("section-radius-mode", "value"),
         Input("field-tab", "value"),
     )
@@ -1477,7 +1547,7 @@ def create_app():
         rotation_deg: float,
         mask_axis_spikes: list[str],
         show_filament_line: list[str],
-        section_filaments: int,
+        section_grid_size: int,
         section_radius_mode: list[str],
         field_tab: str,
     ):
@@ -1487,14 +1557,14 @@ def create_app():
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
-        n_section = int(np.clip(section_filaments, 1, 200))
+        section_grid_n = normalize_section_grid_n(section_grid_size)
         use_area_radius = "area" in section_radius_mode
         mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
         top_fig, bottom_fig = build_section_comparison_figures(
-            "b", sides, radius, rotation, n_sub, n_section, use_area_radius, mask_spikes, show_line
+            "b", sides, radius, rotation, n_sub, section_grid_n, use_area_radius, mask_spikes, show_line
         )
-        geom_fig = build_section_geometry_figure(sides, radius, rotation, n_sub, n_section)
+        geom_fig = build_section_geometry_figure(sides, radius, rotation, n_sub, section_grid_n)
         return top_fig, bottom_fig, geom_fig
 
     @app.callback(
@@ -1507,7 +1577,7 @@ def create_app():
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
         Input("show-filament-line", "value"),
-        Input("section-filaments", "value"),
+        Input("section-grid-size", "value"),
         Input("section-radius-mode", "value"),
         Input("field-tab", "value"),
     )
@@ -1518,7 +1588,7 @@ def create_app():
         rotation_deg: float,
         mask_axis_spikes: list[str],
         show_filament_line: list[str],
-        section_filaments: int,
+        section_grid_size: int,
         section_radius_mode: list[str],
         field_tab: str,
     ):
@@ -1528,14 +1598,14 @@ def create_app():
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
-        n_section = int(np.clip(section_filaments, 1, 200))
+        section_grid_n = normalize_section_grid_n(section_grid_size)
         use_area_radius = "area" in section_radius_mode
         mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
         top_fig, bottom_fig = build_section_comparison_figures(
-            "a", sides, radius, rotation, n_sub, n_section, use_area_radius, mask_spikes, show_line
+            "a", sides, radius, rotation, n_sub, section_grid_n, use_area_radius, mask_spikes, show_line
         )
-        geom_fig = build_section_geometry_figure(sides, radius, rotation, n_sub, n_section)
+        geom_fig = build_section_geometry_figure(sides, radius, rotation, n_sub, section_grid_n)
         return top_fig, bottom_fig, geom_fig
 
     @app.callback(
@@ -1581,12 +1651,12 @@ def main() -> None:
         build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
         build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
         build_section_comparison_figures(
-            "b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_FILAMENTS, False, False, True
+            "b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N, False, False, True
         )
         build_section_comparison_figures(
-            "a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_FILAMENTS, False, False, True
+            "a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N, False, False, True
         )
-        build_section_geometry_figure(3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_FILAMENTS)
+        build_section_geometry_figure(3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N)
         build_equivalence_figures(3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
 
 

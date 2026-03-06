@@ -532,7 +532,7 @@ pub fn vector_potential_linear_filament_scalar(
 
     // Unpack
     let (start, end, ifil) = xyzifil;
-    
+
     // Regularize the line-filament singularity with a minimum core radius.
     let core_radius = wire_radius.max(MIN_WIRE_THICKNESS);
 

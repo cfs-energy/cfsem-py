@@ -532,6 +532,9 @@ pub fn vector_potential_linear_filament_scalar(
 
     // Unpack
     let (start, end, ifil) = xyzifil;
+    
+    // Regularize the line-filament singularity with a minimum core radius.
+    let core_radius = wire_radius.max(MIN_WIRE_THICKNESS);
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing finite-thickness blending:
@@ -545,7 +548,7 @@ pub fn vector_potential_linear_filament_scalar(
         para_b,
         ab_norm: dlhat,
         perp_hat: _,
-    } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
+    } = point_line_distance_with_endpoints(start, end, xyzobs, core_radius);
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
@@ -564,8 +567,19 @@ pub fn vector_potential_linear_filament_scalar(
     //
     // The field shape inside the conductor is handled later; this separation
     // is necessary due to the discontinuity in the current density vector field.
-    let k1 = -para_b + dist_b; // (m)
-    let k2 = -para_a + dist_a; // (m)
+    let perp2 = perp * perp;
+    let k1 = if para_b >= 0.0 {
+        // Each branch is equal, but numerically stable in different regimes
+        perp2 / (dist_b + para_b)
+    } else {
+        dist_b - para_b
+    }; // (m)
+    let k2 = if para_a >= 0.0 {
+        // Each branch is equal, but numerically stable in different regimes
+        perp2 / (dist_a + para_a)
+    } else {
+        dist_a - para_a
+    }; // (m)
     let a_edge = MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0)); // (V-s/m)
 
     // Finite-thickness effect for points inside the conductor or near the endpoints.
@@ -597,12 +611,8 @@ pub fn vector_potential_linear_filament_scalar(
     // (V-s) final vector potential
     let (ax, ay, az) = (a_mag * dlhat.0, a_mag * dlhat.1, a_mag * dlhat.2);
 
-    // Finally, determine whether we are clipping to zero.
-    if perp > MIN_WIRE_THICKNESS {
-        return (ax, ay, az); // (V-s)
-    } else {
-        return (0.0, 0.0, 0.0); // (V-s)
-    }
+    // Return continuous vector potential; avoid hard clipping at small radius.
+    (ax, ay, az)
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current

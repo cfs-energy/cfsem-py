@@ -1308,6 +1308,25 @@ mod test {
         }
     }
 
+    /// Explicitly check axis evaluations at both endpoints and midpoint are non-singular.
+    #[test]
+    fn test_flux_density_axis_endpoint_midpoint_nonsingular_scalar() {
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let midpoint = (0.0, 0.0, 0.5 * (start.2 + end.2));
+        let ifil = 1.0;
+        let axis_points = [("start", start), ("midpoint", midpoint), ("end", end)];
+
+        for &wire_radius in &[0.0, 0.01, 0.1] {
+            for &(label, p) in &axis_points {
+                let b = flux_density_linear_filament_scalar((start, end, ifil), wire_radius, p);
+                assert!(b.0.is_finite(), "Bx is non-finite at {} for wire_radius={}", label, wire_radius);
+                assert!(b.1.is_finite(), "By is non-finite at {} for wire_radius={}", label, wire_radius);
+                assert!(b.2.is_finite(), "Bz is non-finite at {} for wire_radius={}", label, wire_radius);
+            }
+        }
+    }
+
     /// Compare single-segment vector potential against discretized point-source segments.
     #[test]
     fn test_vector_potential_against_point_segment_discretization() {
@@ -1646,6 +1665,25 @@ mod test {
                 assert!(ax[i].is_finite(), "ax[{}] is {}", i, ax[i]);
                 assert!(ay[i].is_finite(), "ay[{}] is {}", i, ay[i]);
                 assert!(az[i].is_finite(), "az[{}] is {}", i, az[i]);
+            }
+        }
+    }
+
+    /// Explicitly check axis evaluations at both endpoints and midpoint are non-singular.
+    #[test]
+    fn test_vector_potential_axis_endpoint_midpoint_nonsingular_scalar() {
+        let start = (0.0, 0.0, -0.5);
+        let end = (0.0, 0.0, 0.5);
+        let midpoint = (0.0, 0.0, 0.5 * (start.2 + end.2));
+        let ifil = 1.0;
+        let axis_points = [("start", start), ("midpoint", midpoint), ("end", end)];
+
+        for &wire_radius in &[0.0, 0.01, 0.1] {
+            for &(label, p) in &axis_points {
+                let a = vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, p);
+                assert!(a.0.is_finite(), "Ax is non-finite at {} for wire_radius={}", label, wire_radius);
+                assert!(a.1.is_finite(), "Ay is non-finite at {} for wire_radius={}", label, wire_radius);
+                assert!(a.2.is_finite(), "Az is non-finite at {} for wire_radius={}", label, wire_radius);
             }
         }
     }

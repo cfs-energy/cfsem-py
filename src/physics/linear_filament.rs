@@ -491,7 +491,7 @@ pub fn vector_potential_linear_filament(
 /// Vector potential (A-field) from a linear current filament segment to an observation point.
 ///
 /// Uses the formula for finite segment length and finite wire thickness.
-/// 
+///
 /// Because an infinitesimally-thick wire produces a nonphysical singularity
 /// at the axis, a minimum wire radius of [MIN_WIRE_THICKNESS] is imposed.
 ///

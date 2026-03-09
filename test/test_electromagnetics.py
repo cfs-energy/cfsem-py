@@ -29,11 +29,20 @@ def test_body_force_density(r, z, par):
     ifil = np.ones_like(xyzfil[0])
 
     jxbx, jxby, jxbz = cfsem.body_force_density_circular_filament_cartesian([1.0], [r], [z], obs, j, par)
-    jxbx1, jxby1, jxbz1 = cfsem.body_force_density_linear_filament(xyzfil, dlxyzfil, ifil, obs, j, par)
+    wire_radius = np.zeros_like(ifil)
+    jxbx1, jxby1, jxbz1 = cfsem.body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par=par
+    )
+    jxbx2, jxby2, jxbz2 = cfsem.body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, 0.0, par=par
+    )
 
     assert np.allclose(jxbx, jxbx1, rtol=1e-2, atol=1e-9)
     assert np.allclose(jxby, jxby1, rtol=1e-2, atol=1e-9)
     assert np.allclose(jxbz, jxbz1, rtol=1e-2, atol=1e-9)
+    assert np.allclose(jxbx1, jxbx2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(jxby1, jxby2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(jxbz1, jxbz2, rtol=1e-12, atol=1e-12)
 
 
 @mark.parametrize("r", [0.775 * 2, np.pi])
@@ -259,8 +268,14 @@ def test_biot_savart_against_flux_density_ideal_solenoid(r, par):
     xyzfil = (x1[:-1], y1[:-1], z1[:-1])
     #   Get B-field at the origin
     zero = np.array([0.0])
-    bx, _by, _bz = cfsem.flux_density_biot_savart(
-        xyzp=(zero, zero, zero), xyzfil=xyzfil, dlxyzfil=dlxyzfil, ifil=ifil, par=par
+    wire_radius = np.zeros_like(ifil)
+    bx, _by, _bz = cfsem.flux_density_linear_filament(
+        xyzp=(zero, zero, zero),
+        xyzfil=xyzfil,
+        dlxyzfil=dlxyzfil,
+        ifil=ifil,
+        wire_radius=wire_radius,
+        par=par,
     )
     b_bs = bx[0]  # [T] First and only element on the axis of the solenoid
 
@@ -299,7 +314,10 @@ def test_biot_savart_against_flux_density_circular_filament(r, z, par):
     xyzfil = (xfils[1:], yfils[1:], zfils[1:])
     dlxyzfil = (xfils[1:] - xfils[:-1], yfils[1:] - yfils[:-1], zfils[1:] - zfils[:-1])
     ifil = np.ones_like(xfils[1:])
-    Br_bs, By_bs, Bz_bs = cfsem.flux_density_biot_savart(xyzp, xyzfil, dlxyzfil, ifil, par)  # [T]
+    wire_radius = np.zeros_like(ifil)
+    Br_bs, By_bs, Bz_bs = cfsem.flux_density_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
+    )  # [T]
 
     assert np.allclose(Br_circular, Br_bs, rtol=1e-6, atol=1e-7)  # Should match circular calc
     assert np.allclose(Bz_circular, Bz_bs, rtol=1e-6, atol=1e-7)  # ...
@@ -756,11 +774,70 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
     xyzfil = (xfils[1:], yfils[1:], zfils[1:])
     dlxyzfil = (xfils[1:] - xfils[:-1], yfils[1:] - yfils[:-1], zfils[1:] - zfils[:-1])
     ifil = np.ones_like(xfils[1:])
-    ax, ay, az = cfsem.vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)  # [V-s/m]
+    wire_radius = np.zeros_like(ifil)
+    ax, ay, az = cfsem.vector_potential_linear_filament(
+        xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
+    )  # [V-s/m]
 
     assert np.allclose(a_phi, ay, rtol=1e-12, atol=1e-12)  # Should match circular calc
     assert np.allclose(az, np.zeros_like(az), atol=1e-9)  # Should sum to zero everywhere
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
+
+
+@mark.parametrize("par", [True, False])
+def test_vector_potential_linear_self_inductance_against_wien(par):
+    """Test integration of dot(A, dL) against Wien's formula for self-inductance.
+    This test also runs a discretization study to ensure that the self-inductance
+    is stable under changing discretization.
+    """
+    # Build a single-turn circular loop as piecewise-linear filaments.
+    major_radius = 0.5  # [m]
+    minor_radius = 5e-3  # [m] finite conductor radius
+    ndiscr_levels = [100, 200, 400, 800]
+    l_from_a_levels = []
+
+    for ndiscr in ndiscr_levels:
+        phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
+
+        x = major_radius * np.cos(phi)
+        y = major_radius * np.sin(phi)
+        z = np.zeros_like(x)
+
+        dx = x[1:] - x[:-1]
+        dy = y[1:] - y[:-1]
+        dz = z[1:] - z[:-1]
+
+        xyzfil = (x[:-1], y[:-1], z[:-1])
+        dlxyzfil = (dx, dy, dz)
+        ifil = np.ones_like(dx)  # [A]
+
+        # Integrate A·dl around the same loop; with 1 A current this equals self-inductance.
+        xyzp = (x[:-1] + 0.5 * dx, y[:-1] + 0.5 * dy, z[:-1] + 0.5 * dz)
+        ax, ay, az = cfsem.vector_potential_linear_filament(
+            xyzp=xyzp,
+            xyzfil=xyzfil,
+            dlxyzfil=dlxyzfil,
+            ifil=ifil,
+            wire_radius=minor_radius,
+            par=par,
+        )
+        l_from_a_levels.append(float(np.sum(ax * dx + ay * dy + az * dz)))  # [H]
+
+    l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))  # [H]
+
+    # Allow moderate error from polygonal discretization of the circular geometry.
+    for ndiscr, l_from_a in zip(ndiscr_levels, l_from_a_levels):
+        assert l_from_a == approx(
+            l_wien, rel=8e-2
+        ), f"ndiscr={ndiscr}, L_from_A={l_from_a:.6e}, L_wien={l_wien:.6e}"
+
+    # Discretization stability checks.
+    lvals = np.array(l_from_a_levels)
+    rel_spread = (np.max(lvals) - np.min(lvals)) / max(abs(l_wien), 1e-30)
+    rel_fine_delta = abs(lvals[-1] - lvals[-2]) / max(abs(l_wien), 1e-30)
+
+    assert rel_spread < 2e-2, f"rel_spread={rel_spread:.6e}, Lvals={lvals}"
+    assert rel_fine_delta < 5e-3, f"rel_fine_delta={rel_fine_delta:.6e}, Lvals={lvals}"
 
 
 def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():

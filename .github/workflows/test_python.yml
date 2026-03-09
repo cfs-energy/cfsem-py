@@ -10,7 +10,6 @@ on:
   push:
     branches: [ "main", "develop", "release" ]
   workflow_dispatch:
-    tag: "Manual Run"
   workflow_call:
 
 jobs:
@@ -36,10 +35,6 @@ jobs:
     - name: Test
       run: |
         # Install with dev deps
-        uv venv
-        source .venv/bin/activate
-
-        uv pip install maturin
         uv pip install . --group dev
 
         # Python lint, test, and coverage

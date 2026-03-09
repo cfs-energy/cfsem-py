@@ -577,8 +577,7 @@ pub fn vector_potential_linear_filament_scalar(
         // puts a value in both the numerator and denominator that is clamped to wire radius.
         //
         // To do this, we can do the rationalization trick to convert an equation of the form
-        // `sqrt(x^2 + y^2) - x`, which goes to zero when `y` goes to zero because both `x` and `y`
-        // are clamped,
+        // `sqrt(x^2 + y^2) - x`, which goes to zero when `y` goes to zero because both `x` and `y` are clamped,
         // to
         // `sqrt(x^2 + y^2) - x = (sqrt(x^2 + y^2) - x) * (sqrt(x^2 + y^2) + x) / (sqrt(x^2 + y^2) + x)`
         // then simplifying the numerator and leaving the denominator as-is to produce

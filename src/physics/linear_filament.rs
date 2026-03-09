@@ -260,7 +260,7 @@ pub fn flux_density_linear_filament(
     Ok(())
 }
 
-/// Biot-Savart calculation for B-field contribution one filament
+/// Biot-Savart calculation for B-field contribution from one filament
 /// to one observation point.
 ///
 /// Uses the formula for continuous current distribution and finite wire thickness.
@@ -279,10 +279,6 @@ pub fn flux_density_linear_filament(
 ///    / ∠a|∠b \
 ///   /    |    \
 ///  a-----m-----b  -> I  
-///        |
-///        |  d_perp (from line to p)
-///        |
-///        q (closest point on line)
 ///```
 ///
 /// The base formula is
@@ -294,7 +290,8 @@ pub fn flux_density_linear_filament(
 ///
 /// The otherwise-expensive sine functions are evaluated directly using distance magnitudes.
 ///
-/// Inside the wire radius, the formula is modified to blend linearly to zero at the wire center.
+/// Inside the wire radius, the formula is modified to blend linearly to zero at the wire center,
+/// which is physically consistent with the field of a cylinder of uniform current density.
 ///
 /// ## References
 ///

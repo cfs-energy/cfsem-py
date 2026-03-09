@@ -167,14 +167,44 @@ pub(crate) fn decompose_filament(
     (midpoint, dl)
 }
 
+/// Geometric components of the system of a filament and an observation point
+/// to support the calculation of finite-length, finite-thickness filament field formulas.
+///
+///  ```text
+///        p (target)
+///        *
+///       /|\
+///      / | \
+///   ap/  |  \bp
+///    / ∠a|∠b \
+///   /    |    \
+///  a-----m-----b  -> I  
+///```
 pub(crate) struct PointLineDistance {
+    /// Perpendicular distance from the infinite line defined by segment `ab` to the point `p`,
+    /// clamped to the wire radius.
     pub(crate) perp: f64,
+
+    /// The normalized direction of the perpendicular distance.
     pub(crate) perp_hat: (f64, f64, f64),
+
+    /// Length of segment `ap` using clamped perpendicular distance.
     pub(crate) dist_a: f64,
+
+    /// Length of segment `bp` using clamped perpendicular distance.
     pub(crate) dist_b: f64,
+
+    /// Fraction of perpendicular distance of point `p` from the filament axis to the wire radius,
+    /// before clamping of the perpendicular distance.
     pub(crate) frac: f64,
+
+    /// Length of segment `am` using unclamped perpendicular distance.
     pub(crate) para_a: f64,
+
+    /// Length of segment `bm` using unclamped perpendicular distance.
     pub(crate) para_b: f64,
+
+    /// Length of the filament, segment `ab`.
     pub(crate) ab_norm: (f64, f64, f64),
 }
 

@@ -569,9 +569,38 @@ pub fn vector_potential_linear_filament_scalar(
     // is necessary due to the discontinuity in the current density vector field.
     let perp2 = perp * perp;
     let k1 = if para_b >= 0.0 {
-        // Each branch is equal, but numerically stable in different regimes
+        // Each branch is equal, but numerically stable in different regimes.
+        //
+        // To keep the argument of the log term from going to zero near the
+        // axis where the normed distance is almost the same as the parallel distance,
+        // we need to come up with a way of phrasing the difference between them that
+        // puts a value in both the numerator and denominator that is clamped to wire radius.
+        //
+        // To do this, we can do the rationalization trick to convert an equation of the form
+        // `sqrt(x^2 + y^2) - x`, which goes to zero when `y` goes to zero because both `x` and `y`
+        // are clamped,
+        // to
+        // `sqrt(x^2 + y^2) - x = (sqrt(x^2 + y^2) - x) * (sqrt(x^2 + y^2) + x) / (sqrt(x^2 + y^2) + x)`
+        // then simplifying the numerator and leaving the denominator as-is to produce
+        // `sqrt(x^2 + y^2) - x = y^2 / (sqrt(x^2 + y^2) + x)`, which becomes useful because
+        // `y` is the perpendicular distance, here, which is clamped. So, after this transformation,
+        // we have the algebraic equivalent of the original expression, but it never goes to either
+        // zero or infinity as long as the parallel distance is nonnegative.
+        //
+        // So, for our formula, this reads as:
+        // `dist - para = (dist - para)(dist + para) / (dist + para)` (first rationalization)
+        // `dist^2 = para^2 + perp^2` (just expanding the existing formula)
+        // `(dist - para)(dist + para) = dist^2 - para^2 = perp^2` (substitute into numerator of rationalized expression)
+        // `dist - para = perp^2 / (dist + para)` (final rationalized expression)
         perp2 / (dist_b + para_b)
     } else {
+        // The rationalized expression works as long as the parallel distance is always positive
+        // so that it can't cancel out `dist`; because `dist` is always positive, when
+        // `para` is negative, we can switch back to the original formula, which subtracts a
+        // negative value from a positive value and always produces a positive value.
+        //
+        // This way, both regimes produce a strictly positive value for `k` that guarantees
+        // `log(k1/k2)` is nonsingular everywhere.
         dist_b - para_b
     }; // (m)
     let k2 = if para_a >= 0.0 {

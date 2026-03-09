@@ -1320,9 +1320,24 @@ mod test {
         for &wire_radius in &[0.0, 0.01, 0.1] {
             for &(label, p) in &axis_points {
                 let b = flux_density_linear_filament_scalar((start, end, ifil), wire_radius, p);
-                assert!(b.0.is_finite(), "Bx is non-finite at {} for wire_radius={}", label, wire_radius);
-                assert!(b.1.is_finite(), "By is non-finite at {} for wire_radius={}", label, wire_radius);
-                assert!(b.2.is_finite(), "Bz is non-finite at {} for wire_radius={}", label, wire_radius);
+                assert!(
+                    b.0.is_finite(),
+                    "Bx is non-finite at {} for wire_radius={}",
+                    label,
+                    wire_radius
+                );
+                assert!(
+                    b.1.is_finite(),
+                    "By is non-finite at {} for wire_radius={}",
+                    label,
+                    wire_radius
+                );
+                assert!(
+                    b.2.is_finite(),
+                    "Bz is non-finite at {} for wire_radius={}",
+                    label,
+                    wire_radius
+                );
             }
         }
     }
@@ -1681,9 +1696,24 @@ mod test {
         for &wire_radius in &[0.0, 0.01, 0.1] {
             for &(label, p) in &axis_points {
                 let a = vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, p);
-                assert!(a.0.is_finite(), "Ax is non-finite at {} for wire_radius={}", label, wire_radius);
-                assert!(a.1.is_finite(), "Ay is non-finite at {} for wire_radius={}", label, wire_radius);
-                assert!(a.2.is_finite(), "Az is non-finite at {} for wire_radius={}", label, wire_radius);
+                assert!(
+                    a.0.is_finite(),
+                    "Ax is non-finite at {} for wire_radius={}",
+                    label,
+                    wire_radius
+                );
+                assert!(
+                    a.1.is_finite(),
+                    "Ay is non-finite at {} for wire_radius={}",
+                    label,
+                    wire_radius
+                );
+                assert!(
+                    a.2.is_finite(),
+                    "Az is non-finite at {} for wire_radius={}",
+                    label,
+                    wire_radius
+                );
             }
         }
     }

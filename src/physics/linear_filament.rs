@@ -779,7 +779,7 @@ pub fn body_force_density_linear_filament_par(
 
 #[cfg(test)]
 mod test {
-    use std::f64::consts::PI;
+    use std::f64::consts::{E, PI};
 
     use super::*;
     use crate::physics::point_source::segment::{
@@ -958,7 +958,6 @@ mod test {
 
         let start = (0.0, 0.0, -0.5);
         let end = (0.0, 0.0, 0.5);
-        let ifil = [1.0];
 
         let xfil = [start.0];
         let yfil = [start.1];
@@ -992,19 +991,6 @@ mod test {
         }
         let xyzp = (&xp[..], &yp[..], &zp[..]);
 
-        let mut bx = vec![0.0; total];
-        let mut by = vec![0.0; total];
-        let mut bz = vec![0.0; total];
-        flux_density_linear_filament(
-            xyzp,
-            xyzfil,
-            dlxyz,
-            &ifil,
-            &[0.0],
-            (&mut bx, &mut by, &mut bz),
-        )
-        .unwrap();
-
         let nseg = 1000;
         let dz = (end.2 - start.2) / nseg as f64;
         let mut xfil_ps = Vec::with_capacity(nseg);
@@ -1018,39 +1004,59 @@ mod test {
         let dlx = vec![0.0; nseg];
         let dly = vec![0.0; nseg];
         let dlz = vec![dz; nseg];
-        let ifil_ps = vec![1.0; nseg];
 
-        let mut bx_ps = vec![0.0; total];
-        let mut by_ps = vec![0.0; total];
-        let mut bz_ps = vec![0.0; total];
-        flux_density_point_segment(
-            xyzp,
-            (&xfil_ps, &yfil_ps, &zfil_ps),
-            (&dlx, &dly, &dlz),
-            &ifil_ps,
-            (&mut bx_ps, &mut by_ps, &mut bz_ps),
-        )
-        .unwrap();
+        for &current in &[1.0, E] {
+            let ifil = [current];
+            let ifil_ps = vec![current; nseg];
 
-        for i in 0..xp.len() {
-            assert!(
-                approx(bx[i], bx_ps[i], rtol, atol),
-                "bx is {}, should be {}",
-                bx[i],
-                bx_ps[i]
-            );
-            assert!(
-                approx(by[i], by_ps[i], rtol, atol),
-                "by is {}, should be {}",
-                by[i],
-                by_ps[i]
-            );
-            assert!(
-                approx(bz[i], bz_ps[i], rtol, atol),
-                "bz is {}, should be {}",
-                bz[i],
-                bz_ps[i]
-            );
+            let mut bx = vec![0.0; total];
+            let mut by = vec![0.0; total];
+            let mut bz = vec![0.0; total];
+            flux_density_linear_filament(
+                xyzp,
+                xyzfil,
+                dlxyz,
+                &ifil,
+                &[0.0],
+                (&mut bx, &mut by, &mut bz),
+            )
+            .unwrap();
+
+            let mut bx_ps = vec![0.0; total];
+            let mut by_ps = vec![0.0; total];
+            let mut bz_ps = vec![0.0; total];
+            flux_density_point_segment(
+                xyzp,
+                (&xfil_ps, &yfil_ps, &zfil_ps),
+                (&dlx, &dly, &dlz),
+                &ifil_ps,
+                (&mut bx_ps, &mut by_ps, &mut bz_ps),
+            )
+            .unwrap();
+
+            for i in 0..xp.len() {
+                assert!(
+                    approx(bx[i], bx_ps[i], rtol, atol),
+                    "current={} A: bx is {}, should be {}",
+                    current,
+                    bx[i],
+                    bx_ps[i]
+                );
+                assert!(
+                    approx(by[i], by_ps[i], rtol, atol),
+                    "current={} A: by is {}, should be {}",
+                    current,
+                    by[i],
+                    by_ps[i]
+                );
+                assert!(
+                    approx(bz[i], bz_ps[i], rtol, atol),
+                    "current={} A: bz is {}, should be {}",
+                    current,
+                    bz[i],
+                    bz_ps[i]
+                );
+            }
         }
     }
 
@@ -1349,7 +1355,6 @@ mod test {
 
         let start = (0.0, 0.0, -0.5);
         let end = (0.0, 0.0, 0.5);
-        let ifil = [1.0];
 
         let xfil = [start.0];
         let yfil = [start.1];
@@ -1383,19 +1388,6 @@ mod test {
         }
         let xyzp = (&xp[..], &yp[..], &zp[..]);
 
-        let mut ax = vec![0.0; total];
-        let mut ay = vec![0.0; total];
-        let mut az = vec![0.0; total];
-        vector_potential_linear_filament(
-            xyzp,
-            xyzfil,
-            dlxyz,
-            &ifil,
-            &[0.0],
-            (&mut ax, &mut ay, &mut az),
-        )
-        .unwrap();
-
         let nseg = 1000;
         let dz = (end.2 - start.2) / nseg as f64;
         let mut xfil_ps = Vec::with_capacity(nseg);
@@ -1409,39 +1401,59 @@ mod test {
         let dlx = vec![0.0; nseg];
         let dly = vec![0.0; nseg];
         let dlz = vec![dz; nseg];
-        let ifil_ps = vec![1.0; nseg];
 
-        let mut ax_ps = vec![0.0; total];
-        let mut ay_ps = vec![0.0; total];
-        let mut az_ps = vec![0.0; total];
-        vector_potential_point_segment(
-            xyzp,
-            (&xfil_ps, &yfil_ps, &zfil_ps),
-            (&dlx, &dly, &dlz),
-            &ifil_ps,
-            (&mut ax_ps, &mut ay_ps, &mut az_ps),
-        )
-        .unwrap();
+        for &current in &[1.0, E] {
+            let ifil = [current];
+            let ifil_ps = vec![current; nseg];
 
-        for i in 0..xp.len() {
-            assert!(
-                approx(ax[i], ax_ps[i], rtol, atol),
-                "ax is {}, should be {}",
-                ax[i],
-                ax_ps[i]
-            );
-            assert!(
-                approx(ay[i], ay_ps[i], rtol, atol),
-                "ay is {}, should be {}",
-                ay[i],
-                ay_ps[i]
-            );
-            assert!(
-                approx(az[i], az_ps[i], rtol, atol),
-                "az is {}, should be {}",
-                az[i],
-                az_ps[i]
-            );
+            let mut ax = vec![0.0; total];
+            let mut ay = vec![0.0; total];
+            let mut az = vec![0.0; total];
+            vector_potential_linear_filament(
+                xyzp,
+                xyzfil,
+                dlxyz,
+                &ifil,
+                &[0.0],
+                (&mut ax, &mut ay, &mut az),
+            )
+            .unwrap();
+
+            let mut ax_ps = vec![0.0; total];
+            let mut ay_ps = vec![0.0; total];
+            let mut az_ps = vec![0.0; total];
+            vector_potential_point_segment(
+                xyzp,
+                (&xfil_ps, &yfil_ps, &zfil_ps),
+                (&dlx, &dly, &dlz),
+                &ifil_ps,
+                (&mut ax_ps, &mut ay_ps, &mut az_ps),
+            )
+            .unwrap();
+
+            for i in 0..xp.len() {
+                assert!(
+                    approx(ax[i], ax_ps[i], rtol, atol),
+                    "current={} A: ax is {}, should be {}",
+                    current,
+                    ax[i],
+                    ax_ps[i]
+                );
+                assert!(
+                    approx(ay[i], ay_ps[i], rtol, atol),
+                    "current={} A: ay is {}, should be {}",
+                    current,
+                    ay[i],
+                    ay_ps[i]
+                );
+                assert!(
+                    approx(az[i], az_ps[i], rtol, atol),
+                    "current={} A: az is {}, should be {}",
+                    current,
+                    az[i],
+                    az_ps[i]
+                );
+            }
         }
     }
 

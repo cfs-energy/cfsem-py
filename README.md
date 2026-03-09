@@ -4,15 +4,33 @@
 
 Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov.
 
+## Installation - System Dependencies
+
+When building the `mlfmm` feature, some system dependencies are needed.
+
+* cmake
+* C/C++ toolchain (clang + make)
+  * Linux: clang, lld, libstdc++-12-dev
+  * NOTE: the g++ toolchain does not work for this project due to dependency ordering issues during linking
+    when building cdylib builds for the python extension library.
+* git (for submodules)
+* BLAS/LAPACK 
+  * Linux & Windows: openblas
+  * Mac: already included by the OS (Accelerate)
+* zlib (for Boost iostreams; typically provided by the OS)
+
+as well as some run-time dependencies:
+
+* zlib
+* System C++ runtime
+* BLAS/LAPACK (MacOS only, nominally provided by OS)
+
 ## Installation - Python
 
 Requirements
 
 * Python 3.9-3.13 and pip
-* Don't worry about this:
-  * This info provided for troubleshooting purposes:
-  * If on an x86 processor, you will need a CPU that supports SSE through 4.1, AVX, and FMA.
-  * This should be true on any modern machine.
+* If on an x86 processor, you will need a CPU from roughly 2013 or later.
 
 ```bash
 pip install cfsem
@@ -26,7 +44,11 @@ To include this library in a Rust project, add an entry to your Cargo.toml's `[d
 cfsem = "*"
 ```
 
-For Python installation, see the docs for the Python library.
+If building with the `rat-mlfmm` feature, the library must be included as a git dependency
+
+```toml
+cfsem = { git = "https://github.com/cfs-energy/cfsem-py.git", tag = "4.0.0" }
+```
 
 ## Benchmarking - Rust
 
@@ -34,6 +56,12 @@ Benchmarks are configured in Cargo.toml, and can be run via cargo:
 
 ```bash
 cargo bench
+```
+
+To build the docs with katex math rendering:
+
+```bash
+RUSTDOCFLAGS="--html-in-header=katex-header.html" cargo rustdoc --open
 ```
 
 ## Development - Python
@@ -46,12 +74,6 @@ To install in the active python environment, do
 
 ```bash
 uv pip install -e . --group dev
-```
-
-To build the Rust bindings only, do
-
-```bash
-maturin develop --release --features=python
 ```
 
 No part of installation requires root. If access issues are encountered, this can likely be resolved by using a virtual environment.

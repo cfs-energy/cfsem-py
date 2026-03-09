@@ -5,7 +5,7 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
-from numpy import ascontiguousarray, float64, zeros_like
+from numpy import asarray, ascontiguousarray, float64, full, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -25,6 +25,7 @@ from .cfsem import (
 from .cfsem import flux_density_dipole as em_flux_density_dipole
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
+from .cfsem import flux_density_point_segment as em_flux_density_point_segment
 from .cfsem import gs_operator_order2 as em_gs_operator_order2
 from .cfsem import gs_operator_order4 as em_gs_operator_order4
 from .cfsem import (
@@ -39,6 +40,9 @@ from .cfsem import (
 )
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
+)
+from .cfsem import (
+    vector_potential_point_segment as em_vector_potential_point_segment,
 )
 
 
@@ -176,6 +180,7 @@ def flux_density_linear_filament(
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     ifil: NDArray[float64],
+    wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -184,8 +189,40 @@ def flux_density_linear_filament(
 
     Args:
         xyzp: [m] x,y,z coords of observation points
-        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
-        dlxyzfil: [m] x,y,z length delta of current filaments
+        xyzfil: [m] x,y,z coords of filament segment start points
+        dlxyzfil: [m] x,y,z deltas from segment start to segment end
+        ifil: [A] current in each filament segment
+        wire_radius: [m] filament radius, scalar or array of length `m`
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [T] (Bx, By, Bz) magnetic flux density at observation points
+    """
+    xyzp = _3tup_contig(xyzp)
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).ravel()
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(ifil.size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
+    return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
+
+
+def flux_density_point_segment(
+    xyzp: Array3xN,
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    ifil: NDArray[float64],
+    par: bool = True,
+) -> Array3xN:
+    """
+    Biot-Savart law calculation for B-field contributions from many filament segments
+    to many observation points, treating each segment as a point source.
+
+    Args:
+        xyzp: [m] x,y,z coords of observation points
+        xyzfil: [m] x,y,z coords of filament segment start points
+        dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
         par: Whether to use CPU parallelism
 
@@ -196,10 +233,7 @@ def flux_density_linear_filament(
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
-    return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
-
-
-flux_density_biot_savart = flux_density_linear_filament  # For backwards-compatibility
+    return em_flux_density_point_segment(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
 def vector_potential_linear_filament(
@@ -207,6 +241,7 @@ def vector_potential_linear_filament(
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     ifil: NDArray[float64],
+    wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -215,8 +250,40 @@ def vector_potential_linear_filament(
 
     Args:
         xyzp: [m] x,y,z coords of observation points
-        xyzfil: [m] x,y,z coords of current filament origins (start of segment)
-        dlxyzfil: [m] x,y,z length delta of current filaments
+        xyzfil: [m] x,y,z coords of filament segment start points
+        dlxyzfil: [m] x,y,z deltas from segment start to segment end
+        ifil: [A] current in each filament segment
+        wire_radius: [m] filament radius, scalar or array of length `m`
+        par: Whether to use CPU parallelism
+
+    Returns:
+        [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
+    """
+    xyzp = _3tup_contig(xyzp)
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    ifil = ascontiguousarray(ifil).ravel()
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(ifil.size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
+    return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
+
+
+def vector_potential_point_segment(
+    xyzp: Array3xN,
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    ifil: NDArray[float64],
+    par: bool = True,
+) -> Array3xN:
+    """
+    Vector potential calculation for A-field contribution from many filament
+    segments to many observation points, treating each segment as a point source.
+
+    Args:
+        xyzp: [m] x,y,z coords of observation points
+        xyzfil: [m] x,y,z coords of filament segment start points
+        dlxyzfil: [m] x,y,z deltas from segment start to segment end
         ifil: [A] current in each filament segment
         par: Whether to use CPU parallelism
 
@@ -227,7 +294,7 @@ def vector_potential_linear_filament(
     xyzfil = _3tup_contig(xyzfil)
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
-    return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, par)
+    return em_vector_potential_point_segment(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
 def inductance_piecewise_linear_filaments(
@@ -570,6 +637,7 @@ def body_force_density_linear_filament(
     ifil: NDArray[float64],
     obs: Array3xN,
     j: Array3xN,
+    wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
 ) -> Array3xN:
     """
@@ -582,6 +650,7 @@ def body_force_density_linear_filament(
         ifil: [A] filament current
         obs: [m] x,y,z coords of observation locations
         j: [A/m^2] current density vector at observation locations
+        wire_radius: [m] filament radius, scalar or array of length `m`
         par: Whether to use CPU parallelism
 
     Returns:
@@ -592,7 +661,12 @@ def body_force_density_linear_filament(
     ifil = ascontiguousarray(ifil).ravel()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
-    jxbx, jxby, jxbz = em_body_force_density_linear_filament(xyzfil, dlxyzfil, ifil, obs, j, par)  # [N/m^3]
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(ifil.size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
+    jxbx, jxby, jxbz = em_body_force_density_linear_filament(
+        xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par
+    )  # [N/m^3]
 
     return jxbx, jxby, jxbz  # type: ignore
 

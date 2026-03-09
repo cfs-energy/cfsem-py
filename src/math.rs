@@ -152,7 +152,7 @@ pub fn cylindrical_to_cartesian(r: f64, phi: f64, z: f64) -> (f64, f64, f64) {
 
 /// Decompose two filament endpoints into a midpoint and a length vector
 #[inline]
-pub fn decompose_filament(
+pub(crate) fn decompose_filament(
     start: (f64, f64, f64),
     end: (f64, f64, f64),
 ) -> ((f64, f64, f64), (f64, f64, f64)) {
@@ -165,6 +165,141 @@ pub fn decompose_filament(
     ); // [m] filament midpoint
 
     (midpoint, dl)
+}
+
+/// Geometric components of the system of a filament and an observation point
+/// to support the calculation of finite-length, finite-thickness filament field formulas.
+///
+///  ```text
+///        p (target)
+///        *
+///       /|\
+///      / | \
+///   ap/  |  \bp
+///    / ∠a|∠b \
+///   /    |    \
+///  a-----m-----b  -> I  
+///```
+pub(crate) struct PointLineDistance {
+    /// Perpendicular distance from the infinite line defined by segment `ab` to the point `p`,
+    /// clamped to the wire radius.
+    pub(crate) perp: f64,
+
+    /// The normalized direction of the perpendicular distance.
+    pub(crate) perp_hat: (f64, f64, f64),
+
+    /// Length of segment `ap` using clamped perpendicular distance.
+    pub(crate) dist_a: f64,
+
+    /// Length of segment `bp` using clamped perpendicular distance.
+    pub(crate) dist_b: f64,
+
+    /// Fraction of perpendicular distance of point `p` from the filament axis to the wire radius,
+    /// before clamping of the perpendicular distance.
+    pub(crate) frac: f64,
+
+    /// Length of segment `am` using unclamped perpendicular distance.
+    pub(crate) para_a: f64,
+
+    /// Length of segment `bm` using unclamped perpendicular distance.
+    pub(crate) para_b: f64,
+
+    /// Length of the filament, segment `ab`.
+    pub(crate) ab_norm: (f64, f64, f64),
+}
+
+/// Minimum perpendicular distance of point p to the infinite line defined by endpoints a and b,
+/// distances to each endpoint, finite-thickness clamp fraction based on `r_min`,
+/// and parallel distances from each endpoint to the target.
+///
+/// Finite-thickness clamping is based only on wire radius and does not
+/// taper outside segment endpoint projections.
+#[inline]
+pub(crate) fn point_line_distance_with_endpoints(
+    a: (f64, f64, f64),
+    b: (f64, f64, f64),
+    p: (f64, f64, f64),
+    r_min: f64,
+) -> PointLineDistance {
+    // Vectors and distances between points.
+    let ab = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
+    let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
+    let bp = (p.0 - b.0, p.1 - b.1, p.2 - b.2);
+
+    // Normalized segment vector.
+    // This might be zero, and that will be handled as late as possible to avoid disrupting
+    // calculations in nominal non-zero-length cases.
+    let ab2 = dot3(ab.0, ab.1, ab.2, ab.0, ab.1, ab.2); // (m^2) squared length.
+    // Handle zero-length special case before any division by segment length.
+    if ab2 == 0.0 {
+        let r_min = r_min.max(0.0);
+        let r_min_frac = r_min.max(f64::MIN_POSITIVE);
+        let dist_a = rss3(ap.0, ap.1, ap.2);
+        let dist_b = rss3(bp.0, bp.1, bp.2);
+        let frac = (dist_a / r_min_frac).min(1.0);
+        let dist_a = dist_a.max(r_min);
+        let dist_b = dist_b.max(r_min);
+        let perp = dist_a;
+        return PointLineDistance {
+            perp,
+            perp_hat: (0.0, 0.0, 0.0),
+            dist_a,
+            dist_b,
+            frac,
+            para_a: 0.0,
+            para_b: 0.0,
+            ab_norm: (0.0, 0.0, 0.0),
+        };
+    }
+
+    // Filament vector, length, and normalized direction
+    let ab_len = ab2.sqrt();
+    let ab_len_inv = ab_len.recip();
+    let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
+
+    // Find the closest point on the infinite line defined by this segment to the target point.
+    let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2; // Normed projected location
+    let closest = (
+        t.mul_add(ab.0, a.0),
+        t.mul_add(ab.1, a.1),
+        t.mul_add(ab.2, a.2),
+    ); // (m) closest point on infinite line
+    let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
+    let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
+    let perp_hat = if perp_raw > 0.0 {
+        let inv = perp_raw.recip();
+        (dp.0 * inv, dp.1 * inv, dp.2 * inv)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+
+    // Clamp r_min to prevent div/0
+    let r_min = r_min.max(f64::MIN_POSITIVE);
+
+    // Parallel distances from each endpoint to the target
+    let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
+    let para_b = para_a - ab_len;
+
+    // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.
+    let frac = (perp_raw / r_min).min(1.0);
+
+    // Clamp distances only if we are inside the minimum radius.
+    let perp = perp_raw.max(r_min);
+
+    // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
+    let dist_a = perp.mul_add(perp, para_a * para_a).sqrt();
+    let dist_b = perp.mul_add(perp, para_b * para_b).sqrt();
+
+    PointLineDistance {
+        perp,
+        perp_hat,
+        dist_a,
+        dist_b,
+        frac,
+        para_a,
+        para_b,
+        ab_norm,
+    }
 }
 
 /// Clip NaN values to the provided value.

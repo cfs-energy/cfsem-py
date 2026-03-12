@@ -85,10 +85,12 @@ pub fn calc_tri_normal(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [f64; 3] {
     return out;
 }
 
-/// Magnetic field contribution of a given triangle's basis function with unit weighting
-/// to a given obseration point. Assumes a basis function living on the triangle's first node
+/// Magnetic flux density (B-field) contribution of a given triangle's basis function
+/// with unit weighting to a given obseration point.
+///
+/// Assumes a basis function living on the triangle's first node.
 #[inline]
-pub fn triangle_biot_savart_basis(
+pub fn triangle_flux_density_basis(
     n0: [f64; 3],
     n1: [f64; 3],
     n2: [f64; 3],
@@ -138,10 +140,11 @@ pub fn triangle_biot_savart_basis(
     return b;
 }
 
-/// B-field of triangular surface current density distribution
+/// Flux density (B-field) of triangular surface current density distribution
 /// at a target point due to scalar current density potential `s`
 /// at each node.
-pub fn triangle_biot_savart(
+#[inline]
+pub fn flux_density_triangle(
     n0: [f64; 3],
     n1: [f64; 3],
     n2: [f64; 3],
@@ -153,9 +156,9 @@ pub fn triangle_biot_savart(
     let mut out = [0.0; 3];
 
     // Collect B-field contributions for the three basis functions living on n0, n1, and n2
-    let b_n0 = triangle_biot_savart_basis(n0, n1, n2, obs, quad_kind, quad_order);
-    let b_n1 = triangle_biot_savart_basis(n1, n2, n0, obs, quad_kind, quad_order);
-    let b_n2 = triangle_biot_savart_basis(n2, n0, n1, obs, quad_kind, quad_order);
+    let b_n0 = triangle_flux_density_basis(n0, n1, n2, obs, quad_kind, quad_order);
+    let b_n1 = triangle_flux_density_basis(n1, n2, n0, obs, quad_kind, quad_order);
+    let b_n2 = triangle_flux_density_basis(n2, n0, n1, obs, quad_kind, quad_order);
 
     // Sum contributions by each basis function weighted by the basis function value
     out[0] = (s[0] * b_n0[0] + s[1] * b_n1[0] + s[2] * b_n2[0]) * MU0_OVER_4PI;

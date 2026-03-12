@@ -28,3 +28,16 @@ as thin helical filaments.
 ``` py title="examples/inductance.py"
 --8<-- "examples/inductance.py"
 ```
+
+## Field Explorer
+
+Examine the B-field and A-field of cfsem's finite-length, finite-thickness filament calcs
+and compare to point-source calculations, section discretizations, and $B = \nabla \times A$
+equivalence tests.
+
+<figure markdown="span">
+  ![Field explorer example](example_outputs/field_explorer.svg)
+  <figcaption>
+    B-field of a triangular arrangement of finite-length filaments.
+  </figcaption>
+</figure>

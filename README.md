@@ -4,27 +4,6 @@
 
 Quasi-steady electromagnetics including filamentized approximations, Biot-Savart, and Grad-Shafranov.
 
-## Installation - System Dependencies
-
-When building the `mlfmm` feature, some system dependencies are needed.
-
-* cmake
-* C/C++ toolchain (clang + make)
-  * Linux: clang, lld, libstdc++-12-dev
-  * NOTE: the g++ toolchain does not work for this project due to dependency ordering issues during linking
-    when building cdylib builds for the python extension library.
-* git (for submodules)
-* BLAS/LAPACK 
-  * Linux & Windows: openblas
-  * Mac: already included by the OS (Accelerate)
-* zlib (for Boost iostreams; typically provided by the OS)
-
-as well as some run-time dependencies:
-
-* zlib
-* System C++ runtime
-* BLAS/LAPACK (MacOS only, nominally provided by OS)
-
 ## Installation - Python
 
 Requirements
@@ -42,12 +21,6 @@ To include this library in a Rust project, add an entry to your Cargo.toml's `[d
 
 ```toml
 cfsem = "*"
-```
-
-If building with the `rat-mlfmm` feature, the library must be included as a git dependency
-
-```toml
-cfsem = { git = "https://github.com/cfs-energy/cfsem-py.git", tag = "4.0.0" }
 ```
 
 ## Benchmarking - Rust

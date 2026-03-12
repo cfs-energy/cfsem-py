@@ -2,6 +2,8 @@
 
 ::: cfsem.flux_density_linear_filament
 
+::: cfsem.flux_density_point_segment
+
 ::: cfsem.flux_density_circular_filament
 
 ::: cfsem.flux_density_ideal_solenoid

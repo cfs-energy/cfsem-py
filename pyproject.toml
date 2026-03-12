@@ -37,6 +37,7 @@ dev = [
     # Examples
     "matplotlib >= 3.9",
     "plotly>=6.6.0,<7",
+    "kaleido>=1,<2",
     "dash>=4.0.0,<5",
 ]
 

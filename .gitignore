@@ -81,3 +81,4 @@ examples/*.png
 docs/python/example_outputs/*.png
 
 *.png
+*.svg

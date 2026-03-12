@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 import time
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 
 import cfsem
 
-GRID_SIZE = 31 if os.getenv("CFSEM_TESTING") else 1001
+GRID_SIZE = 201 if os.getenv("CFSEM_TESTING") else 1001
 EQUIV_GRID_SIZE = 21 if os.getenv("CFSEM_TESTING") else 1001
 SECTION_COMPARE_GRID_SIZE = 17 if os.getenv("CFSEM_TESTING") else 161
 DEFAULT_WIRE_RADIUS = 0.02
@@ -18,6 +19,16 @@ CURRENT = 1.0
 LOG10_FLOOR = -16.0
 DEFAULT_SECTION_GRID_N = 50
 MAX_SECTION_GRID_N = 400
+DOCS_FIELD_EXPLORER_SVG = (
+    Path(__file__).resolve().parents[1] / "docs/python/example_outputs/field_explorer.svg"
+)
+
+
+def export_docs_example_figure(fig) -> None:
+    from kaleido import write_fig_sync
+
+    DOCS_FIELD_EXPLORER_SVG.parent.mkdir(parents=True, exist_ok=True)
+    write_fig_sync(fig, path=str(DOCS_FIELD_EXPLORER_SVG), opts={"format": "svg"})
 
 
 def normalize_section_grid_n(section_grid_n: int) -> int:
@@ -1648,7 +1659,8 @@ def main() -> None:
         app.run(debug=True)
     else:
         # smoketest figures if we're not running the full gui
-        build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
+        top_fig, _bottom_fig = build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
+        export_docs_example_figure(top_fig)
         build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
         build_section_comparison_figures(
             "b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N, False, False, True

@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 import time
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 
 import cfsem
 
-GRID_SIZE = 31 if os.getenv("CFSEM_TESTING") else 1001
+GRID_SIZE = 201 if os.getenv("CFSEM_TESTING") else 1001
 EQUIV_GRID_SIZE = 21 if os.getenv("CFSEM_TESTING") else 1001
 SECTION_COMPARE_GRID_SIZE = 17 if os.getenv("CFSEM_TESTING") else 161
 DEFAULT_WIRE_RADIUS = 0.02
@@ -18,6 +19,63 @@ CURRENT = 1.0
 LOG10_FLOOR = -16.0
 DEFAULT_SECTION_GRID_N = 50
 MAX_SECTION_GRID_N = 400
+DEFAULT_POINT_SEGMENT_SUBDIVISIONS = 24
+MAX_POINT_SEGMENT_SUBDIVISIONS = 400
+DOCS_FIELD_EXPLORER_SVG = (
+    Path(__file__).resolve().parents[1] / "docs/python/example_outputs/field_explorer.svg"
+)
+DOCS_FIELD_EXPLORER_HTML = (
+    Path(__file__).resolve().parents[1] / "docs/python/example_outputs/field_explorer.html"
+)
+
+
+def describe_geometry(n_sides: int) -> str:
+    if n_sides == 1:
+        return "Straight line"
+    if n_sides == 2:
+        return "Two-segment path"
+    return f"{n_sides}-sided polygon"
+
+
+def build_plot_context_summary(
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    *,
+    point_segment_subdivisions: int | None = None,
+    section_grid_n: int | None = None,
+    section_filaments_per_segment: int | None = None,
+    distributed_radius_mode: str | None = None,
+) -> str:
+    parts = [
+        describe_geometry(n_sides),
+        f"wire radius: {wire_radius:.3f} m",
+        f"rotation: {rotation_deg:.0f} deg",
+        f"sub-divisions: {n_subdivisions}",
+    ]
+    if point_segment_subdivisions is not None:
+        parts.append(f"point-segment sub-divisions: {point_segment_subdivisions}")
+    if section_grid_n is not None:
+        grid_summary = f"section grid: {section_grid_n}x{section_grid_n}"
+        if section_filaments_per_segment is not None:
+            grid_summary += f" -> {section_filaments_per_segment} fil/segment"
+        parts.append(grid_summary)
+    if distributed_radius_mode is not None:
+        parts.append(f"distributed radius mode: {distributed_radius_mode}")
+    return " | ".join(parts)
+
+
+def export_docs_example_figure(fig) -> None:
+    DOCS_FIELD_EXPLORER_HTML.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(
+        str(DOCS_FIELD_EXPLORER_HTML),
+        include_plotlyjs="cdn",
+        full_html=True,
+        config={"responsive": True},
+        auto_open=False,
+    )
+    DOCS_FIELD_EXPLORER_SVG.unlink(missing_ok=True)
 
 
 def normalize_section_grid_n(section_grid_n: int) -> int:
@@ -28,6 +86,18 @@ def normalize_section_grid_n(section_grid_n: int) -> int:
         if n > MAX_SECTION_GRID_N:
             n -= 2
     return n
+
+
+def normalize_point_segment_subdivisions(n_point_subdivisions: int) -> int:
+    return max(1, min(MAX_POINT_SEGMENT_SUBDIVISIONS, int(n_point_subdivisions)))
+
+
+def finite_positive_max(values: np.ndarray) -> float | None:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    vmax = float(np.max(finite))
+    return vmax if vmax > 0.0 else None
 
 
 def build_path_vertices(n_sides: int) -> np.ndarray:
@@ -97,9 +167,9 @@ def discretize_point_segments(
     starts: np.ndarray,
     dl: np.ndarray,
     current: np.ndarray,
+    n_lengthwise_discretizations: int,
 ) -> tuple[tuple[np.ndarray, ...], tuple[np.ndarray, ...], np.ndarray]:
-    n_filaments = starts.shape[0]
-    nseg_per_filament = max(6, min(120, 900 // max(1, n_filaments)))
+    nseg_per_filament = normalize_point_segment_subdivisions(n_lengthwise_discretizations)
 
     xfil_ps = []
     yfil_ps = []
@@ -256,7 +326,12 @@ def segment_lines_xyz(starts: np.ndarray, ends: np.ndarray) -> tuple[np.ndarray,
 
 @lru_cache(maxsize=8)
 def compute_field(
-    mode: str, n_sides: int, wire_radius: float, rotation_deg: float, n_subdivisions: int
+    mode: str,
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    point_segment_subdivisions: int,
 ) -> dict[str, np.ndarray | float]:
     vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(
         n_sides, rotation_deg, n_subdivisions
@@ -280,7 +355,7 @@ def compute_field(
         )
     t_linear = time.perf_counter() - t0
 
-    xyzfil_ps, dlxyzfil_ps, ifil_ps = discretize_point_segments(starts, dl, ifil)
+    xyzfil_ps, dlxyzfil_ps, ifil_ps = discretize_point_segments(starts, dl, ifil, point_segment_subdivisions)
 
     t0 = time.perf_counter()
     if mode == "b":
@@ -464,13 +539,14 @@ def build_figures(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
+    point_segment_subdivisions: int,
     mask_axis_spikes: bool,
     show_filament_line: bool,
 ):
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
-    data = compute_field(mode, n_sides, wire_radius, rotation_deg, n_subdivisions)
+    data = compute_field(mode, n_sides, wire_radius, rotation_deg, n_subdivisions, point_segment_subdivisions)
     x = data["x"]
     z = data["z"]
     mag_linear = data["mag_linear"]
@@ -485,14 +561,11 @@ def build_figures(
     mag_log10 = np.maximum(np.log10(mag_linear + 1e-30), LOG10_FLOOR)
     err_log10 = np.where(np.isnan(err), np.nan, np.maximum(np.log10(err + 1e-30), LOG10_FLOOR))
     mid = GRID_SIZE // 2
+    x_slice_ymax = finite_positive_max(mag_linear[mid, :])
+    z_slice_ymax = finite_positive_max(mag_linear[:, mid])
 
     value_title = "|B| [T]" if mode == "b" else "|A| [T m]"
-    title_prefix = "B-field" if mode == "b" else "Vector Potential"
-    geometry_label = (
-        "Straight line"
-        if n_sides == 1
-        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
-    )
+    title_prefix = "B-Field" if mode == "b" else "Vector Potential"
 
     top_fig = make_subplots(
         rows=1,
@@ -560,14 +633,13 @@ def build_figures(
     top_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
     top_fig.update_xaxes(title_text="x [m]", row=1, col=2)
     top_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    if x_slice_ymax is not None:
+        top_fig.update_yaxes(range=[0.0, 2.0 * x_slice_ymax], row=1, col=2)
     top_fig.update_xaxes(showgrid=False)
     top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
-        title=(
-            f"{title_prefix}: {geometry_label}, rotation {rotation_deg:.0f} deg, "
-            f"sub-divisions {n_subdivisions}"
-        ),
+        title=title_prefix,
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -636,6 +708,8 @@ def build_figures(
     bottom_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
     bottom_fig.update_xaxes(title_text="z [m]", row=1, col=2)
     bottom_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    if z_slice_ymax is not None:
+        bottom_fig.update_yaxes(range=[0.0, 2.0 * z_slice_ymax], row=1, col=2)
     bottom_fig.update_xaxes(showgrid=False)
     bottom_fig.update_yaxes(showgrid=False)
     bottom_fig.update_layout(
@@ -674,12 +748,6 @@ def build_equivalence_figures(
     b_log10 = np.maximum(np.log10(bmag + 1e-30), LOG10_FLOOR)
     err_log10 = np.where(np.isnan(err), np.nan, np.maximum(np.log10(err + 1e-30), LOG10_FLOOR))
     mid = EQUIV_GRID_SIZE // 2
-    geometry_label = (
-        "Straight line"
-        if n_sides == 1
-        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
-    )
-
     top_fig = make_subplots(
         rows=1,
         cols=2,
@@ -750,10 +818,7 @@ def build_equivalence_figures(
     top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
-        title=(
-            f"Field Equivalence: {geometry_label}, rotation {rotation_deg:.0f} deg, "
-            f"sub-divisions {n_subdivisions}"
-        ),
+        title="Field Equivalence",
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -846,10 +911,7 @@ def build_section_geometry_figure(
     x_single, y_single, z_single = segment_lines_xyz(starts, ends)
     x_dist, y_dist, z_dist = segment_lines_xyz(starts_ref, ends_ref)
 
-    if n_sides >= 3:
-        path = np.vstack((vertices, vertices[0]))
-    else:
-        path = vertices
+    path = np.vstack((vertices, vertices[0])) if n_sides >= 3 else vertices
 
     fig = go.Figure()
 
@@ -973,12 +1035,7 @@ def build_section_comparison_figures(
     mid = len(x) // 2
 
     value_title = "|B| [T]" if mode == "b" else "|A| [T m]"
-    title_prefix = "B-field" if mode == "b" else "Vector Potential"
-    geometry_label = (
-        "Straight line"
-        if n_sides == 1
-        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
-    )
+    title_prefix = "B-Field" if mode == "b" else "Vector Potential"
 
     top_fig = make_subplots(
         rows=1,
@@ -1053,10 +1110,7 @@ def build_section_comparison_figures(
     top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
-        title=(
-            f"{title_prefix} conductor model check: {geometry_label}, rotation {rotation_deg:.0f} deg, "
-            f"sub-divisions {n_subdivisions}"
-        ),
+        title=f"{title_prefix} Conductor Model Check",
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -1143,15 +1197,18 @@ def build_perf_summary(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
+    point_segment_subdivisions: int = DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
     section_grid_n: int = DEFAULT_SECTION_GRID_N,
     distributed_use_area_radius: bool = False,
 ) -> str:
     if mode in ("b", "a"):
-        data = compute_field(mode, n_sides, wire_radius, rotation_deg, n_subdivisions)
+        data = compute_field(
+            mode, n_sides, wire_radius, rotation_deg, n_subdivisions, point_segment_subdivisions
+        )
         label = "B-field" if mode == "b" else "Vector potential"
         return (
-            f"{label} | wire radius: {wire_radius:.3f} m | rotation: {rotation_deg:.0f} deg | "
-            f"sub-divisions: {n_subdivisions} | "
+            f"{label} | "
+            f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions, point_segment_subdivisions=point_segment_subdivisions)} | "
             f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
             f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
         )
@@ -1171,18 +1228,16 @@ def build_perf_summary(
         radius_mode = "area-equivalent" if distributed_use_area_radius else "zero-radius"
         n_grid = int(data["section_grid_n"])
         return (
-            f"{label} conductor-model check | wire radius: {wire_radius:.3f} m | "
-            f"rotation: {rotation_deg:.0f} deg | sub-divisions: {n_subdivisions} | "
-            f"section grid: {n_grid}x{n_grid} -> {int(data['n_offsets'])} fil/segment | "
-            f"distributed radius mode: {radius_mode} | "
+            f"{label} conductor-model check | "
+            f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions, section_grid_n=n_grid, section_filaments_per_segment=int(data['n_offsets']), distributed_radius_mode=radius_mode)} | "
             f"finite-thickness: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
             f"distributed section: {data['t_ref']:.3f}s / {data['n_ref']:.2e} interactions"
         )
 
     data = compute_field_equivalence(n_sides, wire_radius, rotation_deg, n_subdivisions)
     return (
-        f"Field equivalence (B vs curl(A)) | wire radius: {wire_radius:.3f} m | "
-        f"rotation: {rotation_deg:.0f} deg | sub-divisions: {n_subdivisions} | "
+        f"Field equivalence (B vs curl(A)) | "
+        f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions)} | "
         f"B: {data['t_b']:.3f}s / {data['n_b']:.2e} interactions, "
         f"curl(A): {data['t_curl']:.3f}s / {data['n_curl']:.2e} interactions"
     )
@@ -1200,7 +1255,10 @@ def create_app():
                 [
                     html.Div(
                         [
-                            html.P("Path geometry (sides)", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}),
+                            html.P(
+                                "Path geometry (sides)",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
                             dcc.Slider(
                                 id="polygon-sides",
                                 min=1,
@@ -1214,7 +1272,10 @@ def create_app():
                     ),
                     html.Div(
                         [
-                            html.P("Sub-divisions per segment", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}),
+                            html.P(
+                                "Sub-divisions per segment",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
                             dcc.Slider(
                                 id="segment-subdivisions",
                                 min=1,
@@ -1228,7 +1289,32 @@ def create_app():
                     ),
                     html.Div(
                         [
-                            html.P("Wire radius [m]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}),
+                            html.P(
+                                "Point-segment lengthwise discretizations",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="point-segment-subdivisions",
+                                min=1,
+                                max=MAX_POINT_SEGMENT_SUBDIVISIONS,
+                                step=1,
+                                value=DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
+                                marks={
+                                    1: "1",
+                                    100: "100",
+                                    200: "200",
+                                    300: "300",
+                                    400: "400",
+                                },
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Wire radius [m]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}
+                            ),
                             dcc.Slider(
                                 id="wire-radius",
                                 min=0.0,
@@ -1242,7 +1328,9 @@ def create_app():
                     ),
                     html.Div(
                         [
-                            html.P("Rotation [deg]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}),
+                            html.P(
+                                "Rotation [deg]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}
+                            ),
                             dcc.Slider(
                                 id="rotation-deg",
                                 min=0,
@@ -1285,7 +1373,7 @@ def create_app():
                     "display": "grid",
                     "gridTemplateColumns": "repeat(2, minmax(280px, 1fr))",
                     "columnGap": "1rem",
-                    "rowGap": "0.5rem",
+                    "rowGap": "1.25rem",
                     "paddingBottom": "0.5rem",
                 },
             ),
@@ -1450,6 +1538,7 @@ def create_app():
         Output("perf-summary", "children"),
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
+        Input("point-segment-subdivisions", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
@@ -1461,6 +1550,7 @@ def create_app():
     def update_b_figure(
         n_sides: int,
         n_subdivisions: int,
+        point_segment_subdivisions: int,
         wire_radius: float,
         rotation_deg: float,
         mask_axis_spikes: list[str],
@@ -1471,6 +1561,7 @@ def create_app():
     ):
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
+        n_point_sub = normalize_point_segment_subdivisions(point_segment_subdivisions)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         section_grid_n = normalize_section_grid_n(section_grid_size)
@@ -1478,14 +1569,22 @@ def create_app():
         mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
         if field_tab != "b":
-            return no_update, no_update, build_perf_summary(
-                field_tab, sides, radius, rotation, n_sub, section_grid_n, use_area_radius
+            return (
+                no_update,
+                no_update,
+                build_perf_summary(
+                    field_tab, sides, radius, rotation, n_sub, n_point_sub, section_grid_n, use_area_radius
+                ),
             )
-        top_fig, bottom_fig = build_figures("b", sides, radius, rotation, n_sub, mask_spikes, show_line)
+        top_fig, bottom_fig = build_figures(
+            "b", sides, radius, rotation, n_sub, n_point_sub, mask_spikes, show_line
+        )
         return (
             top_fig,
             bottom_fig,
-            build_perf_summary("b", sides, radius, rotation, n_sub, section_grid_n, use_area_radius),
+            build_perf_summary(
+                "b", sides, radius, rotation, n_sub, n_point_sub, section_grid_n, use_area_radius
+            ),
         )
 
     @app.callback(
@@ -1501,6 +1600,7 @@ def create_app():
         Output("field-figure-a-bottom", "figure"),
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
+        Input("point-segment-subdivisions", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
@@ -1510,6 +1610,7 @@ def create_app():
     def update_a_figure(
         n_sides: int,
         n_subdivisions: int,
+        point_segment_subdivisions: int,
         wire_radius: float,
         rotation_deg: float,
         mask_axis_spikes: list[str],
@@ -1520,11 +1621,12 @@ def create_app():
             return no_update, no_update
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
+        n_point_sub = normalize_point_segment_subdivisions(point_segment_subdivisions)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         mask_spikes = "mask" in mask_axis_spikes
         show_line = "show" in show_filament_line
-        return build_figures("a", sides, radius, rotation, n_sub, mask_spikes, show_line)
+        return build_figures("a", sides, radius, rotation, n_sub, n_point_sub, mask_spikes, show_line)
 
     @app.callback(
         Output("field-figure-cb-top", "figure"),
@@ -1648,8 +1750,27 @@ def main() -> None:
         app.run(debug=True)
     else:
         # smoketest figures if we're not running the full gui
-        build_figures("b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
-        build_figures("a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
+        top_fig, _bottom_fig = build_figures(
+            "b",
+            3,
+            DEFAULT_WIRE_RADIUS,
+            0.0,
+            1,
+            DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
+            False,
+            True,
+        )
+        export_docs_example_figure(top_fig)
+        build_figures(
+            "a",
+            3,
+            DEFAULT_WIRE_RADIUS,
+            0.0,
+            1,
+            DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
+            False,
+            True,
+        )
         build_section_comparison_figures(
             "b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N, False, False, True
         )

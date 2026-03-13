@@ -2,6 +2,7 @@
 
 import os
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -112,6 +113,5 @@ ax_center.set_ylim(0.0, 1.1 * np.max(Bmag_analytic))
 ax_center.set_title("Centerline ($r=0$) $B$-field")
 
 fig.tight_layout()
-
-if not os.environ.get("CFSEM_TESTING", False):
-    fig.savefig("helmholtz.png", dpi=300)
+fpath = Path("__file__").parent / "helmholtz.png"
+fig.savefig(fpath, dpi=300)

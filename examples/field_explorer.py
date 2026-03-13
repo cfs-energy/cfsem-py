@@ -24,13 +24,58 @@ MAX_POINT_SEGMENT_SUBDIVISIONS = 400
 DOCS_FIELD_EXPLORER_SVG = (
     Path(__file__).resolve().parents[1] / "docs/python/example_outputs/field_explorer.svg"
 )
+DOCS_FIELD_EXPLORER_HTML = (
+    Path(__file__).resolve().parents[1] / "docs/python/example_outputs/field_explorer.html"
+)
+
+
+def describe_geometry(n_sides: int) -> str:
+    if n_sides == 1:
+        return "Straight line"
+    if n_sides == 2:
+        return "Two-segment path"
+    return f"{n_sides}-sided polygon"
+
+
+def build_plot_context_summary(
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    *,
+    point_segment_subdivisions: int | None = None,
+    section_grid_n: int | None = None,
+    section_filaments_per_segment: int | None = None,
+    distributed_radius_mode: str | None = None,
+) -> str:
+    parts = [
+        describe_geometry(n_sides),
+        f"wire radius: {wire_radius:.3f} m",
+        f"rotation: {rotation_deg:.0f} deg",
+        f"sub-divisions: {n_subdivisions}",
+    ]
+    if point_segment_subdivisions is not None:
+        parts.append(f"point-segment sub-divisions: {point_segment_subdivisions}")
+    if section_grid_n is not None:
+        grid_summary = f"section grid: {section_grid_n}x{section_grid_n}"
+        if section_filaments_per_segment is not None:
+            grid_summary += f" -> {section_filaments_per_segment} fil/segment"
+        parts.append(grid_summary)
+    if distributed_radius_mode is not None:
+        parts.append(f"distributed radius mode: {distributed_radius_mode}")
+    return " | ".join(parts)
 
 
 def export_docs_example_figure(fig) -> None:
-    from kaleido import write_fig_sync
-
-    DOCS_FIELD_EXPLORER_SVG.parent.mkdir(parents=True, exist_ok=True)
-    write_fig_sync(fig, path=str(DOCS_FIELD_EXPLORER_SVG), opts={"format": "svg"})
+    DOCS_FIELD_EXPLORER_HTML.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(
+        str(DOCS_FIELD_EXPLORER_HTML),
+        include_plotlyjs="cdn",
+        full_html=True,
+        config={"responsive": True},
+        auto_open=False,
+    )
+    DOCS_FIELD_EXPLORER_SVG.unlink(missing_ok=True)
 
 
 def normalize_section_grid_n(section_grid_n: int) -> int:
@@ -520,12 +565,7 @@ def build_figures(
     z_slice_ymax = finite_positive_max(mag_linear[:, mid])
 
     value_title = "|B| [T]" if mode == "b" else "|A| [T m]"
-    title_prefix = "B-field" if mode == "b" else "Vector Potential"
-    geometry_label = (
-        "Straight line"
-        if n_sides == 1
-        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
-    )
+    title_prefix = "B-Field" if mode == "b" else "Vector Potential"
 
     top_fig = make_subplots(
         rows=1,
@@ -599,11 +639,7 @@ def build_figures(
     top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
-        title=(
-            f"{title_prefix}: {geometry_label}, rotation {rotation_deg:.0f} deg, "
-            f"sub-divisions {n_subdivisions}, "
-            f"point-segment sub-divisions {point_segment_subdivisions}"
-        ),
+        title=title_prefix,
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -712,12 +748,6 @@ def build_equivalence_figures(
     b_log10 = np.maximum(np.log10(bmag + 1e-30), LOG10_FLOOR)
     err_log10 = np.where(np.isnan(err), np.nan, np.maximum(np.log10(err + 1e-30), LOG10_FLOOR))
     mid = EQUIV_GRID_SIZE // 2
-    geometry_label = (
-        "Straight line"
-        if n_sides == 1
-        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
-    )
-
     top_fig = make_subplots(
         rows=1,
         cols=2,
@@ -788,10 +818,7 @@ def build_equivalence_figures(
     top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
-        title=(
-            f"Field Equivalence: {geometry_label}, rotation {rotation_deg:.0f} deg, "
-            f"sub-divisions {n_subdivisions}"
-        ),
+        title="Field Equivalence",
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -1008,12 +1035,7 @@ def build_section_comparison_figures(
     mid = len(x) // 2
 
     value_title = "|B| [T]" if mode == "b" else "|A| [T m]"
-    title_prefix = "B-field" if mode == "b" else "Vector Potential"
-    geometry_label = (
-        "Straight line"
-        if n_sides == 1
-        else ("Two-segment path" if n_sides == 2 else f"{n_sides}-sided polygon")
-    )
+    title_prefix = "B-Field" if mode == "b" else "Vector Potential"
 
     top_fig = make_subplots(
         rows=1,
@@ -1088,10 +1110,7 @@ def build_section_comparison_figures(
     top_fig.update_yaxes(showgrid=False)
     top_fig.update_layout(
         height=460,
-        title=(
-            f"{title_prefix} conductor model check: {geometry_label}, rotation {rotation_deg:.0f} deg, "
-            f"sub-divisions {n_subdivisions}"
-        ),
+        title=f"{title_prefix} Conductor Model Check",
         margin={"l": 50, "r": 20, "t": 110, "b": 45},
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -1188,9 +1207,8 @@ def build_perf_summary(
         )
         label = "B-field" if mode == "b" else "Vector potential"
         return (
-            f"{label} | wire radius: {wire_radius:.3f} m | rotation: {rotation_deg:.0f} deg | "
-            f"sub-divisions: {n_subdivisions} | "
-            f"point-segment sub-divisions: {point_segment_subdivisions} | "
+            f"{label} | "
+            f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions, point_segment_subdivisions=point_segment_subdivisions)} | "
             f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
             f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
         )
@@ -1210,18 +1228,16 @@ def build_perf_summary(
         radius_mode = "area-equivalent" if distributed_use_area_radius else "zero-radius"
         n_grid = int(data["section_grid_n"])
         return (
-            f"{label} conductor-model check | wire radius: {wire_radius:.3f} m | "
-            f"rotation: {rotation_deg:.0f} deg | sub-divisions: {n_subdivisions} | "
-            f"section grid: {n_grid}x{n_grid} -> {int(data['n_offsets'])} fil/segment | "
-            f"distributed radius mode: {radius_mode} | "
+            f"{label} conductor-model check | "
+            f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions, section_grid_n=n_grid, section_filaments_per_segment=int(data['n_offsets']), distributed_radius_mode=radius_mode)} | "
             f"finite-thickness: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
             f"distributed section: {data['t_ref']:.3f}s / {data['n_ref']:.2e} interactions"
         )
 
     data = compute_field_equivalence(n_sides, wire_radius, rotation_deg, n_subdivisions)
     return (
-        f"Field equivalence (B vs curl(A)) | wire radius: {wire_radius:.3f} m | "
-        f"rotation: {rotation_deg:.0f} deg | sub-divisions: {n_subdivisions} | "
+        f"Field equivalence (B vs curl(A)) | "
+        f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions)} | "
         f"B: {data['t_b']:.3f}s / {data['n_b']:.2e} interactions, "
         f"curl(A): {data['t_curl']:.3f}s / {data['n_curl']:.2e} interactions"
     )

@@ -1,4 +1,15 @@
 :root {
     --md-primary-fg-color:        #152536;
     --md-accent-fg-color:         #AF5B3A;
-  }
+}
+
+.plotly-embed {
+    display: block;
+    width: min(100vw - 2rem, 78rem);
+    max-width: none;
+    height: clamp(26rem, 70vh, 36rem);
+    margin-inline: auto;
+    border: 1px solid var(--md-default-fg-color--lightest);
+    border-radius: 0.2rem;
+    background: #fff;
+}

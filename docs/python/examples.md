@@ -5,8 +5,15 @@
 In this interactive example, examine the B-field and A-field of cfsem's finite-length-finite-thickness filament calcs
 and compare to point-source calculations, section discretizations, and $B = \nabla \times A$ equivalence tests.
 
+The full example can be run like `uv run --group dev examples/field_explorer.py`; the plot shown below is only an excerpt.
+
 <figure markdown="span">
-  ![Field explorer example](example_outputs/field_explorer.svg)
+  <iframe
+    class="plotly-embed"
+    loading="lazy"
+    src="../example_outputs/field_explorer.html"
+    title="Field explorer example"
+  ></iframe>
   <figcaption>
     B-field of an arrangement of finite-length, finite-thickness filaments.
   </figcaption>

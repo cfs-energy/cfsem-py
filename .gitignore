@@ -79,6 +79,7 @@ site
 
 examples/*.png
 docs/python/example_outputs/*.png
+docs/python/example_outputs/*.html
 
 *.png
 *.svg

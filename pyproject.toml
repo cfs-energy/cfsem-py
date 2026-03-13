@@ -38,6 +38,7 @@ dev = [
     "matplotlib >= 3.9",
     "plotly>=6.6.0,<7",
     "dash>=4.0.0,<5",
+    "griffe>=2.0.0",
 ]
 
 [tool.maturin]

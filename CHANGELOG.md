@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.0.1 2025-03-12
+
+### Changed
+
+* Update readme
+* Update python docs
+* Unmask saved figure during tests so that the figure is built for docs
+* Update build_docs script
+* Add lengthwise discretization slider to field explorer example
+
 ## 4.0.0 2025-03-03
 
 ### Added

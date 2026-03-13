@@ -218,7 +218,10 @@ mod tests {
             for tri in [tri0, tri1] {
                 let normal = calc_tri_normal(tri.nodes[0], tri.nodes[1], tri.nodes[2]);
                 let alignment = normal[0] * radial[0] + normal[1] * radial[1];
-                assert!(alignment > 0.0, "triangle winding is not radially consistent");
+                assert!(
+                    alignment > 0.0,
+                    "triangle winding is not radially consistent"
+                );
                 tris.push(tri);
             }
         }
@@ -253,28 +256,14 @@ mod tests {
             .fold(0.0, f64::max)
     }
 
-    fn axis_scale(strip: &[[f64; 3]], reference: &[[f64; 3]], axis: usize, floor: f64) -> f64 {
-        let mut num = 0.0;
-        let mut den = 0.0;
-
-        for i in 0..strip.len() {
-            if reference[i][axis].abs() > floor {
-                num += strip[i][axis] * reference[i][axis];
-                den += reference[i][axis] * reference[i][axis];
-            }
-        }
-
-        assert!(den > 0.0, "no usable samples for axis {axis}");
-        num / den
-    }
-
     #[test]
-    fn test_flux_density_triangle_circular_strip_far_field_uniform_scale() {
+    fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field() {
         let radius = 0.75;
         let height = radius * 1e-3;
-        let s0 = 0.5;
         let nphi = 256;
-        let loop_current = s0;
+
+        let loop_current = 1.7; // Some not-special number to check current scaling
+        let s0 = loop_current; // Potential function delta for a strip is equal to 2*current
 
         let strip = circular_strip_triangles(radius, height, s0, nphi);
         let obs = [
@@ -297,89 +286,19 @@ mod tests {
             b_loop.push([b_ref.0, b_ref.1, b_ref.2]);
         }
 
-        let reference_floor = max_abs_component(&b_loop) * 1e-6;
         let axis_names = ["Bx", "By", "Bz"];
-
-        let mut global_num = 0.0;
-        let mut global_den = 0.0;
-        let mut local_scales: [Vec<(usize, f64)>; 3] = std::array::from_fn(|_| Vec::new());
+        let bfield_rtol = 1e-3;
+        let bfield_atol = max_abs_component(&b_loop) * 1e-12;
 
         for i in 0..obs.len() {
             for axis in 0..3 {
-                if b_loop[i][axis].abs() > reference_floor {
-                    global_num += b_strip[i][axis] * b_loop[i][axis];
-                    global_den += b_loop[i][axis] * b_loop[i][axis];
-                    local_scales[axis].push((i, b_strip[i][axis] / b_loop[i][axis]));
-                }
-            }
-        }
-
-        assert!(global_den > 0.0, "no usable reference components");
-        let c = global_num / global_den;
-        let cx = axis_scale(&b_strip, &b_loop, 0, reference_floor);
-        let cy = axis_scale(&b_strip, &b_loop, 1, reference_floor);
-        let cz = axis_scale(&b_strip, &b_loop, 2, reference_floor);
-
-        println!("{c} {cx} {cy} {cz}");
-
-        let scale_consistency_rtol = 4e-2;
-        let scale_spread_limit = 5e-2;
-        let axis_match_rtol = 6e-2;
-        let axis_match_atol = max_abs_component(&b_strip).max(max_abs_component(&b_loop)) * 1e-12;
-
-        for (axis_name, c_axis) in [("Bx", cx), ("By", cy), ("Bz", cz)] {
-            assert!(
-                approx(c, c_axis, scale_consistency_rtol, axis_match_atol),
-                "{axis_name} scale factor {c_axis:.6e} differs from global scale {c:.6e}",
-            );
-        }
-
-        for axis in 0..3 {
-            assert_eq!(
-                local_scales[axis].len(),
-                obs.len(),
-                "{} did not stay above the reference floor at every point",
-                axis_names[axis],
-            );
-
-            let mut min_scale = f64::INFINITY;
-            let mut max_scale = f64::NEG_INFINITY;
-            for (point_idx, local_scale) in &local_scales[axis] {
-                min_scale = min_scale.min(*local_scale);
-                max_scale = max_scale.max(*local_scale);
                 assert!(
-                    approx(c, *local_scale, scale_consistency_rtol, axis_match_atol),
-                    "{} local scale at point {} differs from global scale: local={:.6e}, global={:.6e}",
-                    axis_names[axis],
-                    point_idx,
-                    local_scale,
-                    c,
-                );
-            }
-
-            let spread = (max_scale - min_scale).abs() / c.abs().max(1e-30);
-            assert!(
-                spread < scale_spread_limit,
-                "{} scale spread is too large: spread={:.6e}, min={:.6e}, max={:.6e}, global={:.6e}",
-                axis_names[axis],
-                spread,
-                min_scale,
-                max_scale,
-                c,
-            );
-        }
-
-        for i in 0..obs.len() {
-            for axis in 0..3 {
-                let expected = c * b_loop[i][axis];
-                assert!(
-                    approx(expected, b_strip[i][axis], axis_match_rtol, axis_match_atol),
-                    "{} mismatch at point {}: strip={:.6e}, expected={:.6e}, scale={:.6e}, obs={:?}",
+                    approx(b_loop[i][axis], b_strip[i][axis], bfield_rtol, bfield_atol),
+                    "{} mismatch at point {}: strip={:.6e}, reference={:.6e}, obs={:?}",
                     axis_names[axis],
                     i,
                     b_strip[i][axis],
-                    expected,
-                    c,
+                    b_loop[i][axis],
                     obs[i],
                 );
             }

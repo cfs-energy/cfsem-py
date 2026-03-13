@@ -258,12 +258,12 @@ mod tests {
 
     #[test]
     fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field() {
-        let radius = 0.75;
+        let radius = 0.7312345987;
         let height = radius * 1e-3;
         let nphi = 256;
 
         let loop_current = 1.7; // Some not-special number to check current scaling
-        let s0 = loop_current; // Potential function delta for a strip is equal to 2*current
+        let s0 = loop_current; // Potential jump for this strip construction matches the loop current
 
         let strip = circular_strip_triangles(radius, height, s0, nphi);
         let obs = [
@@ -300,6 +300,62 @@ mod tests {
                     b_strip[i][axis],
                     b_loop[i][axis],
                     obs[i],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_flux_density_triangle_circular_strip_matches_circular_filament_near_axis() {
+        let radius = 0.75;
+        let height = radius * 1e-3;
+        let nphi = 256;
+
+        let loop_current = 1.7; // Some not-special number to check current scaling
+        let s0 = loop_current; // Potential jump for this strip construction matches the loop current
+
+        let strip = circular_strip_triangles(radius, height, s0, nphi);
+
+        let mut obs = Vec::with_capacity(202);
+        for i in 0..=200 {
+            let z = -1.0 + i as f64 * 0.01;
+            obs.push([1e-8, 0.0, z]);
+        }
+        obs.push([0.0, 1e-8, 0.0]);
+
+        let axis_names = ["Bx", "By", "Bz"];
+        let bz_rtol = 1e-3;
+        let mut b_loop = Vec::with_capacity(obs.len());
+        for point in &obs {
+            let b_ref = flux_density_circular_filament_cartesian_scalar(
+                (radius, 0.0, loop_current),
+                (point[0], point[1], point[2]),
+            );
+            b_loop.push([b_ref.0, b_ref.1, b_ref.2]);
+        }
+        let transverse_atol = max_abs_component(&b_loop) * 1e-8 + 1e-14;
+
+        for (i, point) in obs.iter().enumerate() {
+            let b_strip = strip_flux_density(&strip, *point);
+
+            assert!(
+                approx(b_loop[i][2], b_strip[2], bz_rtol, 0.0),
+                "Bz mismatch at point {}: strip={:.6e}, reference={:.6e}, obs={:?}",
+                i,
+                b_strip[2],
+                b_loop[i][2],
+                point,
+            );
+
+            for axis in 0..2 {
+                assert!(
+                    b_strip[axis].abs() < transverse_atol,
+                    "{} should be near zero at point {}: strip={:.6e}, atol={:.6e}, obs={:?}",
+                    axis_names[axis],
+                    i,
+                    b_strip[axis],
+                    transverse_atol,
+                    point,
                 );
             }
         }

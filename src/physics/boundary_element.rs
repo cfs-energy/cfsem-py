@@ -146,6 +146,11 @@ pub fn triangle_flux_density_basis(
 /// Flux density (B-field) of triangular surface current density distribution
 /// at a target point due to scalar current density potential `s`
 /// at each node.
+///
+/// For phyisical intuition, the current density is related to the difference
+/// in potential between the nodes; for example, in a strip discretized into triangles
+/// with s=s0 on one side of the strip and s=-s0 on the other side of the strip,
+/// the total current on the strip (and its effective filament current) is equal to s0.
 #[inline]
 pub fn flux_density_triangle(
     n0: [f64; 3],

@@ -46,7 +46,8 @@ const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 
 #[derive(Clone, Copy)]
 pub enum QuadratureKind {
-    GaussLegendre,
+    GaussLegendre2,
+    GaussLegendre3,
     Dunavant,
 }
 
@@ -117,10 +118,10 @@ fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (
 }
 
 #[inline]
-fn triangle_quadrature_points(quad_kind: QuadratureKind, quad_order: usize) -> &'static [[f64; 3]] {
-    match (quad_kind, quad_order) {
-        (QuadratureKind::GaussLegendre, 2) => &TABLE_GAUSS_LEGENDRE_2,
-        (QuadratureKind::GaussLegendre, 3) => &TABLE_GAUSS_LEGENDRE_3,
+fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] {
+    match quad_kind {
+        QuadratureKind::GaussLegendre2 => &TABLE_GAUSS_LEGENDRE_2,
+        QuadratureKind::GaussLegendre3 => &TABLE_GAUSS_LEGENDRE_3,
         _ => panic!(),
     }
 }
@@ -136,10 +137,9 @@ pub fn triangle_flux_density_basis(
     n2: [f64; 3],
     obs: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> [f64; 3] {
     let (tri_area, jref) = triangle_basis_current_density(n0, n1, n2);
-    let quad_points = triangle_quadrature_points(quad_kind, quad_order);
+    let quad_points = triangle_quadrature_points(quad_kind);
 
     let mut b = [0.0; 3];
 
@@ -192,10 +192,9 @@ pub fn triangle_vector_potential_basis(
     n2: [f64; 3],
     obs: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> [f64; 3] {
     let (tri_area, jref) = triangle_basis_current_density(n0, n1, n2);
-    let quad_points = triangle_quadrature_points(quad_kind, quad_order);
+    let quad_points = triangle_quadrature_points(quad_kind);
 
     let mut a = [0.0; 3];
 
@@ -235,14 +234,13 @@ pub fn flux_density_triangle(
     s: [f64; 3],
     obs: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> [f64; 3] {
     let mut out = [0.0; 3];
 
     // Collect B-field contributions for the three basis functions living on n0, n1, and n2
-    let b_n0 = triangle_flux_density_basis(n0, n1, n2, obs, quad_kind, quad_order);
-    let b_n1 = triangle_flux_density_basis(n1, n2, n0, obs, quad_kind, quad_order);
-    let b_n2 = triangle_flux_density_basis(n2, n0, n1, obs, quad_kind, quad_order);
+    let b_n0 = triangle_flux_density_basis(n0, n1, n2, obs, quad_kind);
+    let b_n1 = triangle_flux_density_basis(n1, n2, n0, obs, quad_kind);
+    let b_n2 = triangle_flux_density_basis(n2, n0, n1, obs, quad_kind);
 
     // Sum contributions by each basis function weighted by the basis function value
     out[0] = (s[0] * b_n0[0] + s[1] * b_n1[0] + s[2] * b_n2[0]) * MU0_OVER_4PI;
@@ -278,14 +276,13 @@ pub fn vector_potential_triangle(
     s: [f64; 3],
     obs: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> [f64; 3] {
     let mut out = [0.0; 3];
 
     // Collect A-field contributions for the three basis functions living on n0, n1, and n2
-    let a_n0 = triangle_vector_potential_basis(n0, n1, n2, obs, quad_kind, quad_order);
-    let a_n1 = triangle_vector_potential_basis(n1, n2, n0, obs, quad_kind, quad_order);
-    let a_n2 = triangle_vector_potential_basis(n2, n0, n1, obs, quad_kind, quad_order);
+    let a_n0 = triangle_vector_potential_basis(n0, n1, n2, obs, quad_kind);
+    let a_n1 = triangle_vector_potential_basis(n1, n2, n0, obs, quad_kind);
+    let a_n2 = triangle_vector_potential_basis(n2, n0, n1, obs, quad_kind);
 
     // Sum contributions by each basis function weighted by the basis function value
     out[0] = (s[0] * a_n0[0] + s[1] * a_n1[0] + s[2] * a_n2[0]) * MU0_OVER_4PI;
@@ -338,10 +335,9 @@ fn triangle_scalar_potential_regular(
     n2: [f64; 3],
     obs: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> f64 {
     let tri_area = calc_tri_area(n0, n1, n2);
-    let quad_points = triangle_quadrature_points(quad_kind, quad_order);
+    let quad_points = triangle_quadrature_points(quad_kind);
 
     let mut out = 0.0;
     for qp in quad_points {
@@ -422,17 +418,16 @@ pub fn triangle_geometric_coupling_regular(
     tgt1: [f64; 3],
     tgt2: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> f64 {
     let tri_area_tgt = calc_tri_area(tgt0, tgt1, tgt2);
-    let quad_points_tgt = triangle_quadrature_points(quad_kind, quad_order);
+    let quad_points_tgt = triangle_quadrature_points(quad_kind);
 
     let mut out = 0.0;
     for qp in quad_points_tgt {
         let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
         out += qp[0]
             * tri_area_tgt
-            * triangle_scalar_potential_regular(src0, src1, src2, obs, quad_kind, quad_order);
+            * triangle_scalar_potential_regular(src0, src1, src2, obs, quad_kind);
     }
 
     out
@@ -457,10 +452,9 @@ fn triangle_geometric_coupling_self(
     n1: [f64; 3],
     n2: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> f64 {
     let tri_area = calc_tri_area(n0, n1, n2);
-    let quad_points = triangle_quadrature_points(quad_kind, quad_order);
+    let quad_points = triangle_quadrature_points(quad_kind);
 
     let mut out = 0.0;
     for qp in quad_points {
@@ -497,7 +491,6 @@ pub fn triangle_geometric_coupling(
     tgt1: [f64; 3],
     tgt2: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> f64 {
     // NOTE: for smaller functions such as the linear and circular filaments,
     // having a branch in the middle of the scalar kernel like this would be
@@ -505,13 +498,13 @@ pub fn triangle_geometric_coupling(
     // in this scalar kernel is so large, we're going to get good use out of SLP vectorization
     // and don't necessarily need to coddle the loop vectorizer or branch predictor.
     if triangles_identical(src0, src1, src2, tgt0, tgt1, tgt2) {
-        return triangle_geometric_coupling_self(src0, src1, src2, quad_kind, quad_order);
+        return triangle_geometric_coupling_self(src0, src1, src2, quad_kind);
     }
 
     0.5 * (triangle_geometric_coupling_regular(
-        src0, src1, src2, tgt0, tgt1, tgt2, quad_kind, quad_order,
+        src0, src1, src2, tgt0, tgt1, tgt2, quad_kind,
     ) + triangle_geometric_coupling_regular(
-        tgt0, tgt1, tgt2, src0, src1, src2, quad_kind, quad_order,
+        tgt0, tgt1, tgt2, src0, src1, src2, quad_kind,
     ))
 }
 
@@ -538,9 +531,8 @@ pub fn triangle_basis_mutual_inductance_block(
     tgt1: [f64; 3],
     tgt2: [f64; 3],
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> [[f64; 3]; 3] {
-    let g = triangle_geometric_coupling(src0, src1, src2, tgt0, tgt1, tgt2, quad_kind, quad_order);
+    let g = triangle_geometric_coupling(src0, src1, src2, tgt0, tgt1, tgt2, quad_kind);
     let ksrc = triangle_basis_current_densities(src0, src1, src2);
     let ktgt = triangle_basis_current_densities(tgt0, tgt1, tgt2);
 
@@ -573,11 +565,9 @@ pub fn triangle_basis_mutual_inductance(
     tgt2: [f64; 3],
     tgt_basis: usize,
     quad_kind: QuadratureKind,
-    quad_order: usize,
 ) -> f64 {
-    triangle_basis_mutual_inductance_block(
-        src0, src1, src2, tgt0, tgt1, tgt2, quad_kind, quad_order,
-    )[src_basis][tgt_basis]
+    triangle_basis_mutual_inductance_block(src0, src1, src2, tgt0, tgt1, tgt2, quad_kind)
+        [src_basis][tgt_basis]
 }
 
 /// Contract a triangle-pair inductance block with source and target nodal potential
@@ -706,8 +696,7 @@ mod tests {
                 tri.nodes[2],
                 tri.s,
                 obs,
-                QuadratureKind::GaussLegendre,
-                3,
+                QuadratureKind::GaussLegendre3,
             );
             out[0] += contrib[0];
             out[1] += contrib[1];
@@ -725,8 +714,7 @@ mod tests {
                 tri.nodes[2],
                 tri.s,
                 obs,
-                QuadratureKind::GaussLegendre,
-                3,
+                QuadratureKind::GaussLegendre3,
             );
             out[0] += contrib[0];
             out[1] += contrib[1];
@@ -763,8 +751,7 @@ mod tests {
                     target.nodes[0],
                     target.nodes[1],
                     target.nodes[2],
-                    QuadratureKind::GaussLegendre,
-                    3,
+                    QuadratureKind::GaussLegendre3,
                 );
                 out += triangle_inductance_from_potential_vectors(block, source.s, target.s);
             }
@@ -777,18 +764,17 @@ mod tests {
     {
         let src = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.0]];
         let tgt = [[0.3, -0.2, 1.1], [1.1, 0.1, 1.4], [0.2, 0.9, 1.2]];
-        let quad_kind = QuadratureKind::GaussLegendre;
-        let quad_order = 3;
+        let quad_kind = QuadratureKind::GaussLegendre3;
 
         let block = triangle_basis_mutual_inductance_block(
-            src[0], src[1], src[2], tgt[0], tgt[1], tgt[2], quad_kind, quad_order,
+            src[0], src[1], src[2], tgt[0], tgt[1], tgt[2], quad_kind,
         );
         let block_t = triangle_basis_mutual_inductance_block(
-            tgt[0], tgt[1], tgt[2], src[0], src[1], src[2], quad_kind, quad_order,
+            tgt[0], tgt[1], tgt[2], src[0], src[1], src[2], quad_kind,
         );
 
         let tri_area_tgt = calc_tri_area(tgt[0], tgt[1], tgt[2]);
-        let quad_points_tgt = triangle_quadrature_points(quad_kind, quad_order);
+        let quad_points_tgt = triangle_quadrature_points(quad_kind);
         let ktgt = triangle_basis_current_densities(tgt[0], tgt[1], tgt[2]);
 
         for i in 0..3 {
@@ -803,7 +789,6 @@ mod tests {
                         src_basis[2],
                         obs,
                         quad_kind,
-                        quad_order,
                     );
                     via_a_dot_k += qp[0]
                         * tri_area_tgt
@@ -839,8 +824,7 @@ mod tests {
             tri[0],
             tri[1],
             tri[2],
-            QuadratureKind::GaussLegendre,
-            3,
+            QuadratureKind::GaussLegendre3,
         );
 
         let mut max_entry: f64 = 0.0;
@@ -884,8 +868,7 @@ mod tests {
                 other[0],
                 other[1],
                 other[2],
-                QuadratureKind::GaussLegendre,
-                3,
+                QuadratureKind::GaussLegendre3,
             );
             let block21 = triangle_basis_mutual_inductance_block(
                 other[0],
@@ -894,8 +877,7 @@ mod tests {
                 tri0[0],
                 tri0[1],
                 tri0[2],
-                QuadratureKind::GaussLegendre,
-                3,
+                QuadratureKind::GaussLegendre3,
             );
 
             for i in 0..3 {

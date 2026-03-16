@@ -1,10 +1,12 @@
 use core::f64::consts::PI;
 
 use super::{
-    QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle, map_tri_uv,
+    QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
+    flux_density_triangle_mesh, flux_density_triangle_mesh_par, map_tri_uv,
     triangle_basis_current_densities, triangle_basis_mutual_inductance_block,
     triangle_inductance_from_potential_vectors, triangle_quadrature_points,
-    triangle_vector_potential_basis, vector_potential_triangle,
+    triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
+    vector_potential_triangle_mesh_par,
 };
 use crate::MU0_OVER_4PI;
 use crate::math::{cartesian_to_cylindrical, dot3};
@@ -18,6 +20,12 @@ use crate::testing::approx;
 struct TrianglePatch {
     nodes: [[f64; 3]; 3],
     s: [f64; 3],
+}
+
+struct TriangleMeshData {
+    nodes: (Vec<f64>, Vec<f64>, Vec<f64>),
+    triangles: (Vec<usize>, Vec<usize>, Vec<usize>),
+    s: Vec<f64>,
 }
 
 fn circular_strip_triangles_at_z(
@@ -121,6 +129,120 @@ fn strip_vector_potential(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
     out
 }
 
+fn triangle_patches_to_mesh(tris: &[TrianglePatch]) -> TriangleMeshData {
+    let mut nodes_xyz: Vec<[f64; 3]> = Vec::new();
+    let mut node_s: Vec<f64> = Vec::new();
+    let mut tri0 = Vec::with_capacity(tris.len());
+    let mut tri1 = Vec::with_capacity(tris.len());
+    let mut tri2 = Vec::with_capacity(tris.len());
+
+    for tri in tris {
+        let mut tri_idx = [0usize; 3];
+        for local in 0..3 {
+            let node = tri.nodes[local];
+            if let Some(idx) = nodes_xyz.iter().position(|&existing| existing == node) {
+                assert!(
+                    approx(node_s[idx], tri.s[local], 0.0, 1e-14),
+                    "shared node had inconsistent scalar value"
+                );
+                tri_idx[local] = idx;
+            } else {
+                nodes_xyz.push(node);
+                node_s.push(tri.s[local]);
+                tri_idx[local] = nodes_xyz.len() - 1;
+            }
+        }
+        tri0.push(tri_idx[0]);
+        tri1.push(tri_idx[1]);
+        tri2.push(tri_idx[2]);
+    }
+
+    let mut x = Vec::with_capacity(nodes_xyz.len());
+    let mut y = Vec::with_capacity(nodes_xyz.len());
+    let mut z = Vec::with_capacity(nodes_xyz.len());
+    for node in nodes_xyz {
+        x.push(node[0]);
+        y.push(node[1]);
+        z.push(node[2]);
+    }
+
+    TriangleMeshData {
+        nodes: (x, y, z),
+        triangles: (tri0, tri1, tri2),
+        s: node_s,
+    }
+}
+
+fn obs_components(obs: &[[f64; 3]]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let mut x = Vec::with_capacity(obs.len());
+    let mut y = Vec::with_capacity(obs.len());
+    let mut z = Vec::with_capacity(obs.len());
+    for point in obs {
+        x.push(point[0]);
+        y.push(point[1]);
+        z.push(point[2]);
+    }
+    (x, y, z)
+}
+
+fn mesh_flux_density(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -> Vec<[f64; 3]> {
+    let obs_xyz = obs_components(obs);
+    let mut bx = vec![0.0; obs.len()];
+    let mut by = vec![0.0; obs.len()];
+    let mut bz = vec![0.0; obs.len()];
+
+    let result = match par {
+        true => flux_density_triangle_mesh_par(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &mesh.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut bx, &mut by, &mut bz),
+        ),
+        false => flux_density_triangle_mesh(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &mesh.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut bx, &mut by, &mut bz),
+        ),
+    };
+    result.unwrap();
+
+    (0..obs.len()).map(|i| [bx[i], by[i], bz[i]]).collect()
+}
+
+fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -> Vec<[f64; 3]> {
+    let obs_xyz = obs_components(obs);
+    let mut ax = vec![0.0; obs.len()];
+    let mut ay = vec![0.0; obs.len()];
+    let mut az = vec![0.0; obs.len()];
+
+    let result = match par {
+        true => vector_potential_triangle_mesh_par(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &mesh.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut ax, &mut ay, &mut az),
+        ),
+        false => vector_potential_triangle_mesh(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &mesh.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut ax, &mut ay, &mut az),
+        ),
+    };
+    result.unwrap();
+
+    (0..obs.len()).map(|i| [ax[i], ay[i], az[i]]).collect()
+}
+
 fn max_abs_component(vectors: &[[f64; 3]]) -> f64 {
     vectors
         .iter()
@@ -155,6 +277,59 @@ fn strip_mutual_inductance(src: &[TrianglePatch], tgt: &[TrianglePatch]) -> f64 
         }
     }
     out
+}
+
+#[test]
+fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
+    let tri = TrianglePatch {
+        nodes: [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]],
+        s: [1.2, -0.4, 0.7],
+    };
+    let mesh = triangle_patches_to_mesh(&[tri]);
+    let obs = [[0.3, -0.2, 1.1], [0.8, 0.4, 0.6], [-0.4, 0.7, 0.9]];
+
+    let b_mesh = mesh_flux_density(&mesh, &obs, false);
+    let b_mesh_par = mesh_flux_density(&mesh, &obs, true);
+    let a_mesh = mesh_vector_potential(&mesh, &obs, false);
+    let a_mesh_par = mesh_vector_potential(&mesh, &obs, true);
+
+    for (i, point) in obs.iter().enumerate() {
+        let b_direct = flux_density_triangle(
+            tri.nodes[0],
+            tri.nodes[1],
+            tri.nodes[2],
+            tri.s,
+            *point,
+            QuadratureKind::GaussLegendre3,
+        );
+        let a_direct = vector_potential_triangle(
+            tri.nodes[0],
+            tri.nodes[1],
+            tri.nodes[2],
+            tri.s,
+            *point,
+            QuadratureKind::GaussLegendre3,
+        );
+
+        for axis in 0..3 {
+            assert!(
+                approx(b_mesh[i][axis], b_direct[axis], 1e-12, 1e-14),
+                "single-triangle mesh B mismatch at point {i}, axis {axis}"
+            );
+            assert!(
+                approx(b_mesh_par[i][axis], b_direct[axis], 1e-12, 1e-14),
+                "single-triangle mesh parallel B mismatch at point {i}, axis {axis}"
+            );
+            assert!(
+                approx(a_mesh[i][axis], a_direct[axis], 1e-12, 1e-14),
+                "single-triangle mesh A mismatch at point {i}, axis {axis}"
+            );
+            assert!(
+                approx(a_mesh_par[i][axis], a_direct[axis], 1e-12, 1e-14),
+                "single-triangle mesh parallel A mismatch at point {i}, axis {axis}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -334,6 +509,7 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
     let s0 = loop_current;
 
     let strip = circular_strip_triangles(radius, height, s0, nphi);
+    let strip_mesh = triangle_patches_to_mesh(&strip);
     let obs = [
         [2.70, 0.95, 0.85],
         [3.10, -1.15, 1.05],
@@ -342,6 +518,10 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
         [4.20, -0.90, -1.55],
         [4.55, 1.10, -2.05],
     ];
+    let b_mesh = mesh_flux_density(&strip_mesh, &obs, false);
+    let b_mesh_par = mesh_flux_density(&strip_mesh, &obs, true);
+    let a_mesh = mesh_vector_potential(&strip_mesh, &obs, false);
+    let a_mesh_par = mesh_vector_potential(&strip_mesh, &obs, true);
 
     let mut b_strip = Vec::with_capacity(obs.len());
     let mut b_loop = Vec::with_capacity(obs.len());
@@ -380,6 +560,24 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
                 b_loop[i][axis],
                 obs[i],
             );
+            assert!(
+                approx(b_strip[i][axis], b_mesh[i][axis], 1e-12, bfield_atol),
+                "{} mesh serial mismatch at point {}: mesh={:.6e}, strip={:.6e}, obs={:?}",
+                b_axis_names[axis],
+                i,
+                b_mesh[i][axis],
+                b_strip[i][axis],
+                obs[i],
+            );
+            assert!(
+                approx(b_strip[i][axis], b_mesh_par[i][axis], 1e-12, bfield_atol),
+                "{} mesh parallel mismatch at point {}: mesh={:.6e}, strip={:.6e}, obs={:?}",
+                b_axis_names[axis],
+                i,
+                b_mesh_par[i][axis],
+                b_strip[i][axis],
+                obs[i],
+            );
 
             assert!(
                 approx(a_loop[i][axis], a_strip[i][axis], afield_rtol, afield_atol),
@@ -388,6 +586,24 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
                 i,
                 a_strip[i][axis],
                 a_loop[i][axis],
+                obs[i],
+            );
+            assert!(
+                approx(a_strip[i][axis], a_mesh[i][axis], 1e-12, afield_atol),
+                "{} mesh serial mismatch at point {}: mesh={:.6e}, strip={:.6e}, obs={:?}",
+                a_axis_names[axis],
+                i,
+                a_mesh[i][axis],
+                a_strip[i][axis],
+                obs[i],
+            );
+            assert!(
+                approx(a_strip[i][axis], a_mesh_par[i][axis], 1e-12, afield_atol),
+                "{} mesh parallel mismatch at point {}: mesh={:.6e}, strip={:.6e}, obs={:?}",
+                a_axis_names[axis],
+                i,
+                a_mesh_par[i][axis],
+                a_strip[i][axis],
                 obs[i],
             );
         }
@@ -401,6 +617,7 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_near_axis
     let nphi = 256;
     let loop_current = 1.7;
     let strip = circular_strip_triangles(radius, height, loop_current, nphi);
+    let strip_mesh = triangle_patches_to_mesh(&strip);
 
     let mut obs = Vec::with_capacity(202);
     for i in -100..=100 {
@@ -410,8 +627,10 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_near_axis
 
     let bz_rtol = 1e-3;
     let bxy_atol = 1e-12;
+    let b_mesh = mesh_flux_density(&strip_mesh, &obs, false);
+    let b_mesh_par = mesh_flux_density(&strip_mesh, &obs, true);
 
-    for point in obs {
+    for (i, point) in obs.iter().copied().enumerate() {
         let b_strip = strip_flux_density(&strip, point);
         let b_ref = flux_density_circular_filament_cartesian_scalar(
             (radius, 0.0, loop_current),
@@ -427,15 +646,39 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_near_axis
             point,
         );
         assert!(
+            approx(b_strip[2], b_mesh[i][2], 1e-12, 1e-15),
+            "mesh serial Bz mismatch near axis: mesh={:.6e}, strip={:.6e}, obs={:?}",
+            b_mesh[i][2],
+            b_strip[2],
+            point,
+        );
+        assert!(
+            approx(b_strip[2], b_mesh_par[i][2], 1e-12, 1e-15),
+            "mesh parallel Bz mismatch near axis: mesh={:.6e}, strip={:.6e}, obs={:?}",
+            b_mesh_par[i][2],
+            b_strip[2],
+            point,
+        );
+        assert!(
             b_strip[0].abs() <= bxy_atol,
             "Bx not near zero on axis: {:.6e} at {:?}",
             b_strip[0],
             point,
         );
         assert!(
+            b_mesh[i][0].abs() <= bxy_atol && b_mesh_par[i][0].abs() <= bxy_atol,
+            "mesh Bx not near zero on axis at {:?}",
+            point,
+        );
+        assert!(
             b_strip[1].abs() <= bxy_atol,
             "By not near zero on axis: {:.6e} at {:?}",
             b_strip[1],
+            point,
+        );
+        assert!(
+            b_mesh[i][1].abs() <= bxy_atol && b_mesh_par[i][1].abs() <= bxy_atol,
+            "mesh By not near zero on axis at {:?}",
             point,
         );
     }

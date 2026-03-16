@@ -1,8 +1,15 @@
+use rayon::{
+    iter::{IntoParallelIterator, ParallelIterator},
+    slice::{ParallelSlice, ParallelSliceMut},
+};
+
 use super::{
     QuadratureKind, map_tri_uv, triangle_basis_current_density, triangle_quadrature_points,
 };
-use crate::MU0_OVER_4PI;
+use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
 use crate::math::{cross3, rss3};
+use crate::mesh::TriangleMeshView;
+use crate::{MU0_OVER_4PI, chunksize};
 
 /// Magnetic flux density (B-field) contribution of a given triangle's basis function
 /// with unit weighting to a given observation point.
@@ -63,4 +70,76 @@ pub fn flux_density_triangle(
         (s[0] * b_n0[1] + s[1] * b_n1[1] + s[2] * b_n2[1]) * MU0_OVER_4PI,
         (s[0] * b_n0[2] + s[1] * b_n1[2] + s[2] * b_n2[2]) * MU0_OVER_4PI,
     ]
+}
+
+fn flux_density_triangle_mesh_inner(
+    obs: (&[f64], &[f64], &[f64]),
+    mesh: TriangleMeshView<'_>,
+    quad_kind: QuadratureKind,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let nobs = obs.0.len();
+    check_length_3tup!(nobs, obs);
+    check_length_3tup!(nobs, out);
+
+    out.0.fill(0.0);
+    out.1.fill(0.0);
+    out.2.fill(0.0);
+
+    for i in 0..nobs {
+        let obs_i = [obs.0[i], obs.1[i], obs.2[i]];
+        for j in 0..mesh.len() {
+            let (tri_nodes, tri_s) = mesh.triangle_nodes(j);
+            let contrib = flux_density_triangle(
+                tri_nodes[0],
+                tri_nodes[1],
+                tri_nodes[2],
+                tri_s,
+                obs_i,
+                quad_kind,
+            );
+            out.0[i] += contrib[0];
+            out.1[i] += contrib[1];
+            out.2[i] += contrib[2];
+        }
+    }
+
+    Ok(())
+}
+
+/// Flux density contribution from a triangle mesh with nodal stream-function values.
+pub fn flux_density_triangle_mesh(
+    obs: (&[f64], &[f64], &[f64]),
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    s: &[f64],
+    quad_kind: QuadratureKind,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
+    flux_density_triangle_mesh_inner(obs, mesh, quad_kind, out)
+}
+
+/// Flux density contribution from a triangle mesh with nodal stream-function values.
+/// This variant is parallelized over chunks of observation points.
+pub fn flux_density_triangle_mesh_par(
+    obs: (&[f64], &[f64], &[f64]),
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    s: &[f64],
+    quad_kind: QuadratureKind,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
+    let n = chunksize(obs.0.len());
+    let (xpc, ypc, zpc) = par_chunks_3tup!(obs, n);
+    let (bxc, byc, bzc) = mut_par_chunks_3tup!(out, n);
+
+    (bxc, byc, bzc, xpc, ypc, zpc)
+        .into_par_iter()
+        .try_for_each(|(bx, by, bz, xp, yp, zp)| {
+            flux_density_triangle_mesh_inner((xp, yp, zp), mesh, quad_kind, (bx, by, bz))
+        })?;
+
+    Ok(())
 }

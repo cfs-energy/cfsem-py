@@ -7,6 +7,7 @@ import cfsem
 
 from test import test_funcs as _test
 
+
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
 @mark.parametrize("par", [True, False])

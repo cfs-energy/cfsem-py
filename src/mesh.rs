@@ -50,6 +50,74 @@ where
     }
 }
 
+/// Borrowed view of a triangle surface mesh with one scalar value per node.
+///
+/// Intended as an internal lowered representation for boundary-element kernels.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TriangleMeshView<'a> {
+    nodes: (&'a [f64], &'a [f64], &'a [f64]),
+    triangles: (&'a [usize], &'a [usize], &'a [usize]),
+    s: &'a [f64],
+}
+
+impl<'a> TriangleMeshView<'a> {
+    /// Validate dimensions and construct a borrowed mesh view.
+    pub(crate) fn new(
+        nodes: (&'a [f64], &'a [f64], &'a [f64]),
+        triangles: (&'a [usize], &'a [usize], &'a [usize]),
+        s: &'a [f64],
+    ) -> Result<Self, &'static str> {
+        let nnode = nodes.0.len();
+        if nodes.1.len() != nnode || nodes.2.len() != nnode {
+            return Err("Node coordinate dimension mismatch");
+        }
+        if s.len() != nnode {
+            return Err("Nodal scalar dimension mismatch");
+        }
+
+        let ntri = triangles.0.len();
+        if triangles.1.len() != ntri || triangles.2.len() != ntri {
+            return Err("Triangle index dimension mismatch");
+        }
+
+        if triangles
+            .0
+            .iter()
+            .chain(triangles.1.iter())
+            .chain(triangles.2.iter())
+            .any(|&idx| idx >= nnode)
+        {
+            return Err("Triangle refers to non-existent node");
+        }
+
+        Ok(Self {
+            nodes,
+            triangles,
+            s,
+        })
+    }
+
+    /// Number of triangles in the view.
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.triangles.0.len()
+    }
+
+    /// Node coordinates and nodal scalar values for one triangle.
+    #[inline]
+    pub(crate) fn triangle_nodes(&self, i: usize) -> ([[f64; 3]; 3], [f64; 3]) {
+        let idx = [
+            self.triangles.0[i],
+            self.triangles.1[i],
+            self.triangles.2[i],
+        ];
+        let nodes = idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]);
+        let s = idx.map(|k| self.s[k]);
+        (nodes, s)
+    }
+}
+
 /// Convert a point to f64 values
 ///
 /// # Panics
@@ -317,4 +385,30 @@ fn tuplenormalize(a: (f64, f64, f64)) -> (f64, f64, f64) {
 #[inline]
 fn tuplecross(a: (f64, f64, f64), b: (f64, f64, f64)) -> (f64, f64, f64) {
     cross3(a.0, a.1, a.2, b.0, b.1, b.2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TriangleMeshView;
+
+    #[test]
+    fn test_triangle_mesh_view_valid() {
+        let nodes = (
+            &[0.0, 1.0, 0.0][..],
+            &[0.0, 0.0, 1.0][..],
+            &[0.0, 0.0, 0.0][..],
+        );
+        let triangles = (&[0usize][..], &[1usize][..], &[2usize][..]);
+        let s = &[1.0, -0.5, 0.25][..];
+
+        let view = TriangleMeshView::new(nodes, triangles, s).unwrap();
+        assert_eq!(view.len(), 1);
+
+        let (tri_nodes, tri_s) = view.triangle_nodes(0);
+        assert_eq!(
+            tri_nodes,
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert_eq!(tri_s, [1.0, -0.5, 0.25]);
+    }
 }

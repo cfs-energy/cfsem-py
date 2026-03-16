@@ -5,7 +5,7 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
-from numpy import asarray, ascontiguousarray, float64, full, zeros_like
+from numpy import asarray, ascontiguousarray, float64, full, int64, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -25,6 +25,7 @@ from .cfsem import (
 from .cfsem import flux_density_dipole as em_flux_density_dipole
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
+from .cfsem import flux_density_triangle_mesh as em_flux_density_triangle_mesh
 from .cfsem import flux_density_point_segment as em_flux_density_point_segment
 from .cfsem import gs_operator_order2 as em_gs_operator_order2
 from .cfsem import gs_operator_order4 as em_gs_operator_order4
@@ -40,6 +41,9 @@ from .cfsem import (
 )
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
+)
+from .cfsem import (
+    vector_potential_triangle_mesh as em_vector_potential_triangle_mesh,
 )
 from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
@@ -295,6 +299,66 @@ def vector_potential_point_segment(
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
     return em_vector_potential_point_segment(xyzp, xyzfil, dlxyzfil, ifil, par)
+
+
+def flux_density_triangle_mesh(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    s: NDArray[float64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> Array3xN:
+    """
+    Biot-Savart law calculation for B-field contribution from a triangle mesh
+    with one stream-function value per node.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        s: nodal stream-function values with shape `(nnode,)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, either `"gl2"` or `"gl3"`
+
+    Returns:
+        [T] (Bx, By, Bz) magnetic flux density at observation points
+    """
+    obs = _n3f_contig(obs, "obs")
+    nodes = _n3f_contig(nodes, "nodes")
+    triangles = _n3i_contig(triangles, "triangles")
+    s = ascontiguousarray(s, dtype=float64).ravel()
+    return em_flux_density_triangle_mesh(obs, nodes, triangles, s, par, quad)
+
+
+def vector_potential_triangle_mesh(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    s: NDArray[float64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> Array3xN:
+    """
+    Vector potential calculation for A-field contribution from a triangle mesh
+    with one stream-function value per node.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        s: nodal stream-function values with shape `(nnode,)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, either `"gl2"` or `"gl3"`
+
+    Returns:
+        [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
+    """
+    obs = _n3f_contig(obs, "obs")
+    nodes = _n3f_contig(nodes, "nodes")
+    triangles = _n3i_contig(triangles, "triangles")
+    s = ascontiguousarray(s, dtype=float64).ravel()
+    return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par, quad)
 
 
 def inductance_piecewise_linear_filaments(
@@ -689,3 +753,19 @@ def _2tup_contig(
     """Make contiguous references or copies to arrays in a 2-tuple.
     Only copies data if it is not already contiguous."""
     return (ascontiguousarray(t[0]).ravel(), ascontiguousarray(t[1]).ravel())
+
+
+def _n3f_contig(arr: NDArray[float64], name: str) -> NDArray[float64]:
+    """Make a contiguous float64 array with shape `(n, 3)`."""
+    arr = ascontiguousarray(arr, dtype=float64)
+    if arr.ndim != 2 or arr.shape[1] != 3:
+        raise ValueError(f"{name} must have shape (n, 3)")
+    return arr
+
+
+def _n3i_contig(arr: NDArray[int64], name: str) -> NDArray[int64]:
+    """Make a contiguous int64 array with shape `(n, 3)`."""
+    arr = ascontiguousarray(arr, dtype=int64)
+    if arr.ndim != 2 or arr.shape[1] != 3:
+        raise ValueError(f"{name} must have shape (n, 3)")
+    return arr

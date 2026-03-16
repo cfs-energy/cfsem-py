@@ -70,7 +70,10 @@ fn circular_strip_triangles_at_z(
         for tri in [tri0, tri1] {
             let normal = calc_tri_normal(tri.nodes[0], tri.nodes[1], tri.nodes[2]);
             let alignment = normal[0] * radial[0] + normal[1] * radial[1];
-            assert!(alignment > 0.0, "triangle winding is not radially consistent");
+            assert!(
+                alignment > 0.0,
+                "triangle winding is not radially consistent"
+            );
             tris.push(tri);
         }
     }
@@ -160,10 +163,12 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
     let tgt = [[0.3, -0.2, 1.1], [1.1, 0.1, 1.4], [0.2, 0.9, 1.2]];
     let quad_kind = QuadratureKind::GaussLegendre3;
 
-    let block =
-        triangle_basis_mutual_inductance_block(src[0], src[1], src[2], tgt[0], tgt[1], tgt[2], quad_kind);
-    let block_t =
-        triangle_basis_mutual_inductance_block(tgt[0], tgt[1], tgt[2], src[0], src[1], src[2], quad_kind);
+    let block = triangle_basis_mutual_inductance_block(
+        src[0], src[1], src[2], tgt[0], tgt[1], tgt[2], quad_kind,
+    );
+    let block_t = triangle_basis_mutual_inductance_block(
+        tgt[0], tgt[1], tgt[2], src[0], src[1], src[2], quad_kind,
+    );
 
     let tri_area_tgt = calc_tri_area(tgt[0], tgt[1], tgt[2]);
     let quad_points_tgt = triangle_quadrature_points(quad_kind);
@@ -175,12 +180,19 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
             let mut via_a_dot_k = 0.0;
             for qp in quad_points_tgt {
                 let obs = map_tri_uv(tgt[0], tgt[1], tgt[2], [qp[1], qp[2]]);
-                let a_src =
-                    triangle_vector_potential_basis(src_basis[0], src_basis[1], src_basis[2], obs, quad_kind);
+                let a_src = triangle_vector_potential_basis(
+                    src_basis[0],
+                    src_basis[1],
+                    src_basis[2],
+                    obs,
+                    quad_kind,
+                );
                 via_a_dot_k += qp[0]
                     * tri_area_tgt
                     * MU0_OVER_4PI
-                    * dot3(a_src[0], a_src[1], a_src[2], ktgt[j][0], ktgt[j][1], ktgt[j][2]);
+                    * dot3(
+                        a_src[0], a_src[1], a_src[2], ktgt[j][0], ktgt[j][1], ktgt[j][2],
+                    );
             }
 
             assert!(
@@ -202,13 +214,23 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
 #[test]
 fn test_triangle_basis_self_inductance_block_is_symmetric_and_finite() {
     let tri = [[0.0, 0.0, 0.0], [0.8, 0.1, 0.0], [0.2, 0.9, 0.2]];
-    let block =
-        triangle_basis_mutual_inductance_block(tri[0], tri[1], tri[2], tri[0], tri[1], tri[2], QuadratureKind::GaussLegendre3);
+    let block = triangle_basis_mutual_inductance_block(
+        tri[0],
+        tri[1],
+        tri[2],
+        tri[0],
+        tri[1],
+        tri[2],
+        QuadratureKind::GaussLegendre3,
+    );
 
     let mut max_entry: f64 = 0.0;
     for i in 0..3 {
         for j in 0..3 {
-            assert!(block[i][j].is_finite(), "self block contains non-finite entry at ({i},{j})");
+            assert!(
+                block[i][j].is_finite(),
+                "self block contains non-finite entry at ({i},{j})"
+            );
             assert!(
                 approx(block[i][j], block[j][i], 1e-10, 1e-12),
                 "self block is not symmetric at ({i},{j}): {:.6e} vs {:.6e}",
@@ -257,7 +279,10 @@ fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciproca
 
         for i in 0..3 {
             for j in 0..3 {
-                assert!(block12[i][j].is_finite(), "touching-pair entry is non-finite at ({i},{j})");
+                assert!(
+                    block12[i][j].is_finite(),
+                    "touching-pair entry is non-finite at ({i},{j})"
+                );
                 assert!(
                     approx(block12[i][j], block21[j][i], 1e-8, 1e-11),
                     "touching-pair reciprocity mismatch at ({i},{j}): {:.6e} vs {:.6e}",
@@ -273,7 +298,7 @@ fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciproca
 fn test_triangle_strip_mutual_inductance_against_circular_filament() {
     let radius = 0.71;
     let height = radius * 1e-3;
-    let nphi = 32;
+    let nphi = 128;
     let current = 1.0;
     let z_src = -0.37;
     let z_tgt = 0.41;
@@ -286,7 +311,7 @@ fn test_triangle_strip_mutual_inductance_against_circular_filament() {
     let m_loop = flux_circular_filament_scalar((radius, z_src, 1.0), (radius, z_tgt));
 
     assert!(
-        approx(m_loop, m_strip, 4e-2, 1e-12),
+        approx(m_loop, m_strip, 1e-3, 1e-12),
         "strip mutual inductance mismatch: strip={:.6e}, circular={:.6e}",
         m_strip,
         m_loop,

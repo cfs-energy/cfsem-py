@@ -1,4 +1,6 @@
-use super::{QuadratureKind, map_tri_uv, triangle_basis_current_density, triangle_quadrature_points};
+use super::{
+    QuadratureKind, map_tri_uv, triangle_basis_current_density, triangle_quadrature_points,
+};
 use crate::MU0_OVER_4PI;
 use crate::math::rss3;
 

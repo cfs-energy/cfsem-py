@@ -180,11 +180,8 @@ pub fn triangle_geometric_coupling(
         return triangle_geometric_coupling_self(src0, src1, src2, quad_kind);
     }
 
-    0.5 * (triangle_geometric_coupling_regular(
-        src0, src1, src2, tgt0, tgt1, tgt2, quad_kind,
-    ) + triangle_geometric_coupling_regular(
-        tgt0, tgt1, tgt2, src0, src1, src2, quad_kind,
-    ))
+    0.5 * (triangle_geometric_coupling_regular(src0, src1, src2, tgt0, tgt1, tgt2, quad_kind)
+        + triangle_geometric_coupling_regular(tgt0, tgt1, tgt2, src0, src1, src2, quad_kind))
 }
 
 /// Mutual-inductance block for the three nodal basis functions on a source triangle and
@@ -245,8 +242,8 @@ pub fn triangle_basis_mutual_inductance(
     tgt_basis: usize,
     quad_kind: QuadratureKind,
 ) -> f64 {
-    triangle_basis_mutual_inductance_block(src0, src1, src2, tgt0, tgt1, tgt2, quad_kind)
-        [src_basis][tgt_basis]
+    triangle_basis_mutual_inductance_block(src0, src1, src2, tgt0, tgt1, tgt2, quad_kind)[src_basis]
+        [tgt_basis]
 }
 
 /// Contract a triangle-pair inductance block with source and target nodal potential

@@ -291,8 +291,6 @@ pub fn vector_potential_triangle(
     return out;
 }
 
-const TRIANGLE_SCALAR_POTENTIAL_NEAR_FACTOR: f64 = 2.0;
-const TRIANGLE_SCALAR_POTENTIAL_MAX_DEPTH: usize = 8;
 const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 128;
 
 #[inline]
@@ -301,46 +299,6 @@ fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) ->
         triangle_basis_current_density(n0, n1, n2).1,
         triangle_basis_current_density(n1, n2, n0).1,
         triangle_basis_current_density(n2, n0, n1).1,
-    ]
-}
-
-#[inline]
-fn triangle_centroid(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [f64; 3] {
-    [
-        (n0[0] + n1[0] + n2[0]) / 3.0,
-        (n0[1] + n1[1] + n2[1]) / 3.0,
-        (n0[2] + n1[2] + n2[2]) / 3.0,
-    ]
-}
-
-#[inline]
-fn triangle_max_edge_length(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> f64 {
-    let d01 = rss3(n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]);
-    let d12 = rss3(n2[0] - n1[0], n2[1] - n1[1], n2[2] - n1[2]);
-    let d20 = rss3(n0[0] - n2[0], n0[1] - n2[1], n0[2] - n2[2]);
-    d01.max(d12).max(d20)
-}
-
-#[inline]
-fn midpoint(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        0.5 * (a[0] + b[0]),
-        0.5 * (a[1] + b[1]),
-        0.5 * (a[2] + b[2]),
-    ]
-}
-
-#[inline]
-fn subdivide_triangle(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [[[f64; 3]; 3]; 4] {
-    let m01 = midpoint(n0, n1);
-    let m12 = midpoint(n1, n2);
-    let m20 = midpoint(n2, n0);
-
-    [
-        [n0, m01, m20],
-        [m01, n1, m12],
-        [m20, m12, n2],
-        [m01, m12, m20],
     ]
 }
 
@@ -444,52 +402,6 @@ fn triangle_scalar_potential_self_duffy(
     out
 }
 
-/// Adaptive evaluation of `∫_triangle dS / R` for near-singular observation points.
-///
-/// Method:
-/// - Use standard triangle quadrature when the observation point is well separated from
-///   the triangle relative to its edge length.
-/// - Otherwise recursively subdivide the source triangle into four children and sum the
-///   child contributions until the pair is sufficiently separated or the depth limit is
-///   reached.
-///
-/// References:
-/// - [2], pp. 1448-1455, for numerical treatment of triangle Green-function integrals.
-/// - [3], pp. 276-281, for the underlying `1 / R` element integrals.
-/// - [1] and [4], as background on handling weak vertex singularities by variable
-///   transformation when the observation point approaches the element.
-#[inline]
-fn triangle_scalar_potential_adaptive(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    obs: [f64; 3],
-    quad_kind: QuadratureKind,
-    quad_order: usize,
-    depth: usize,
-) -> f64 {
-    let centroid = triangle_centroid(n0, n1, n2);
-    let dist = rss3(
-        obs[0] - centroid[0],
-        obs[1] - centroid[1],
-        obs[2] - centroid[2],
-    );
-    let tri_scale = triangle_max_edge_length(n0, n1, n2);
-
-    if depth == 0 || dist > TRIANGLE_SCALAR_POTENTIAL_NEAR_FACTOR * tri_scale {
-        return triangle_scalar_potential_regular(n0, n1, n2, obs, quad_kind, quad_order);
-    }
-
-    subdivide_triangle(n0, n1, n2)
-        .iter()
-        .map(|child| {
-            triangle_scalar_potential_adaptive(
-                child[0], child[1], child[2], obs, quad_kind, quad_order, depth - 1,
-            )
-        })
-        .sum()
-}
-
 /// Double-surface geometric coupling
 /// `∫_target ∫_source 1 / |r - r'| dS' dS`
 /// for a well-separated triangle pair using plain nested quadrature.
@@ -558,64 +470,15 @@ fn triangle_geometric_coupling_self(
     out
 }
 
-/// One directed evaluation of the triangle-pair geometric coupling.
-///
-/// Method:
-/// - Integrate over target quadrature points.
-/// - For each target point, evaluate the source triangle's `∫ dS / R` contribution with
-///   adaptive subdivision so touching and near-touching pairs remain finite and accurate.
-///
-/// References:
-/// - [5], Eq. (3.16) on p. 68 and discussion on p. 106 that mutual-inductance
-///   evaluation requires vector potential on overlapping support.
-/// - [2], pp. 1448-1455.
-/// - [3], pp. 276-281.
-/// - [1] and [4], for Duffy-type handling of weak singularities.
-#[inline]
-fn triangle_geometric_coupling_one_way(
-    src0: [f64; 3],
-    src1: [f64; 3],
-    src2: [f64; 3],
-    tgt0: [f64; 3],
-    tgt1: [f64; 3],
-    tgt2: [f64; 3],
-    quad_kind: QuadratureKind,
-    quad_order: usize,
-) -> f64 {
-    if triangles_identical(src0, src1, src2, tgt0, tgt1, tgt2) {
-        return triangle_geometric_coupling_self(src0, src1, src2, quad_kind, quad_order);
-    }
-
-    let tri_area_tgt = calc_tri_area(tgt0, tgt1, tgt2);
-    let quad_points_tgt = triangle_quadrature_points(quad_kind, quad_order);
-
-    let mut out = 0.0;
-    for qp in quad_points_tgt {
-        let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
-        out += qp[0]
-            * tri_area_tgt
-            * triangle_scalar_potential_adaptive(
-                src0,
-                src1,
-                src2,
-                obs,
-                quad_kind,
-                quad_order,
-                TRIANGLE_SCALAR_POTENTIAL_MAX_DEPTH,
-            );
-    }
-
-    out
-}
-
 /// Double-surface geometric coupling
 /// `∫_target ∫_source 1 / |r - r'| dS' dS`
 /// between two triangles.
 ///
 /// Method:
 /// - Use the dedicated self-term path when the two triangles are identical.
-/// - Otherwise evaluate the pair in both source/target directions and average the two
-///   results so the numerical coupling is explicitly symmetric.
+/// - Otherwise evaluate the pair with regular nested quadrature in both
+///   source/target directions and average the two results so the numerical coupling is
+///   explicitly symmetric.
 ///
 /// References:
 /// - [5], Eq. (3.16) on p. 68 and Sec. 3.5.1 on p. 85 for the symmetry of mutual
@@ -623,7 +486,7 @@ fn triangle_geometric_coupling_one_way(
 ///   vector-potential evaluation.
 /// - [2], pp. 1448-1455.
 /// - [3], pp. 276-281.
-/// - [1] and [4], for weakly singular integration background.
+/// - [1] and [4], for weakly singular integration background for the dedicated self term.
 #[inline]
 pub fn triangle_geometric_coupling(
     src0: [f64; 3],
@@ -645,9 +508,9 @@ pub fn triangle_geometric_coupling(
     }
 
     0.5
-        * (triangle_geometric_coupling_one_way(
+        * (triangle_geometric_coupling_regular(
             src0, src1, src2, tgt0, tgt1, tgt2, quad_kind, quad_order,
-        ) + triangle_geometric_coupling_one_way(
+        ) + triangle_geometric_coupling_regular(
             tgt0, tgt1, tgt2, src0, src1, src2, quad_kind, quad_order,
         ))
 }

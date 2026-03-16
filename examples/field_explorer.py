@@ -21,6 +21,9 @@ DEFAULT_SECTION_GRID_N = 50
 MAX_SECTION_GRID_N = 400
 DEFAULT_POINT_SEGMENT_SUBDIVISIONS = 24
 MAX_POINT_SEGMENT_SUBDIVISIONS = 400
+DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES = 4
+MAX_BOUNDARY_ELEMENT_LENGTH_NODES = 20
+BOUNDARY_COMPARE_GRID_SIZE = 17 if os.getenv("CFSEM_TESTING") else 101
 DOCS_FIELD_EXPLORER_SVG = (
     Path(__file__).resolve().parents[1] / "docs/python/example_outputs/field_explorer.svg"
 )
@@ -47,6 +50,7 @@ def build_plot_context_summary(
     section_grid_n: int | None = None,
     section_filaments_per_segment: int | None = None,
     distributed_radius_mode: str | None = None,
+    boundary_strip_length_nodes: int | None = None,
 ) -> str:
     parts = [
         describe_geometry(n_sides),
@@ -63,6 +67,8 @@ def build_plot_context_summary(
         parts.append(grid_summary)
     if distributed_radius_mode is not None:
         parts.append(f"distributed radius mode: {distributed_radius_mode}")
+    if boundary_strip_length_nodes is not None:
+        parts.append(f"strip nodes/segment: {boundary_strip_length_nodes}")
     return " | ".join(parts)
 
 
@@ -90,6 +96,10 @@ def normalize_section_grid_n(section_grid_n: int) -> int:
 
 def normalize_point_segment_subdivisions(n_point_subdivisions: int) -> int:
     return max(1, min(MAX_POINT_SEGMENT_SUBDIVISIONS, int(n_point_subdivisions)))
+
+
+def normalize_boundary_element_length_nodes(n_strip_nodes: int) -> int:
+    return max(2, min(MAX_BOUNDARY_ELEMENT_LENGTH_NODES, int(n_strip_nodes)))
 
 
 def finite_positive_max(values: np.ndarray) -> float | None:
@@ -306,6 +316,65 @@ def distribute_filaments_in_cylinder_section(
     )
 
 
+def build_boundary_element_strips(
+    starts: np.ndarray,
+    ends: np.ndarray,
+    current: np.ndarray,
+    wire_radius: float,
+    n_length_nodes: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    n_length_nodes = normalize_boundary_element_length_nodes(n_length_nodes)
+    half_width = max(float(wire_radius), 1e-6)
+    y_offset = np.array([0.0, half_width, 0.0])
+
+    nodes: list[np.ndarray] = []
+    triangles: list[list[int]] = []
+    svals: list[np.ndarray] = []
+    upper_paths: list[np.ndarray] = []
+    lower_paths: list[np.ndarray] = []
+    end_connectors: list[np.ndarray] = []
+    node_offset = 0
+
+    for start, end, amp in zip(starts, ends, current, strict=True):
+        centerline = start + np.linspace(0.0, 1.0, n_length_nodes)[:, None] * (end - start)
+        lower = centerline - y_offset.reshape(1, 3)
+        upper = centerline + y_offset.reshape(1, 3)
+
+        nodes.extend([lower, upper])
+        svals.extend(
+            [
+                np.full(n_length_nodes, -amp, dtype=float),
+                np.full(n_length_nodes, amp, dtype=float),
+            ]
+        )
+
+        for i in range(n_length_nodes - 1):
+            lower0 = node_offset + i
+            lower1 = node_offset + i + 1
+            upper0 = node_offset + n_length_nodes + i
+            upper1 = node_offset + n_length_nodes + i + 1
+
+            # Winding is chosen so that s = +I on the upper edge and s = -I on the
+            # lower edge produces current along the segment direction.
+            triangles.append([lower0, upper1, lower1])
+            triangles.append([lower0, upper0, upper1])
+
+        upper_paths.append(upper)
+        lower_paths.append(lower)
+        end_connectors.append(np.vstack((lower[0], upper[0])))
+        end_connectors.append(np.vstack((lower[-1], upper[-1])))
+        node_offset += 2 * n_length_nodes
+
+    return (
+        np.ascontiguousarray(np.vstack(nodes), dtype=np.float64),
+        np.ascontiguousarray(np.array(triangles), dtype=np.int64),
+        np.ascontiguousarray(np.concatenate(svals), dtype=np.float64),
+        upper_paths,
+        lower_paths,
+        end_connectors,
+    )
+
+
 def segment_lines_xyz(starts: np.ndarray, ends: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     n = starts.shape[0]
     x = np.empty(3 * n, dtype=float)
@@ -322,6 +391,47 @@ def segment_lines_xyz(starts: np.ndarray, ends: np.ndarray) -> tuple[np.ndarray,
     z[1::3] = ends[:, 2]
     z[2::3] = np.nan
     return x, y, z
+
+
+def polyline_collection_xyz(paths: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n = sum(path.shape[0] + 1 for path in paths)
+    x = np.empty(n, dtype=float)
+    y = np.empty(n, dtype=float)
+    z = np.empty(n, dtype=float)
+
+    idx = 0
+    for path in paths:
+        m = path.shape[0]
+        x[idx : idx + m] = path[:, 0]
+        y[idx : idx + m] = path[:, 1]
+        z[idx : idx + m] = path[:, 2]
+        x[idx + m] = np.nan
+        y[idx + m] = np.nan
+        z[idx + m] = np.nan
+        idx += m + 1
+
+    return x, y, z
+
+
+def triangle_mesh_edge_lines_xyz(
+    nodes: np.ndarray,
+    triangles: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    edge_set: set[tuple[int, int]] = set()
+    starts: list[np.ndarray] = []
+    ends: list[np.ndarray] = []
+
+    for tri in triangles:
+        i0, i1, i2 = int(tri[0]), int(tri[1]), int(tri[2])
+        for ia, ib in ((i0, i1), (i1, i2), (i2, i0)):
+            edge = (ia, ib) if ia < ib else (ib, ia)
+            if edge in edge_set:
+                continue
+            edge_set.add(edge)
+            starts.append(nodes[edge[0]])
+            ends.append(nodes[edge[1]])
+
+    return segment_lines_xyz(np.vstack(starts), np.vstack(ends))
 
 
 @lru_cache(maxsize=8)
@@ -1191,6 +1301,409 @@ def build_section_comparison_figures(
     return top_fig, bottom_fig
 
 
+@lru_cache(maxsize=8)
+def compute_boundary_element_field(
+    mode: str,
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    boundary_strip_length_nodes: int,
+) -> dict[str, np.ndarray | float]:
+    vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(
+        n_sides, rotation_deg, n_subdivisions
+    )
+    nodes, triangles, s, _upper_paths, _lower_paths, _connectors = build_boundary_element_strips(
+        starts,
+        ends,
+        ifil,
+        wire_radius,
+        boundary_strip_length_nodes,
+    )
+
+    x = np.linspace(-DOMAIN, DOMAIN, BOUNDARY_COMPARE_GRID_SIZE)
+    z = np.linspace(-DOMAIN, DOMAIN, BOUNDARY_COMPARE_GRID_SIZE)
+    xx, zz = np.meshgrid(x, z, indexing="xy")
+    yy = np.zeros_like(xx)
+    xyzp = (xx.ravel(), yy.ravel(), zz.ravel())
+    obs = np.column_stack((xyzp[0], xyzp[1], xyzp[2]))
+
+    t0 = time.perf_counter()
+    if mode == "b":
+        vx_model, vy_model, vz_model = cfsem.flux_density_linear_filament(
+            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
+        )
+    else:
+        vx_model, vy_model, vz_model = cfsem.vector_potential_linear_filament(
+            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=True
+        )
+    t_model = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    if mode == "b":
+        vx_strip, vy_strip, vz_strip = cfsem.flux_density_triangle_mesh(
+            obs, nodes, triangles, s, par=True, quad="gl3"
+        )
+    else:
+        vx_strip, vy_strip, vz_strip = cfsem.vector_potential_triangle_mesh(
+            obs, nodes, triangles, s, par=True, quad="gl3"
+        )
+    t_strip = time.perf_counter() - t0
+
+    mag_model = np.sqrt(vx_model * vx_model + vy_model * vy_model + vz_model * vz_model).reshape(xx.shape)
+    mag_strip = np.sqrt(vx_strip * vx_strip + vy_strip * vy_strip + vz_strip * vz_strip).reshape(xx.shape)
+    err = np.abs(mag_model - mag_strip)
+
+    npts = xyzp[0].size
+    return {
+        "x": x,
+        "z": z,
+        "mag_model": mag_model,
+        "mag_strip": mag_strip,
+        "err": err,
+        "path_x": np.r_[vertices[:, 0], vertices[0, 0]] if n_sides >= 3 else vertices[:, 0],
+        "path_z": np.r_[vertices[:, 2], vertices[0, 2]] if n_sides >= 3 else vertices[:, 2],
+        "t_model": t_model,
+        "t_strip": t_strip,
+        "n_model": float(ifil.size * npts),
+        "n_strip": float(triangles.shape[0] * npts),
+        "n_triangles": float(triangles.shape[0]),
+        "n_nodes": float(nodes.shape[0]),
+        "strip_length_nodes": float(normalize_boundary_element_length_nodes(boundary_strip_length_nodes)),
+    }
+
+
+def build_boundary_element_figures(
+    mode: str,
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    boundary_strip_length_nodes: int,
+    mask_axis_spikes: bool,
+    show_filament_line: bool,
+):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    data = compute_boundary_element_field(
+        mode,
+        n_sides,
+        wire_radius,
+        rotation_deg,
+        n_subdivisions,
+        boundary_strip_length_nodes,
+    )
+    x = data["x"]
+    z = data["z"]
+    mag_model = data["mag_model"]
+    mag_strip = data["mag_strip"]
+    err = data["err"]
+    path_x = data["path_x"]
+    path_z = data["path_z"]
+    n_triangles = int(data["n_triangles"])
+    n_strip_nodes = int(data["strip_length_nodes"])
+
+    if mask_axis_spikes:
+        mag_model = np.where(mag_model > 1e2, np.nan, mag_model)
+        mag_strip = np.where(mag_strip > 1e2, np.nan, mag_strip)
+        err = np.where(err > 1e2, np.nan, err)
+
+    mag_log10 = np.maximum(np.log10(mag_model + 1e-30), LOG10_FLOOR)
+    err_log10 = np.where(np.isnan(err), np.nan, np.maximum(np.log10(err + 1e-30), LOG10_FLOOR))
+    mid = len(x) // 2
+
+    value_title = "|B| [T]" if mode == "b" else "|A| [T m]"
+    title_prefix = "B-Field" if mode == "b" else "Vector Potential"
+
+    top_fig = make_subplots(
+        rows=1,
+        cols=2,
+        horizontal_spacing=0.15,
+        subplot_titles=[
+            f"{title_prefix} linear-filament model (log10)",
+            "Slice along x (z = 0): linear filament vs triangle strip",
+        ],
+    )
+    top_fig.add_trace(
+        go.Heatmap(
+            x=x,
+            y=z,
+            z=mag_log10,
+            colorscale="Magma",
+            colorbar={
+                "title": f"log10({value_title})",
+                "thickness": 14,
+                "x": -0.15,
+                "xanchor": "left",
+            },
+            zmin=np.nanmin(mag_log10),
+            zmax=np.nanmax(mag_log10),
+        ),
+        row=1,
+        col=1,
+    )
+    if show_filament_line:
+        top_fig.add_trace(
+            go.Scatter(
+                x=path_x,
+                y=path_z,
+                mode="lines",
+                line={"color": "white", "width": 3},
+                name="Path geometry",
+                showlegend=True,
+            ),
+            row=1,
+            col=1,
+        )
+    top_fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=mag_model[mid, :],
+            mode="lines",
+            line={"color": "black", "width": 2},
+            name="Linear filament",
+        ),
+        row=1,
+        col=2,
+    )
+    top_fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=mag_strip[mid, :],
+            mode="lines",
+            line={"color": "deepskyblue", "width": 2, "dash": "dash"},
+            name=f"Triangle strip ({n_strip_nodes} nodes/seg, {n_triangles} tris)",
+        ),
+        row=1,
+        col=2,
+    )
+    top_fig.update_xaxes(title_text="x [m]", row=1, col=1)
+    top_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
+    top_fig.update_xaxes(title_text="x [m]", row=1, col=2)
+    top_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    top_fig.update_xaxes(showgrid=False)
+    top_fig.update_yaxes(showgrid=False)
+    top_fig.update_layout(
+        height=460,
+        title=f"{title_prefix} Boundary-Element Check",
+        margin={"l": 50, "r": 20, "t": 110, "b": 45},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 1.08,
+            "yanchor": "bottom",
+            "bgcolor": "rgba(255,255,255,0.8)",
+        },
+    )
+
+    bottom_fig = make_subplots(
+        rows=1,
+        cols=2,
+        horizontal_spacing=0.15,
+        subplot_titles=[
+            "Linear - boundary-element error (log10)",
+            "Slice along z (x = 0): linear filament vs triangle strip",
+        ],
+    )
+    bottom_fig.add_trace(
+        go.Heatmap(
+            x=x,
+            y=z,
+            z=err_log10,
+            colorscale="Viridis",
+            colorbar={
+                "title": f"log10(delta {value_title})",
+                "thickness": 14,
+                "x": -0.15,
+                "xanchor": "left",
+            },
+            zmin=np.nanmin(err_log10),
+            zmax=np.nanmax(err_log10),
+        ),
+        row=1,
+        col=1,
+    )
+    bottom_fig.add_trace(
+        go.Scatter(
+            x=z,
+            y=mag_model[:, mid],
+            mode="lines",
+            line={"color": "black", "width": 2},
+            name="Linear filament (z-slice)",
+            showlegend=False,
+        ),
+        row=1,
+        col=2,
+    )
+    bottom_fig.add_trace(
+        go.Scatter(
+            x=z,
+            y=mag_strip[:, mid],
+            mode="lines",
+            line={"color": "deepskyblue", "width": 2, "dash": "dash"},
+            name="Triangle strip (z-slice)",
+            showlegend=False,
+        ),
+        row=1,
+        col=2,
+    )
+    bottom_fig.update_xaxes(title_text="x [m]", row=1, col=1)
+    bottom_fig.update_yaxes(title_text="z [m]", row=1, col=1, scaleanchor="x", scaleratio=1.0)
+    bottom_fig.update_xaxes(title_text="z [m]", row=1, col=2)
+    bottom_fig.update_yaxes(title_text=value_title, row=1, col=2)
+    bottom_fig.update_xaxes(showgrid=False)
+    bottom_fig.update_yaxes(showgrid=False)
+    bottom_fig.update_layout(
+        height=460,
+        margin={"l": 50, "r": 20, "t": 50, "b": 60},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+
+    return top_fig, bottom_fig
+
+
+def build_boundary_element_geometry_figure(
+    n_sides: int,
+    wire_radius: float,
+    rotation_deg: float,
+    n_subdivisions: int,
+    boundary_strip_length_nodes: int,
+):
+    import plotly.graph_objects as go
+
+    vertices, starts, ends, _xyzfil, _dlxyzfil, ifil = build_linear_filaments(
+        n_sides, rotation_deg, n_subdivisions
+    )
+    nodes, triangles, _s, upper_paths, lower_paths, end_connectors = build_boundary_element_strips(
+        starts,
+        ends,
+        ifil,
+        wire_radius,
+        boundary_strip_length_nodes,
+    )
+    path = np.vstack((vertices, vertices[0])) if n_sides >= 3 else vertices
+    x_upper, y_upper, z_upper = polyline_collection_xyz(upper_paths)
+    x_lower, y_lower, z_lower = polyline_collection_xyz(lower_paths)
+    x_conn, y_conn, z_conn = polyline_collection_xyz(end_connectors)
+    x_mesh, y_mesh, z_mesh = triangle_mesh_edge_lines_xyz(nodes, triangles)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter3d(
+            x=x_mesh,
+            y=y_mesh,
+            z=z_mesh,
+            mode="lines",
+            line={"color": "black", "width": 2},
+            opacity=0.7,
+            name="Triangle mesh edges",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=nodes[:, 0],
+            y=nodes[:, 1],
+            z=nodes[:, 2],
+            mode="markers",
+            marker={"color": "black", "size": 3, "symbol": "circle"},
+            name="Mesh nodes",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=x_upper,
+            y=y_upper,
+            z=z_upper,
+            mode="lines",
+            line={"color": "deepskyblue", "width": 3},
+            opacity=0.85,
+            name="Upper strip edge",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=x_lower,
+            y=y_lower,
+            z=z_lower,
+            mode="lines",
+            line={"color": "royalblue", "width": 3},
+            opacity=0.85,
+            name="Lower strip edge",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=x_conn,
+            y=y_conn,
+            z=z_conn,
+            mode="lines",
+            line={"color": "lightsteelblue", "width": 2},
+            name="Strip end connectors",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=path[:, 0],
+            y=path[:, 1],
+            z=path[:, 2],
+            mode="lines",
+            line={"color": "firebrick", "width": 6},
+            name="Path centerline",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+    fig.update_layout(
+        height=620,
+        title={
+            "text": (
+                "Boundary-element strip geometry | "
+                f"{triangles.shape[0]} triangles, {nodes.shape[0]} nodes, "
+                f"{normalize_boundary_element_length_nodes(boundary_strip_length_nodes)} nodes/segment"
+            ),
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 0.98,
+            "yanchor": "top",
+            "pad": {"b": 5},
+        },
+        margin={"l": 40, "r": 20, "t": 45, "b": 30},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 0.93,
+            "yanchor": "top",
+            "bgcolor": "rgba(255,255,255,0.8)",
+        },
+    )
+    fig.update_scenes(
+        xaxis_title="x [m]",
+        yaxis_title="y [m]",
+        zaxis_title="z [m]",
+        aspectmode="data",
+        camera={"eye": {"x": 1.5, "y": 1.4, "z": 1.0}},
+    )
+    return fig
+
+
 def build_perf_summary(
     mode: str,
     n_sides: int,
@@ -1200,6 +1713,7 @@ def build_perf_summary(
     point_segment_subdivisions: int = DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
     section_grid_n: int = DEFAULT_SECTION_GRID_N,
     distributed_use_area_radius: bool = False,
+    boundary_strip_length_nodes: int = DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
 ) -> str:
     if mode in ("b", "a"):
         data = compute_field(
@@ -1208,7 +1722,13 @@ def build_perf_summary(
         label = "B-field" if mode == "b" else "Vector potential"
         return (
             f"{label} | "
-            f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions, point_segment_subdivisions=point_segment_subdivisions)} | "
+            f"{build_plot_context_summary(
+                n_sides,
+                wire_radius,
+                rotation_deg,
+                n_subdivisions,
+                point_segment_subdivisions=point_segment_subdivisions,
+            )} | "
             f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
             f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
         )
@@ -1229,9 +1749,43 @@ def build_perf_summary(
         n_grid = int(data["section_grid_n"])
         return (
             f"{label} conductor-model check | "
-            f"{build_plot_context_summary(n_sides, wire_radius, rotation_deg, n_subdivisions, section_grid_n=n_grid, section_filaments_per_segment=int(data['n_offsets']), distributed_radius_mode=radius_mode)} | "
+            f"{build_plot_context_summary(
+                n_sides,
+                wire_radius,
+                rotation_deg,
+                n_subdivisions,
+                section_grid_n=n_grid,
+                section_filaments_per_segment=int(data['n_offsets']),
+                distributed_radius_mode=radius_mode,
+            )} | "
             f"finite-thickness: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
             f"distributed section: {data['t_ref']:.3f}s / {data['n_ref']:.2e} interactions"
+        )
+
+    if mode in ("bb", "ba"):
+        field_mode = "b" if mode == "bb" else "a"
+        data = compute_boundary_element_field(
+            field_mode,
+            n_sides,
+            wire_radius,
+            rotation_deg,
+            n_subdivisions,
+            boundary_strip_length_nodes,
+        )
+        label = "B-field" if field_mode == "b" else "Vector potential"
+        n_strip_nodes = int(data["strip_length_nodes"])
+        return (
+            f"{label} boundary-element check | "
+            f"{build_plot_context_summary(
+                n_sides,
+                wire_radius,
+                rotation_deg,
+                n_subdivisions,
+                boundary_strip_length_nodes=n_strip_nodes,
+            )} | "
+            f"linear: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
+            f"triangle strip: {data['t_strip']:.3f}s / {data['n_strip']:.2e} interactions "
+            f"({int(data['n_triangles'])} tris)"
         )
 
     data = compute_field_equivalence(n_sides, wire_radius, rotation_deg, n_subdivisions)
@@ -1306,6 +1860,23 @@ def create_app():
                                     300: "300",
                                     400: "400",
                                 },
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Boundary-element strip nodes / segment",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="boundary-strip-length-nodes",
+                                min=2,
+                                max=MAX_BOUNDARY_ELEMENT_LENGTH_NODES,
+                                step=1,
+                                value=DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
+                                marks={2: "2", 4: "4", 8: "8", 12: "12", 16: "16", 20: "20"},
                                 tooltip={"placement": "bottom", "always_visible": True},
                             ),
                         ]
@@ -1508,6 +2079,58 @@ def create_app():
                         ],
                     ),
                     dcc.Tab(
+                        label="Boundary element (B)",
+                        value="bb",
+                        children=[
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-bb-top"),
+                                ),
+                                style={"marginBottom": "0.5rem"},
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-bb-bottom"),
+                                )
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-bb-geom"),
+                                ),
+                                style={"marginTop": "0.5rem"},
+                            ),
+                        ],
+                    ),
+                    dcc.Tab(
+                        label="Boundary element (A)",
+                        value="ba",
+                        children=[
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-ba-top"),
+                                ),
+                                style={"marginBottom": "0.5rem"},
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-ba-bottom"),
+                                )
+                            ),
+                            html.Div(
+                                dcc.Loading(
+                                    type="circle",
+                                    children=dcc.Graph(id="field-figure-ba-geom"),
+                                ),
+                                style={"marginTop": "0.5rem"},
+                            ),
+                        ],
+                    ),
+                    dcc.Tab(
                         label="Field equivalence",
                         value="eq",
                         children=[
@@ -1539,6 +2162,7 @@ def create_app():
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
         Input("point-segment-subdivisions", "value"),
+        Input("boundary-strip-length-nodes", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
@@ -1551,6 +2175,7 @@ def create_app():
         n_sides: int,
         n_subdivisions: int,
         point_segment_subdivisions: int,
+        boundary_strip_length_nodes: int,
         wire_radius: float,
         rotation_deg: float,
         mask_axis_spikes: list[str],
@@ -1562,6 +2187,7 @@ def create_app():
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         n_point_sub = normalize_point_segment_subdivisions(point_segment_subdivisions)
+        n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         section_grid_n = normalize_section_grid_n(section_grid_size)
@@ -1573,7 +2199,15 @@ def create_app():
                 no_update,
                 no_update,
                 build_perf_summary(
-                    field_tab, sides, radius, rotation, n_sub, n_point_sub, section_grid_n, use_area_radius
+                    field_tab,
+                    sides,
+                    radius,
+                    rotation,
+                    n_sub,
+                    n_point_sub,
+                    section_grid_n,
+                    use_area_radius,
+                    n_strip_nodes,
                 ),
             )
         top_fig, bottom_fig = build_figures(
@@ -1583,7 +2217,15 @@ def create_app():
             top_fig,
             bottom_fig,
             build_perf_summary(
-                "b", sides, radius, rotation, n_sub, n_point_sub, section_grid_n, use_area_radius
+                "b",
+                sides,
+                radius,
+                rotation,
+                n_sub,
+                n_point_sub,
+                section_grid_n,
+                use_area_radius,
+                n_strip_nodes,
             ),
         )
 
@@ -1711,6 +2353,108 @@ def create_app():
         return top_fig, bottom_fig, geom_fig
 
     @app.callback(
+        Output("field-figure-bb-top", "figure"),
+        Output("field-figure-bb-bottom", "figure"),
+        Output("field-figure-bb-geom", "figure"),
+        Input("polygon-sides", "value"),
+        Input("segment-subdivisions", "value"),
+        Input("boundary-strip-length-nodes", "value"),
+        Input("wire-radius", "value"),
+        Input("rotation-deg", "value"),
+        Input("mask-axis-spikes", "value"),
+        Input("show-filament-line", "value"),
+        Input("field-tab", "value"),
+    )
+    def update_boundary_element_b_figure(
+        n_sides: int,
+        n_subdivisions: int,
+        boundary_strip_length_nodes: int,
+        wire_radius: float,
+        rotation_deg: float,
+        mask_axis_spikes: list[str],
+        show_filament_line: list[str],
+        field_tab: str,
+    ):
+        if field_tab != "bb":
+            return no_update, no_update, no_update
+        sides = int(n_sides)
+        n_sub = int(np.clip(n_subdivisions, 1, 10))
+        n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
+        radius = float(np.clip(wire_radius, 0.0, 0.1))
+        rotation = float(np.mod(rotation_deg, 360.0))
+        mask_spikes = "mask" in mask_axis_spikes
+        show_line = "show" in show_filament_line
+        top_fig, bottom_fig = build_boundary_element_figures(
+            "b",
+            sides,
+            radius,
+            rotation,
+            n_sub,
+            n_strip_nodes,
+            mask_spikes,
+            show_line,
+        )
+        geom_fig = build_boundary_element_geometry_figure(
+            sides,
+            radius,
+            rotation,
+            n_sub,
+            n_strip_nodes,
+        )
+        return top_fig, bottom_fig, geom_fig
+
+    @app.callback(
+        Output("field-figure-ba-top", "figure"),
+        Output("field-figure-ba-bottom", "figure"),
+        Output("field-figure-ba-geom", "figure"),
+        Input("polygon-sides", "value"),
+        Input("segment-subdivisions", "value"),
+        Input("boundary-strip-length-nodes", "value"),
+        Input("wire-radius", "value"),
+        Input("rotation-deg", "value"),
+        Input("mask-axis-spikes", "value"),
+        Input("show-filament-line", "value"),
+        Input("field-tab", "value"),
+    )
+    def update_boundary_element_a_figure(
+        n_sides: int,
+        n_subdivisions: int,
+        boundary_strip_length_nodes: int,
+        wire_radius: float,
+        rotation_deg: float,
+        mask_axis_spikes: list[str],
+        show_filament_line: list[str],
+        field_tab: str,
+    ):
+        if field_tab != "ba":
+            return no_update, no_update, no_update
+        sides = int(n_sides)
+        n_sub = int(np.clip(n_subdivisions, 1, 10))
+        n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
+        radius = float(np.clip(wire_radius, 0.0, 0.1))
+        rotation = float(np.mod(rotation_deg, 360.0))
+        mask_spikes = "mask" in mask_axis_spikes
+        show_line = "show" in show_filament_line
+        top_fig, bottom_fig = build_boundary_element_figures(
+            "a",
+            sides,
+            radius,
+            rotation,
+            n_sub,
+            n_strip_nodes,
+            mask_spikes,
+            show_line,
+        )
+        geom_fig = build_boundary_element_geometry_figure(
+            sides,
+            radius,
+            rotation,
+            n_sub,
+            n_strip_nodes,
+        )
+        return top_fig, bottom_fig, geom_fig
+
+    @app.callback(
         Output("field-figure-eq-top", "figure"),
         Output("field-figure-eq-bottom", "figure"),
         Input("polygon-sides", "value"),
@@ -1778,6 +2522,15 @@ def main() -> None:
             "a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N, False, False, True
         )
         build_section_geometry_figure(3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N)
+        build_boundary_element_figures(
+            "b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES, False, True
+        )
+        build_boundary_element_figures(
+            "a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES, False, True
+        )
+        build_boundary_element_geometry_figure(
+            3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES
+        )
         build_equivalence_figures(3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
 
 

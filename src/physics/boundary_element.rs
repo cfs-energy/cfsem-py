@@ -40,6 +40,10 @@ const TABLE_GAUSS_LEGENDRE_3: [[f64; 3]; 9] = [
     [0.6846438175e-01, 0.1000000000e+00, 0.1127016654e+00],
 ];
 
+/// Midpoint-rule samples used for the 1D edge integral in the Duffy-style
+/// triangle self kernel.
+const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
+
 #[derive(Clone, Copy)]
 pub enum QuadratureKind {
     GaussLegendre,
@@ -291,8 +295,6 @@ pub fn vector_potential_triangle(
     return out;
 }
 
-const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 128;
-
 #[inline]
 fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [[f64; 3]; 3] {
     [
@@ -319,8 +321,7 @@ fn triangles_identical(
     let src = [src0, src1, src2];
     let tgt = [tgt0, tgt1, tgt2];
 
-    src.iter()
-        .all(|&s| tgt.iter().any(|&t| points_match(s, t)))
+    src.iter().all(|&s| tgt.iter().any(|&t| points_match(s, t)))
 }
 
 /// Regular triangle evaluation of the scalar kernel integral `∫ dS / R` using plain
@@ -507,12 +508,11 @@ pub fn triangle_geometric_coupling(
         return triangle_geometric_coupling_self(src0, src1, src2, quad_kind, quad_order);
     }
 
-    0.5
-        * (triangle_geometric_coupling_regular(
-            src0, src1, src2, tgt0, tgt1, tgt2, quad_kind, quad_order,
-        ) + triangle_geometric_coupling_regular(
-            tgt0, tgt1, tgt2, src0, src1, src2, quad_kind, quad_order,
-        ))
+    0.5 * (triangle_geometric_coupling_regular(
+        src0, src1, src2, tgt0, tgt1, tgt2, quad_kind, quad_order,
+    ) + triangle_geometric_coupling_regular(
+        tgt0, tgt1, tgt2, src0, src1, src2, quad_kind, quad_order,
+    ))
 }
 
 /// Mutual-inductance block for the three nodal basis functions on a source triangle and
@@ -610,16 +610,16 @@ mod tests {
     use super::{
         QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle, map_tri_uv,
         triangle_basis_current_densities, triangle_basis_mutual_inductance_block,
-        triangle_quadrature_points, triangle_inductance_from_potential_vectors,
+        triangle_inductance_from_potential_vectors, triangle_quadrature_points,
         triangle_vector_potential_basis, vector_potential_triangle,
     };
+    use crate::MU0_OVER_4PI;
     use crate::math::{cartesian_to_cylindrical, dot3};
     use crate::physics::circular_filament::{
         flux_circular_filament_scalar, flux_density_circular_filament_cartesian_scalar,
         vector_potential_circular_filament_scalar,
     };
     use crate::testing::approx;
-    use crate::MU0_OVER_4PI;
 
     #[derive(Clone, Copy)]
     struct TrianglePatch {
@@ -643,10 +643,26 @@ mod tests {
             let phi0 = i as f64 * dphi;
             let phi1 = (i + 1) as f64 * dphi;
 
-            let lower0 = [radius * phi0.cos(), radius * phi0.sin(), z_center - height / 2.0];
-            let lower1 = [radius * phi1.cos(), radius * phi1.sin(), z_center - height / 2.0];
-            let upper0 = [radius * phi0.cos(), radius * phi0.sin(), z_center + height / 2.0];
-            let upper1 = [radius * phi1.cos(), radius * phi1.sin(), z_center + height / 2.0];
+            let lower0 = [
+                radius * phi0.cos(),
+                radius * phi0.sin(),
+                z_center - height / 2.0,
+            ];
+            let lower1 = [
+                radius * phi1.cos(),
+                radius * phi1.sin(),
+                z_center - height / 2.0,
+            ];
+            let upper0 = [
+                radius * phi0.cos(),
+                radius * phi0.sin(),
+                z_center + height / 2.0,
+            ];
+            let upper1 = [
+                radius * phi1.cos(),
+                radius * phi1.sin(),
+                z_center + height / 2.0,
+            ];
 
             let tri0 = TrianglePatch {
                 nodes: [lower0, lower1, upper1],
@@ -672,7 +688,12 @@ mod tests {
         tris
     }
 
-    fn circular_strip_triangles(radius: f64, height: f64, s0: f64, nphi: usize) -> Vec<TrianglePatch> {
+    fn circular_strip_triangles(
+        radius: f64,
+        height: f64,
+        s0: f64,
+        nphi: usize,
+    ) -> Vec<TrianglePatch> {
         circular_strip_triangles_at_z(radius, height, s0, nphi, 0.0)
     }
 
@@ -752,7 +773,8 @@ mod tests {
     }
 
     #[test]
-    fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disjoint_triangles() {
+    fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disjoint_triangles()
+    {
         let src = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.0]];
         let tgt = [[0.3, -0.2, 1.1], [1.1, 0.1, 1.4], [0.2, 0.9, 1.2]];
         let quad_kind = QuadratureKind::GaussLegendre;
@@ -787,12 +809,7 @@ mod tests {
                         * tri_area_tgt
                         * MU0_OVER_4PI
                         * dot3(
-                            a_src[0],
-                            a_src[1],
-                            a_src[2],
-                            ktgt[j][0],
-                            ktgt[j][1],
-                            ktgt[j][2],
+                            a_src[0], a_src[1], a_src[2], ktgt[j][0], ktgt[j][1], ktgt[j][2],
                         );
                 }
 
@@ -829,7 +846,10 @@ mod tests {
         let mut max_entry: f64 = 0.0;
         for i in 0..3 {
             for j in 0..3 {
-                assert!(block[i][j].is_finite(), "self block contains non-finite entry at ({i},{j})");
+                assert!(
+                    block[i][j].is_finite(),
+                    "self block contains non-finite entry at ({i},{j})"
+                );
                 assert!(
                     approx(block[i][j], block[j][i], 1e-10, 1e-12),
                     "self block is not symmetric at ({i},{j}): {:.6e} vs {:.6e}",
@@ -858,15 +878,32 @@ mod tests {
 
         for other in [shared_edge, shared_vertex] {
             let block12 = triangle_basis_mutual_inductance_block(
-                tri0[0], tri0[1], tri0[2], other[0], other[1], other[2], QuadratureKind::GaussLegendre, 3,
+                tri0[0],
+                tri0[1],
+                tri0[2],
+                other[0],
+                other[1],
+                other[2],
+                QuadratureKind::GaussLegendre,
+                3,
             );
             let block21 = triangle_basis_mutual_inductance_block(
-                other[0], other[1], other[2], tri0[0], tri0[1], tri0[2], QuadratureKind::GaussLegendre, 3,
+                other[0],
+                other[1],
+                other[2],
+                tri0[0],
+                tri0[1],
+                tri0[2],
+                QuadratureKind::GaussLegendre,
+                3,
             );
 
             for i in 0..3 {
                 for j in 0..3 {
-                    assert!(block12[i][j].is_finite(), "touching-pair entry is non-finite at ({i},{j})");
+                    assert!(
+                        block12[i][j].is_finite(),
+                        "touching-pair entry is non-finite at ({i},{j})"
+                    );
                     assert!(
                         approx(block12[i][j], block21[j][i], 1e-8, 1e-11),
                         "touching-pair reciprocity mismatch at ({i},{j}): {:.6e} vs {:.6e}",

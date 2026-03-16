@@ -324,9 +324,9 @@ def flux_density_triangle_mesh(
     Returns:
         [T] (Bx, By, Bz) magnetic flux density at observation points
     """
-    obs = _n3f_contig(obs, "obs")
-    nodes = _n3f_contig(nodes, "nodes")
-    triangles = _n3i_contig(triangles, "triangles")
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
     s = ascontiguousarray(s, dtype=float64).ravel()
     return em_flux_density_triangle_mesh(obs, nodes, triangles, s, par, quad)
 
@@ -354,9 +354,9 @@ def vector_potential_triangle_mesh(
     Returns:
         [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
     """
-    obs = _n3f_contig(obs, "obs")
-    nodes = _n3f_contig(nodes, "nodes")
-    triangles = _n3i_contig(triangles, "triangles")
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
     s = ascontiguousarray(s, dtype=float64).ravel()
     return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par, quad)
 
@@ -753,19 +753,3 @@ def _2tup_contig(
     """Make contiguous references or copies to arrays in a 2-tuple.
     Only copies data if it is not already contiguous."""
     return (ascontiguousarray(t[0]).ravel(), ascontiguousarray(t[1]).ravel())
-
-
-def _n3f_contig(arr: NDArray[float64], name: str) -> NDArray[float64]:
-    """Make a contiguous float64 array with shape `(n, 3)`."""
-    arr = ascontiguousarray(arr, dtype=float64)
-    if arr.ndim != 2 or arr.shape[1] != 3:
-        raise ValueError(f"{name} must have shape (n, 3)")
-    return arr
-
-
-def _n3i_contig(arr: NDArray[int64], name: str) -> NDArray[int64]:
-    """Make a contiguous int64 array with shape `(n, 3)`."""
-    arr = ascontiguousarray(arr, dtype=int64)
-    if arr.ndim != 2 or arr.shape[1] != 3:
-        raise ValueError(f"{name} must have shape (n, 3)")
-    return arr

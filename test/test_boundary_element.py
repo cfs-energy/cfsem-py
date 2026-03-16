@@ -143,6 +143,9 @@ def test_triangle_mesh_invalid_inputs():
     with raises(ValueError, match="obs must have shape"):
         cfsem.flux_density_triangle_mesh(obs[:, :2], nodes, triangles, s)
 
+    with raises(ValueError, match="triangles must have shape"):
+        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles[:, :2], s)
+
     bad_triangles = triangles.copy()
     bad_triangles[0, 0] = -1
     with raises(ValueError, match="nonnegative node indices"):

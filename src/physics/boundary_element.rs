@@ -85,6 +85,32 @@ pub fn calc_tri_normal(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [f64; 3] {
     return out;
 }
 
+#[inline]
+fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (f64, [f64; 3]) {
+    // Calculate directional vectors between nodes
+    let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
+    let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
+
+    // Triangle area and basis current density vector
+    let tri_area = calc_tri_area(n0, n1, n2);
+    let jref = [
+        (v02[0] - v01[0]) / (2.0 * tri_area),
+        (v02[1] - v01[1]) / (2.0 * tri_area),
+        (v02[2] - v01[2]) / (2.0 * tri_area),
+    ];
+
+    (tri_area, jref)
+}
+
+#[inline]
+fn triangle_quadrature_points(quad_kind: QuadratureKind, quad_order: usize) -> &'static [[f64; 3]] {
+    match (quad_kind, quad_order) {
+        (QuadratureKind::GaussLegendre, 2) => &TABLE_GAUSS_LEGENDRE_2,
+        (QuadratureKind::GaussLegendre, 3) => &TABLE_GAUSS_LEGENDRE_3,
+        _ => panic!(),
+    }
+}
+
 /// Magnetic flux density (B-field) contribution of a given triangle's basis function
 /// with unit weighting to a given obseration point.
 ///
@@ -98,26 +124,8 @@ pub fn triangle_flux_density_basis(
     quad_kind: QuadratureKind,
     quad_order: usize,
 ) -> [f64; 3] {
-    // Calculate directional vectors between nodes
-    let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
-    let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
-
-    // Triangle area and normal vector
-    let tri_area = calc_tri_area(n0, n1, n2);
-
-    // Reference current density vector for this triangle
-    let jref = [
-        (v02[0] - v01[0]) / (2.0 * tri_area),
-        (v02[1] - v01[1]) / (2.0 * tri_area),
-        (v02[2] - v01[2]) / (2.0 * tri_area),
-    ];
-
-    // Match quadrature kind and order to list of quadrature points
-    let quad_points: &[[f64; 3]] = match (quad_kind, quad_order) {
-        (QuadratureKind::GaussLegendre, 2) => &TABLE_GAUSS_LEGENDRE_2,
-        (QuadratureKind::GaussLegendre, 3) => &TABLE_GAUSS_LEGENDRE_3,
-        _ => panic!(),
-    };
+    let (tri_area, jref) = triangle_basis_current_density(n0, n1, n2);
+    let quad_points = triangle_quadrature_points(quad_kind, quad_order);
 
     let mut b = [0.0; 3];
 
@@ -141,6 +149,44 @@ pub fn triangle_flux_density_basis(
     }
 
     return b;
+}
+
+/// Magnetic vector potential (A-field) contribution of a given triangle's basis
+/// function with unit weighting to a given observation point.
+///
+/// Assumes a basis function living on the triangle's first node.
+#[inline]
+pub fn triangle_vector_potential_basis(
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+    obs: [f64; 3],
+    quad_kind: QuadratureKind,
+    quad_order: usize,
+) -> [f64; 3] {
+    let (tri_area, jref) = triangle_basis_current_density(n0, n1, n2);
+    let quad_points = triangle_quadrature_points(quad_kind, quad_order);
+
+    let mut a = [0.0; 3];
+
+    for i in 0..quad_points.len() {
+        // Unpack current quad point
+        let (c, u, v) = (quad_points[i][0], quad_points[i][1], quad_points[i][2]);
+
+        // Transform current quad points for the given triangle
+        let qp = map_tri_uv(n0, n1, n2, [u, v]);
+
+        // Coulomb-gauge kernel for a constant surface current density over the triangle
+        let r = rss3(obs[0] - qp[0], obs[1] - qp[1], obs[2] - qp[2]);
+        let weight = c * tri_area / r;
+
+        // Add A-field contribution for current quadrature point
+        a[0] += weight * jref[0];
+        a[1] += weight * jref[1];
+        a[2] += weight * jref[2];
+    }
+
+    a
 }
 
 /// Flux density (B-field) of triangular surface current density distribution
@@ -176,12 +222,50 @@ pub fn flux_density_triangle(
     return out;
 }
 
+/// Magnetic vector potential (A-field) of triangular surface current density
+/// distribution at a target point due to scalar current density potential `s`
+/// at each node.
+///
+/// For physical intuition, the current density is related to the difference
+/// in potential between the nodes; for example, in a strip discretized into triangles
+/// with s=s0 on one side of the strip and s=-s0 on the other side of the strip,
+/// the total current on the strip (and its effective filament current) is equal to s0.
+#[inline]
+pub fn vector_potential_triangle(
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+    s: [f64; 3],
+    obs: [f64; 3],
+    quad_kind: QuadratureKind,
+    quad_order: usize,
+) -> [f64; 3] {
+    let mut out = [0.0; 3];
+
+    // Collect A-field contributions for the three basis functions living on n0, n1, and n2
+    let a_n0 = triangle_vector_potential_basis(n0, n1, n2, obs, quad_kind, quad_order);
+    let a_n1 = triangle_vector_potential_basis(n1, n2, n0, obs, quad_kind, quad_order);
+    let a_n2 = triangle_vector_potential_basis(n2, n0, n1, obs, quad_kind, quad_order);
+
+    // Sum contributions by each basis function weighted by the basis function value
+    out[0] = (s[0] * a_n0[0] + s[1] * a_n1[0] + s[2] * a_n2[0]) * MU0_OVER_4PI;
+    out[1] = (s[0] * a_n0[1] + s[1] * a_n1[1] + s[2] * a_n2[1]) * MU0_OVER_4PI;
+    out[2] = (s[0] * a_n0[2] + s[1] * a_n1[2] + s[2] * a_n2[2]) * MU0_OVER_4PI;
+
+    return out;
+}
+
 #[cfg(test)]
 mod tests {
     use core::f64::consts::PI;
 
-    use super::{QuadratureKind, calc_tri_normal, flux_density_triangle};
-    use crate::physics::circular_filament::flux_density_circular_filament_cartesian_scalar;
+    use super::{
+        QuadratureKind, calc_tri_normal, flux_density_triangle, vector_potential_triangle,
+    };
+    use crate::math::cartesian_to_cylindrical;
+    use crate::physics::circular_filament::{
+        flux_density_circular_filament_cartesian_scalar, vector_potential_circular_filament_scalar,
+    };
     use crate::testing::approx;
 
     #[derive(Clone, Copy)]
@@ -253,6 +337,25 @@ mod tests {
         out
     }
 
+    fn strip_vector_potential(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
+        let mut out = [0.0; 3];
+        for tri in tris {
+            let contrib = vector_potential_triangle(
+                tri.nodes[0],
+                tri.nodes[1],
+                tri.nodes[2],
+                tri.s,
+                obs,
+                QuadratureKind::GaussLegendre,
+                3,
+            );
+            out[0] += contrib[0];
+            out[1] += contrib[1];
+            out[2] += contrib[2];
+        }
+        out
+    }
+
     fn max_abs_component(vectors: &[[f64; 3]]) -> f64 {
         vectors
             .iter()
@@ -282,6 +385,8 @@ mod tests {
 
         let mut b_strip = Vec::with_capacity(obs.len());
         let mut b_loop = Vec::with_capacity(obs.len());
+        let mut a_strip = Vec::with_capacity(obs.len());
+        let mut a_loop = Vec::with_capacity(obs.len());
         for point in obs {
             b_strip.push(strip_flux_density(&strip, point));
             let b_ref = flux_density_circular_filament_cartesian_scalar(
@@ -289,21 +394,42 @@ mod tests {
                 (point[0], point[1], point[2]),
             );
             b_loop.push([b_ref.0, b_ref.1, b_ref.2]);
+
+            a_strip.push(strip_vector_potential(&strip, point));
+            let (r_obs, phi_obs, z_obs) = cartesian_to_cylindrical(point[0], point[1], point[2]);
+            let a_phi = vector_potential_circular_filament_scalar(
+                (radius, 0.0, loop_current),
+                (r_obs, z_obs),
+            );
+            a_loop.push([-a_phi * libm::sin(phi_obs), a_phi * libm::cos(phi_obs), 0.0]);
         }
 
-        let axis_names = ["Bx", "By", "Bz"];
+        let b_axis_names = ["Bx", "By", "Bz"];
+        let a_axis_names = ["Ax", "Ay", "Az"];
         let bfield_rtol = 1e-3;
         let bfield_atol = max_abs_component(&b_loop) * 1e-12;
+        let afield_rtol = 1e-3;
+        let afield_atol = max_abs_component(&a_loop) * 1e-12;
 
         for i in 0..obs.len() {
             for axis in 0..3 {
                 assert!(
                     approx(b_loop[i][axis], b_strip[i][axis], bfield_rtol, bfield_atol),
                     "{} mismatch at point {}: strip={:.6e}, reference={:.6e}, obs={:?}",
-                    axis_names[axis],
+                    b_axis_names[axis],
                     i,
                     b_strip[i][axis],
                     b_loop[i][axis],
+                    obs[i],
+                );
+
+                assert!(
+                    approx(a_loop[i][axis], a_strip[i][axis], afield_rtol, afield_atol),
+                    "{} mismatch at point {}: strip={:.6e}, reference={:.6e}, obs={:?}",
+                    a_axis_names[axis],
+                    i,
+                    a_strip[i][axis],
+                    a_loop[i][axis],
                     obs[i],
                 );
             }

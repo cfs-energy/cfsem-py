@@ -1720,15 +1720,16 @@ def build_perf_summary(
             mode, n_sides, wire_radius, rotation_deg, n_subdivisions, point_segment_subdivisions
         )
         label = "B-field" if mode == "b" else "Vector potential"
+        context = build_plot_context_summary(
+            n_sides,
+            wire_radius,
+            rotation_deg,
+            n_subdivisions,
+            point_segment_subdivisions=point_segment_subdivisions,
+        )
         return (
             f"{label} | "
-            f"{build_plot_context_summary(
-                n_sides,
-                wire_radius,
-                rotation_deg,
-                n_subdivisions,
-                point_segment_subdivisions=point_segment_subdivisions,
-            )} | "
+            f"{context} | "
             f"linear: {data['t_linear']:.3f}s / {data['n_linear']:.2e} interactions, "
             f"point-segment: {data['t_point']:.3f}s / {data['n_point']:.2e} interactions"
         )
@@ -1747,17 +1748,18 @@ def build_perf_summary(
         label = "B-field" if field_mode == "b" else "Vector potential"
         radius_mode = "area-equivalent" if distributed_use_area_radius else "zero-radius"
         n_grid = int(data["section_grid_n"])
+        context = build_plot_context_summary(
+            n_sides,
+            wire_radius,
+            rotation_deg,
+            n_subdivisions,
+            section_grid_n=n_grid,
+            section_filaments_per_segment=int(data["n_offsets"]),
+            distributed_radius_mode=radius_mode,
+        )
         return (
             f"{label} conductor-model check | "
-            f"{build_plot_context_summary(
-                n_sides,
-                wire_radius,
-                rotation_deg,
-                n_subdivisions,
-                section_grid_n=n_grid,
-                section_filaments_per_segment=int(data['n_offsets']),
-                distributed_radius_mode=radius_mode,
-            )} | "
+            f"{context} | "
             f"finite-thickness: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
             f"distributed section: {data['t_ref']:.3f}s / {data['n_ref']:.2e} interactions"
         )
@@ -1774,15 +1776,16 @@ def build_perf_summary(
         )
         label = "B-field" if field_mode == "b" else "Vector potential"
         n_strip_nodes = int(data["strip_length_nodes"])
+        context = build_plot_context_summary(
+            n_sides,
+            wire_radius,
+            rotation_deg,
+            n_subdivisions,
+            boundary_strip_length_nodes=n_strip_nodes,
+        )
         return (
             f"{label} boundary-element check | "
-            f"{build_plot_context_summary(
-                n_sides,
-                wire_radius,
-                rotation_deg,
-                n_subdivisions,
-                boundary_strip_length_nodes=n_strip_nodes,
-            )} | "
+            f"{context} | "
             f"linear: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
             f"triangle strip: {data['t_strip']:.3f}s / {data['n_strip']:.2e} interactions "
             f"({int(data['n_triangles'])} tris)"

@@ -23,6 +23,7 @@ DEFAULT_POINT_SEGMENT_SUBDIVISIONS = 24
 MAX_POINT_SEGMENT_SUBDIVISIONS = 400
 DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES = 4
 MAX_BOUNDARY_ELEMENT_LENGTH_NODES = 20
+DEFAULT_BOUNDARY_ELEMENT_QUAD = "gl3"
 BOUNDARY_COMPARE_GRID_SIZE = 17 if os.getenv("CFSEM_TESTING") else 101
 DOCS_FIELD_EXPLORER_SVG = (
     Path(__file__).resolve().parents[1] / "docs/python/example_outputs/field_explorer.svg"
@@ -51,6 +52,7 @@ def build_plot_context_summary(
     section_filaments_per_segment: int | None = None,
     distributed_radius_mode: str | None = None,
     boundary_strip_length_nodes: int | None = None,
+    boundary_quadrature: str | None = None,
 ) -> str:
     parts = [
         describe_geometry(n_sides),
@@ -69,6 +71,8 @@ def build_plot_context_summary(
         parts.append(f"distributed radius mode: {distributed_radius_mode}")
     if boundary_strip_length_nodes is not None:
         parts.append(f"strip nodes/segment: {boundary_strip_length_nodes}")
+    if boundary_quadrature is not None:
+        parts.append(f"boundary quad: {boundary_quadrature}")
     return " | ".join(parts)
 
 
@@ -100,6 +104,10 @@ def normalize_point_segment_subdivisions(n_point_subdivisions: int) -> int:
 
 def normalize_boundary_element_length_nodes(n_strip_nodes: int) -> int:
     return max(2, min(MAX_BOUNDARY_ELEMENT_LENGTH_NODES, int(n_strip_nodes)))
+
+
+def normalize_boundary_element_quadrature(quad: str | None) -> str:
+    return quad if quad in ("gl2", "gl3") else DEFAULT_BOUNDARY_ELEMENT_QUAD
 
 
 def finite_positive_max(values: np.ndarray) -> float | None:
@@ -1309,7 +1317,9 @@ def compute_boundary_element_field(
     rotation_deg: float,
     n_subdivisions: int,
     boundary_strip_length_nodes: int,
+    boundary_quad: str,
 ) -> dict[str, np.ndarray | float]:
+    boundary_quad = normalize_boundary_element_quadrature(boundary_quad)
     vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(
         n_sides, rotation_deg, n_subdivisions
     )
@@ -1342,11 +1352,11 @@ def compute_boundary_element_field(
     t0 = time.perf_counter()
     if mode == "b":
         vx_strip, vy_strip, vz_strip = cfsem.flux_density_triangle_mesh(
-            obs, nodes, triangles, s, par=True, quad="gl3"
+            obs, nodes, triangles, s, par=True, quad=boundary_quad
         )
     else:
         vx_strip, vy_strip, vz_strip = cfsem.vector_potential_triangle_mesh(
-            obs, nodes, triangles, s, par=True, quad="gl3"
+            obs, nodes, triangles, s, par=True, quad=boundary_quad
         )
     t_strip = time.perf_counter() - t0
 
@@ -1370,6 +1380,7 @@ def compute_boundary_element_field(
         "n_triangles": float(triangles.shape[0]),
         "n_nodes": float(nodes.shape[0]),
         "strip_length_nodes": float(normalize_boundary_element_length_nodes(boundary_strip_length_nodes)),
+        "boundary_quad": boundary_quad,
     }
 
 
@@ -1380,6 +1391,7 @@ def build_boundary_element_figures(
     rotation_deg: float,
     n_subdivisions: int,
     boundary_strip_length_nodes: int,
+    boundary_quad: str,
     mask_axis_spikes: bool,
     show_filament_line: bool,
 ):
@@ -1393,6 +1405,7 @@ def build_boundary_element_figures(
         rotation_deg,
         n_subdivisions,
         boundary_strip_length_nodes,
+        boundary_quad,
     )
     x = data["x"]
     z = data["z"]
@@ -1403,6 +1416,7 @@ def build_boundary_element_figures(
     path_z = data["path_z"]
     n_triangles = int(data["n_triangles"])
     n_strip_nodes = int(data["strip_length_nodes"])
+    boundary_quad = str(data["boundary_quad"])
 
     if mask_axis_spikes:
         mag_model = np.where(mag_model > 1e2, np.nan, mag_model)
@@ -1473,7 +1487,7 @@ def build_boundary_element_figures(
             y=mag_strip[mid, :],
             mode="lines",
             line={"color": "deepskyblue", "width": 2, "dash": "dash"},
-            name=f"Triangle strip ({n_strip_nodes} nodes/seg, {n_triangles} tris)",
+            name=f"Triangle strip ({boundary_quad}, {n_strip_nodes} nodes/seg, {n_triangles} tris)",
         ),
         row=1,
         col=2,
@@ -1714,6 +1728,7 @@ def build_perf_summary(
     section_grid_n: int = DEFAULT_SECTION_GRID_N,
     distributed_use_area_radius: bool = False,
     boundary_strip_length_nodes: int = DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
+    boundary_quad: str = DEFAULT_BOUNDARY_ELEMENT_QUAD,
 ) -> str:
     if mode in ("b", "a"):
         data = compute_field(
@@ -1773,15 +1788,18 @@ def build_perf_summary(
             rotation_deg,
             n_subdivisions,
             boundary_strip_length_nodes,
+            boundary_quad,
         )
         label = "B-field" if field_mode == "b" else "Vector potential"
         n_strip_nodes = int(data["strip_length_nodes"])
+        boundary_quad = str(data["boundary_quad"])
         context = build_plot_context_summary(
             n_sides,
             wire_radius,
             rotation_deg,
             n_subdivisions,
             boundary_strip_length_nodes=n_strip_nodes,
+            boundary_quadrature=boundary_quad,
         )
         return (
             f"{label} boundary-element check | "
@@ -1881,6 +1899,23 @@ def create_app():
                                 value=DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
                                 marks={2: "2", 4: "4", 8: "8", 12: "12", 16: "16", 20: "20"},
                                 tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Boundary-element quadrature",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Dropdown(
+                                id="boundary-element-quad",
+                                options=[
+                                    {"label": "Gauss-Legendre 2", "value": "gl2"},
+                                    {"label": "Gauss-Legendre 3", "value": "gl3"},
+                                ],
+                                value=DEFAULT_BOUNDARY_ELEMENT_QUAD,
+                                clearable=False,
                             ),
                         ]
                     ),
@@ -2166,6 +2201,7 @@ def create_app():
         Input("segment-subdivisions", "value"),
         Input("point-segment-subdivisions", "value"),
         Input("boundary-strip-length-nodes", "value"),
+        Input("boundary-element-quad", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
@@ -2179,6 +2215,7 @@ def create_app():
         n_subdivisions: int,
         point_segment_subdivisions: int,
         boundary_strip_length_nodes: int,
+        boundary_element_quad: str,
         wire_radius: float,
         rotation_deg: float,
         mask_axis_spikes: list[str],
@@ -2191,6 +2228,7 @@ def create_app():
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         n_point_sub = normalize_point_segment_subdivisions(point_segment_subdivisions)
         n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
+        boundary_quad = normalize_boundary_element_quadrature(boundary_element_quad)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         section_grid_n = normalize_section_grid_n(section_grid_size)
@@ -2211,6 +2249,7 @@ def create_app():
                     section_grid_n,
                     use_area_radius,
                     n_strip_nodes,
+                    boundary_quad,
                 ),
             )
         top_fig, bottom_fig = build_figures(
@@ -2229,6 +2268,7 @@ def create_app():
                 section_grid_n,
                 use_area_radius,
                 n_strip_nodes,
+                boundary_quad,
             ),
         )
 
@@ -2362,6 +2402,7 @@ def create_app():
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
         Input("boundary-strip-length-nodes", "value"),
+        Input("boundary-element-quad", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
@@ -2372,6 +2413,7 @@ def create_app():
         n_sides: int,
         n_subdivisions: int,
         boundary_strip_length_nodes: int,
+        boundary_element_quad: str,
         wire_radius: float,
         rotation_deg: float,
         mask_axis_spikes: list[str],
@@ -2383,6 +2425,7 @@ def create_app():
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
+        boundary_quad = normalize_boundary_element_quadrature(boundary_element_quad)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         mask_spikes = "mask" in mask_axis_spikes
@@ -2394,6 +2437,7 @@ def create_app():
             rotation,
             n_sub,
             n_strip_nodes,
+            boundary_quad,
             mask_spikes,
             show_line,
         )
@@ -2413,6 +2457,7 @@ def create_app():
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
         Input("boundary-strip-length-nodes", "value"),
+        Input("boundary-element-quad", "value"),
         Input("wire-radius", "value"),
         Input("rotation-deg", "value"),
         Input("mask-axis-spikes", "value"),
@@ -2423,6 +2468,7 @@ def create_app():
         n_sides: int,
         n_subdivisions: int,
         boundary_strip_length_nodes: int,
+        boundary_element_quad: str,
         wire_radius: float,
         rotation_deg: float,
         mask_axis_spikes: list[str],
@@ -2434,6 +2480,7 @@ def create_app():
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
+        boundary_quad = normalize_boundary_element_quadrature(boundary_element_quad)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
         rotation = float(np.mod(rotation_deg, 360.0))
         mask_spikes = "mask" in mask_axis_spikes
@@ -2445,6 +2492,7 @@ def create_app():
             rotation,
             n_sub,
             n_strip_nodes,
+            boundary_quad,
             mask_spikes,
             show_line,
         )
@@ -2526,10 +2574,26 @@ def main() -> None:
         )
         build_section_geometry_figure(3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_SECTION_GRID_N)
         build_boundary_element_figures(
-            "b", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES, False, True
+            "b",
+            3,
+            DEFAULT_WIRE_RADIUS,
+            0.0,
+            1,
+            DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
+            DEFAULT_BOUNDARY_ELEMENT_QUAD,
+            False,
+            True,
         )
         build_boundary_element_figures(
-            "a", 3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES, False, True
+            "a",
+            3,
+            DEFAULT_WIRE_RADIUS,
+            0.0,
+            1,
+            DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
+            DEFAULT_BOUNDARY_ELEMENT_QUAD,
+            False,
+            True,
         )
         build_boundary_element_geometry_figure(
             3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES

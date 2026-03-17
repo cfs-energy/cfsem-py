@@ -72,7 +72,7 @@ pub fn triangle_vector_potential_basis(
 /// - Apply the final `μ0 / 4π` prefactor to obtain the physical vector potential.
 ///
 /// References:
-/// - [5], Eq. (3.24), Eq. (4.6), and Eqs. (5.3)-(5.5)8.
+/// - [5], Eq. (3.24), Eq. (4.6), and Eqs. (5.3)-(5.5).
 /// - [3], pp. 276-281.
 /// - [2], pp. 1448-1455.
 #[inline]

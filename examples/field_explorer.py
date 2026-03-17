@@ -1587,9 +1587,11 @@ def build_boundary_element_geometry_figure(
     rotation_deg: float,
     n_subdivisions: int,
     boundary_strip_length_nodes: int,
+    boundary_quad: str,
 ):
     import plotly.graph_objects as go
 
+    boundary_quad = normalize_boundary_element_quadrature(boundary_quad)
     vertices, starts, ends, _xyzfil, _dlxyzfil, ifil = build_linear_filaments(
         n_sides, rotation_deg, n_subdivisions
     )
@@ -1605,6 +1607,14 @@ def build_boundary_element_geometry_figure(
     x_lower, y_lower, z_lower = polyline_collection_xyz(lower_paths)
     x_conn, y_conn, z_conn = polyline_collection_xyz(end_connectors)
     x_mesh, y_mesh, z_mesh = triangle_mesh_edge_lines_xyz(nodes, triangles)
+    quad_points, quad_weights = cfsem.triangle_mesh_quadrature_points(
+        nodes,
+        triangles,
+        quad=boundary_quad,
+    )
+    quad_xyz = quad_points.reshape(-1, 3)
+    quad_weight = quad_weights.ravel()
+    quad_wmax = float(np.max(quad_weight)) if quad_weight.size > 0 else 1.0
 
     fig = go.Figure()
     fig.add_trace(
@@ -1618,6 +1628,38 @@ def build_boundary_element_geometry_figure(
             name="Triangle mesh edges",
             showlegend=True,
             hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=quad_xyz[:, 0],
+            y=quad_xyz[:, 1],
+            z=quad_xyz[:, 2],
+            mode="markers",
+            marker={
+                "color": quad_weight,
+                "size": 2.5,
+                "colorscale": "Viridis",
+                "cmin": 0.0,
+                "cmax": quad_wmax,
+                "opacity": 0.8,
+                "colorbar": {
+                    "title": "w [m^2]",
+                    "x": 1.02,
+                    "xanchor": "left",
+                    "len": 0.65,
+                },
+            },
+            name=f"Quadrature points ({boundary_quad})",
+            showlegend=True,
+            customdata=quad_weight[:, None],
+            hovertemplate=(
+                "x=%{x:.4f} m<br>"
+                "y=%{y:.4f} m<br>"
+                "z=%{z:.4f} m<br>"
+                "w=%{customdata[0]:.4e} m^2"
+                "<extra></extra>"
+            ),
         )
     )
     fig.add_trace(
@@ -1688,7 +1730,8 @@ def build_boundary_element_geometry_figure(
             "text": (
                 "Boundary-element strip geometry | "
                 f"{triangles.shape[0]} triangles, {nodes.shape[0]} nodes, "
-                f"{normalize_boundary_element_length_nodes(boundary_strip_length_nodes)} nodes/segment"
+                f"{normalize_boundary_element_length_nodes(boundary_strip_length_nodes)} nodes/segment, "
+                f"{boundary_quad}"
             ),
             "x": 0.5,
             "xanchor": "center",
@@ -2447,6 +2490,7 @@ def create_app():
             rotation,
             n_sub,
             n_strip_nodes,
+            boundary_quad,
         )
         return top_fig, bottom_fig, geom_fig
 
@@ -2502,6 +2546,7 @@ def create_app():
             rotation,
             n_sub,
             n_strip_nodes,
+            boundary_quad,
         )
         return top_fig, bottom_fig, geom_fig
 
@@ -2596,7 +2641,12 @@ def main() -> None:
             True,
         )
         build_boundary_element_geometry_figure(
-            3, DEFAULT_WIRE_RADIUS, 0.0, 1, DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES
+            3,
+            DEFAULT_WIRE_RADIUS,
+            0.0,
+            1,
+            DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
+            DEFAULT_BOUNDARY_ELEMENT_QUAD,
         )
         build_equivalence_figures(3, DEFAULT_WIRE_RADIUS, 0.0, 1, False, True)
 

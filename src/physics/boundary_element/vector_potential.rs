@@ -24,12 +24,11 @@ use crate::{MU0_OVER_4PI, chunksize};
 ///   applied when basis functions are combined into a physical field.
 ///
 /// References:
-/// - [5], Eq. (3.24) on p. 70 for the stream-function surface current construction,
-///   Eq. (4.6) on p. 93 for the constant current density on a linear triangle, and
-///   Eqs. (5.3)-(5.5) on pp. 107-108 for triangle vector-potential integrals.
-/// - [3], pp. 276-281, for classic `1 / R` potential integrals on polygonal and
-///   polyhedral elements.
-/// - [2], pp. 1448-1455, for numerical treatment of triangle `1 / R` and `∇(1 / R)`
+/// - [5], Eq. (3.24) for the stream-function surface current construction,
+///   Eq. (4.6) for the constant current density on a linear triangle, and
+///   Eqs. (5.3)-(5.5) for triangle vector-potential integrals.
+/// - [3] for `1 / R` potential integrals on polygonal and polyhedral elements.
+/// - [2] for numerical treatment of triangle `1 / R` and `∇(1 / R)`
 ///   integrals with linear shape functions.
 #[inline]
 pub fn triangle_vector_potential_basis(
@@ -73,7 +72,7 @@ pub fn triangle_vector_potential_basis(
 /// - Apply the final `μ0 / 4π` prefactor to obtain the physical vector potential.
 ///
 /// References:
-/// - [5], Eq. (3.24) on p. 70, Eq. (4.6) on p. 93, and Eqs. (5.3)-(5.5) on pp. 107-108.
+/// - [5], Eq. (3.24), Eq. (4.6), and Eqs. (5.3)-(5.5)8.
 /// - [3], pp. 276-281.
 /// - [2], pp. 1448-1455.
 #[inline]

@@ -48,7 +48,7 @@ pub fn triangle_flux_density_basis(
 /// at a target point due to scalar current density potential `s`
 /// at each node.
 ///
-/// For physical intuition, the current density is related to the difference
+/// For physical intuition, the current density is related to the gradient
 /// in potential between the nodes; for example, in a strip discretized into triangles
 /// with s=s0 on one side of the strip and s=-s0 on the other side of the strip,
 /// the total current on the strip (and its effective filament current) is equal to s0.

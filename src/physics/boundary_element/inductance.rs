@@ -20,14 +20,14 @@ fn triangle_scalar_potential_regular(
     obs: [f64; 3],
     quad_kind: QuadratureKind,
 ) -> f64 {
-    let tri_area = calc_tri_area(n0, n1, n2);
+    let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
     let quad_points = triangle_quadrature_points(quad_kind);
 
-    let mut out = 0.0;
+    let mut out = 0.0; // [m]
     for qp in quad_points {
-        let src = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]);
-        let dist = rss3(obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]);
-        out += qp[0] * tri_area / dist;
+        let src = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]); // [m]
+        let dist = rss3(obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]); // [m]
+        out += qp[0] * tri_area / dist; // [m]
     }
 
     out
@@ -58,15 +58,15 @@ fn triangle_scalar_potential_self_duffy(
     obs: [f64; 3],
 ) -> f64 {
     let edges = [(n0, n1), (n1, n2), (n2, n0)];
-    let mut out = 0.0;
+    let mut out = 0.0; // [m]
 
     for (va, vb) in edges {
-        let area_sub = calc_tri_area(obs, va, vb);
+        let area_sub = calc_tri_area(obs, va, vb); // [m^2]
         if area_sub == 0.0 {
             continue;
         }
 
-        let mut line_integral = 0.0;
+        let mut line_integral = 0.0; // [1/m]
         for i in 0..TRIANGLE_SELF_DUFFY_SAMPLES {
             let eta = (i as f64 + 0.5) / TRIANGLE_SELF_DUFFY_SAMPLES as f64;
             let edge_vec = [
@@ -74,10 +74,10 @@ fn triangle_scalar_potential_self_duffy(
                 (1.0 - eta).mul_add(va[1] - obs[1], eta * (vb[1] - obs[1])),
                 (1.0 - eta).mul_add(va[2] - obs[2], eta * (vb[2] - obs[2])),
             ];
-            line_integral += 1.0 / rss3(edge_vec[0], edge_vec[1], edge_vec[2]);
+            line_integral += 1.0 / rss3(edge_vec[0], edge_vec[1], edge_vec[2]); // [1/m]
         }
 
-        out += area_sub * line_integral / TRIANGLE_SELF_DUFFY_SAMPLES as f64;
+        out += area_sub * line_integral / TRIANGLE_SELF_DUFFY_SAMPLES as f64; // [m]
     }
 
     out
@@ -93,6 +93,18 @@ fn triangle_scalar_potential_self_duffy(
 ///   triangle vector-potential integrals.
 /// - [3], pp. 276-281.
 /// - [2], pp. 1448-1455.
+///
+/// Args:
+///     src0: Source triangle vertex 0 `[x, y, z]` (m).
+///     src1: Source triangle vertex 1 `[x, y, z]` (m).
+///     src2: Source triangle vertex 2 `[x, y, z]` (m).
+///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
+///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
+///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///
+/// Returns:
+///     Double-surface geometric coupling `∫∫ dS' dS / R` (m^3).
 #[inline]
 pub fn triangle_geometric_coupling_regular(
     src0: [f64; 3],
@@ -103,15 +115,15 @@ pub fn triangle_geometric_coupling_regular(
     tgt2: [f64; 3],
     quad_kind: QuadratureKind,
 ) -> f64 {
-    let tri_area_tgt = calc_tri_area(tgt0, tgt1, tgt2);
+    let tri_area_tgt = calc_tri_area(tgt0, tgt1, tgt2); // [m^2]
     let quad_points_tgt = triangle_quadrature_points(quad_kind);
 
-    let mut out = 0.0;
+    let mut out = 0.0; // [m^3]
     for qp in quad_points_tgt {
-        let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
+        let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]); // [m]
         out += qp[0]
             * tri_area_tgt
-            * triangle_scalar_potential_regular(src0, src1, src2, obs, quad_kind);
+            * triangle_scalar_potential_regular(src0, src1, src2, obs, quad_kind); // [m^3]
     }
 
     out
@@ -137,13 +149,13 @@ fn triangle_geometric_coupling_self(
     n2: [f64; 3],
     quad_kind: QuadratureKind,
 ) -> f64 {
-    let tri_area = calc_tri_area(n0, n1, n2);
+    let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
     let quad_points = triangle_quadrature_points(quad_kind);
 
-    let mut out = 0.0;
+    let mut out = 0.0; // [m^3]
     for qp in quad_points {
-        let obs = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]);
-        out += qp[0] * tri_area * triangle_scalar_potential_self_duffy(n0, n1, n2, obs);
+        let obs = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]); // [m]
+        out += qp[0] * tri_area * triangle_scalar_potential_self_duffy(n0, n1, n2, obs); // [m^3]
     }
 
     out
@@ -166,6 +178,18 @@ fn triangle_geometric_coupling_self(
 /// - [2], pp. 1448-1455.
 /// - [3], pp. 276-281.
 /// - [1] and [4], for weakly singular integration background for the dedicated self term.
+///
+/// Args:
+///     src0: Source triangle vertex 0 `[x, y, z]` (m).
+///     src1: Source triangle vertex 1 `[x, y, z]` (m).
+///     src2: Source triangle vertex 2 `[x, y, z]` (m).
+///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
+///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
+///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///
+/// Returns:
+///     Symmetric double-surface geometric coupling `∫∫ dS' dS / R` (m^3).
 #[inline]
 pub fn triangle_geometric_coupling(
     src0: [f64; 3],
@@ -198,6 +222,18 @@ pub fn triangle_geometric_coupling(
 ///   current density induced by linear triangle nodal values.
 /// - [3], pp. 276-281.
 /// - [2], pp. 1448-1455.
+///
+/// Args:
+///     src0: Source triangle vertex 0 `[x, y, z]` (m).
+///     src1: Source triangle vertex 1 `[x, y, z]` (m).
+///     src2: Source triangle vertex 2 `[x, y, z]` (m).
+///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
+///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
+///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///
+/// Returns:
+///     Mutual-inductance block `[[M_ij]; 3]` for the source and target triangle bases (H).
 #[inline]
 pub fn triangle_basis_mutual_inductance_block(
     src0: [f64; 3],
@@ -230,6 +266,20 @@ pub fn triangle_basis_mutual_inductance_block(
 ///
 /// References:
 /// - [5], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
+///
+/// Args:
+///     src0: Source triangle vertex 0 `[x, y, z]` (m).
+///     src1: Source triangle vertex 1 `[x, y, z]` (m).
+///     src2: Source triangle vertex 2 `[x, y, z]` (m).
+///     src_basis: Source basis-function index in `{0, 1, 2}` (dimensionless).
+///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
+///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
+///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
+///     tgt_basis: Target basis-function index in `{0, 1, 2}` (dimensionless).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///
+/// Returns:
+///     Triangle-basis mutual-inductance entry `M_ij` (H).
 #[inline]
 pub fn triangle_basis_mutual_inductance(
     src0: [f64; 3],
@@ -254,6 +304,14 @@ pub fn triangle_basis_mutual_inductance(
 /// - [5], Eq. (3.16) on p. 68 for the mutual-inductance bilinear form, together with
 ///   Eq. (4.6) on p. 93 for the linear dependence of triangle current density on nodal
 ///   stream-function values.
+///
+/// Args:
+///     m_block: Triangle-pair mutual-inductance block `[[M_ij]; 3]` (H).
+///     s_src: Source nodal current-potential vector `[s0, s1, s2]` (A).
+///     s_tgt: Target nodal current-potential vector `[s0, s1, s2]` (A).
+///
+/// Returns:
+///     Bilinear coupling `s_src^T M s_tgt` (H*A^2).
 #[inline]
 pub fn triangle_inductance_from_potential_vectors(
     m_block: [[f64; 3]; 3],

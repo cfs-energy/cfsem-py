@@ -65,12 +65,12 @@ pub(crate) fn validate_triangle_mesh_geometry(
     nodes: (&[f64], &[f64], &[f64]),
     triangles: (&[usize], &[usize], &[usize]),
 ) -> Result<(usize, usize), &'static str> {
-    let nnode = nodes.0.len();
+    let nnode = nodes.0.len(); // [-]
     if nodes.1.len() != nnode || nodes.2.len() != nnode {
         return Err("Node coordinate dimension mismatch");
     }
 
-    let ntri = triangles.0.len();
+    let ntri = triangles.0.len(); // [-]
     if triangles.1.len() != ntri || triangles.2.len() != ntri {
         return Err("Triangle index dimension mismatch");
     }
@@ -121,8 +121,8 @@ impl<'a> TriangleMeshView<'a> {
             self.triangles.1[i],
             self.triangles.2[i],
         ];
-        let nodes = idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]);
-        let s = idx.map(|k| self.s[k]);
+        let nodes = idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]); // [m]
+        let s = idx.map(|k| self.s[k]); // [A]
         (nodes, s)
     }
 }

@@ -439,7 +439,6 @@ fn vector_potential_linear_filament(
     _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
-/// Python bindings for cfsemrs::physics::boundary_element::flux_density_triangle_mesh
 #[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="gl3"))]
 fn flux_density_triangle_mesh(
     obs: PyReadonlyArray2<f64>,
@@ -480,7 +479,6 @@ fn flux_density_triangle_mesh(
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
-/// Python bindings for cfsemrs::physics::boundary_element::vector_potential_triangle_mesh
 #[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="gl3"))]
 fn vector_potential_triangle_mesh(
     obs: PyReadonlyArray2<f64>,
@@ -521,7 +519,6 @@ fn vector_potential_triangle_mesh(
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
-/// Python bindings for cfsemrs::physics::boundary_element::triangle_mesh_current_density
 #[pyfunction]
 fn triangle_mesh_current_density(
     nodes: PyReadonlyArray2<f64>,
@@ -551,7 +548,6 @@ fn triangle_mesh_current_density(
     _3tup_ret!((jx, f64), (jy, f64), (jz, f64))
 }
 
-/// Python bindings for cfsemrs::physics::boundary_element::triangle_mesh_quadrature_points
 #[pyfunction(signature = (nodes, triangles, quad="gl3"))]
 fn triangle_mesh_quadrature_points(
     nodes: PyReadonlyArray2<f64>,

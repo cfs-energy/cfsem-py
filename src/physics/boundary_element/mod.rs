@@ -101,6 +101,15 @@ pub enum QuadratureKind {
 
 /// Isoparametric mapping of a point on a 3D triangle
 /// from U-V coordinates on the triangle's surface.
+///
+/// Args:
+///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
+///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
+///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
+///     pin_uv: Reference-triangle coordinates `[u, v]` (dimensionless).
+///
+/// Returns:
+///     Cartesian point `[x, y, z]` on the triangle surface (m).
 #[inline]
 pub fn map_tri_uv(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], pin_uv: [f64; 2]) -> [f64; 3] {
     let mut pout = [0.0; 3];
@@ -112,6 +121,14 @@ pub fn map_tri_uv(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], pin_uv: [f64; 2]) ->
 }
 
 /// Area of a 3D triangle.
+///
+/// Args:
+///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
+///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
+///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
+///
+/// Returns:
+///     Triangle area (m^2).
 #[inline]
 pub fn calc_tri_area(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> f64 {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
@@ -124,6 +141,14 @@ pub fn calc_tri_area(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> f64 {
 ///
 /// Direction is non-unique; the order of the points determines whether
 /// the returned normal points "up" or "down" relative to the triangle.
+///
+/// Args:
+///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
+///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
+///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
+///
+/// Returns:
+///     Unit normal vector `[nx, ny, nz]` (dimensionless).
 #[inline]
 pub fn calc_tri_normal(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [f64; 3] {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
@@ -135,13 +160,13 @@ pub fn calc_tri_normal(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [f64; 3] {
 
 #[inline]
 fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (f64, [f64; 3]) {
-    let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
-    let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
-    let tri_area = calc_tri_area(n0, n1, n2);
+    let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]]; // [m]
+    let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]]; // [m]
+    let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
     let jref = [
-        (v02[0] - v01[0]) / (2.0 * tri_area),
-        (v02[1] - v01[1]) / (2.0 * tri_area),
-        (v02[2] - v01[2]) / (2.0 * tri_area),
+        (v02[0] - v01[0]) / (2.0 * tri_area), // [1/m]
+        (v02[1] - v01[1]) / (2.0 * tri_area), // [1/m]
+        (v02[2] - v01[2]) / (2.0 * tri_area), // [1/m]
     ];
 
     (tri_area, jref)
@@ -150,21 +175,30 @@ fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (
 #[inline]
 fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [[f64; 3]; 3] {
     [
-        triangle_basis_current_density(n0, n1, n2).1,
-        triangle_basis_current_density(n1, n2, n0).1,
-        triangle_basis_current_density(n2, n0, n1).1,
+        triangle_basis_current_density(n0, n1, n2).1, // [1/m]
+        triangle_basis_current_density(n1, n2, n0).1, // [1/m]
+        triangle_basis_current_density(n2, n0, n1).1, // [1/m]
     ]
 }
 
 /// Physical surface current density induced on one triangle by its nodal
 /// stream-function values.
+///
+/// Args:
+///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
+///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
+///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
+///     s: Nodal current-potential values `[s0, s1, s2]` (A).
+///
+/// Returns:
+///     Constant surface current density `[jx, jy, jz]` on the triangle (A/m).
 #[inline]
 pub fn triangle_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], s: [f64; 3]) -> [f64; 3] {
     let basis = triangle_basis_current_densities(n0, n1, n2);
     [
-        s[0] * basis[0][0] + s[1] * basis[1][0] + s[2] * basis[2][0],
-        s[0] * basis[0][1] + s[1] * basis[1][1] + s[2] * basis[2][1],
-        s[0] * basis[0][2] + s[1] * basis[1][2] + s[2] * basis[2][2],
+        s[0] * basis[0][0] + s[1] * basis[1][0] + s[2] * basis[2][0], // [A/m]
+        s[0] * basis[0][1] + s[1] * basis[1][1] + s[2] * basis[2][1], // [A/m]
+        s[0] * basis[0][2] + s[1] * basis[1][2] + s[2] * basis[2][2], // [A/m]
     ]
 }
 
@@ -178,12 +212,28 @@ fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] 
 }
 
 /// Number of quadrature points used by a given triangle rule.
+///
+/// Args:
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///
+/// Returns:
+///     Number of quadrature points in the selected rule (dimensionless).
 #[inline]
 pub fn triangle_quadrature_count(quad_kind: QuadratureKind) -> usize {
     triangle_quadrature_points(quad_kind).len()
 }
 
 /// Extract the constant physical surface current density on each triangle of a mesh.
+///
+/// Args:
+///     nodes: Node-coordinate component slices `(x, y, z)` (m).
+///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     s: Nodal current-potential values (A).
+///     out: Output buffers for triangle current-density components `(jx, jy, jz)` (A/m).
+///
+/// Returns:
+///     `Ok(())` after writing one current-density vector per triangle to `out`, or an
+///     error if the mesh geometry or output dimensions are inconsistent.
 #[inline]
 pub fn triangle_mesh_current_density(
     nodes: (&[f64], &[f64], &[f64]),
@@ -199,10 +249,10 @@ pub fn triangle_mesh_current_density(
 
     for i in 0..ntri {
         let (tri_nodes, tri_s) = mesh.triangle_nodes(i);
-        let j = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s);
-        out.0[i] = j[0];
-        out.1[i] = j[1];
-        out.2[i] = j[2];
+        let j = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s); // [A/m]
+        out.0[i] = j[0]; // [A/m]
+        out.1[i] = j[1]; // [A/m]
+        out.2[i] = j[2]; // [A/m]
     }
 
     Ok(())
@@ -210,6 +260,17 @@ pub fn triangle_mesh_current_density(
 
 /// Extract physical quadrature-point coordinates and area weights for each triangle
 /// in triangle-major order.
+///
+/// Args:
+///     nodes: Node-coordinate component slices `(x, y, z)` (m).
+///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     out: Output buffers for quadrature-point coordinates `(xq, yq, zq)` (m).
+///     weights: Output buffer for physical quadrature weights `ΔS_q` (m^2).
+///
+/// Returns:
+///     `Ok(())` after writing triangle-major quadrature coordinates and weights, or an
+///     error if the mesh geometry or output dimensions are inconsistent.
 #[inline]
 pub fn triangle_mesh_quadrature_points(
     nodes: (&[f64], &[f64], &[f64]),
@@ -242,15 +303,15 @@ pub fn triangle_mesh_quadrature_points(
             nodes.1[triangles.2[i]],
             nodes.2[triangles.2[i]],
         ];
-        let tri_area = calc_tri_area(n0, n1, n2);
+        let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
 
         for (k, qp) in quad_points.iter().enumerate() {
             let idx = i * nqp + k;
-            let point = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]);
-            out.0[idx] = point[0];
-            out.1[idx] = point[1];
-            out.2[idx] = point[2];
-            weights[idx] = qp[0] * tri_area;
+            let point = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]); // [m]
+            out.0[idx] = point[0]; // [m]
+            out.1[idx] = point[1]; // [m]
+            out.2[idx] = point[2]; // [m]
+            weights[idx] = qp[0] * tri_area; // [m^2]
         }
     }
 

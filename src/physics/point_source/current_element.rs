@@ -13,8 +13,8 @@ pub(crate) fn flux_density_current_element_scalar(
     obs: [f64; 3],
 ) -> [f64; 3] {
     let r = [obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]];
-    let sumsq = dot3(r[0], r[1], r[2], r[0], r[1], r[2]);
-    let rnorm3_inv = sumsq.powf(-1.5);
+    let rmag = dot3(r[0], r[1], r[2], r[0], r[1], r[2]);
+    let rnorm3_inv = rmag.powf(-1.5);
     let m_cross_r = cross3(moment[0], moment[1], moment[2], r[0], r[1], r[2]);
     [
         MU0_OVER_4PI * m_cross_r.0 * rnorm3_inv,
@@ -31,10 +31,10 @@ pub(crate) fn vector_potential_current_element_scalar(
     moment: [f64; 3],
     obs: [f64; 3],
 ) -> [f64; 3] {
-    let rnorm = rss3(obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]);
+    let rmag = rss3(obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]);
     [
-        MU0_OVER_4PI * moment[0] / rnorm,
-        MU0_OVER_4PI * moment[1] / rnorm,
-        MU0_OVER_4PI * moment[2] / rnorm,
+        MU0_OVER_4PI * moment[0] / rmag,
+        MU0_OVER_4PI * moment[1] / rmag,
+        MU0_OVER_4PI * moment[2] / rmag,
     ]
 }

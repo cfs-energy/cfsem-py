@@ -23,6 +23,7 @@ nav:
   - "Python Examples": "python/examples.md"
   - "Python API":
       - "python/filament.md"
+      - "python/boundary_element.md"
       - "python/flux_density.md"
       - "python/vector_potential.md"
       - "python/inductance.md"

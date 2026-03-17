@@ -6,12 +6,15 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
+use crate::physics::point_source::current_element::{
+    flux_density_current_element_scalar, vector_potential_current_element_scalar,
+};
 use crate::{
     chunksize,
-    math::{cross3, decompose_filament, dot3, rss3},
+    math::{cross3, decompose_filament},
 };
 
-use crate::{MU0_OVER_4PI, macros::*};
+use crate::macros::*;
 
 /// Biot-Savart calculation for B-field contribution from many current filament
 /// segments to many observation points.
@@ -135,43 +138,9 @@ pub fn flux_density_point_segment_scalar(
 
     // Get filament midpoint and length vector
     let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
-
-    // Get distance from middle of the filament segment to the observation point
-    let rx: f64 = xp - xmid; // [m]
-    let ry = yp - ymid; // [m]
-    let rz = zp - zmid; // [m]
-
-    // Now that we've resolved the part of the calculation that involves a wide dynamic range,
-    // which drives the need for 64-bit floats to control roundoff error,
-    // we can switch to 32-bit floats for the majority of the calculation without incurring
-    // excessive error, before converting back to 64-bit float so that we maintain
-    // acceptable error during summation downstream.
-    let (rx, ry, rz) = (rx, ry, rz);
-    let dl = (dl.0, dl.1, dl.2);
-    let ifil = ifil;
-
-    // Do 1/r^3 operation with an ordering that improves float error by eliminating
-    // the actual cube operation and using fused multiply-add to reduce roundoff events,
-    // then rolling the result into the factor that is constant between all contributions.
-    let sumsq = dot3(rx, ry, rz, rx, ry, rz);
-    let rnorm3_inv = sumsq.powf(-1.5); // [m^-3]
-
-    // This factor is constant across all x, y, and z components
-    let c = (MU0_OVER_4PI) * ifil * rnorm3_inv;
-
-    // Evaluate the cross products for each axis component
-    // separately using mul_add which would not be assumed usable
-    // in a more general implementation.
-    let (cx, cy, cz) = cross3(dl.0, dl.1, dl.2, rx, ry, rz);
-
-    // Assemble final B-field components
-    // and upcast back to 64-bit float so that summation operations
-    // downstream do not incur excessive roundoff error.
-    let bx = c * cx; // [T]
-    let by = c * cy;
-    let bz = c * cz;
-
-    (bx, by, bz)
+    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
+    let b = flux_density_current_element_scalar([xmid, ymid, zmid], moment, [xp, yp, zp]);
+    (b[0], b[1], b[2])
 }
 
 /// Vector potential calculation for A-field contribution from many current filament
@@ -296,21 +265,13 @@ pub fn vector_potential_point_segment_scalar(
 
     // Get filament midpoint and length vector
     let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
-
-    // [m] vector from filament midpoint to obs point
-    let (rx, ry, rz) = (xyzobs.0 - xmid, xyzobs.1 - ymid, xyzobs.2 - zmid);
-    let rnorm = rss3(rx, ry, rz);
-
-    // Scale factor shared between all components of A
-    let c = MU0_OVER_4PI * (ifil / rnorm);
-
-    // Vector potential is linear in the current and segment length
-    // and goes like 1/R from the segment to the observation point.
-    let ax = c * dl.0;
-    let ay = c * dl.1;
-    let az = c * dl.2;
-
-    (ax, ay, az)
+    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
+    let a = vector_potential_current_element_scalar(
+        [xmid, ymid, zmid],
+        moment,
+        [xyzobs.0, xyzobs.1, xyzobs.2],
+    );
+    (a[0], a[1], a[2])
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current
@@ -456,8 +417,50 @@ mod test {
     use std::f64::consts::PI;
 
     use super::*;
+    use crate::math::rss3;
     use crate::physics::linear_filament::inductance_piecewise_linear_filaments;
+    use crate::physics::point_source::current_element::{
+        flux_density_current_element_scalar, vector_potential_current_element_scalar,
+    };
     use crate::testing::*;
+
+    #[test]
+    fn test_point_segment_scalars_match_current_element_midpoint_mapping() {
+        let xyz0 = (-0.4, 0.2, 0.7);
+        let xyz1 = (0.8, -0.3, 1.1);
+        let ifil = -2.3;
+        let obs = (1.4, -0.9, 0.6);
+
+        let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
+        let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
+
+        let b_segment = flux_density_point_segment_scalar((xyz0, xyz1, ifil), obs);
+        let a_segment = vector_potential_point_segment_scalar((xyz0, xyz1, ifil), obs);
+        let b_element =
+            flux_density_current_element_scalar([xmid, ymid, zmid], moment, [obs.0, obs.1, obs.2]);
+        let a_element = vector_potential_current_element_scalar(
+            [xmid, ymid, zmid],
+            moment,
+            [obs.0, obs.1, obs.2],
+        );
+
+        for axis in 0..3 {
+            let b_segment_axis = [b_segment.0, b_segment.1, b_segment.2][axis];
+            let a_segment_axis = [a_segment.0, a_segment.1, a_segment.2][axis];
+            assert!(
+                approx(b_segment_axis, b_element[axis], 0.0, 1e-15),
+                "point-segment B/current-element mismatch at axis {axis}: segment={:.16e}, element={:.16e}",
+                b_segment_axis,
+                b_element[axis],
+            );
+            assert!(
+                approx(a_segment_axis, a_element[axis], 0.0, 1e-15),
+                "point-segment A/current-element mismatch at axis {axis}: segment={:.16e}, element={:.16e}",
+                a_segment_axis,
+                a_element[axis],
+            );
+        }
+    }
 
     /// Make sure the forces have the right sign
     /// and self-forces sum to zero within discretization error

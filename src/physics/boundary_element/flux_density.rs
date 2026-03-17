@@ -6,15 +6,22 @@ use rayon::{
 use super::{
     QuadratureKind, map_tri_uv, triangle_basis_current_density, triangle_quadrature_points,
 };
+use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
-use crate::math::{cross3, rss3};
 use crate::mesh::TriangleMeshView;
-use crate::{MU0_OVER_4PI, chunksize};
+use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
 /// Magnetic flux density (B-field) contribution of a given triangle's basis function
 /// with unit weighting to a given observation point.
 ///
 /// Assumes a basis function living on the triangle's first node.
+///
+/// Method:
+/// - The linear triangle basis induces a constant surface current density over the
+///   element.
+/// - Each quadrature point is treated as a point current element with moment
+///   `m = K * ΔS_q`.
+/// - Sum the Biot-Savart contributions with the full `μ0 / 4π` prefactor included.
 #[inline]
 pub fn triangle_flux_density_basis(
     n0: [f64; 3],
@@ -31,14 +38,15 @@ pub fn triangle_flux_density_basis(
     for qp in quad_points {
         let (c, u, v) = (qp[0], qp[1], qp[2]);
         let src = map_tri_uv(n0, n1, n2, [u, v]);
-        let r = [obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]];
-        let d = rss3(r[0], r[1], r[2]);
-        let inv_d3 = 1.0 / (d * d * d);
-        let j_cross_r = cross3(jref[0], jref[1], jref[2], r[0], r[1], r[2]);
-
-        b[0] += c * j_cross_r.0 * inv_d3 * tri_area;
-        b[1] += c * j_cross_r.1 * inv_d3 * tri_area;
-        b[2] += c * j_cross_r.2 * inv_d3 * tri_area;
+        let moment = [
+            jref[0] * c * tri_area,
+            jref[1] * c * tri_area,
+            jref[2] * c * tri_area,
+        ];
+        let contrib = flux_density_current_element_scalar(src, moment, obs);
+        b[0] += contrib[0];
+        b[1] += contrib[1];
+        b[2] += contrib[2];
     }
 
     b
@@ -66,9 +74,9 @@ pub fn flux_density_triangle(
     let b_n2 = triangle_flux_density_basis(n2, n0, n1, obs, quad_kind);
 
     [
-        (s[0] * b_n0[0] + s[1] * b_n1[0] + s[2] * b_n2[0]) * MU0_OVER_4PI,
-        (s[0] * b_n0[1] + s[1] * b_n1[1] + s[2] * b_n2[1]) * MU0_OVER_4PI,
-        (s[0] * b_n0[2] + s[1] * b_n1[2] + s[2] * b_n2[2]) * MU0_OVER_4PI,
+        s[0] * b_n0[0] + s[1] * b_n1[0] + s[2] * b_n2[0],
+        s[0] * b_n0[1] + s[1] * b_n1[1] + s[2] * b_n2[1],
+        s[0] * b_n0[2] + s[1] * b_n1[2] + s[2] * b_n2[2],
     ]
 }
 

@@ -3,17 +3,20 @@ use core::f64::consts::PI;
 use super::{
     QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
     flux_density_triangle_mesh, flux_density_triangle_mesh_par, map_tri_uv,
-    triangle_basis_current_densities, triangle_basis_mutual_inductance_block,
-    triangle_current_density, triangle_inductance_from_potential_vectors,
-    triangle_mesh_current_density, triangle_mesh_quadrature_points, triangle_quadrature_count,
-    triangle_quadrature_points, triangle_vector_potential_basis, vector_potential_triangle,
-    vector_potential_triangle_mesh, vector_potential_triangle_mesh_par,
+    triangle_basis_current_densities, triangle_basis_current_density,
+    triangle_basis_mutual_inductance_block, triangle_current_density,
+    triangle_inductance_from_potential_vectors, triangle_mesh_current_density,
+    triangle_mesh_quadrature_points, triangle_quadrature_count, triangle_quadrature_points,
+    triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
+    vector_potential_triangle_mesh_par,
 };
-use crate::MU0_OVER_4PI;
 use crate::math::{cartesian_to_cylindrical, dot3};
 use crate::physics::circular_filament::{
     flux_circular_filament_scalar, flux_density_circular_filament_cartesian_scalar,
     vector_potential_circular_filament_scalar,
+};
+use crate::physics::point_source::current_element::{
+    flux_density_current_element_scalar, vector_potential_current_element_scalar,
 };
 use crate::testing::approx;
 
@@ -342,6 +345,50 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
 }
 
 #[test]
+fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let obs = [0.35, -0.22, 1.15];
+    let quad_kind = QuadratureKind::GaussLegendre3;
+
+    let (tri_area, jref) = triangle_basis_current_density(tri[0], tri[1], tri[2]);
+    let mut b_via_elements = [0.0; 3];
+    let mut a_via_elements = [0.0; 3];
+
+    for qp in triangle_quadrature_points(quad_kind) {
+        let src = map_tri_uv(tri[0], tri[1], tri[2], [qp[1], qp[2]]);
+        let moment = [
+            jref[0] * qp[0] * tri_area,
+            jref[1] * qp[0] * tri_area,
+            jref[2] * qp[0] * tri_area,
+        ];
+        let bq = flux_density_current_element_scalar(src, moment, obs);
+        let aq = vector_potential_current_element_scalar(src, moment, obs);
+        for axis in 0..3 {
+            b_via_elements[axis] += bq[axis];
+            a_via_elements[axis] += aq[axis];
+        }
+    }
+
+    let b_basis = super::triangle_flux_density_basis(tri[0], tri[1], tri[2], obs, quad_kind);
+    let a_basis = triangle_vector_potential_basis(tri[0], tri[1], tri[2], obs, quad_kind);
+
+    for axis in 0..3 {
+        assert!(
+            approx(b_basis[axis], b_via_elements[axis], 0.0, 1e-15),
+            "basis B/current-element mismatch at axis {axis}: basis={:.16e}, via_elements={:.16e}",
+            b_basis[axis],
+            b_via_elements[axis],
+        );
+        assert!(
+            approx(a_basis[axis], a_via_elements[axis], 0.0, 1e-15),
+            "basis A/current-element mismatch at axis {axis}: basis={:.16e}, via_elements={:.16e}",
+            a_basis[axis],
+            a_via_elements[axis],
+        );
+    }
+}
+
+#[test]
 fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     let tris = circular_strip_triangles(0.73, 7.3e-4, 1.7, 24);
     let mesh = triangle_patches_to_mesh(&tris);
@@ -457,7 +504,6 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
                 );
                 via_a_dot_k += qp[0]
                     * tri_area_tgt
-                    * MU0_OVER_4PI
                     * dot3(
                         a_src[0], a_src[1], a_src[2], ktgt[j][0], ktgt[j][1], ktgt[j][2],
                     );

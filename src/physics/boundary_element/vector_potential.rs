@@ -6,10 +6,10 @@ use rayon::{
 use super::{
     QuadratureKind, map_tri_uv, triangle_basis_current_density, triangle_quadrature_points,
 };
+use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
-use crate::math::rss3;
 use crate::mesh::TriangleMeshView;
-use crate::{MU0_OVER_4PI, chunksize};
+use crate::physics::point_source::current_element::vector_potential_current_element_scalar;
 
 /// Magnetic vector potential (A-field) contribution of a given triangle's basis
 /// function with unit weighting to a given observation point.
@@ -19,9 +19,9 @@ use crate::{MU0_OVER_4PI, chunksize};
 /// Method:
 /// - The linear triangle basis induces a constant surface current density over the
 ///   element.
-/// - Evaluate the Coulomb-gauge kernel `K / R` at triangle quadrature points.
-/// - Sum the weighted contributions without the `μ0 / 4π` prefactor; that prefactor is
-///   applied when basis functions are combined into a physical field.
+/// - Each quadrature point is treated as a point current element with moment
+///   `m = K * ΔS_q`.
+/// - Sum the weighted contributions with the full `μ0 / 4π` prefactor included.
 ///
 /// References:
 /// - [5], Eq. (3.24) for the stream-function surface current construction,
@@ -46,12 +46,15 @@ pub fn triangle_vector_potential_basis(
     for qp in quad_points {
         let (c, u, v) = (qp[0], qp[1], qp[2]);
         let src = map_tri_uv(n0, n1, n2, [u, v]);
-        let r = rss3(obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]);
-        let weight = c * tri_area / r;
-
-        a[0] += weight * jref[0];
-        a[1] += weight * jref[1];
-        a[2] += weight * jref[2];
+        let moment = [
+            jref[0] * c * tri_area,
+            jref[1] * c * tri_area,
+            jref[2] * c * tri_area,
+        ];
+        let contrib = vector_potential_current_element_scalar(src, moment, obs);
+        a[0] += contrib[0];
+        a[1] += contrib[1];
+        a[2] += contrib[2];
     }
 
     a
@@ -69,7 +72,6 @@ pub fn triangle_vector_potential_basis(
 /// Method:
 /// - Evaluate the three nodal basis-function vector potentials.
 /// - Weight them by the nodal scalar potential values.
-/// - Apply the final `μ0 / 4π` prefactor to obtain the physical vector potential.
 ///
 /// References:
 /// - [5], Eq. (3.24), Eq. (4.6), and Eqs. (5.3)-(5.5).
@@ -89,9 +91,9 @@ pub fn vector_potential_triangle(
     let a_n2 = triangle_vector_potential_basis(n2, n0, n1, obs, quad_kind);
 
     [
-        (s[0] * a_n0[0] + s[1] * a_n1[0] + s[2] * a_n2[0]) * MU0_OVER_4PI,
-        (s[0] * a_n0[1] + s[1] * a_n1[1] + s[2] * a_n2[1]) * MU0_OVER_4PI,
-        (s[0] * a_n0[2] + s[1] * a_n1[2] + s[2] * a_n2[2]) * MU0_OVER_4PI,
+        s[0] * a_n0[0] + s[1] * a_n1[0] + s[2] * a_n2[0],
+        s[0] * a_n0[1] + s[1] * a_n1[1] + s[2] * a_n2[1],
+        s[0] * a_n0[2] + s[1] * a_n1[2] + s[2] * a_n2[2],
     ]
 }
 

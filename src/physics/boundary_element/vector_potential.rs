@@ -96,6 +96,7 @@ pub fn vector_potential_triangle(
     ]
 }
 
+#[inline]
 fn vector_potential_triangle_mesh_inner(
     obs: (&[f64], &[f64], &[f64]),
     mesh: TriangleMeshView<'_>,
@@ -132,6 +133,7 @@ fn vector_potential_triangle_mesh_inner(
 }
 
 /// Vector potential contribution from a triangle mesh with nodal stream-function values.
+#[inline]
 pub fn vector_potential_triangle_mesh(
     obs: (&[f64], &[f64], &[f64]),
     nodes: (&[f64], &[f64], &[f64]),
@@ -146,6 +148,7 @@ pub fn vector_potential_triangle_mesh(
 
 /// Vector potential contribution from a triangle mesh with nodal stream-function values.
 /// This variant is parallelized over chunks of observation points.
+#[inline]
 pub fn vector_potential_triangle_mesh_par(
     obs: (&[f64], &[f64], &[f64]),
     nodes: (&[f64], &[f64], &[f64]),

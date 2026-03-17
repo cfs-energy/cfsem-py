@@ -72,6 +72,7 @@ pub fn flux_density_triangle(
     ]
 }
 
+#[inline]
 fn flux_density_triangle_mesh_inner(
     obs: (&[f64], &[f64], &[f64]),
     mesh: TriangleMeshView<'_>,
@@ -108,6 +109,7 @@ fn flux_density_triangle_mesh_inner(
 }
 
 /// Flux density contribution from a triangle mesh with nodal stream-function values.
+#[inline]
 pub fn flux_density_triangle_mesh(
     obs: (&[f64], &[f64], &[f64]),
     nodes: (&[f64], &[f64], &[f64]),
@@ -122,6 +124,7 @@ pub fn flux_density_triangle_mesh(
 
 /// Flux density contribution from a triangle mesh with nodal stream-function values.
 /// This variant is parallelized over chunks of observation points.
+#[inline]
 pub fn flux_density_triangle_mesh_par(
     obs: (&[f64], &[f64], &[f64]),
     nodes: (&[f64], &[f64], &[f64]),

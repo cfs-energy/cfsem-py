@@ -24,11 +24,14 @@ pub use flux_density::{
     flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_par,
     triangle_flux_density_basis,
 };
+
+#[doc(hidden)] // Experimental for now
 pub use inductance::{
     triangle_basis_mutual_inductance, triangle_basis_mutual_inductance_block,
     triangle_geometric_coupling, triangle_geometric_coupling_regular,
     triangle_inductance_from_potential_vectors,
 };
+
 pub use vector_potential::{
     triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
     vector_potential_triangle_mesh_par,

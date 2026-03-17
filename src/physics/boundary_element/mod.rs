@@ -12,7 +12,7 @@ use crate::math::{cross3, rss3};
 
 mod flux_density;
 
-#[doc(hidden)]  // Experimental for now
+#[doc(hidden)] // Experimental for now
 mod inductance;
 
 #[cfg(test)]

@@ -15,6 +15,8 @@ from cfsem.bindings import (
     flux_density_circular_filament_cartesian,
     flux_density_dipole,
     flux_density_linear_filament,
+    triangle_mesh_current_density,
+    triangle_mesh_quadrature_points,
     flux_density_triangle_mesh,
     flux_density_point_segment,
     gs_operator_order2,
@@ -41,6 +43,8 @@ https://www.physics.nist.gov/cuu/pdf/wall_2018.pdf .
 __all__ = [
     "flux_circular_filament",
     "flux_density_linear_filament",
+    "triangle_mesh_current_density",
+    "triangle_mesh_quadrature_points",
     "flux_density_triangle_mesh",
     "flux_density_circular_filament",
     "gs_operator_order2",

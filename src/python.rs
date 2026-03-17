@@ -520,6 +520,88 @@ fn vector_potential_triangle_mesh(
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
+/// Python bindings for cfsemrs::physics::boundary_element::triangle_mesh_current_density
+#[pyfunction]
+fn triangle_mesh_current_density(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let s = s.as_slice()?;
+
+    let ntri = triangles.0.len();
+    let (mut jx, mut jy, mut jz) = (vec![0.0; ntri], vec![0.0; ntri], vec![0.0; ntri]);
+
+    match physics::boundary_element::triangle_mesh_current_density(
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+        s,
+        (&mut jx, &mut jy, &mut jz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((jx, f64), (jy, f64), (jz, f64))
+}
+
+/// Python bindings for cfsemrs::physics::boundary_element::triangle_mesh_quadrature_points
+#[pyfunction(signature = (nodes, triangles, quad="gl3"))]
+fn triangle_mesh_quadrature_points(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    quad: &str,
+) -> PyResult<(
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    usize,
+)> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let ntri = triangles.0.len();
+    let nqp = physics::boundary_element::triangle_quadrature_count(quad);
+    let nout = ntri * nqp;
+    let (mut xq, mut yq, mut zq, mut wq) = (
+        vec![0.0; nout],
+        vec![0.0; nout],
+        vec![0.0; nout],
+        vec![0.0; nout],
+    );
+
+    match physics::boundary_element::triangle_mesh_quadrature_points(
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+        quad,
+        (&mut xq, &mut yq, &mut zq),
+        &mut wq,
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| {
+        Ok((
+            PyArray1::from_vec(py, xq).unbind(),
+            PyArray1::from_vec(py, yq).unbind(),
+            PyArray1::from_vec(py, zq).unbind(),
+            PyArray1::from_vec(py, wq).unbind(),
+            nqp,
+        ))
+    })
+}
+
 /// Python bindings for cfsemrs::physics::point_source::segment::vector_potential_point_segment
 #[pyfunction]
 fn vector_potential_point_segment(
@@ -993,6 +1075,11 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(flux_density_linear_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(flux_density_triangle_mesh, m.clone())?)?;
     m.add_function(wrap_pyfunction!(flux_density_point_segment, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(triangle_mesh_current_density, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_quadrature_points,
+        m.clone()
+    )?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_linear_filament,
         m.clone()

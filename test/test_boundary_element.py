@@ -5,6 +5,16 @@ from pytest import mark, raises
 
 import cfsem
 
+GL2_TRI_QUAD = np.array(
+    [
+        [0.05283121635, 0.1666666667, 0.7886751346],
+        [0.1971687836, 0.6220084679, 0.2113248654],
+        [0.05283121635, 0.04465819874, 0.7886751346],
+        [0.1971687836, 0.1666666667, 0.2113248654],
+    ],
+    dtype=np.float64,
+)
+
 
 def _triangle_strip_mesh(
     radius: float,
@@ -60,6 +70,50 @@ def _loop_vector_potential_cartesian(
     return np.column_stack(
         (-a_phi * np.sin(phi), a_phi * np.cos(phi), np.zeros(obs.shape[0]))
     )
+
+
+def _triangle_current_density_reference(
+    nodes: np.ndarray,
+    triangles: np.ndarray,
+    s: np.ndarray,
+) -> np.ndarray:
+    out = np.empty((triangles.shape[0], 3), dtype=np.float64)
+    for i, (i0, i1, i2) in enumerate(triangles):
+        n0 = nodes[i0]
+        n1 = nodes[i1]
+        n2 = nodes[i2]
+        area = 0.5 * np.linalg.norm(np.cross(n1 - n0, n2 - n0))
+        out[i] = (
+            s[i0] * (n2 - n1) + s[i1] * (n0 - n2) + s[i2] * (n1 - n0)
+        ) / (2.0 * area)
+    return out
+
+
+def test_triangle_mesh_quadrature_points_and_current_density():
+    nodes, triangles, s = _triangle_strip_mesh(0.73, 7.3e-4, 1.7, nphi=32)
+
+    j = cfsem.triangle_mesh_current_density(nodes, triangles, s)
+    j_ref = _triangle_current_density_reference(nodes, triangles, s)
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="gl2")
+
+    assert j.shape == (triangles.shape[0], 3)
+    assert points.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0], 3)
+    assert weights.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0])
+    assert np.allclose(j, j_ref, rtol=1e-13, atol=1e-13)
+
+    for i, (i0, i1, i2) in enumerate(triangles):
+        n0 = nodes[i0]
+        n1 = nodes[i1]
+        n2 = nodes[i2]
+        area = 0.5 * np.linalg.norm(np.cross(n1 - n0, n2 - n0))
+        expected_points = (
+            (1.0 - GL2_TRI_QUAD[:, 1] - GL2_TRI_QUAD[:, 2])[:, None] * n0[None, :]
+            + GL2_TRI_QUAD[:, 1][:, None] * n1[None, :]
+            + GL2_TRI_QUAD[:, 2][:, None] * n2[None, :]
+        )
+        expected_weights = GL2_TRI_QUAD[:, 0] * area
+        assert np.allclose(points[i], expected_points, rtol=0.0, atol=1e-13)
+        assert np.allclose(weights[i], expected_weights, rtol=0.0, atol=1e-13)
 
 
 @mark.parametrize("par", [True, False])
@@ -153,3 +207,6 @@ def test_triangle_mesh_invalid_inputs():
 
     with raises(ValueError, match="Unsupported triangle quadrature rule"):
         cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, quad="bad")
+
+    with raises(ValueError, match="Unsupported triangle quadrature rule"):
+        cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="bad")

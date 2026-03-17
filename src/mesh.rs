@@ -61,6 +61,33 @@ pub(crate) struct TriangleMeshView<'a> {
     s: &'a [f64],
 }
 
+pub(crate) fn validate_triangle_mesh_geometry(
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+) -> Result<(usize, usize), &'static str> {
+    let nnode = nodes.0.len();
+    if nodes.1.len() != nnode || nodes.2.len() != nnode {
+        return Err("Node coordinate dimension mismatch");
+    }
+
+    let ntri = triangles.0.len();
+    if triangles.1.len() != ntri || triangles.2.len() != ntri {
+        return Err("Triangle index dimension mismatch");
+    }
+
+    if triangles
+        .0
+        .iter()
+        .chain(triangles.1.iter())
+        .chain(triangles.2.iter())
+        .any(|&idx| idx >= nnode)
+    {
+        return Err("Triangle refers to non-existent node");
+    }
+
+    Ok((nnode, ntri))
+}
+
 impl<'a> TriangleMeshView<'a> {
     /// Validate dimensions and construct a borrowed mesh view.
     pub(crate) fn new(
@@ -68,27 +95,9 @@ impl<'a> TriangleMeshView<'a> {
         triangles: (&'a [usize], &'a [usize], &'a [usize]),
         s: &'a [f64],
     ) -> Result<Self, &'static str> {
-        let nnode = nodes.0.len();
-        if nodes.1.len() != nnode || nodes.2.len() != nnode {
-            return Err("Node coordinate dimension mismatch");
-        }
+        let (nnode, _ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
         if s.len() != nnode {
             return Err("Nodal scalar dimension mismatch");
-        }
-
-        let ntri = triangles.0.len();
-        if triangles.1.len() != ntri || triangles.2.len() != ntri {
-            return Err("Triangle index dimension mismatch");
-        }
-
-        if triangles
-            .0
-            .iter()
-            .chain(triangles.1.iter())
-            .chain(triangles.2.iter())
-            .any(|&idx| idx >= nnode)
-        {
-            return Err("Triangle refers to non-existent node");
         }
 
         Ok(Self {

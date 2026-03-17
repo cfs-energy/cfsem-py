@@ -5,7 +5,7 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
-from numpy import asarray, ascontiguousarray, float64, full, int64, zeros_like
+from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -36,6 +36,8 @@ from .cfsem import (
     mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
 )
 from .cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
+from .cfsem import triangle_mesh_current_density as em_triangle_mesh_current_density
+from .cfsem import triangle_mesh_quadrature_points as em_triangle_mesh_quadrature_points
 from .cfsem import (
     vector_potential_circular_filament as em_vector_potential_circular_filament,
 )
@@ -359,6 +361,55 @@ def vector_potential_triangle_mesh(
     triangles = ascontiguousarray(triangles, dtype=int64)
     s = ascontiguousarray(s, dtype=float64).ravel()
     return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par, quad)
+
+
+def triangle_mesh_current_density(
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    s: NDArray[float64],
+) -> NDArray[float64]:
+    """
+    Extract the constant physical surface current density on each triangle of a mesh.
+
+    Args:
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        s: nodal stream-function values with shape `(nnode,)`
+
+    Returns:
+        [A/m] triangle-wise surface current density with shape `(ntri, 3)`
+    """
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    s = ascontiguousarray(s, dtype=float64).ravel()
+    jx, jy, jz = em_triangle_mesh_current_density(nodes, triangles, s)
+    return column_stack((jx, jy, jz))
+
+
+def triangle_mesh_quadrature_points(
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64]]:
+    """
+    Extract physical quadrature-point coordinates and area weights for each triangle.
+
+    Args:
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        quad: Triangle quadrature rule, either `"gl2"` or `"gl3"`
+
+    Returns:
+        points: [m] quadrature-point coordinates with shape `(ntri, nqp, 3)`
+        weights: [m^2] physical quadrature weights with shape `(ntri, nqp)`
+    """
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    xq, yq, zq, wq, nqp = em_triangle_mesh_quadrature_points(nodes, triangles, quad)
+    ntri = triangles.shape[0]
+    points = column_stack((xq, yq, zq)).reshape(ntri, nqp, 3)
+    weights = ascontiguousarray(wq).reshape(ntri, nqp)
+    return points, weights
 
 
 def inductance_piecewise_linear_filaments(

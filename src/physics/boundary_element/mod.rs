@@ -9,6 +9,7 @@
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
 
 use crate::math::{cross3, rss3};
+use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
 
 mod flux_density;
 
@@ -134,6 +135,18 @@ fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) ->
     ]
 }
 
+/// Physical surface current density induced on one triangle by its nodal
+/// stream-function values.
+#[inline]
+pub fn triangle_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], s: [f64; 3]) -> [f64; 3] {
+    let basis = triangle_basis_current_densities(n0, n1, n2);
+    [
+        s[0] * basis[0][0] + s[1] * basis[1][0] + s[2] * basis[2][0],
+        s[0] * basis[0][1] + s[1] * basis[1][1] + s[2] * basis[2][1],
+        s[0] * basis[0][2] + s[1] * basis[1][2] + s[2] * basis[2][2],
+    ]
+}
+
 #[inline]
 fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] {
     match quad_kind {
@@ -141,6 +154,86 @@ fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] 
         QuadratureKind::GaussLegendre3 => &TABLE_GAUSS_LEGENDRE_3,
         _ => panic!(),
     }
+}
+
+/// Number of quadrature points used by a given triangle rule.
+#[inline]
+pub fn triangle_quadrature_count(quad_kind: QuadratureKind) -> usize {
+    triangle_quadrature_points(quad_kind).len()
+}
+
+/// Extract the constant physical surface current density on each triangle of a mesh.
+#[inline]
+pub fn triangle_mesh_current_density(
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    s: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
+    let ntri = mesh.len();
+    if out.0.len() != ntri || out.1.len() != ntri || out.2.len() != ntri {
+        return Err("Output dimension mismatch");
+    }
+
+    for i in 0..ntri {
+        let (tri_nodes, tri_s) = mesh.triangle_nodes(i);
+        let j = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s);
+        out.0[i] = j[0];
+        out.1[i] = j[1];
+        out.2[i] = j[2];
+    }
+
+    Ok(())
+}
+
+/// Extract physical quadrature-point coordinates and area weights for each triangle
+/// in triangle-major order.
+#[inline]
+pub fn triangle_mesh_quadrature_points(
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    quad_kind: QuadratureKind,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+    weights: &mut [f64],
+) -> Result<(), &'static str> {
+    let (_nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
+    let quad_points = triangle_quadrature_points(quad_kind);
+    let nqp = quad_points.len();
+    let nout = ntri * nqp;
+    if out.0.len() != nout || out.1.len() != nout || out.2.len() != nout || weights.len() != nout {
+        return Err("Output dimension mismatch");
+    }
+
+    for i in 0..ntri {
+        let n0 = [
+            nodes.0[triangles.0[i]],
+            nodes.1[triangles.0[i]],
+            nodes.2[triangles.0[i]],
+        ];
+        let n1 = [
+            nodes.0[triangles.1[i]],
+            nodes.1[triangles.1[i]],
+            nodes.2[triangles.1[i]],
+        ];
+        let n2 = [
+            nodes.0[triangles.2[i]],
+            nodes.1[triangles.2[i]],
+            nodes.2[triangles.2[i]],
+        ];
+        let tri_area = calc_tri_area(n0, n1, n2);
+
+        for (k, qp) in quad_points.iter().enumerate() {
+            let idx = i * nqp + k;
+            let point = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]);
+            out.0[idx] = point[0];
+            out.1[idx] = point[1];
+            out.2[idx] = point[2];
+            weights[idx] = qp[0] * tri_area;
+        }
+    }
+
+    Ok(())
 }
 
 #[inline]

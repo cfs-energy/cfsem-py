@@ -4,9 +4,10 @@ use super::{
     QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
     flux_density_triangle_mesh, flux_density_triangle_mesh_par, map_tri_uv,
     triangle_basis_current_densities, triangle_basis_mutual_inductance_block,
-    triangle_inductance_from_potential_vectors, triangle_quadrature_points,
-    triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
-    vector_potential_triangle_mesh_par,
+    triangle_current_density, triangle_inductance_from_potential_vectors,
+    triangle_mesh_current_density, triangle_mesh_quadrature_points, triangle_quadrature_count,
+    triangle_quadrature_points, triangle_vector_potential_basis, vector_potential_triangle,
+    vector_potential_triangle_mesh, vector_potential_triangle_mesh_par,
 };
 use crate::MU0_OVER_4PI;
 use crate::math::{cartesian_to_cylindrical, dot3};
@@ -327,6 +328,69 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
             assert!(
                 approx(a_mesh_par[i][axis], a_direct[axis], 1e-12, 1e-14),
                 "single-triangle mesh parallel A mismatch at point {i}, axis {axis}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
+    let tris = circular_strip_triangles(0.73, 7.3e-4, 1.7, 24);
+    let mesh = triangle_patches_to_mesh(&tris);
+    let quad_kind = QuadratureKind::GaussLegendre2;
+    let ntri = mesh.triangles.0.len();
+    let nqp = triangle_quadrature_count(quad_kind);
+
+    let (mut jx, mut jy, mut jz) = (vec![0.0; ntri], vec![0.0; ntri], vec![0.0; ntri]);
+    triangle_mesh_current_density(
+        (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+        (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+        &mesh.s,
+        (&mut jx, &mut jy, &mut jz),
+    )
+    .unwrap();
+
+    let (mut xq, mut yq, mut zq) = (
+        vec![0.0; ntri * nqp],
+        vec![0.0; ntri * nqp],
+        vec![0.0; ntri * nqp],
+    );
+    let mut wq = vec![0.0; ntri * nqp];
+    triangle_mesh_quadrature_points(
+        (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+        (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+        quad_kind,
+        (&mut xq, &mut yq, &mut zq),
+        &mut wq,
+    )
+    .unwrap();
+
+    let quad_points = triangle_quadrature_points(quad_kind);
+    for (i, tri) in tris.iter().enumerate() {
+        let j_expected = triangle_current_density(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s);
+        for axis in 0..3 {
+            let j = [jx[i], jy[i], jz[i]][axis];
+            assert!(
+                approx(j, j_expected[axis], 1e-13, 1e-14),
+                "triangle current density mismatch for triangle {i}, axis {axis}"
+            );
+        }
+
+        let tri_area = calc_tri_area(tri.nodes[0], tri.nodes[1], tri.nodes[2]);
+        for (k, qp) in quad_points.iter().enumerate() {
+            let idx = i * nqp + k;
+            let expected_point =
+                map_tri_uv(tri.nodes[0], tri.nodes[1], tri.nodes[2], [qp[1], qp[2]]);
+            for axis in 0..3 {
+                let q = [xq[idx], yq[idx], zq[idx]][axis];
+                assert!(
+                    approx(q, expected_point[axis], 0.0, 1e-14),
+                    "quadrature point mismatch for triangle {i}, point {k}, axis {axis}"
+                );
+            }
+            assert!(
+                approx(wq[idx], qp[0] * tri_area, 0.0, 1e-14),
+                "quadrature weight mismatch for triangle {i}, point {k}"
             );
         }
     }

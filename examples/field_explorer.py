@@ -23,6 +23,8 @@ DEFAULT_POINT_SEGMENT_SUBDIVISIONS = 24
 MAX_POINT_SEGMENT_SUBDIVISIONS = 400
 DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES = 4
 MAX_BOUNDARY_ELEMENT_LENGTH_NODES = 20
+DEFAULT_BOUNDARY_ELEMENT_STRIP_COUNT = 1
+MAX_BOUNDARY_ELEMENT_STRIP_COUNT = 10
 DEFAULT_BOUNDARY_ELEMENT_QUAD = "gl3"
 BOUNDARY_COMPARE_GRID_SIZE = 17 if os.getenv("CFSEM_TESTING") else 101
 DOCS_FIELD_EXPLORER_SVG = (
@@ -51,6 +53,7 @@ def build_plot_context_summary(
     section_grid_n: int | None = None,
     section_filaments_per_segment: int | None = None,
     distributed_radius_mode: str | None = None,
+    boundary_strip_count: int | None = None,
     boundary_strip_length_nodes: int | None = None,
     boundary_quadrature: str | None = None,
 ) -> str:
@@ -69,6 +72,8 @@ def build_plot_context_summary(
         parts.append(grid_summary)
     if distributed_radius_mode is not None:
         parts.append(f"distributed radius mode: {distributed_radius_mode}")
+    if boundary_strip_count is not None:
+        parts.append(f"tube strips/segment: {boundary_strip_count}")
     if boundary_strip_length_nodes is not None:
         parts.append(f"strip nodes/segment: {boundary_strip_length_nodes}")
     if boundary_quadrature is not None:
@@ -104,6 +109,10 @@ def normalize_point_segment_subdivisions(n_point_subdivisions: int) -> int:
 
 def normalize_boundary_element_length_nodes(n_strip_nodes: int) -> int:
     return max(2, min(MAX_BOUNDARY_ELEMENT_LENGTH_NODES, int(n_strip_nodes)))
+
+
+def normalize_boundary_element_strip_count(n_strip_count: int) -> int:
+    return max(1, min(MAX_BOUNDARY_ELEMENT_STRIP_COUNT, int(n_strip_count)))
 
 
 def normalize_boundary_element_quadrature(quad: str | None) -> str:
@@ -330,55 +339,72 @@ def build_boundary_element_strips(
     current: np.ndarray,
     wire_radius: float,
     n_length_nodes: int,
+    n_wrapped_strips: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     n_length_nodes = normalize_boundary_element_length_nodes(n_length_nodes)
+    n_wrapped_strips = normalize_boundary_element_strip_count(n_wrapped_strips)
     half_width = max(float(wire_radius), 1e-6)
-    y_offset = np.array([0.0, half_width, 0.0])
 
     nodes: list[np.ndarray] = []
     triangles: list[list[int]] = []
     svals: list[np.ndarray] = []
-    upper_paths: list[np.ndarray] = []
-    lower_paths: list[np.ndarray] = []
+    positive_paths: list[np.ndarray] = []
+    negative_paths: list[np.ndarray] = []
     end_connectors: list[np.ndarray] = []
     node_offset = 0
 
     for start, end, amp in zip(starts, ends, current, strict=True):
         centerline = start + np.linspace(0.0, 1.0, n_length_nodes)[:, None] * (end - start)
-        lower = centerline - y_offset.reshape(1, 3)
-        upper = centerline + y_offset.reshape(1, 3)
+        u, v = orthonormal_section_basis(end - start)
+        amp_strip = amp / n_wrapped_strips
 
-        nodes.extend([lower, upper])
-        svals.extend(
-            [
-                np.full(n_length_nodes, -amp, dtype=float),
-                np.full(n_length_nodes, amp, dtype=float),
-            ]
-        )
+        if n_wrapped_strips == 1:
+            strip_dirs = [(-u, u)]
+        else:
+            angles = np.linspace(0.0, 2.0 * np.pi, n_wrapped_strips, endpoint=False)
+            strip_dirs = []
+            for i in range(n_wrapped_strips):
+                phi0 = angles[i]
+                phi1 = angles[(i + 1) % n_wrapped_strips]
+                dir0 = np.cos(phi0) * u + np.sin(phi0) * v
+                dir1 = np.cos(phi1) * u + np.sin(phi1) * v
+                strip_dirs.append((dir0, dir1))
 
-        for i in range(n_length_nodes - 1):
-            lower0 = node_offset + i
-            lower1 = node_offset + i + 1
-            upper0 = node_offset + n_length_nodes + i
-            upper1 = node_offset + n_length_nodes + i + 1
+        for dir_neg, dir_pos in strip_dirs:
+            edge_neg = centerline + half_width * dir_neg.reshape(1, 3)
+            edge_pos = centerline + half_width * dir_pos.reshape(1, 3)
 
-            # Winding is chosen so that s = +I on the upper edge and s = -I on the
-            # lower edge produces current along the segment direction.
-            triangles.append([lower0, upper1, lower1])
-            triangles.append([lower0, upper0, upper1])
+            nodes.extend([edge_neg, edge_pos])
+            svals.extend(
+                [
+                    np.full(n_length_nodes, -amp_strip, dtype=float),
+                    np.full(n_length_nodes, amp_strip, dtype=float),
+                ]
+            )
 
-        upper_paths.append(upper)
-        lower_paths.append(lower)
-        end_connectors.append(np.vstack((lower[0], upper[0])))
-        end_connectors.append(np.vstack((lower[-1], upper[-1])))
-        node_offset += 2 * n_length_nodes
+            for i in range(n_length_nodes - 1):
+                neg0 = node_offset + i
+                neg1 = node_offset + i + 1
+                pos0 = node_offset + n_length_nodes + i
+                pos1 = node_offset + n_length_nodes + i + 1
+
+                # Winding is chosen so that s = +I on the positive edge and s = -I on the
+                # negative edge produces current along the segment direction.
+                triangles.append([neg0, pos1, neg1])
+                triangles.append([neg0, pos0, pos1])
+
+            positive_paths.append(edge_pos)
+            negative_paths.append(edge_neg)
+            end_connectors.append(np.vstack((edge_neg[0], edge_pos[0])))
+            end_connectors.append(np.vstack((edge_neg[-1], edge_pos[-1])))
+            node_offset += 2 * n_length_nodes
 
     return (
         np.ascontiguousarray(np.vstack(nodes), dtype=np.float64),
         np.ascontiguousarray(np.array(triangles), dtype=np.int64),
         np.ascontiguousarray(np.concatenate(svals), dtype=np.float64),
-        upper_paths,
-        lower_paths,
+        positive_paths,
+        negative_paths,
         end_connectors,
     )
 
@@ -1316,19 +1342,22 @@ def compute_boundary_element_field(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
+    boundary_strip_count: int,
     boundary_strip_length_nodes: int,
     boundary_quad: str,
 ) -> dict[str, np.ndarray | float]:
     boundary_quad = normalize_boundary_element_quadrature(boundary_quad)
+    boundary_strip_count = normalize_boundary_element_strip_count(boundary_strip_count)
     vertices, starts, ends, xyzfil, dlxyzfil, ifil = build_linear_filaments(
         n_sides, rotation_deg, n_subdivisions
     )
-    nodes, triangles, s, _upper_paths, _lower_paths, _connectors = build_boundary_element_strips(
+    nodes, triangles, s, _positive_paths, _negative_paths, _connectors = build_boundary_element_strips(
         starts,
         ends,
         ifil,
         wire_radius,
         boundary_strip_length_nodes,
+        boundary_strip_count,
     )
 
     x = np.linspace(-DOMAIN, DOMAIN, BOUNDARY_COMPARE_GRID_SIZE)
@@ -1379,6 +1408,7 @@ def compute_boundary_element_field(
         "n_strip": float(triangles.shape[0] * npts),
         "n_triangles": float(triangles.shape[0]),
         "n_nodes": float(nodes.shape[0]),
+        "strip_count": float(boundary_strip_count),
         "strip_length_nodes": float(normalize_boundary_element_length_nodes(boundary_strip_length_nodes)),
         "boundary_quad": boundary_quad,
     }
@@ -1390,6 +1420,7 @@ def build_boundary_element_figures(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
+    boundary_strip_count: int,
     boundary_strip_length_nodes: int,
     boundary_quad: str,
     mask_axis_spikes: bool,
@@ -1404,6 +1435,7 @@ def build_boundary_element_figures(
         wire_radius,
         rotation_deg,
         n_subdivisions,
+        boundary_strip_count,
         boundary_strip_length_nodes,
         boundary_quad,
     )
@@ -1415,6 +1447,7 @@ def build_boundary_element_figures(
     path_x = data["path_x"]
     path_z = data["path_z"]
     n_triangles = int(data["n_triangles"])
+    n_strip_faces = int(data["strip_count"])
     n_strip_nodes = int(data["strip_length_nodes"])
     boundary_quad = str(data["boundary_quad"])
 
@@ -1436,7 +1469,7 @@ def build_boundary_element_figures(
         horizontal_spacing=0.15,
         subplot_titles=[
             f"{title_prefix} boundary-element model (log10)",
-            "Slice along x (z = 0): triangle strip vs linear filament",
+            "Slice along x (z = 0): triangle tube vs linear filament",
         ],
     )
     top_fig.add_trace(
@@ -1476,7 +1509,10 @@ def build_boundary_element_figures(
             y=mag_strip[mid, :],
             mode="lines",
             line={"color": "deepskyblue", "width": 2},
-            name=f"Triangle strip ({boundary_quad}, {n_strip_nodes} nodes/seg, {n_triangles} tris)",
+            name=(
+                f"Triangle tube ({n_strip_faces} strips/seg, {boundary_quad}, "
+                f"{n_strip_nodes} nodes/seg, {n_triangles} tris)"
+            ),
         ),
         row=1,
         col=2,
@@ -1520,7 +1556,7 @@ def build_boundary_element_figures(
         horizontal_spacing=0.15,
         subplot_titles=[
             "Linear - boundary-element error (log10)",
-            "Slice along z (x = 0): triangle strip vs linear filament",
+            "Slice along z (x = 0): triangle tube vs linear filament",
         ],
     )
     bottom_fig.add_trace(
@@ -1547,7 +1583,7 @@ def build_boundary_element_figures(
             y=mag_strip[:, mid],
             mode="lines",
             line={"color": "deepskyblue", "width": 2},
-            name="Triangle strip (z-slice)",
+            name="Triangle tube (z-slice)",
             showlegend=False,
         ),
         row=1,
@@ -1586,25 +1622,28 @@ def build_boundary_element_geometry_figure(
     wire_radius: float,
     rotation_deg: float,
     n_subdivisions: int,
+    boundary_strip_count: int,
     boundary_strip_length_nodes: int,
     boundary_quad: str,
 ):
     import plotly.graph_objects as go
 
     boundary_quad = normalize_boundary_element_quadrature(boundary_quad)
+    boundary_strip_count = normalize_boundary_element_strip_count(boundary_strip_count)
     vertices, starts, ends, _xyzfil, _dlxyzfil, ifil = build_linear_filaments(
         n_sides, rotation_deg, n_subdivisions
     )
-    nodes, triangles, _s, upper_paths, lower_paths, end_connectors = build_boundary_element_strips(
+    nodes, triangles, _s, positive_paths, negative_paths, end_connectors = build_boundary_element_strips(
         starts,
         ends,
         ifil,
         wire_radius,
         boundary_strip_length_nodes,
+        boundary_strip_count,
     )
     path = np.vstack((vertices, vertices[0])) if n_sides >= 3 else vertices
-    x_upper, y_upper, z_upper = polyline_collection_xyz(upper_paths)
-    x_lower, y_lower, z_lower = polyline_collection_xyz(lower_paths)
+    x_pos, y_pos, z_pos = polyline_collection_xyz(positive_paths)
+    x_neg, y_neg, z_neg = polyline_collection_xyz(negative_paths)
     x_conn, y_conn, z_conn = polyline_collection_xyz(end_connectors)
     x_mesh, y_mesh, z_mesh = triangle_mesh_edge_lines_xyz(nodes, triangles)
     quad_points, quad_weights = cfsem.triangle_mesh_quadrature_points(
@@ -1676,26 +1715,26 @@ def build_boundary_element_geometry_figure(
     )
     fig.add_trace(
         go.Scatter3d(
-            x=x_upper,
-            y=y_upper,
-            z=z_upper,
+            x=x_pos,
+            y=y_pos,
+            z=z_pos,
             mode="lines",
             line={"color": "deepskyblue", "width": 3},
             opacity=0.85,
-            name="Upper strip edge",
+            name="+s strip edges",
             showlegend=True,
             hoverinfo="skip",
         )
     )
     fig.add_trace(
         go.Scatter3d(
-            x=x_lower,
-            y=y_lower,
-            z=z_lower,
+            x=x_neg,
+            y=y_neg,
+            z=z_neg,
             mode="lines",
             line={"color": "royalblue", "width": 3},
             opacity=0.85,
-            name="Lower strip edge",
+            name="-s strip edges",
             showlegend=True,
             hoverinfo="skip",
         )
@@ -1728,8 +1767,9 @@ def build_boundary_element_geometry_figure(
         height=620,
         title={
             "text": (
-                "Boundary-element strip geometry | "
+                "Boundary-element tube geometry | "
                 f"{triangles.shape[0]} triangles, {nodes.shape[0]} nodes, "
+                f"{boundary_strip_count} strips/segment, "
                 f"{normalize_boundary_element_length_nodes(boundary_strip_length_nodes)} nodes/segment, "
                 f"{boundary_quad}"
             ),
@@ -1770,6 +1810,7 @@ def build_perf_summary(
     point_segment_subdivisions: int = DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
     section_grid_n: int = DEFAULT_SECTION_GRID_N,
     distributed_use_area_radius: bool = False,
+    boundary_strip_count: int = DEFAULT_BOUNDARY_ELEMENT_STRIP_COUNT,
     boundary_strip_length_nodes: int = DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
     boundary_quad: str = DEFAULT_BOUNDARY_ELEMENT_QUAD,
 ) -> str:
@@ -1830,6 +1871,7 @@ def build_perf_summary(
             wire_radius,
             rotation_deg,
             n_subdivisions,
+            boundary_strip_count,
             boundary_strip_length_nodes,
             boundary_quad,
         )
@@ -1841,6 +1883,7 @@ def build_perf_summary(
             wire_radius,
             rotation_deg,
             n_subdivisions,
+            boundary_strip_count=normalize_boundary_element_strip_count(boundary_strip_count),
             boundary_strip_length_nodes=n_strip_nodes,
             boundary_quadrature=boundary_quad,
         )
@@ -1848,7 +1891,7 @@ def build_perf_summary(
             f"{label} boundary-element check | "
             f"{context} | "
             f"linear: {data['t_model']:.3f}s / {data['n_model']:.2e} interactions, "
-            f"triangle strip: {data['t_strip']:.3f}s / {data['n_strip']:.2e} interactions "
+            f"triangle tube: {data['t_strip']:.3f}s / {data['n_strip']:.2e} interactions "
             f"({int(data['n_triangles'])} tris)"
         )
 
@@ -1873,160 +1916,209 @@ def create_app():
                 [
                     html.Div(
                         [
-                            html.P(
-                                "Path geometry (sides)",
-                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
-                            ),
-                            dcc.Slider(
-                                id="polygon-sides",
-                                min=1,
-                                max=50,
-                                step=1,
-                                value=3,
-                                marks={1: "1", 10: "10", 20: "20", 30: "30", 40: "40", 50: "50"},
-                                tooltip={"placement": "bottom", "always_visible": True},
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        [
-                            html.P(
-                                "Sub-divisions per segment",
-                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
-                            ),
-                            dcc.Slider(
-                                id="segment-subdivisions",
-                                min=1,
-                                max=10,
-                                step=1,
-                                value=1,
-                                marks={1: "1", 3: "3", 5: "5", 7: "7", 10: "10"},
-                                tooltip={"placement": "bottom", "always_visible": True},
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        [
-                            html.P(
-                                "Point-segment lengthwise discretizations",
-                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
-                            ),
-                            dcc.Slider(
-                                id="point-segment-subdivisions",
-                                min=1,
-                                max=MAX_POINT_SEGMENT_SUBDIVISIONS,
-                                step=1,
-                                value=DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
-                                marks={
-                                    1: "1",
-                                    100: "100",
-                                    200: "200",
-                                    300: "300",
-                                    400: "400",
-                                },
-                                tooltip={"placement": "bottom", "always_visible": True},
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        [
-                            html.P(
-                                "Boundary-element strip nodes / segment",
-                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
-                            ),
-                            dcc.Slider(
-                                id="boundary-strip-length-nodes",
-                                min=2,
-                                max=MAX_BOUNDARY_ELEMENT_LENGTH_NODES,
-                                step=1,
-                                value=DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
-                                marks={2: "2", 4: "4", 8: "8", 12: "12", 16: "16", 20: "20"},
-                                tooltip={"placement": "bottom", "always_visible": True},
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        [
-                            html.P(
-                                "Boundary-element quadrature",
-                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
-                            ),
-                            dcc.Dropdown(
-                                id="boundary-element-quad",
-                                options=[
-                                    {"label": "Gauss-Legendre 2", "value": "gl2"},
-                                    {"label": "Gauss-Legendre 3", "value": "gl3"},
-                                    {"label": "Dunavant 5", "value": "dunavant5"},
-                                ],
-                                value=DEFAULT_BOUNDARY_ELEMENT_QUAD,
-                                clearable=False,
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        [
-                            html.P(
-                                "Wire radius [m]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}
-                            ),
-                            dcc.Slider(
-                                id="wire-radius",
-                                min=0.0,
-                                max=0.1,
-                                step=0.001,
-                                value=DEFAULT_WIRE_RADIUS,
-                                marks={0.0: "0.00", 0.02: "0.02", 0.05: "0.05", 0.08: "0.08", 0.1: "0.10"},
-                                tooltip={"placement": "bottom", "always_visible": True},
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        [
-                            html.P(
-                                "Rotation [deg]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}
-                            ),
-                            dcc.Slider(
-                                id="rotation-deg",
-                                min=0,
-                                max=360,
-                                step=1,
-                                value=0,
-                                marks={0: "0", 90: "90", 180: "180", 270: "270", 360: "360"},
-                                tooltip={"placement": "bottom", "always_visible": True},
-                            ),
-                        ]
-                    ),
-                    html.Div(
-                        [
-                            html.P(
-                                "Distributed section grid size (n x n)",
-                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
-                            ),
-                            dcc.Slider(
-                                id="section-grid-size",
-                                min=2,
-                                max=MAX_SECTION_GRID_N,
-                                step=2,
-                                value=DEFAULT_SECTION_GRID_N,
-                                marks={2: "2", 50: "50", 100: "100", 200: "200", 300: "300", 400: "400"},
-                                tooltip={"placement": "bottom", "always_visible": True},
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Path geometry (sides)",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="polygon-sides",
+                                        min=1,
+                                        max=50,
+                                        step=1,
+                                        value=3,
+                                        marks={1: "1", 10: "10", 20: "20", 30: "30", 40: "40", 50: "50"},
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ]
                             ),
                             html.Div(
-                                id="section-grid-summary",
-                                children=distributed_section_summary_text(DEFAULT_SECTION_GRID_N),
-                                style={
-                                    "marginTop": "0.35rem",
-                                    "fontFamily": "monospace",
-                                    "fontSize": "0.9rem",
-                                },
+                                [
+                                    html.P(
+                                        "Sub-divisions per segment",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="segment-subdivisions",
+                                        min=1,
+                                        max=10,
+                                        step=1,
+                                        value=1,
+                                        marks={1: "1", 3: "3", 5: "5", 7: "7", 10: "10"},
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ]
                             ),
-                        ]
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Point-segment lengthwise discretizations",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="point-segment-subdivisions",
+                                        min=1,
+                                        max=MAX_POINT_SEGMENT_SUBDIVISIONS,
+                                        step=1,
+                                        value=DEFAULT_POINT_SEGMENT_SUBDIVISIONS,
+                                        marks={
+                                            1: "1",
+                                            100: "100",
+                                            200: "200",
+                                            300: "300",
+                                            400: "400",
+                                        },
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ]
+                            ),
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Wire radius [m]",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="wire-radius",
+                                        min=0.0,
+                                        max=0.1,
+                                        step=0.001,
+                                        value=DEFAULT_WIRE_RADIUS,
+                                        marks={
+                                            0.0: "0.00",
+                                            0.02: "0.02",
+                                            0.05: "0.05",
+                                            0.08: "0.08",
+                                            0.1: "0.10",
+                                        },
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ]
+                            ),
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Rotation [deg]",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="rotation-deg",
+                                        min=0,
+                                        max=360,
+                                        step=1,
+                                        value=0,
+                                        marks={0: "0", 90: "90", 180: "180", 270: "270", 360: "360"},
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ]
+                            ),
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Distributed section grid size (n x n)",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="section-grid-size",
+                                        min=2,
+                                        max=MAX_SECTION_GRID_N,
+                                        step=2,
+                                        value=DEFAULT_SECTION_GRID_N,
+                                        marks={
+                                            2: "2",
+                                            50: "50",
+                                            100: "100",
+                                            200: "200",
+                                            300: "300",
+                                            400: "400",
+                                        },
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                    html.Div(
+                                        id="section-grid-summary",
+                                        children=distributed_section_summary_text(DEFAULT_SECTION_GRID_N),
+                                        style={
+                                            "marginTop": "0.35rem",
+                                            "fontFamily": "monospace",
+                                            "fontSize": "0.9rem",
+                                        },
+                                    ),
+                                ]
+                            ),
+                        ],
+                        style={
+                            "display": "flex",
+                            "flexDirection": "column",
+                            "rowGap": "1.25rem",
+                        },
+                    ),
+                    html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Boundary-element tube strips / segment",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="boundary-strip-count",
+                                        min=1,
+                                        max=MAX_BOUNDARY_ELEMENT_STRIP_COUNT,
+                                        step=1,
+                                        value=DEFAULT_BOUNDARY_ELEMENT_STRIP_COUNT,
+                                        marks={1: "1", 3: "3", 5: "5", 7: "7", 10: "10"},
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ]
+                            ),
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Boundary-element strip nodes / segment",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Slider(
+                                        id="boundary-strip-length-nodes",
+                                        min=2,
+                                        max=MAX_BOUNDARY_ELEMENT_LENGTH_NODES,
+                                        step=1,
+                                        value=DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
+                                        marks={2: "2", 4: "4", 8: "8", 12: "12", 16: "16", 20: "20"},
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ]
+                            ),
+                            html.Div(
+                                [
+                                    html.P(
+                                        "Boundary-element quadrature",
+                                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                                    ),
+                                    dcc.Dropdown(
+                                        id="boundary-element-quad",
+                                        options=[
+                                            {"label": "Gauss-Legendre 2", "value": "gl2"},
+                                            {"label": "Gauss-Legendre 3", "value": "gl3"},
+                                            {"label": "Dunavant 5", "value": "dunavant5"},
+                                        ],
+                                        value=DEFAULT_BOUNDARY_ELEMENT_QUAD,
+                                        clearable=False,
+                                    ),
+                                ]
+                            ),
+                        ],
+                        style={
+                            "display": "flex",
+                            "flexDirection": "column",
+                            "rowGap": "1.25rem",
+                        },
                     ),
                 ],
                 style={
                     "display": "grid",
-                    "gridTemplateColumns": "repeat(2, minmax(280px, 1fr))",
+                    "gridTemplateColumns": "repeat(2, minmax(320px, 1fr))",
                     "columnGap": "1rem",
-                    "rowGap": "1.25rem",
                     "paddingBottom": "0.5rem",
                 },
             ),
@@ -2244,6 +2336,7 @@ def create_app():
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
         Input("point-segment-subdivisions", "value"),
+        Input("boundary-strip-count", "value"),
         Input("boundary-strip-length-nodes", "value"),
         Input("boundary-element-quad", "value"),
         Input("wire-radius", "value"),
@@ -2258,6 +2351,7 @@ def create_app():
         n_sides: int,
         n_subdivisions: int,
         point_segment_subdivisions: int,
+        boundary_strip_count: int,
         boundary_strip_length_nodes: int,
         boundary_element_quad: str,
         wire_radius: float,
@@ -2271,6 +2365,7 @@ def create_app():
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
         n_point_sub = normalize_point_segment_subdivisions(point_segment_subdivisions)
+        n_boundary_strips = normalize_boundary_element_strip_count(boundary_strip_count)
         n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
         boundary_quad = normalize_boundary_element_quadrature(boundary_element_quad)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
@@ -2292,6 +2387,7 @@ def create_app():
                     n_point_sub,
                     section_grid_n,
                     use_area_radius,
+                    n_boundary_strips,
                     n_strip_nodes,
                     boundary_quad,
                 ),
@@ -2311,6 +2407,7 @@ def create_app():
                 n_point_sub,
                 section_grid_n,
                 use_area_radius,
+                n_boundary_strips,
                 n_strip_nodes,
                 boundary_quad,
             ),
@@ -2445,6 +2542,7 @@ def create_app():
         Output("field-figure-bb-geom", "figure"),
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
+        Input("boundary-strip-count", "value"),
         Input("boundary-strip-length-nodes", "value"),
         Input("boundary-element-quad", "value"),
         Input("wire-radius", "value"),
@@ -2456,6 +2554,7 @@ def create_app():
     def update_boundary_element_b_figure(
         n_sides: int,
         n_subdivisions: int,
+        boundary_strip_count: int,
         boundary_strip_length_nodes: int,
         boundary_element_quad: str,
         wire_radius: float,
@@ -2468,6 +2567,7 @@ def create_app():
             return no_update, no_update, no_update
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
+        n_boundary_strips = normalize_boundary_element_strip_count(boundary_strip_count)
         n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
         boundary_quad = normalize_boundary_element_quadrature(boundary_element_quad)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
@@ -2480,6 +2580,7 @@ def create_app():
             radius,
             rotation,
             n_sub,
+            n_boundary_strips,
             n_strip_nodes,
             boundary_quad,
             mask_spikes,
@@ -2490,6 +2591,7 @@ def create_app():
             radius,
             rotation,
             n_sub,
+            n_boundary_strips,
             n_strip_nodes,
             boundary_quad,
         )
@@ -2501,6 +2603,7 @@ def create_app():
         Output("field-figure-ba-geom", "figure"),
         Input("polygon-sides", "value"),
         Input("segment-subdivisions", "value"),
+        Input("boundary-strip-count", "value"),
         Input("boundary-strip-length-nodes", "value"),
         Input("boundary-element-quad", "value"),
         Input("wire-radius", "value"),
@@ -2512,6 +2615,7 @@ def create_app():
     def update_boundary_element_a_figure(
         n_sides: int,
         n_subdivisions: int,
+        boundary_strip_count: int,
         boundary_strip_length_nodes: int,
         boundary_element_quad: str,
         wire_radius: float,
@@ -2524,6 +2628,7 @@ def create_app():
             return no_update, no_update, no_update
         sides = int(n_sides)
         n_sub = int(np.clip(n_subdivisions, 1, 10))
+        n_boundary_strips = normalize_boundary_element_strip_count(boundary_strip_count)
         n_strip_nodes = normalize_boundary_element_length_nodes(boundary_strip_length_nodes)
         boundary_quad = normalize_boundary_element_quadrature(boundary_element_quad)
         radius = float(np.clip(wire_radius, 0.0, 0.1))
@@ -2536,6 +2641,7 @@ def create_app():
             radius,
             rotation,
             n_sub,
+            n_boundary_strips,
             n_strip_nodes,
             boundary_quad,
             mask_spikes,
@@ -2546,6 +2652,7 @@ def create_app():
             radius,
             rotation,
             n_sub,
+            n_boundary_strips,
             n_strip_nodes,
             boundary_quad,
         )
@@ -2625,6 +2732,7 @@ def main() -> None:
             DEFAULT_WIRE_RADIUS,
             0.0,
             1,
+            DEFAULT_BOUNDARY_ELEMENT_STRIP_COUNT,
             DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
             DEFAULT_BOUNDARY_ELEMENT_QUAD,
             False,
@@ -2636,6 +2744,7 @@ def main() -> None:
             DEFAULT_WIRE_RADIUS,
             0.0,
             1,
+            DEFAULT_BOUNDARY_ELEMENT_STRIP_COUNT,
             DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
             DEFAULT_BOUNDARY_ELEMENT_QUAD,
             False,
@@ -2646,6 +2755,7 @@ def main() -> None:
             DEFAULT_WIRE_RADIUS,
             0.0,
             1,
+            DEFAULT_BOUNDARY_ELEMENT_STRIP_COUNT,
             DEFAULT_BOUNDARY_ELEMENT_LENGTH_NODES,
             DEFAULT_BOUNDARY_ELEMENT_QUAD,
         )

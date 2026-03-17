@@ -1,6 +1,24 @@
 # Changelog
 
-## 4.0.1 2025-03-12
+## 4.1.0 2026-03-17
+
+### Added
+
+* Rust
+    * Add `point_source::current_element` module with element kernels shared between point-segment and boundary-element methods
+    * Add `boundary_element` module with B-field and A-field calculations on triangular meshes
+        * Experimental `inductance` submodule remains `#[doc(hidden)]` from the public API for now
+    * Add minimal triangle mesh view interface in `mesh.rs` using nodes-and-indices storage
+* Python
+    * Add bindings for `flux_density_triangle_mesh` and `vector_potential_triangle_mesh` as well as helpers for visualizing quadrature points and triangle surface current density
+    * Add boundary element method to field_explorer example
+
+### Changed
+
+* Refactor point-segment calculations to extract B-field and A-field kernels to `current_element.rs`
+    * These kernels are shared between `point_segment` and `boundary_element` modules, and will likely be used by a future finite element module as well.
+
+## 4.0.1 2026-03-12
 
 ### Changed
 
@@ -10,7 +28,7 @@
 * Update build_docs script
 * Add lengthwise discretization slider to field explorer example
 
-## 4.0.0 2025-03-03
+## 4.0.0 2026-03-03
 
 ### Added
 

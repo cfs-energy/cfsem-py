@@ -1423,7 +1423,7 @@ def build_boundary_element_figures(
         mag_strip = np.where(mag_strip > 1e2, np.nan, mag_strip)
         err = np.where(err > 1e2, np.nan, err)
 
-    mag_log10 = np.maximum(np.log10(mag_model + 1e-30), LOG10_FLOOR)
+    mag_strip_log10 = np.maximum(np.log10(mag_strip + 1e-30), LOG10_FLOOR)
     err_log10 = np.where(np.isnan(err), np.nan, np.maximum(np.log10(err + 1e-30), LOG10_FLOOR))
     mid = len(x) // 2
 
@@ -1435,15 +1435,15 @@ def build_boundary_element_figures(
         cols=2,
         horizontal_spacing=0.15,
         subplot_titles=[
-            f"{title_prefix} linear-filament model (log10)",
-            "Slice along x (z = 0): linear filament vs triangle strip",
+            f"{title_prefix} boundary-element model (log10)",
+            "Slice along x (z = 0): triangle strip vs linear filament",
         ],
     )
     top_fig.add_trace(
         go.Heatmap(
             x=x,
             y=z,
-            z=mag_log10,
+            z=mag_strip_log10,
             colorscale="Magma",
             colorbar={
                 "title": f"log10({value_title})",
@@ -1451,8 +1451,8 @@ def build_boundary_element_figures(
                 "x": -0.15,
                 "xanchor": "left",
             },
-            zmin=np.nanmin(mag_log10),
-            zmax=np.nanmax(mag_log10),
+            zmin=np.nanmin(mag_strip_log10),
+            zmax=np.nanmax(mag_strip_log10),
         ),
         row=1,
         col=1,
@@ -1473,10 +1473,10 @@ def build_boundary_element_figures(
     top_fig.add_trace(
         go.Scatter(
             x=x,
-            y=mag_model[mid, :],
+            y=mag_strip[mid, :],
             mode="lines",
-            line={"color": "black", "width": 2},
-            name="Linear filament",
+            line={"color": "deepskyblue", "width": 2},
+            name=f"Triangle strip ({boundary_quad}, {n_strip_nodes} nodes/seg, {n_triangles} tris)",
         ),
         row=1,
         col=2,
@@ -1484,10 +1484,10 @@ def build_boundary_element_figures(
     top_fig.add_trace(
         go.Scatter(
             x=x,
-            y=mag_strip[mid, :],
+            y=mag_model[mid, :],
             mode="lines",
-            line={"color": "deepskyblue", "width": 2, "dash": "dash"},
-            name=f"Triangle strip ({boundary_quad}, {n_strip_nodes} nodes/seg, {n_triangles} tris)",
+            line={"color": "black", "width": 2, "dash": "dash"},
+            name="Linear filament",
         ),
         row=1,
         col=2,
@@ -1520,7 +1520,7 @@ def build_boundary_element_figures(
         horizontal_spacing=0.15,
         subplot_titles=[
             "Linear - boundary-element error (log10)",
-            "Slice along z (x = 0): linear filament vs triangle strip",
+            "Slice along z (x = 0): triangle strip vs linear filament",
         ],
     )
     bottom_fig.add_trace(
@@ -1544,10 +1544,10 @@ def build_boundary_element_figures(
     bottom_fig.add_trace(
         go.Scatter(
             x=z,
-            y=mag_model[:, mid],
+            y=mag_strip[:, mid],
             mode="lines",
-            line={"color": "black", "width": 2},
-            name="Linear filament (z-slice)",
+            line={"color": "deepskyblue", "width": 2},
+            name="Triangle strip (z-slice)",
             showlegend=False,
         ),
         row=1,
@@ -1556,10 +1556,10 @@ def build_boundary_element_figures(
     bottom_fig.add_trace(
         go.Scatter(
             x=z,
-            y=mag_strip[:, mid],
+            y=mag_model[:, mid],
             mode="lines",
-            line={"color": "deepskyblue", "width": 2, "dash": "dash"},
-            name="Triangle strip (z-slice)",
+            line={"color": "black", "width": 2, "dash": "dash"},
+            name="Linear filament (z-slice)",
             showlegend=False,
         ),
         row=1,

@@ -95,10 +95,15 @@ def test_triangle_mesh_quadrature_points_and_current_density():
     j = cfsem.triangle_mesh_current_density(nodes, triangles, s)
     j_ref = _triangle_current_density_reference(nodes, triangles, s)
     points, weights = cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="gl2")
+    dunavant_points, dunavant_weights = cfsem.triangle_mesh_quadrature_points(
+        nodes, triangles, quad="dunavant7"
+    )
 
     assert j.shape == (triangles.shape[0], 3)
     assert points.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0], 3)
     assert weights.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0])
+    assert dunavant_points.shape == (triangles.shape[0], 7, 3)
+    assert dunavant_weights.shape == (triangles.shape[0], 7)
     assert np.allclose(j, j_ref, rtol=1e-13, atol=1e-13)
 
     for i, (i0, i1, i2) in enumerate(triangles):
@@ -117,7 +122,8 @@ def test_triangle_mesh_quadrature_points_and_current_density():
 
 
 @mark.parametrize("par", [True, False])
-def test_triangle_mesh_far_field_against_circular_filament(par):
+@mark.parametrize("quad", ["gl3", "dunavant7"])
+def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     radius = 0.7312345987
     height = radius * 1e-3
     loop_current = 1.7
@@ -134,9 +140,9 @@ def test_triangle_mesh_far_field_against_circular_filament(par):
         dtype=np.float64,
     )
 
-    bx, by, bz = cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=par, quad="gl3")
+    bx, by, bz = cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=par, quad=quad)
     ax, ay, az = cfsem.vector_potential_triangle_mesh(
-        obs, nodes, triangles, s, par=par, quad="gl3"
+        obs, nodes, triangles, s, par=par, quad=quad
     )
     b_ref = np.column_stack(
         cfsem.flux_density_circular_filament_cartesian(

@@ -244,6 +244,14 @@ fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -
     (0..obs.len()).map(|i| [ax[i], ay[i], az[i]]).collect()
 }
 
+fn factorial(n: usize) -> f64 {
+    (1..=n).fold(1.0, |acc, k| acc * k as f64)
+}
+
+fn reference_triangle_monomial_integral(p: usize, q: usize) -> f64 {
+    factorial(p) * factorial(q) / factorial(p + q + 2)
+}
+
 fn max_abs_component(vectors: &[[f64; 3]]) -> f64 {
     vectors
         .iter()
@@ -391,6 +399,27 @@ fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
             assert!(
                 approx(wq[idx], qp[0] * tri_area, 0.0, 1e-14),
                 "quadrature weight mismatch for triangle {i}, point {k}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_dunavant_rule_integrates_reference_triangle_monomials_to_degree_five() {
+    let quad_points = triangle_quadrature_points(QuadratureKind::Dunavant7);
+
+    assert_eq!(quad_points.len(), 7);
+
+    for p in 0..=5 {
+        for q in 0..=(5 - p) {
+            let approx_int = quad_points
+                .iter()
+                .map(|qp| qp[0] * qp[1].powi(p as i32) * qp[2].powi(q as i32))
+                .sum::<f64>();
+            let exact_int = reference_triangle_monomial_integral(p, q);
+            assert!(
+                approx(approx_int, exact_int, 0.0, 1e-14),
+                "Dunavant rule failed for u^{p} v^{q}: approx={approx_int:.16e}, exact={exact_int:.16e}"
             );
         }
     }

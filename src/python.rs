@@ -86,6 +86,7 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
     match quad {
         "gl2" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre2),
         "gl3" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre3),
+        "dunavant7" => Ok(physics::boundary_element::QuadratureKind::Dunavant7),
         _ => Err(PyInteropError::DimensionalityError {
             msg: format!("Unsupported triangle quadrature rule: {quad}"),
         }

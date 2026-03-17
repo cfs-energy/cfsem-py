@@ -7,6 +7,7 @@
 //! * \[4\] M. G. Duffy, “Quadrature Over a Pyramid or Cube of Integrands with a Singularity at a Vertex,” SIAM Journal on Numerical Analysis, vol. 19, no. 6, pp. 1260–1262, 1982.
 //! * \[5\] G. N. Peeren, “Stream function approach for determining optimal surface currents,” Phd Thesis 2 (Research NOT TU/e / Graduation TU/e), Technische Universiteit Eindhoven, Eindhoven, 2003. doi: 10.6100/IR570424.
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
+//! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
 
 use crate::math::{cross3, rss3};
 use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
@@ -67,6 +68,26 @@ const TABLE_GAUSS_LEGENDRE_3: [[f64; 3]; 9] = [
     [0.6846438175e-01, 0.1000000000e+00, 0.1127016654e+00],
 ];
 
+/// Dunavant's 7-point degree-5 symmetric quadrature rule on a triangle.
+/// Format is [Weights, U, V].
+///
+/// The published rule is given in barycentric form and normalized so the
+/// weights sum to 1 over a physical triangle area factor. This backend stores
+/// quadrature weights in the same reference-triangle convention as the existing
+/// Gauss-Legendre tables, so the published weights are halved here.
+///
+/// References:
+/// * [7], Appendix II, rule with `p = 5`, `n_g = 7`.
+const TABLE_DUNAVANT_7: [[f64; 3]; 7] = [
+    [0.112500000000000, 0.333333333333333, 0.333333333333333],
+    [0.066197076394253, 0.470142064105115, 0.470142064105115],
+    [0.066197076394253, 0.059715871789770, 0.470142064105115],
+    [0.066197076394253, 0.470142064105115, 0.059715871789770],
+    [0.062969590272414, 0.101286507323456, 0.101286507323456],
+    [0.062969590272414, 0.797426985353087, 0.101286507323456],
+    [0.062969590272414, 0.101286507323456, 0.797426985353087],
+];
+
 /// Midpoint-rule samples used for the 1D edge integral in the Duffy-style
 /// triangle self kernel.
 const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
@@ -75,7 +96,7 @@ const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 pub enum QuadratureKind {
     GaussLegendre2,
     GaussLegendre3,
-    Dunavant,
+    Dunavant7,
 }
 
 /// Isoparametric mapping of a point on a 3D triangle
@@ -152,7 +173,7 @@ fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] 
     match quad_kind {
         QuadratureKind::GaussLegendre2 => &TABLE_GAUSS_LEGENDRE_2,
         QuadratureKind::GaussLegendre3 => &TABLE_GAUSS_LEGENDRE_3,
-        _ => panic!(),
+        QuadratureKind::Dunavant7 => &TABLE_DUNAVANT_7,
     }
 }
 

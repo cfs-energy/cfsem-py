@@ -406,7 +406,7 @@ fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
 
 #[test]
 fn test_dunavant_rule_integrates_reference_triangle_monomials_to_degree_five() {
-    let quad_points = triangle_quadrature_points(QuadratureKind::Dunavant7);
+    let quad_points = triangle_quadrature_points(QuadratureKind::Dunavant5);
 
     assert_eq!(quad_points.len(), 7);
 

@@ -321,7 +321,7 @@ def flux_density_triangle_mesh(
         triangles: node indices with shape `(ntri, 3)`
         s: nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant7"`
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
 
     Returns:
         [T] (Bx, By, Bz) magnetic flux density at observation points
@@ -351,7 +351,7 @@ def vector_potential_triangle_mesh(
         triangles: node indices with shape `(ntri, 3)`
         s: nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant7"`
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
 
     Returns:
         [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
@@ -397,7 +397,7 @@ def triangle_mesh_quadrature_points(
     Args:
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
-        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant7"`
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
 
     Returns:
         points: [m] quadrature-point coordinates with shape `(ntri, nqp, 3)`

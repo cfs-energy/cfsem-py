@@ -96,7 +96,7 @@ const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 pub enum QuadratureKind {
     GaussLegendre2,
     GaussLegendre3,
-    Dunavant7,
+    Dunavant5,
 }
 
 /// Isoparametric mapping of a point on a 3D triangle
@@ -173,7 +173,7 @@ fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] 
     match quad_kind {
         QuadratureKind::GaussLegendre2 => &TABLE_GAUSS_LEGENDRE_2,
         QuadratureKind::GaussLegendre3 => &TABLE_GAUSS_LEGENDRE_3,
-        QuadratureKind::Dunavant7 => &TABLE_DUNAVANT_7,
+        QuadratureKind::Dunavant5 => &TABLE_DUNAVANT_7,
     }
 }
 

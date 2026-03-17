@@ -107,7 +107,7 @@ def normalize_boundary_element_length_nodes(n_strip_nodes: int) -> int:
 
 
 def normalize_boundary_element_quadrature(quad: str | None) -> str:
-    return quad if quad in ("gl2", "gl3") else DEFAULT_BOUNDARY_ELEMENT_QUAD
+    return quad if quad in ("gl2", "gl3", "dunavant5") else DEFAULT_BOUNDARY_ELEMENT_QUAD
 
 
 def finite_positive_max(values: np.ndarray) -> float | None:
@@ -1956,6 +1956,7 @@ def create_app():
                                 options=[
                                     {"label": "Gauss-Legendre 2", "value": "gl2"},
                                     {"label": "Gauss-Legendre 3", "value": "gl3"},
+                                    {"label": "Dunavant 5", "value": "dunavant5"},
                                 ],
                                 value=DEFAULT_BOUNDARY_ELEMENT_QUAD,
                                 clearable=False,

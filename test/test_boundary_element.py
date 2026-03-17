@@ -96,7 +96,7 @@ def test_triangle_mesh_quadrature_points_and_current_density():
     j_ref = _triangle_current_density_reference(nodes, triangles, s)
     points, weights = cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="gl2")
     dunavant_points, dunavant_weights = cfsem.triangle_mesh_quadrature_points(
-        nodes, triangles, quad="dunavant7"
+        nodes, triangles, quad="dunavant5"
     )
 
     assert j.shape == (triangles.shape[0], 3)
@@ -122,7 +122,7 @@ def test_triangle_mesh_quadrature_points_and_current_density():
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("quad", ["gl3", "dunavant7"])
+@mark.parametrize("quad", ["gl3", "dunavant5"])
 def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     radius = 0.7312345987
     height = radius * 1e-3

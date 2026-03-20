@@ -6,6 +6,8 @@ use super::{
     triangle_basis_current_densities, triangle_basis_current_density,
     triangle_basis_mutual_inductance_block, triangle_current_density,
     triangle_inductance_from_potential_vectors, triangle_mesh_current_density,
+    triangle_mesh_inductance_from_potential_vectors, triangle_mesh_inductance_matrix,
+    triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
     triangle_mesh_quadrature_points, triangle_quadrature_count, triangle_quadrature_points,
     triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
     vector_potential_triangle_mesh_par,
@@ -245,6 +247,84 @@ fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -
     result.unwrap();
 
     (0..obs.len()).map(|i| [ax[i], ay[i], az[i]]).collect()
+}
+
+fn mesh_inductance_matrix(mesh: &TriangleMeshData, par: bool) -> Vec<f64> {
+    let nnode = mesh.nodes.0.len();
+    let mut out = vec![0.0; nnode * nnode];
+    let result = match par {
+        true => triangle_mesh_inductance_matrix_par(
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+        false => triangle_mesh_inductance_matrix(
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+    };
+    result.unwrap();
+    out
+}
+
+fn combine_disconnected_meshes(
+    src: &TriangleMeshData,
+    tgt: &TriangleMeshData,
+) -> (TriangleMeshData, Vec<f64>, Vec<f64>) {
+    let nsrc = src.nodes.0.len();
+    let ntgt = tgt.nodes.0.len();
+
+    let mut nodes = (
+        Vec::with_capacity(nsrc + ntgt),
+        Vec::with_capacity(nsrc + ntgt),
+        Vec::with_capacity(nsrc + ntgt),
+    );
+    nodes.0.extend_from_slice(&src.nodes.0);
+    nodes.0.extend_from_slice(&tgt.nodes.0);
+    nodes.1.extend_from_slice(&src.nodes.1);
+    nodes.1.extend_from_slice(&tgt.nodes.1);
+    nodes.2.extend_from_slice(&src.nodes.2);
+    nodes.2.extend_from_slice(&tgt.nodes.2);
+
+    let mut triangles = (
+        Vec::with_capacity(src.triangles.0.len() + tgt.triangles.0.len()),
+        Vec::with_capacity(src.triangles.1.len() + tgt.triangles.1.len()),
+        Vec::with_capacity(src.triangles.2.len() + tgt.triangles.2.len()),
+    );
+    triangles.0.extend_from_slice(&src.triangles.0);
+    triangles.1.extend_from_slice(&src.triangles.1);
+    triangles.2.extend_from_slice(&src.triangles.2);
+    triangles
+        .0
+        .extend(tgt.triangles.0.iter().map(|&idx| idx + nsrc));
+    triangles
+        .1
+        .extend(tgt.triangles.1.iter().map(|&idx| idx + nsrc));
+    triangles
+        .2
+        .extend(tgt.triangles.2.iter().map(|&idx| idx + nsrc));
+
+    let mut s = Vec::with_capacity(nsrc + ntgt);
+    s.extend_from_slice(&src.s);
+    s.extend_from_slice(&tgt.s);
+
+    let mut s_src = vec![0.0; nsrc + ntgt];
+    s_src[..nsrc].copy_from_slice(&src.s);
+    let mut s_tgt = vec![0.0; nsrc + ntgt];
+    s_tgt[nsrc..].copy_from_slice(&tgt.s);
+
+    (
+        TriangleMeshData {
+            nodes,
+            triangles,
+            s,
+        },
+        s_src,
+        s_tgt,
+    )
 }
 
 fn factorial(n: usize) -> f64 {
@@ -526,6 +606,44 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
 }
 
 #[test]
+fn test_triangle_mesh_inductance_matrix_matches_single_triangle_block() {
+    let tri = TrianglePatch {
+        nodes: [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]],
+        s: [1.2, -0.4, 0.7],
+    };
+    let mesh = triangle_patches_to_mesh(&[tri]);
+    let block = triangle_basis_mutual_inductance_block(
+        tri.nodes[0],
+        tri.nodes[1],
+        tri.nodes[2],
+        tri.nodes[0],
+        tri.nodes[1],
+        tri.nodes[2],
+        QuadratureKind::GaussLegendre3,
+    );
+    let lmat = mesh_inductance_matrix(&mesh, false);
+    let lmat_par = mesh_inductance_matrix(&mesh, true);
+
+    for i in 0..3 {
+        for j in 0..3 {
+            let idx = i * 3 + j;
+            assert!(
+                approx(lmat[idx], block[i][j], 1e-12, 1e-14),
+                "single-triangle nodal matrix mismatch at ({i},{j}): matrix={:.16e}, block={:.16e}",
+                lmat[idx],
+                block[i][j],
+            );
+            assert!(
+                approx(lmat_par[idx], block[i][j], 1e-12, 1e-14),
+                "single-triangle parallel nodal matrix mismatch at ({i},{j}): matrix={:.16e}, block={:.16e}",
+                lmat_par[idx],
+                block[i][j],
+            );
+        }
+    }
+}
+
+#[test]
 fn test_triangle_basis_self_inductance_block_is_symmetric_and_finite() {
     let tri = [[0.0, 0.0, 0.0], [0.8, 0.1, 0.0], [0.2, 0.9, 0.2]];
     let block = triangle_basis_mutual_inductance_block(
@@ -563,6 +681,112 @@ fn test_triangle_basis_self_inductance_block_is_symmetric_and_finite() {
             energy_like,
         );
     }
+}
+
+#[test]
+fn test_triangle_mesh_inductance_matrix_is_symmetric_and_matches_direct_contraction() {
+    let patches = [
+        TrianglePatch {
+            nodes: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            s: [1.2, -0.7, 0.4],
+        },
+        TrianglePatch {
+            nodes: [[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            s: [1.2, 0.4, -0.9],
+        },
+    ];
+    let mesh = triangle_patches_to_mesh(&patches);
+    let lmat = mesh_inductance_matrix(&mesh, false);
+    let lmat_par = mesh_inductance_matrix(&mesh, true);
+    let nnode = mesh.s.len();
+
+    for i in 0..nnode {
+        for j in 0..nnode {
+            let idx = i * nnode + j;
+            let idx_t = j * nnode + i;
+            assert!(
+                approx(lmat[idx], lmat[idx_t], 1e-10, 1e-12),
+                "global nodal matrix is not symmetric at ({i},{j}): {:.6e} vs {:.6e}",
+                lmat[idx],
+                lmat[idx_t],
+            );
+            assert!(
+                approx(lmat[idx], lmat_par[idx], 1e-12, 1e-14),
+                "serial/parallel nodal matrix mismatch at ({i},{j}): serial={:.16e}, parallel={:.16e}",
+                lmat[idx],
+                lmat_par[idx],
+            );
+        }
+    }
+
+    let direct = strip_mutual_inductance(&patches, &patches);
+    let via_l = triangle_mesh_inductance_from_potential_vectors(&lmat, &mesh.s, &mesh.s).unwrap();
+    let energy = triangle_mesh_inductive_energy(&lmat, &mesh.s).unwrap();
+
+    assert!(
+        approx(via_l, direct, 1e-10, 1e-12),
+        "global nodal bilinear form mismatch: matrix={:.6e}, direct={:.6e}",
+        via_l,
+        direct,
+    );
+    assert!(
+        approx(energy, 0.5 * direct, 1e-10, 1e-12),
+        "global nodal energy mismatch: matrix={:.6e}, expected={:.6e}",
+        energy,
+        0.5 * direct,
+    );
+}
+
+#[test]
+fn test_triangle_mesh_inductance_matrix_has_constant_potential_null_mode() {
+    let patches = [
+        TrianglePatch {
+            nodes: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            s: [0.0, 0.0, 0.0],
+        },
+        TrianglePatch {
+            nodes: [[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            s: [0.0, 0.0, 0.0],
+        },
+    ];
+    let mesh = triangle_patches_to_mesh(&patches);
+    let const_s = vec![2.3; mesh.s.len()];
+    let lmat = mesh_inductance_matrix(&mesh, false);
+    let mut jx = vec![0.0; mesh.triangles.0.len()];
+    let mut jy = vec![0.0; mesh.triangles.0.len()];
+    let mut jz = vec![0.0; mesh.triangles.0.len()];
+
+    triangle_mesh_current_density(
+        (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+        (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+        &const_s,
+        (&mut jx, &mut jy, &mut jz),
+    )
+    .unwrap();
+
+    for i in 0..mesh.triangles.0.len() {
+        for (axis, comp) in [jx[i], jy[i], jz[i]].into_iter().enumerate() {
+            assert!(
+                approx(comp, 0.0, 0.0, 1e-14),
+                "constant-potential current density is nonzero for triangle {i}, axis {axis}: {:.16e}",
+                comp,
+            );
+        }
+    }
+
+    let bilinear =
+        triangle_mesh_inductance_from_potential_vectors(&lmat, &const_s, &const_s).unwrap();
+    let energy = triangle_mesh_inductive_energy(&lmat, &const_s).unwrap();
+    assert!(
+        approx(bilinear, 0.0, 0.0, 1e-12),
+        "constant-potential bilinear form is nonzero: {:.16e}",
+        bilinear,
+    );
+    assert!(
+        approx(energy, 0.0, 0.0, 1e-12),
+        "constant-potential energy is nonzero: {:.16e}",
+        energy,
+    );
 }
 
 #[test]
@@ -635,6 +859,33 @@ fn test_triangle_strip_mutual_inductance_against_circular_filament() {
         "strip reciprocity mismatch: M12={:.6e}, M21={:.6e}",
         m_strip,
         m_strip_reverse,
+    );
+}
+
+#[test]
+fn test_triangle_mesh_inductance_matrix_mutual_coupling_matches_triangle_pair_sum() {
+    let radius = 0.71;
+    let height = radius * 1e-3;
+    let nphi = 24;
+    let current = 1.0;
+    let z_src = -0.37;
+    let z_tgt = 0.41;
+
+    let strip_src = circular_strip_triangles_at_z(radius, height, current, nphi, z_src);
+    let strip_tgt = circular_strip_triangles_at_z(radius, height, current, nphi, z_tgt);
+    let mesh_src = triangle_patches_to_mesh(&strip_src);
+    let mesh_tgt = triangle_patches_to_mesh(&strip_tgt);
+    let (mesh, s_src, s_tgt) = combine_disconnected_meshes(&mesh_src, &mesh_tgt);
+    let lmat = mesh_inductance_matrix(&mesh, false);
+
+    let direct = strip_mutual_inductance(&strip_src, &strip_tgt);
+    let via_l = triangle_mesh_inductance_from_potential_vectors(&lmat, &s_src, &s_tgt).unwrap();
+
+    assert!(
+        approx(via_l, direct, 1e-10, 1e-12),
+        "disconnected-mesh mutual coupling mismatch: matrix={:.6e}, direct={:.6e}",
+        via_l,
+        direct,
     );
 }
 

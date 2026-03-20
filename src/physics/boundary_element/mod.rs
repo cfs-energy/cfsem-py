@@ -31,7 +31,9 @@ pub use flux_density::{
 pub use inductance::{
     triangle_basis_mutual_inductance, triangle_basis_mutual_inductance_block,
     triangle_geometric_coupling, triangle_geometric_coupling_regular,
-    triangle_inductance_from_potential_vectors,
+    triangle_inductance_from_potential_vectors, triangle_mesh_inductance_from_potential_vectors,
+    triangle_mesh_inductance_matrix, triangle_mesh_inductance_matrix_par,
+    triangle_mesh_inductive_energy,
 };
 
 pub use vector_potential::{

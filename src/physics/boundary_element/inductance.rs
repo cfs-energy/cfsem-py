@@ -3,7 +3,10 @@ use super::{
     triangle_basis_current_densities, triangle_quadrature_points, triangles_identical,
 };
 use crate::MU0_OVER_4PI;
+use crate::chunksize;
 use crate::math::{dot3, rss3};
+use crate::mesh::validate_triangle_mesh_geometry;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Regular triangle evaluation of the scalar kernel integral `∫ dS / R` using plain
 /// quadrature.
@@ -223,6 +226,8 @@ pub fn triangle_geometric_coupling(
 /// - Linear triangle basis current densities are constant over each triangle.
 /// - Compute one scalar geometric coupling `G = ∫∫ 1 / R dS' dS`.
 /// - Form the full `3x3` block as `μ0 / 4π * G * (K_src_i · K_tgt_j)`.
+/// - This block is the elemental nodal-basis contribution used to assemble a full mesh
+///   inductance matrix.
 ///
 /// References:
 /// - [5], Eq. (3.16) on p. 68 for `M_mn = ∬ A_m · j_n dS`, Eq. (3.24) on p. 70 for the
@@ -268,6 +273,213 @@ pub fn triangle_basis_mutual_inductance_block(
     }
 
     out
+}
+
+#[inline]
+fn triangle_nodes_and_indices(
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    i: usize,
+) -> ([[f64; 3]; 3], [usize; 3]) {
+    let idx = [triangles.0[i], triangles.1[i], triangles.2[i]]; // [-]
+    let tri_nodes = idx.map(|k| [nodes.0[k], nodes.1[k], nodes.2[k]]); // [m]
+    (tri_nodes, idx)
+}
+
+#[inline]
+fn scatter_triangle_block(
+    out: &mut [f64],
+    nnode: usize,
+    src_idx: [usize; 3],
+    tgt_idx: [usize; 3],
+    block: [[f64; 3]; 3],
+) {
+    for i in 0..3 {
+        let row = src_idx[i] * nnode; // [-]
+        for j in 0..3 {
+            out[row + tgt_idx[j]] += block[i][j]; // [H]
+        }
+    }
+}
+
+#[inline]
+fn validate_inductance_matrix_inputs(
+    lmat: &[f64],
+    s_src: &[f64],
+    s_tgt: &[f64],
+) -> Result<usize, &'static str> {
+    let nnode = s_src.len(); // [-]
+    if s_tgt.len() != nnode {
+        return Err("Nodal scalar dimension mismatch");
+    }
+    if lmat.len() != nnode * nnode {
+        return Err("Inductance matrix dimension mismatch");
+    }
+    Ok(nnode)
+}
+
+/// Assemble the dense nodal-basis inductance matrix for one triangle mesh.
+///
+/// Method:
+/// - Treat the existing triangle-pair `3x3` mutual-inductance block as the elemental
+///   nodal-basis kernel.
+/// - Loop over all source and target triangle pairs.
+/// - Scatter-add each elemental block into a row-major global node-node matrix.
+///
+/// The resulting matrix acts on nodal current-potential values `s_a` and represents the
+/// bilinear form
+/// `L_ab = μ0 / 4π ∬ K_a(r) · K_b(r') / |r - r'| dS dS'`.
+///
+/// Args:
+///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
+///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
+///
+/// Returns:
+///     `Ok(())` after writing the dense nodal inductance matrix to `out`, or an error if
+///     the mesh geometry or output dimensions are inconsistent.
+///
+/// References:
+/// - [5], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
+/// - [3], pp. 276-281.
+/// - [2], pp. 1448-1455.
+#[inline]
+pub fn triangle_mesh_inductance_matrix(
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    quad_kind: QuadratureKind,
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
+    if out.len() != nnode * nnode {
+        return Err("Output dimension mismatch");
+    }
+
+    out.fill(0.0); // [H]
+
+    for isrc in 0..ntri {
+        let (src_nodes, src_idx) = triangle_nodes_and_indices(nodes, triangles, isrc);
+        for itgt in 0..ntri {
+            let (tgt_nodes, tgt_idx) = triangle_nodes_and_indices(nodes, triangles, itgt);
+            let block = triangle_basis_mutual_inductance_block(
+                src_nodes[0],
+                src_nodes[1],
+                src_nodes[2],
+                tgt_nodes[0],
+                tgt_nodes[1],
+                tgt_nodes[2],
+                quad_kind,
+            );
+            scatter_triangle_block(out, nnode, src_idx, tgt_idx, block);
+        }
+    }
+
+    Ok(())
+}
+
+/// Assemble the dense nodal-basis inductance matrix for one triangle mesh.
+/// This variant is parallelized over chunks of source triangles and reduced into the
+/// final dense matrix.
+///
+/// Args:
+///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
+///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
+///
+/// Returns:
+///     `Ok(())` after writing the dense nodal inductance matrix to `out`, or an error if
+///     the mesh geometry or output dimensions are inconsistent.
+#[inline]
+pub fn triangle_mesh_inductance_matrix_par(
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    quad_kind: QuadratureKind,
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
+    if out.len() != nnode * nnode {
+        return Err("Output dimension mismatch");
+    }
+
+    let chunk = chunksize(ntri.max(1)); // [-]
+    let starts: Vec<usize> = (0..ntri).step_by(chunk).collect();
+    let partials: Vec<Vec<f64>> = starts
+        .into_par_iter()
+        .map(|start| {
+            let end = (start + chunk).min(ntri);
+            let mut local = vec![0.0; nnode * nnode]; // [H]
+            for isrc in start..end {
+                let (src_nodes, src_idx) = triangle_nodes_and_indices(nodes, triangles, isrc);
+                for itgt in 0..ntri {
+                    let (tgt_nodes, tgt_idx) = triangle_nodes_and_indices(nodes, triangles, itgt);
+                    let block = triangle_basis_mutual_inductance_block(
+                        src_nodes[0],
+                        src_nodes[1],
+                        src_nodes[2],
+                        tgt_nodes[0],
+                        tgt_nodes[1],
+                        tgt_nodes[2],
+                        quad_kind,
+                    );
+                    scatter_triangle_block(&mut local, nnode, src_idx, tgt_idx, block);
+                }
+            }
+            local
+        })
+        .collect();
+
+    out.fill(0.0); // [H]
+    for partial in partials {
+        for (dst, val) in out.iter_mut().zip(partial.into_iter()) {
+            *dst += val; // [H]
+        }
+    }
+
+    Ok(())
+}
+
+/// Contract a dense nodal inductance matrix with source and target nodal current-potential
+/// vectors.
+///
+/// Args:
+///     lmat: Row-major nodal inductance matrix of length `nnode * nnode` (H).
+///     s_src: Source nodal current-potential values (A).
+///     s_tgt: Target nodal current-potential values (A).
+///
+/// Returns:
+///     Bilinear inductive coupling `s_src^T L s_tgt` (H*A^2).
+#[inline]
+pub fn triangle_mesh_inductance_from_potential_vectors(
+    lmat: &[f64],
+    s_src: &[f64],
+    s_tgt: &[f64],
+) -> Result<f64, &'static str> {
+    let nnode = validate_inductance_matrix_inputs(lmat, s_src, s_tgt)?;
+
+    let mut out = 0.0; // [H*A^2]
+    for i in 0..nnode {
+        let row = &lmat[i * nnode..(i + 1) * nnode];
+        for j in 0..nnode {
+            out += s_src[i] * row[j] * s_tgt[j]; // [H*A^2]
+        }
+    }
+
+    Ok(out)
+}
+
+/// Magnetic self energy for a prescribed nodal current-potential vector on one mesh.
+///
+/// Args:
+///     lmat: Row-major nodal inductance matrix of length `nnode * nnode` (H).
+///     s: Nodal current-potential values (A).
+///
+/// Returns:
+///     Magnetic energy `0.5 * s^T L s` (J).
+#[inline]
+pub fn triangle_mesh_inductive_energy(lmat: &[f64], s: &[f64]) -> Result<f64, &'static str> {
+    Ok(0.5 * triangle_mesh_inductance_from_potential_vectors(lmat, s, s)?) // [J]
 }
 
 /// Single entry from the triangle-basis mutual-inductance block.

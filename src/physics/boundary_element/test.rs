@@ -3,16 +3,19 @@ use core::f64::consts::PI;
 use super::{
     QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
     flux_density_triangle_mesh, flux_density_triangle_mesh_par, map_tri_uv,
-    triangle_basis_current_densities, triangle_basis_current_density,
+    triangle_basis_current_densities, triangle_basis_current_density, triangle_basis_force_block,
     triangle_basis_mutual_inductance_block, triangle_current_density,
-    triangle_inductance_from_potential_vectors, triangle_mesh_current_density,
+    triangle_force_from_potential_vectors, triangle_inductance_from_potential_vectors,
+    triangle_mesh_current_density, triangle_mesh_force_from_potential_vectors,
+    triangle_mesh_force_mapping, triangle_mesh_force_mapping_par,
     triangle_mesh_inductance_from_potential_vectors, triangle_mesh_inductance_matrix,
     triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
-    triangle_mesh_quadrature_points, triangle_quadrature_count, triangle_quadrature_points,
+    triangle_mesh_quadrature_points, triangle_mesh_self_force_mapping,
+    triangle_mesh_self_force_mapping_par, triangle_quadrature_count, triangle_quadrature_points,
     triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
     vector_potential_triangle_mesh_par,
 };
-use crate::math::{cartesian_to_cylindrical, dot3};
+use crate::math::{cartesian_to_cylindrical, cross3, dot3};
 use crate::physics::circular_filament::{
     flux_circular_filament_scalar, flux_density_circular_filament_cartesian_scalar,
     vector_potential_circular_filament_scalar,
@@ -267,6 +270,119 @@ fn mesh_inductance_matrix(mesh: &TriangleMeshData, par: bool) -> Vec<f64> {
         ),
     };
     result.unwrap();
+    out
+}
+
+fn mesh_force_mapping(
+    mesh_src: &TriangleMeshData,
+    mesh_tgt: &TriangleMeshData,
+    par: bool,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let nnode_src = mesh_src.nodes.0.len();
+    let ntri_tgt = mesh_tgt.triangles.0.len();
+    let nout = nnode_src * ntri_tgt;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let result = match par {
+        true => triangle_mesh_force_mapping_par(
+            (&mesh_src.nodes.0, &mesh_src.nodes.1, &mesh_src.nodes.2),
+            (
+                &mesh_src.triangles.0,
+                &mesh_src.triangles.1,
+                &mesh_src.triangles.2,
+            ),
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
+            &mesh_tgt.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut fx, &mut fy, &mut fz),
+        ),
+        false => triangle_mesh_force_mapping(
+            (&mesh_src.nodes.0, &mesh_src.nodes.1, &mesh_src.nodes.2),
+            (
+                &mesh_src.triangles.0,
+                &mesh_src.triangles.1,
+                &mesh_src.triangles.2,
+            ),
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
+            &mesh_tgt.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut fx, &mut fy, &mut fz),
+        ),
+    };
+    result.unwrap();
+
+    (fx, fy, fz)
+}
+
+fn mesh_self_force_mapping(mesh: &TriangleMeshData, par: bool) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let nnode = mesh.nodes.0.len();
+    let ntri = mesh.triangles.0.len();
+    let nout = nnode * ntri;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let result = match par {
+        true => triangle_mesh_self_force_mapping_par(
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &mesh.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut fx, &mut fy, &mut fz),
+        ),
+        false => triangle_mesh_self_force_mapping(
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &mesh.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut fx, &mut fy, &mut fz),
+        ),
+    };
+    result.unwrap();
+
+    (fx, fy, fz)
+}
+
+fn explicit_force_on_target_triangle_from_source_mesh(
+    mesh_src: &TriangleMeshData,
+    tri_nodes: [[f64; 3]; 3],
+    tri_s: [f64; 3],
+) -> [f64; 3] {
+    let tri_area = calc_tri_area(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
+    let k_tgt = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s);
+    let mut out = [0.0; 3];
+    for qp in triangle_quadrature_points(QuadratureKind::GaussLegendre3) {
+        let obs = map_tri_uv(tri_nodes[0], tri_nodes[1], tri_nodes[2], [qp[1], qp[2]]);
+        let mut bx = [0.0];
+        let mut by = [0.0];
+        let mut bz = [0.0];
+        flux_density_triangle_mesh(
+            (&[obs[0]], &[obs[1]], &[obs[2]]),
+            (&mesh_src.nodes.0, &mesh_src.nodes.1, &mesh_src.nodes.2),
+            (
+                &mesh_src.triangles.0,
+                &mesh_src.triangles.1,
+                &mesh_src.triangles.2,
+            ),
+            &mesh_src.s,
+            QuadratureKind::GaussLegendre3,
+            (&mut bx, &mut by, &mut bz),
+        )
+        .unwrap();
+        let jf = cross3(k_tgt[0], k_tgt[1], k_tgt[2], bx[0], by[0], bz[0]);
+        let w = qp[0] * tri_area;
+        out[0] += jf.0 * w;
+        out[1] += jf.1 * w;
+        out[2] += jf.2 * w;
+    }
     out
 }
 
@@ -887,6 +1003,134 @@ fn test_triangle_mesh_inductance_matrix_mutual_coupling_matches_triangle_pair_su
         via_l,
         direct,
     );
+}
+
+#[test]
+fn test_triangle_basis_force_block_matches_direct_contraction() {
+    let src0 = [0.0, 0.0, 0.0];
+    let src1 = [0.4, 0.1, 0.0];
+    let src2 = [0.1, 0.5, 0.0];
+    let tgt0 = [0.2, -0.1, 0.7];
+    let tgt1 = [0.6, 0.0, 0.8];
+    let tgt2 = [0.1, 0.4, 0.9];
+    let s_src = [0.7, -0.2, 0.5];
+    let s_tgt = [-0.3, 0.4, 0.8];
+
+    let block = triangle_basis_force_block(
+        src0,
+        src1,
+        src2,
+        tgt0,
+        tgt1,
+        tgt2,
+        QuadratureKind::GaussLegendre3,
+    );
+    let via_block = triangle_force_from_potential_vectors(block, s_src, s_tgt);
+
+    let tri_area = calc_tri_area(tgt0, tgt1, tgt2);
+    let k_tgt = triangle_current_density(tgt0, tgt1, tgt2, s_tgt);
+    let mut direct = [0.0; 3];
+    for qp in triangle_quadrature_points(QuadratureKind::GaussLegendre3) {
+        let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
+        let b = flux_density_triangle(src0, src1, src2, s_src, obs, QuadratureKind::GaussLegendre3);
+        let jf = cross3(k_tgt[0], k_tgt[1], k_tgt[2], b[0], b[1], b[2]);
+        let w = qp[0] * tri_area;
+        direct[0] += jf.0 * w;
+        direct[1] += jf.1 * w;
+        direct[2] += jf.2 * w;
+    }
+
+    for axis in 0..3 {
+        assert!(
+            approx(via_block[axis], direct[axis], 1e-12, 1e-12),
+            "force block mismatch on axis {axis}: block={:.16e}, direct={:.16e}",
+            via_block[axis],
+            direct[axis],
+        );
+    }
+}
+
+#[test]
+fn test_triangle_mesh_force_mapping_matches_direct_target_integration() {
+    let radius = 0.61;
+    let height = radius * 1e-3;
+    let nphi = 32;
+    let src = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 1.3, nphi, -0.17,
+    ));
+    let tgt = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 0.9, nphi, 0.23,
+    ));
+
+    let (fx, fy, fz) = mesh_force_mapping(&src, &tgt, false);
+    let via_mapping = triangle_mesh_force_from_potential_vectors(&fx, &fy, &fz, &src.s).unwrap();
+    let via_mapping_par = {
+        let (fxp, fyp, fzp) = mesh_force_mapping(&src, &tgt, true);
+        triangle_mesh_force_from_potential_vectors(&fxp, &fyp, &fzp, &src.s).unwrap()
+    };
+
+    let mut direct = [0.0; 3];
+    for itgt in 0..tgt.triangles.0.len() {
+        let idx = [
+            tgt.triangles.0[itgt],
+            tgt.triangles.1[itgt],
+            tgt.triangles.2[itgt],
+        ];
+        let tri_nodes = idx.map(|k| [tgt.nodes.0[k], tgt.nodes.1[k], tgt.nodes.2[k]]);
+        let tri_s = idx.map(|k| tgt.s[k]);
+        let force = explicit_force_on_target_triangle_from_source_mesh(&src, tri_nodes, tri_s);
+        direct[0] += force[0];
+        direct[1] += force[1];
+        direct[2] += force[2];
+    }
+
+    for axis in 0..3 {
+        assert!(
+            approx(via_mapping[axis], direct[axis], 1e-11, 1e-12),
+            "mesh force mapping mismatch on axis {axis}: mapping={:.16e}, direct={:.16e}",
+            via_mapping[axis],
+            direct[axis],
+        );
+        assert!(
+            approx(via_mapping_par[axis], direct[axis], 1e-11, 1e-12),
+            "parallel mesh force mapping mismatch on axis {axis}: mapping={:.16e}, direct={:.16e}",
+            via_mapping_par[axis],
+            direct[axis],
+        );
+    }
+}
+
+#[test]
+fn test_triangle_mesh_self_force_mapping_serial_matches_parallel() {
+    let radius = 0.73;
+    let height = radius * 1e-3;
+    let mesh = triangle_patches_to_mesh(&circular_strip_triangles(radius, height, 1.0, 48));
+
+    let (fx, fy, fz) = mesh_self_force_mapping(&mesh, false);
+    let total = triangle_mesh_force_from_potential_vectors(&fx, &fy, &fz, &mesh.s).unwrap();
+    let total_par = {
+        let (fxp, fyp, fzp) = mesh_self_force_mapping(&mesh, true);
+        triangle_mesh_force_from_potential_vectors(&fxp, &fyp, &fzp, &mesh.s).unwrap()
+    };
+
+    for axis in 0..3 {
+        assert!(
+            total[axis].is_finite(),
+            "serial self force is not finite on axis {axis}: {:.6e}",
+            total[axis]
+        );
+        assert!(
+            total_par[axis].is_finite(),
+            "parallel self force is not finite on axis {axis}: {:.6e}",
+            total_par[axis]
+        );
+        assert!(
+            approx(total[axis], total_par[axis], 1e-12, 1e-12),
+            "self force serial/parallel mismatch on axis {axis}: serial={:.16e}, parallel={:.16e}",
+            total[axis],
+            total_par[axis],
+        );
+    }
 }
 
 #[test]

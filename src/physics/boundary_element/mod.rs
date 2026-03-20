@@ -12,6 +12,7 @@
 use crate::math::{cross3, rss3};
 use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
 
+mod body_force_density;
 mod flux_density;
 mod inductance;
 mod vector_potential;
@@ -22,6 +23,18 @@ mod test;
 pub use flux_density::{
     flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_par,
     triangle_flux_density_basis,
+};
+
+pub use body_force_density::{
+    triangle_basis_force_block, triangle_force_from_potential_vectors,
+    triangle_mesh_force_from_potential_vectors, triangle_mesh_force_mapping,
+    triangle_mesh_force_mapping_from_circular_filaments,
+    triangle_mesh_force_mapping_from_circular_filaments_par,
+    triangle_mesh_force_mapping_from_dipoles, triangle_mesh_force_mapping_from_dipoles_par,
+    triangle_mesh_force_mapping_from_linear_filaments,
+    triangle_mesh_force_mapping_from_linear_filaments_par, triangle_mesh_force_mapping_par,
+    triangle_mesh_self_force_mapping, triangle_mesh_self_force_mapping_par,
+    triangle_mesh_triangle_forces_from_potential_vectors,
 };
 
 pub use inductance::{

@@ -638,6 +638,267 @@ fn triangle_mesh_inductance_matrix(
     Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
 }
 
+#[pyfunction(signature = (nodes_src, triangles_src, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping(
+    nodes_src: PyReadonlyArray2<f64>,
+    triangles_src: PyReadonlyArray2<i64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let nodes_src = split_xyz_array2("nodes_src", nodes_src)?;
+    let triangles_src = split_triangle_index_array2("triangles_src", triangles_src)?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nnode_src = nodes_src.0.len();
+    let ntri_tgt = triangles_tgt.0.len();
+    let nout = nnode_src
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping,
+    };
+    match func(
+        (&nodes_src.0, &nodes_src.1, &nodes_src.2),
+        (&triangles_src.0, &triangles_src.1, &triangles_src.2),
+        (&nodes_tgt.0, &nodes_tgt.1, &nodes_tgt.2),
+        (&triangles_tgt.0, &triangles_tgt.1, &triangles_tgt.2),
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (nodes, triangles, s, par=true, quad="gl3"))]
+fn triangle_mesh_self_force_mapping(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let s = s.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nnode = nodes.0.len();
+    let ntri = triangles.0.len();
+    let nout = nnode
+        .checked_mul(ntri)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_self_force_mapping_par,
+        false => physics::boundary_element::triangle_mesh_self_force_mapping,
+    };
+    match func(
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+        s,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping_from_linear_filaments(
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    wire_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let wire_radius = wire_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nfil = xyzfil.0.len();
+    let ntri_tgt = triangles_tgt.0.len();
+    let nout = nfil
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_from_linear_filaments_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping_from_linear_filaments,
+    };
+    match func(
+        xyzfil,
+        dlxyzfil,
+        wire_radius,
+        (&nodes_tgt.0, &nodes_tgt.1, &nodes_tgt.2),
+        (&triangles_tgt.0, &triangles_tgt.1, &triangles_tgt.2),
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping_from_circular_filaments(
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let rfil = rfil.as_slice()?;
+    let zfil = zfil.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nfil = rfil.len();
+    let ntri_tgt = triangles_tgt.0.len();
+    let nout = nfil
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_from_circular_filaments_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping_from_circular_filaments,
+    };
+    match func(
+        rfil,
+        zfil,
+        (&nodes_tgt.0, &nodes_tgt.1, &nodes_tgt.2),
+        (&triangles_tgt.0, &triangles_tgt.1, &triangles_tgt.2),
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping_from_dipoles(
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    moment_dir: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    outer_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(moment_dir);
+    let outer_radius = outer_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let ndip = loc.0.len();
+    let ntri_tgt = triangles_tgt.0.len();
+    let nout = ndip
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_from_dipoles_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping_from_dipoles,
+    };
+    match func(
+        loc,
+        moment_dir,
+        outer_radius,
+        (&nodes_tgt.0, &nodes_tgt.1, &nodes_tgt.2),
+        (&triangles_tgt.0, &triangles_tgt.1, &triangles_tgt.2),
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
 /// Python bindings for cfsemrs::physics::point_source::segment::vector_potential_point_segment
 #[pyfunction]
 fn vector_potential_point_segment(
@@ -1114,6 +1375,23 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(triangle_mesh_current_density, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         triangle_mesh_quadrature_points,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(triangle_mesh_force_mapping, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_self_force_mapping,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_force_mapping_from_linear_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_force_mapping_from_circular_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_force_mapping_from_dipoles,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

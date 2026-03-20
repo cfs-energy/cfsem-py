@@ -8,10 +8,17 @@ use super::{
     triangle_basis_mutual_inductance_block, triangle_current_density,
     triangle_force_from_potential_vectors, triangle_inductance_from_potential_vectors,
     triangle_mesh_current_density, triangle_mesh_flux_density_from_potential_vectors,
+    triangle_mesh_flux_linkage_from_source_coefficients,
+    triangle_mesh_flux_linkage_mapping_from_dipoles,
+    triangle_mesh_flux_linkage_mapping_from_dipoles_par,
     triangle_mesh_force_from_potential_vectors, triangle_mesh_force_mapping,
     triangle_mesh_force_mapping_par, triangle_mesh_inductance_from_potential_vectors,
-    triangle_mesh_inductance_matrix, triangle_mesh_inductance_matrix_par,
-    triangle_mesh_inductive_energy, triangle_mesh_quadrature_points,
+    triangle_mesh_inductance_mapping_from_circular_filaments,
+    triangle_mesh_inductance_mapping_from_circular_filaments_par,
+    triangle_mesh_inductance_mapping_from_linear_filaments,
+    triangle_mesh_inductance_mapping_from_linear_filaments_par, triangle_mesh_inductance_matrix,
+    triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
+    triangle_mesh_interaction_energy_from_source_coefficients, triangle_mesh_quadrature_points,
     triangle_mesh_self_force_mapping, triangle_mesh_self_force_mapping_par,
     triangle_mesh_vector_potential_from_potential_vectors, triangle_quadrature_count,
     triangle_quadrature_points, triangle_vector_potential_basis, vector_potential_triangle,
@@ -23,9 +30,11 @@ use crate::physics::circular_filament::{
     flux_circular_filament_scalar, flux_density_circular_filament_cartesian_scalar,
     vector_potential_circular_filament_scalar,
 };
+use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::current_element::{
     flux_density_current_element_scalar, vector_potential_current_element_scalar,
 };
+use crate::physics::point_source::dipole::vector_potential_dipole_scalar;
 use crate::testing::approx;
 
 #[derive(Clone, Copy)]
@@ -268,6 +277,175 @@ fn mesh_inductance_matrix(mesh: &TriangleMeshData, par: bool) -> Vec<f64> {
         false => triangle_mesh_inductance_matrix(
             (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
             (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+    };
+    result.unwrap();
+    out
+}
+
+fn explicit_nodal_flux_linkage_from_vector_potential_fn<F>(
+    mesh_tgt: &TriangleMeshData,
+    eval_a: F,
+) -> Vec<f64>
+where
+    F: Fn([f64; 3]) -> [f64; 3],
+{
+    let nnode = mesh_tgt.nodes.0.len();
+    let mut out = vec![0.0; nnode];
+
+    for itgt in 0..mesh_tgt.triangles.0.len() {
+        let idx = [
+            mesh_tgt.triangles.0[itgt],
+            mesh_tgt.triangles.1[itgt],
+            mesh_tgt.triangles.2[itgt],
+        ];
+        let tri_nodes = idx.map(|k| {
+            [
+                mesh_tgt.nodes.0[k],
+                mesh_tgt.nodes.1[k],
+                mesh_tgt.nodes.2[k],
+            ]
+        });
+        let tri_area = calc_tri_area(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
+        let ktgt = triangle_basis_current_densities(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
+
+        for qp in triangle_quadrature_points(QuadratureKind::GaussLegendre3) {
+            let obs = map_tri_uv(tri_nodes[0], tri_nodes[1], tri_nodes[2], [qp[1], qp[2]]);
+            let a = eval_a(obs);
+            let w = qp[0] * tri_area;
+            for ibasis in 0..3 {
+                out[idx[ibasis]] += dot3(
+                    ktgt[ibasis][0],
+                    ktgt[ibasis][1],
+                    ktgt[ibasis][2],
+                    a[0],
+                    a[1],
+                    a[2],
+                ) * w;
+            }
+        }
+    }
+
+    out
+}
+
+fn mesh_inductance_mapping_from_linear_filaments(
+    mesh_tgt: &TriangleMeshData,
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    par: bool,
+) -> Vec<f64> {
+    let nnode = mesh_tgt.nodes.0.len();
+    let nfil = xyzfil.0.len();
+    let mut out = vec![0.0; nnode * nfil];
+    let result = match par {
+        true => triangle_mesh_inductance_mapping_from_linear_filaments_par(
+            xyzfil,
+            dlxyzfil,
+            wire_radius,
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+        false => triangle_mesh_inductance_mapping_from_linear_filaments(
+            xyzfil,
+            dlxyzfil,
+            wire_radius,
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+    };
+    result.unwrap();
+    out
+}
+
+fn mesh_inductance_mapping_from_circular_filaments(
+    mesh_tgt: &TriangleMeshData,
+    rfil: &[f64],
+    zfil: &[f64],
+    par: bool,
+) -> Vec<f64> {
+    let nnode = mesh_tgt.nodes.0.len();
+    let nfil = rfil.len();
+    let mut out = vec![0.0; nnode * nfil];
+    let result = match par {
+        true => triangle_mesh_inductance_mapping_from_circular_filaments_par(
+            rfil,
+            zfil,
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+        false => triangle_mesh_inductance_mapping_from_circular_filaments(
+            rfil,
+            zfil,
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+    };
+    result.unwrap();
+    out
+}
+
+fn mesh_flux_linkage_mapping_from_dipoles(
+    mesh_tgt: &TriangleMeshData,
+    loc: (&[f64], &[f64], &[f64]),
+    moment_dir: (&[f64], &[f64], &[f64]),
+    outer_radius: &[f64],
+    par: bool,
+) -> Vec<f64> {
+    let nnode = mesh_tgt.nodes.0.len();
+    let ndip = loc.0.len();
+    let mut out = vec![0.0; nnode * ndip];
+    let result = match par {
+        true => triangle_mesh_flux_linkage_mapping_from_dipoles_par(
+            loc,
+            moment_dir,
+            outer_radius,
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
+            QuadratureKind::GaussLegendre3,
+            &mut out,
+        ),
+        false => triangle_mesh_flux_linkage_mapping_from_dipoles(
+            loc,
+            moment_dir,
+            outer_radius,
+            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
+            (
+                &mesh_tgt.triangles.0,
+                &mesh_tgt.triangles.1,
+                &mesh_tgt.triangles.2,
+            ),
             QuadratureKind::GaussLegendre3,
             &mut out,
         ),
@@ -1190,6 +1368,222 @@ fn test_triangle_mesh_inductance_matrix_has_constant_potential_null_mode() {
         approx(energy, 0.0, 0.0, 1e-12),
         "constant-potential energy is nonzero: {:.16e}",
         energy,
+    );
+}
+
+#[test]
+fn test_triangle_mesh_inductance_mapping_from_linear_filaments_matches_direct_target_quadrature() {
+    let radius = 0.62;
+    let height = radius * 1e-3;
+    let mesh_tgt = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 0.9, 32, 0.21,
+    ));
+    let xyzfil = (&[0.15, -0.12][..], &[-0.35, 0.28][..], &[0.42, -0.31][..]);
+    let dlxyzfil = (&[0.27, -0.18][..], &[0.16, 0.21][..], &[-0.11, 0.14][..]);
+    let wire_radius = &[2.5e-3, 1.5e-3][..];
+    let coeffs = &[1.4, -0.7][..];
+
+    let map = mesh_inductance_mapping_from_linear_filaments(
+        &mesh_tgt,
+        xyzfil,
+        dlxyzfil,
+        wire_radius,
+        false,
+    );
+    let map_par = mesh_inductance_mapping_from_linear_filaments(
+        &mesh_tgt,
+        xyzfil,
+        dlxyzfil,
+        wire_radius,
+        true,
+    );
+    for i in 0..map.len() {
+        assert!(
+            approx(map[i], map_par[i], 1e-12, 1e-14),
+            "linear-filament inductance mapping serial/parallel mismatch at {i}"
+        );
+    }
+
+    let mut psi = vec![0.0; mesh_tgt.nodes.0.len()];
+    triangle_mesh_flux_linkage_from_source_coefficients(&map, coeffs, &mut psi).unwrap();
+    let energy =
+        triangle_mesh_interaction_energy_from_source_coefficients(&map, &mesh_tgt.s, coeffs)
+            .unwrap();
+
+    let psi_ref = explicit_nodal_flux_linkage_from_vector_potential_fn(&mesh_tgt, |obs| {
+        let mut out = [0.0; 3];
+        for i in 0..coeffs.len() {
+            let start = (xyzfil.0[i], xyzfil.1[i], xyzfil.2[i]);
+            let end = (
+                xyzfil.0[i] + dlxyzfil.0[i],
+                xyzfil.1[i] + dlxyzfil.1[i],
+                xyzfil.2[i] + dlxyzfil.2[i],
+            );
+            let a = vector_potential_linear_filament_scalar(
+                (start, end, coeffs[i]),
+                wire_radius[i],
+                (obs[0], obs[1], obs[2]),
+            );
+            out[0] += a.0;
+            out[1] += a.1;
+            out[2] += a.2;
+        }
+        out
+    });
+    let energy_ref: f64 = mesh_tgt
+        .s
+        .iter()
+        .zip(psi_ref.iter())
+        .map(|(s, p)| s * p)
+        .sum();
+
+    for i in 0..psi.len() {
+        assert!(
+            approx(psi[i], psi_ref[i], 1e-11, 1e-12),
+            "linear-filament nodal flux linkage mismatch at node {i}: map={:.16e}, direct={:.16e}",
+            psi[i],
+            psi_ref[i]
+        );
+    }
+    assert!(
+        approx(energy, energy_ref, 1e-11, 1e-12),
+        "linear-filament interaction energy mismatch: map={:.16e}, direct={:.16e}",
+        energy,
+        energy_ref
+    );
+}
+
+#[test]
+fn test_triangle_mesh_inductance_mapping_from_circular_filaments_matches_direct_target_quadrature()
+{
+    let radius = 0.58;
+    let height = radius * 1e-3;
+    let mesh_tgt = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 0.85, 32, 0.17,
+    ));
+    let rfil = &[0.47, 0.63][..];
+    let zfil = &[-0.16, 0.29][..];
+    let coeffs = &[0.8, -1.1][..];
+
+    let map = mesh_inductance_mapping_from_circular_filaments(&mesh_tgt, rfil, zfil, false);
+    let map_par = mesh_inductance_mapping_from_circular_filaments(&mesh_tgt, rfil, zfil, true);
+    for i in 0..map.len() {
+        assert!(
+            approx(map[i], map_par[i], 1e-12, 1e-14),
+            "circular-filament inductance mapping serial/parallel mismatch at {i}"
+        );
+    }
+
+    let mut psi = vec![0.0; mesh_tgt.nodes.0.len()];
+    triangle_mesh_flux_linkage_from_source_coefficients(&map, coeffs, &mut psi).unwrap();
+    let energy =
+        triangle_mesh_interaction_energy_from_source_coefficients(&map, &mesh_tgt.s, coeffs)
+            .unwrap();
+
+    let psi_ref = explicit_nodal_flux_linkage_from_vector_potential_fn(&mesh_tgt, |obs| {
+        let (robs, phiobs, zobs) = cartesian_to_cylindrical(obs[0], obs[1], obs[2]);
+        let mut out = [0.0; 3];
+        for i in 0..coeffs.len() {
+            let a_phi = vector_potential_circular_filament_scalar(
+                (rfil[i], zfil[i], coeffs[i]),
+                (robs, zobs),
+            );
+            out[0] += -a_phi * libm::sin(phiobs);
+            out[1] += a_phi * libm::cos(phiobs);
+        }
+        out
+    });
+    let energy_ref: f64 = mesh_tgt
+        .s
+        .iter()
+        .zip(psi_ref.iter())
+        .map(|(s, p)| s * p)
+        .sum();
+
+    for i in 0..psi.len() {
+        assert!(
+            approx(psi[i], psi_ref[i], 1e-11, 1e-12),
+            "circular-filament nodal flux linkage mismatch at node {i}: map={:.16e}, direct={:.16e}",
+            psi[i],
+            psi_ref[i]
+        );
+    }
+    assert!(
+        approx(energy, energy_ref, 1e-11, 1e-12),
+        "circular-filament interaction energy mismatch: map={:.16e}, direct={:.16e}",
+        energy,
+        energy_ref
+    );
+}
+
+#[test]
+fn test_triangle_mesh_flux_linkage_mapping_from_dipoles_matches_direct_target_quadrature() {
+    let radius = 0.55;
+    let height = radius * 1e-3;
+    let mesh_tgt = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 0.75, 28, 0.12,
+    ));
+    let loc = (&[0.21, -0.38][..], &[0.12, 0.25][..], &[-0.27, 0.34][..]);
+    let moment_dir = (&[0.0, 0.8][..], &[0.0, -0.4][..], &[1.0, 0.45][..]);
+    let outer_radius = &[0.0, 0.0][..];
+    let coeffs = &[0.35, -0.6][..];
+
+    let map =
+        mesh_flux_linkage_mapping_from_dipoles(&mesh_tgt, loc, moment_dir, outer_radius, false);
+    let map_par =
+        mesh_flux_linkage_mapping_from_dipoles(&mesh_tgt, loc, moment_dir, outer_radius, true);
+    for i in 0..map.len() {
+        assert!(
+            approx(map[i], map_par[i], 1e-12, 1e-14),
+            "dipole flux-linkage mapping serial/parallel mismatch at {i}"
+        );
+    }
+
+    let mut psi = vec![0.0; mesh_tgt.nodes.0.len()];
+    triangle_mesh_flux_linkage_from_source_coefficients(&map, coeffs, &mut psi).unwrap();
+    let energy =
+        triangle_mesh_interaction_energy_from_source_coefficients(&map, &mesh_tgt.s, coeffs)
+            .unwrap();
+
+    let psi_ref = explicit_nodal_flux_linkage_from_vector_potential_fn(&mesh_tgt, |obs| {
+        let mut out = [0.0; 3];
+        for i in 0..coeffs.len() {
+            let a = vector_potential_dipole_scalar(
+                (loc.0[i], loc.1[i], loc.2[i]),
+                (
+                    coeffs[i] * moment_dir.0[i],
+                    coeffs[i] * moment_dir.1[i],
+                    coeffs[i] * moment_dir.2[i],
+                ),
+                outer_radius[i],
+                (obs[0], obs[1], obs[2]),
+            );
+            out[0] += a.0;
+            out[1] += a.1;
+            out[2] += a.2;
+        }
+        out
+    });
+    let energy_ref: f64 = mesh_tgt
+        .s
+        .iter()
+        .zip(psi_ref.iter())
+        .map(|(s, p)| s * p)
+        .sum();
+
+    for i in 0..psi.len() {
+        assert!(
+            approx(psi[i], psi_ref[i], 1e-11, 1e-12),
+            "dipole nodal flux linkage mismatch at node {i}: map={:.16e}, direct={:.16e}",
+            psi[i],
+            psi_ref[i]
+        );
+    }
+    assert!(
+        approx(energy, energy_ref, 1e-11, 1e-12),
+        "dipole interaction energy mismatch: map={:.16e}, direct={:.16e}",
+        energy,
+        energy_ref
     );
 }
 

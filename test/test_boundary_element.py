@@ -104,6 +104,15 @@ def _force_from_bfield_on_target(
     return np.sum(np.cross(j_tgt[:, None, :], b_qp) * weights[:, :, None], axis=1)
 
 
+def _interaction_energy_from_afield_on_target(
+    points: np.ndarray,
+    weights: np.ndarray,
+    j_tgt: np.ndarray,
+    a_qp: np.ndarray,
+) -> float:
+    return float(np.sum(np.sum(j_tgt[:, None, :] * a_qp, axis=2) * weights))
+
+
 def _linear_filament_loop(
     radius: float,
     z: float,
@@ -310,6 +319,134 @@ def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_
     assert l_from_matrix == approx(l_lyle, rel=0.09)
     assert energy_from_matrix == approx(energy_wien, rel=0.12)
     assert energy_from_matrix == approx(energy_lyle, rel=0.09)
+
+
+@mark.parametrize("par", [True, False])
+def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
+    radius = 0.58
+    height = radius * 1e-3
+    nodes_tgt, triangles_tgt, s_tgt = _triangle_strip_mesh(radius, height, 0.9, nphi=20, z_center=0.14)
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="gl3")
+    j_tgt = cfsem.triangle_mesh_current_density(nodes_tgt, triangles_tgt, s_tgt)
+    xyzp = (points[..., 0].ravel(), points[..., 1].ravel(), points[..., 2].ravel())
+
+    xyzfil = (
+        np.array([0.15, -0.12], dtype=np.float64),
+        np.array([-0.35, 0.28], dtype=np.float64),
+        np.array([0.42, -0.31], dtype=np.float64),
+    )
+    dlxyzfil = (
+        np.array([0.27, -0.18], dtype=np.float64),
+        np.array([0.16, 0.21], dtype=np.float64),
+        np.array([-0.11, 0.14], dtype=np.float64),
+    )
+    ifil = np.array([1.4, -0.7], dtype=np.float64)
+    wire_radius = np.array([2.5e-3, 1.5e-3], dtype=np.float64)
+
+    m_lin = cfsem.triangle_mesh_inductance_mapping_from_linear_filaments(
+        xyzfil,
+        dlxyzfil,
+        nodes_tgt,
+        triangles_tgt,
+        wire_radius=wire_radius,
+        par=par,
+        quad="gl3",
+    )
+    m_lin_ref = cfsem.triangle_mesh_inductance_mapping_from_linear_filaments(
+        xyzfil,
+        dlxyzfil,
+        nodes_tgt,
+        triangles_tgt,
+        wire_radius=wire_radius,
+        par=not par,
+        quad="gl3",
+    )
+    energy_lin = float(s_tgt @ (m_lin @ ifil))
+    a_lin = np.column_stack(
+        cfsem.vector_potential_linear_filament(
+            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=False
+        )
+    ).reshape(points.shape)
+    energy_lin_ref = _interaction_energy_from_afield_on_target(points, weights, j_tgt, a_lin)
+
+    rfil = np.array([0.47, 0.63], dtype=np.float64)
+    zfil = np.array([-0.16, 0.29], dtype=np.float64)
+    icirc = np.array([0.8, -1.1], dtype=np.float64)
+    m_circ = cfsem.triangle_mesh_inductance_mapping_from_circular_filaments(
+        rfil, zfil, nodes_tgt, triangles_tgt, par=par, quad="gl3"
+    )
+    m_circ_ref = cfsem.triangle_mesh_inductance_mapping_from_circular_filaments(
+        rfil, zfil, nodes_tgt, triangles_tgt, par=not par, quad="gl3"
+    )
+    energy_circ = float(s_tgt @ (m_circ @ icirc))
+    r_qp = np.sqrt(points[..., 0] ** 2 + points[..., 1] ** 2)
+    phi_qp = np.arctan2(points[..., 1], points[..., 0])
+    a_phi = cfsem.vector_potential_circular_filament(
+        icirc,
+        rfil,
+        zfil,
+        r_qp.ravel(),
+        points[..., 2].ravel(),
+        False,
+    ).reshape(points.shape[:2])
+    a_circ = np.stack(
+        (-a_phi * np.sin(phi_qp), a_phi * np.cos(phi_qp), np.zeros_like(a_phi)),
+        axis=2,
+    )
+    energy_circ_ref = _interaction_energy_from_afield_on_target(points, weights, j_tgt, a_circ)
+
+    loc = (
+        np.array([0.21, -0.38], dtype=np.float64),
+        np.array([0.12, 0.25], dtype=np.float64),
+        np.array([-0.27, 0.34], dtype=np.float64),
+    )
+    moment_dir = (
+        np.array([0.0, 0.8], dtype=np.float64),
+        np.array([0.0, -0.4], dtype=np.float64),
+        np.array([1.0, 0.45], dtype=np.float64),
+    )
+    dip_amp = np.array([0.35, -0.6], dtype=np.float64)
+    outer_radius = np.array([0.0, 0.0], dtype=np.float64)
+    m_dip = cfsem.triangle_mesh_flux_linkage_mapping_from_dipoles(
+        loc,
+        moment_dir,
+        nodes_tgt,
+        triangles_tgt,
+        outer_radius=outer_radius,
+        par=par,
+        quad="gl3",
+    )
+    m_dip_ref = cfsem.triangle_mesh_flux_linkage_mapping_from_dipoles(
+        loc,
+        moment_dir,
+        nodes_tgt,
+        triangles_tgt,
+        outer_radius=outer_radius,
+        par=not par,
+        quad="gl3",
+    )
+    energy_dip = float(s_tgt @ (m_dip @ dip_amp))
+    moment = tuple(dip_amp * comp for comp in moment_dir)
+    a_dip = np.column_stack(
+        cfsem.vector_potential_dipole(
+            loc,
+            moment,
+            xyzp,
+            par=False,
+            outer_radius=outer_radius,
+        )
+    ).reshape(points.shape)
+    energy_dip_ref = _interaction_energy_from_afield_on_target(points, weights, j_tgt, a_dip)
+
+    assert m_lin.shape == (nodes_tgt.shape[0], ifil.size)
+    assert m_circ.shape == (nodes_tgt.shape[0], icirc.size)
+    assert m_dip.shape == (nodes_tgt.shape[0], dip_amp.size)
+    assert np.allclose(m_lin, m_lin_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(m_circ, m_circ_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(m_dip, m_dip_ref, rtol=1e-12, atol=1e-12)
+    assert energy_lin == approx(energy_lin_ref, rel=1e-11, abs=1e-12)
+    assert energy_circ == approx(energy_circ_ref, rel=1e-11, abs=1e-12)
+    assert energy_dip == approx(energy_dip_ref, rel=1e-11, abs=1e-12)
 
 
 @mark.parametrize("par", [True, False])

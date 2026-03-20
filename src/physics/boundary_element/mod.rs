@@ -41,9 +41,17 @@ pub use body_force_density::{
 pub use inductance::{
     triangle_basis_mutual_inductance, triangle_basis_mutual_inductance_block,
     triangle_geometric_coupling, triangle_geometric_coupling_regular,
-    triangle_inductance_from_potential_vectors, triangle_mesh_inductance_from_potential_vectors,
-    triangle_mesh_inductance_matrix, triangle_mesh_inductance_matrix_par,
-    triangle_mesh_inductive_energy,
+    triangle_inductance_from_potential_vectors,
+    triangle_mesh_flux_linkage_from_source_coefficients,
+    triangle_mesh_flux_linkage_mapping_from_dipoles,
+    triangle_mesh_flux_linkage_mapping_from_dipoles_par,
+    triangle_mesh_inductance_from_potential_vectors,
+    triangle_mesh_inductance_mapping_from_circular_filaments,
+    triangle_mesh_inductance_mapping_from_circular_filaments_par,
+    triangle_mesh_inductance_mapping_from_linear_filaments,
+    triangle_mesh_inductance_mapping_from_linear_filaments_par, triangle_mesh_inductance_matrix,
+    triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
+    triangle_mesh_interaction_energy_from_source_coefficients,
 };
 
 pub use vector_potential::{

@@ -40,13 +40,22 @@ from .cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
 from .cfsem import triangle_mesh_current_density as em_triangle_mesh_current_density
 from .cfsem import triangle_mesh_force_mapping as em_triangle_mesh_force_mapping
 from .cfsem import (
-    triangle_mesh_force_mapping_from_circular_filaments as em_triangle_mesh_force_mapping_from_circular_filaments, # noqa: E501
+    triangle_mesh_force_mapping_from_circular_filaments as em_triangle_mesh_force_mapping_from_circular_filaments,  # noqa: E501
 )
 from .cfsem import (
     triangle_mesh_force_mapping_from_dipoles as em_triangle_mesh_force_mapping_from_dipoles,
 )
 from .cfsem import (
     triangle_mesh_force_mapping_from_linear_filaments as em_triangle_mesh_force_mapping_from_linear_filaments,
+)
+from .cfsem import (
+    triangle_mesh_flux_linkage_mapping_from_dipoles as em_triangle_mesh_flux_linkage_mapping_from_dipoles,
+)
+from .cfsem import (
+    triangle_mesh_inductance_mapping_from_circular_filaments as em_triangle_mesh_inductance_mapping_from_circular_filaments,
+)
+from .cfsem import (
+    triangle_mesh_inductance_mapping_from_linear_filaments as em_triangle_mesh_inductance_mapping_from_linear_filaments,
 )
 from .cfsem import triangle_mesh_inductance_matrix as em_triangle_mesh_inductance_matrix
 from .cfsem import triangle_mesh_quadrature_points as em_triangle_mesh_quadrature_points
@@ -517,6 +526,112 @@ def triangle_mesh_inductance_matrix(
     lmat = em_triangle_mesh_inductance_matrix(nodes, triangles, par, quad)
     nnode = nodes.shape[0]
     return ascontiguousarray(lmat).reshape(nnode, nnode)
+
+
+def triangle_mesh_inductance_mapping_from_linear_filaments(
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    wire_radius: float | NDArray[float64] = 0.0,
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the source-current to target-node inductance mapping from linear filaments.
+
+    Args:
+        xyzfil: [m] x,y,z filament start coordinates
+        dlxyzfil: [m] x,y,z filament segment deltas
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        wire_radius: [m] filament radius, scalar or array of length `nfil`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [H] mapping matrix with shape `(nnode_tgt, nfil)`
+    """
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(xyzfil[0].size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
+    out = em_triangle_mesh_inductance_mapping_from_linear_filaments(
+        xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, par, quad
+    )
+    return ascontiguousarray(out).reshape(nodes_tgt.shape[0], xyzfil[0].size)
+
+
+def triangle_mesh_inductance_mapping_from_circular_filaments(
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the source-current to target-node inductance mapping from circular filaments.
+
+    Args:
+        rfil: [m] circular filament radii
+        zfil: [m] circular filament axial coordinates
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [H] mapping matrix with shape `(nnode_tgt, nfil)`
+    """
+    rfil = ascontiguousarray(rfil, dtype=float64).ravel()
+    zfil = ascontiguousarray(zfil, dtype=float64).ravel()
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    out = em_triangle_mesh_inductance_mapping_from_circular_filaments(
+        rfil, zfil, nodes_tgt, triangles_tgt, par, quad
+    )
+    return ascontiguousarray(out).reshape(nodes_tgt.shape[0], rfil.size)
+
+
+def triangle_mesh_flux_linkage_mapping_from_dipoles(
+    loc: Array3xN,
+    moment_dir: Array3xN,
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    outer_radius: float | NDArray[float64] = 0.0,
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the source-amplitude to target-node flux-linkage mapping from dipoles.
+
+    Args:
+        loc: [m] dipole locations
+        moment_dir: dipole moment direction vectors
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        outer_radius: [m] dipole finite-core radius, scalar or array of length `ndip`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        mapping matrix with shape `(nnode_tgt, ndip)`
+    """
+    loc = _3tup_contig(loc)
+    moment_dir = _3tup_contig(moment_dir)
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    if asarray(outer_radius).ndim == 0:
+        outer_radius = full(loc[0].size, float(outer_radius))
+    outer_radius = ascontiguousarray(outer_radius).ravel()
+    out = em_triangle_mesh_flux_linkage_mapping_from_dipoles(
+        loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, par, quad
+    )
+    return ascontiguousarray(out).reshape(nodes_tgt.shape[0], loc[0].size)
 
 
 def triangle_mesh_force_mapping(

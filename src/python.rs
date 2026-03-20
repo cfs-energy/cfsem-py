@@ -724,6 +724,172 @@ fn triangle_mesh_inductance_matrix(
     Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
 }
 
+#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_inductance_mapping_from_linear_filaments(
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    wire_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let wire_radius = wire_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout = nodes_tgt.0.len().checked_mul(xyzfil.0.len()).ok_or(
+        PyInteropError::DimensionalityError {
+            msg: "Inductance mapping size overflow".to_string(),
+        },
+    )?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => {
+            physics::boundary_element::triangle_mesh_inductance_mapping_from_linear_filaments_par
+        }
+        false => physics::boundary_element::triangle_mesh_inductance_mapping_from_linear_filaments,
+    };
+    match func(
+        xyzfil,
+        dlxyzfil,
+        wire_radius,
+        (&nodes_tgt.0, &nodes_tgt.1, &nodes_tgt.2),
+        (&triangles_tgt.0, &triangles_tgt.1, &triangles_tgt.2),
+        quad,
+        &mut out,
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
+#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_inductance_mapping_from_circular_filaments(
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    let rfil = rfil.as_slice()?;
+    let zfil = zfil.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        nodes_tgt
+            .0
+            .len()
+            .checked_mul(rfil.len())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Inductance mapping size overflow".to_string(),
+            })?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => {
+            physics::boundary_element::triangle_mesh_inductance_mapping_from_circular_filaments_par
+        }
+        false => {
+            physics::boundary_element::triangle_mesh_inductance_mapping_from_circular_filaments
+        }
+    };
+    match func(
+        rfil,
+        zfil,
+        (&nodes_tgt.0, &nodes_tgt.1, &nodes_tgt.2),
+        (&triangles_tgt.0, &triangles_tgt.1, &triangles_tgt.2),
+        quad,
+        &mut out,
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
+#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_flux_linkage_mapping_from_dipoles(
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    moment_dir: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    outer_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(moment_dir);
+    let outer_radius = outer_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        nodes_tgt
+            .0
+            .len()
+            .checked_mul(loc.0.len())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Flux-linkage mapping size overflow".to_string(),
+            })?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_flux_linkage_mapping_from_dipoles_par,
+        false => physics::boundary_element::triangle_mesh_flux_linkage_mapping_from_dipoles,
+    };
+    match func(
+        loc,
+        moment_dir,
+        outer_radius,
+        (&nodes_tgt.0, &nodes_tgt.1, &nodes_tgt.2),
+        (&triangles_tgt.0, &triangles_tgt.1, &triangles_tgt.2),
+        quad,
+        &mut out,
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
 #[pyfunction(signature = (nodes_src, triangles_src, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
 fn triangle_mesh_force_mapping(
     nodes_src: PyReadonlyArray2<f64>,
@@ -1482,6 +1648,18 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         triangle_mesh_inductance_matrix,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_inductance_mapping_from_linear_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_inductance_mapping_from_circular_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_flux_linkage_mapping_from_dipoles,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

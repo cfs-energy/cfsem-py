@@ -6,7 +6,7 @@ use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::math::{dot3, rss3};
 use crate::mesh::validate_triangle_mesh_geometry;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Regular triangle evaluation of the scalar kernel integral `∫ dS / R` using plain
 /// quadrature.
@@ -382,6 +382,9 @@ pub fn triangle_mesh_inductance_matrix(
 /// This variant is parallelized over chunks of source triangles and reduced into the
 /// final dense matrix.
 ///
+/// If the per-worker scratch matrices cannot be allocated, this routine falls back to
+/// the serial implementation rather than failing outright.
+///
 /// Args:
 ///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
 ///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
@@ -399,17 +402,30 @@ pub fn triangle_mesh_inductance_matrix_par(
     out: &mut [f64],
 ) -> Result<(), &'static str> {
     let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
-    if out.len() != nnode * nnode {
+    let matrix_len = nnode
+        .checked_mul(nnode)
+        .ok_or("Inductance matrix size overflow")?;
+    if out.len() != matrix_len {
         return Err("Output dimension mismatch");
     }
 
     let chunk = chunksize(ntri.max(1)); // [-]
     let starts: Vec<usize> = (0..ntri).step_by(chunk).collect();
+    let mut partial_buffers = Vec::with_capacity(starts.len());
+    for _ in 0..starts.len() {
+        let mut local = Vec::new();
+        if local.try_reserve_exact(matrix_len).is_err() {
+            return triangle_mesh_inductance_matrix(nodes, triangles, quad_kind, out);
+        }
+        local.resize(matrix_len, 0.0); // [H]
+        partial_buffers.push(local);
+    }
+
     let partials: Vec<Vec<f64>> = starts
         .into_par_iter()
-        .map(|start| {
+        .zip(partial_buffers.into_par_iter())
+        .map(|(start, mut local)| {
             let end = (start + chunk).min(ntri);
-            let mut local = vec![0.0; nnode * nnode]; // [H]
             for isrc in start..end {
                 let (src_nodes, src_idx) = triangle_nodes_and_indices(nodes, triangles, isrc);
                 for itgt in 0..ntri {

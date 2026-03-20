@@ -201,9 +201,11 @@ def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_
     minor_radius = 5e-3
     height = 2.0 * minor_radius
     nodes, triangles, s = _triangle_strip_mesh(major_radius, height, 1.0, nphi=96)
+    target_current = 3.7
 
     lmat = cfsem.triangle_mesh_inductance_matrix(nodes, triangles, par=False, quad="gl3")
     l_from_matrix = float(s @ lmat @ s)
+    energy_from_matrix = float(0.5 * (target_current * s) @ lmat @ (target_current * s))
     l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))
     l_lyle = float(
         cfsem.self_inductance_lyle6(
@@ -213,11 +215,15 @@ def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_
             n=1.0,
         )
     )
+    energy_wien = 0.5 * l_wien * target_current**2
+    energy_lyle = 0.5 * l_lyle * target_current**2
 
     assert lmat.shape == (nodes.shape[0], nodes.shape[0])
     assert np.allclose(lmat, lmat.T, rtol=1e-12, atol=1e-12)
     assert l_from_matrix == approx(l_wien, rel=0.12)
     assert l_from_matrix == approx(l_lyle, rel=0.09)
+    assert energy_from_matrix == approx(energy_wien, rel=0.12)
+    assert energy_from_matrix == approx(energy_lyle, rel=0.09)
 
 
 def test_triangle_mesh_invalid_inputs():

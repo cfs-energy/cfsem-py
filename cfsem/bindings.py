@@ -40,7 +40,7 @@ from .cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
 from .cfsem import triangle_mesh_current_density as em_triangle_mesh_current_density
 from .cfsem import triangle_mesh_force_mapping as em_triangle_mesh_force_mapping
 from .cfsem import (
-    triangle_mesh_force_mapping_from_circular_filaments as em_triangle_mesh_force_mapping_from_circular_filaments,
+    triangle_mesh_force_mapping_from_circular_filaments as em_triangle_mesh_force_mapping_from_circular_filaments, # noqa: E501
 )
 from .cfsem import (
     triangle_mesh_force_mapping_from_dipoles as em_triangle_mesh_force_mapping_from_dipoles,

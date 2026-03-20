@@ -52,10 +52,10 @@ from .cfsem import (
     triangle_mesh_flux_linkage_mapping_from_dipoles as em_triangle_mesh_flux_linkage_mapping_from_dipoles,
 )
 from .cfsem import (
-    triangle_mesh_inductance_mapping_from_circular_filaments as em_triangle_mesh_inductance_mapping_from_circular_filaments,
+    triangle_mesh_inductance_mapping_from_circular_filaments as em_triangle_mesh_inductance_mapping_from_circular_filaments,  # noqa: E501
 )
 from .cfsem import (
-    triangle_mesh_inductance_mapping_from_linear_filaments as em_triangle_mesh_inductance_mapping_from_linear_filaments,
+    triangle_mesh_inductance_mapping_from_linear_filaments as em_triangle_mesh_inductance_mapping_from_linear_filaments,  # noqa: E501
 )
 from .cfsem import triangle_mesh_inductance_matrix as em_triangle_mesh_inductance_matrix
 from .cfsem import triangle_mesh_quadrature_points as em_triangle_mesh_quadrature_points

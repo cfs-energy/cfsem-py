@@ -67,9 +67,7 @@ def _loop_vector_potential_cartesian(
         obs[:, 2],
         par,
     )
-    return np.column_stack(
-        (-a_phi * np.sin(phi), a_phi * np.cos(phi), np.zeros(obs.shape[0]))
-    )
+    return np.column_stack((-a_phi * np.sin(phi), a_phi * np.cos(phi), np.zeros(obs.shape[0])))
 
 
 def _triangle_current_density_reference(
@@ -83,9 +81,7 @@ def _triangle_current_density_reference(
         n1 = nodes[i1]
         n2 = nodes[i2]
         area = 0.5 * np.linalg.norm(np.cross(n1 - n0, n2 - n0))
-        out[i] = (
-            s[i0] * (n2 - n1) + s[i1] * (n0 - n2) + s[i2] * (n1 - n0)
-        ) / (2.0 * area)
+        out[i] = (s[i0] * (n2 - n1) + s[i1] * (n0 - n2) + s[i2] * (n1 - n0)) / (2.0 * area)
     return out
 
 
@@ -141,9 +137,7 @@ def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     )
 
     bx, by, bz = cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=par, quad=quad)
-    ax, ay, az = cfsem.vector_potential_triangle_mesh(
-        obs, nodes, triangles, s, par=par, quad=quad
-    )
+    ax, ay, az = cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=par, quad=quad)
     b_ref = np.column_stack(
         cfsem.flux_density_circular_filament_cartesian(
             np.array([loop_current], dtype=np.float64),
@@ -179,34 +173,37 @@ def test_triangle_mesh_serial_vs_parallel():
         dtype=np.float64,
     )
 
-    b_serial = np.column_stack(
-        cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=False)
-    )
-    b_parallel = np.column_stack(
-        cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=True)
-    )
-    a_serial = np.column_stack(
-        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False)
-    )
-    a_parallel = np.column_stack(
-        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=True)
-    )
+    b_serial = np.column_stack(cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=False))
+    b_parallel = np.column_stack(cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=True))
+    a_serial = np.column_stack(cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False))
+    a_parallel = np.column_stack(cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=True))
 
     assert np.allclose(b_serial, b_parallel, rtol=1e-12, atol=1e-12)
     assert np.allclose(a_serial, a_parallel, rtol=1e-12, atol=1e-12)
 
 
 def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_lyle():
-    major_radius = 0.5
-    minor_radius = 5e-3
-    height = 2.0 * minor_radius
+    major_radius = 0.5  # [m]
+    minor_radius = 5e-3  # [m]
+    height = 2.0 * minor_radius  # [m]
     nodes, triangles, s = _triangle_strip_mesh(major_radius, height, 1.0, nphi=96)
-    target_current = 3.7
+    target_current = 3.7  # [A]
 
-    lmat = cfsem.triangle_mesh_inductance_matrix(nodes, triangles, par=False, quad="gl3")
-    l_from_matrix = float(s @ lmat @ s)
-    energy_from_matrix = float(0.5 * (target_current * s) @ lmat @ (target_current * s))
-    l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))
+    # Calculate full-mesh nodal mutual inductance matrix
+    lmat = cfsem.triangle_mesh_inductance_matrix(nodes, triangles, par=False, quad="gl3")  # [H]
+
+    # Total self-inductance is 2 * stored energy per amp^2,
+    # so we can calculate the self-inductance by taking 2 times the stored energy at unit current.
+    # The default values of `s` on the test strip correspond to unit current.
+    l_from_matrix = float(s @ lmat @ s)  # [H]
+
+    # Stored energy is 1/2 s^T @ L @ s.
+    # To make sure we handle non-unit current, we test with some
+    s_at_target_current = target_current * s  # [A]
+    energy_from_matrix = float(0.5 * s_at_target_current @ lmat @ s_at_target_current)  # [J]
+
+    # Analytic self-inductance and energy calculations for comparison
+    l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))  # [H]
     l_lyle = float(
         cfsem.self_inductance_lyle6(
             r=major_radius,
@@ -214,10 +211,12 @@ def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_
             dz=height,
             n=1.0,
         )
-    )
-    energy_wien = 0.5 * l_wien * target_current**2
-    energy_lyle = 0.5 * l_lyle * target_current**2
+    )  # [H]
+    energy_wien = 0.5 * l_wien * target_current**2  # [J]
+    energy_lyle = 0.5 * l_lyle * target_current**2  # [J]
 
+    # Lyle's calc should match a little better than Wien's,
+    # because a strip is more like a rectangle than a circle.
     assert lmat.shape == (nodes.shape[0], nodes.shape[0])
     assert np.allclose(lmat, lmat.T, rtol=1e-12, atol=1e-12)
     assert l_from_matrix == approx(l_wien, rel=0.12)

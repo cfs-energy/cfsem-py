@@ -599,6 +599,45 @@ fn triangle_mesh_quadrature_points(
     })
 }
 
+#[pyfunction(signature = (nodes, triangles, par=true, quad="gl3"))]
+fn triangle_mesh_inductance_matrix(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nnode = nodes.0.len();
+    let nout = nnode
+        .checked_mul(nnode)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Inductance matrix size overflow".to_string(),
+        })?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_inductance_matrix_par,
+        false => physics::boundary_element::triangle_mesh_inductance_matrix,
+    };
+    match func(
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+        quad,
+        &mut out,
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
 /// Python bindings for cfsemrs::physics::point_source::segment::vector_potential_point_segment
 #[pyfunction]
 fn vector_potential_point_segment(
@@ -1075,6 +1114,10 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(triangle_mesh_current_density, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         triangle_mesh_quadrature_points,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_inductance_matrix,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

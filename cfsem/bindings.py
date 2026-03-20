@@ -37,6 +37,7 @@ from .cfsem import (
 )
 from .cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
 from .cfsem import triangle_mesh_current_density as em_triangle_mesh_current_density
+from .cfsem import triangle_mesh_inductance_matrix as em_triangle_mesh_inductance_matrix
 from .cfsem import triangle_mesh_quadrature_points as em_triangle_mesh_quadrature_points
 from .cfsem import (
     vector_potential_circular_filament as em_vector_potential_circular_filament,
@@ -410,6 +411,31 @@ def triangle_mesh_quadrature_points(
     points = column_stack((xq, yq, zq)).reshape(ntri, nqp, 3)
     weights = ascontiguousarray(wq).reshape(ntri, nqp)
     return points, weights
+
+
+def triangle_mesh_inductance_matrix(
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the dense nodal inductance matrix for a triangle stream-function mesh.
+
+    Args:
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [H] dense nodal inductance matrix with shape `(nnode, nnode)`
+    """
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    lmat = em_triangle_mesh_inductance_matrix(nodes, triangles, par, quad)
+    nnode = nodes.shape[0]
+    return ascontiguousarray(lmat).reshape(nnode, nnode)
 
 
 def inductance_piecewise_linear_filaments(

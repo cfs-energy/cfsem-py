@@ -6,8 +6,7 @@
 
 * Rust
     * Add `point_source::current_element` module with element kernels shared between point-segment and boundary-element methods
-    * Add `boundary_element` module with B-field and A-field calculations on triangular meshes
-        * Experimental `inductance` submodule remains `#[doc(hidden)]` from the public API for now
+    * Add `boundary_element` module with B-field, A-field, inductance, and stored energy
     * Add minimal triangle mesh view interface in `mesh.rs` using nodes-and-indices storage
 * Python
     * Add bindings for `flux_density_triangle_mesh` and `vector_potential_triangle_mesh` as well as helpers for visualizing quadrature points and triangle surface current density

@@ -13,21 +13,17 @@ use crate::math::{cross3, rss3};
 use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
 
 mod flux_density;
-
-#[doc(hidden)] // Experimental for now
 mod inductance;
+mod vector_potential;
 
 #[cfg(test)]
 mod test;
-
-mod vector_potential;
 
 pub use flux_density::{
     flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_par,
     triangle_flux_density_basis,
 };
 
-#[doc(hidden)] // Experimental for now
 pub use inductance::{
     triangle_basis_mutual_inductance, triangle_basis_mutual_inductance_block,
     triangle_geometric_coupling, triangle_geometric_coupling_regular,

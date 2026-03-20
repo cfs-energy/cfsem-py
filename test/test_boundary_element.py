@@ -1,7 +1,7 @@
 """Tests of triangle boundary-element interfaces"""
 
 import numpy as np
-from pytest import mark, raises
+from pytest import approx, mark, raises
 
 import cfsem
 
@@ -194,6 +194,30 @@ def test_triangle_mesh_serial_vs_parallel():
 
     assert np.allclose(b_serial, b_parallel, rtol=1e-12, atol=1e-12)
     assert np.allclose(a_serial, a_parallel, rtol=1e-12, atol=1e-12)
+
+
+def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_lyle():
+    major_radius = 0.5
+    minor_radius = 5e-3
+    height = 2.0 * minor_radius
+    nodes, triangles, s = _triangle_strip_mesh(major_radius, height, 1.0, nphi=96)
+
+    lmat = cfsem.triangle_mesh_inductance_matrix(nodes, triangles, par=False, quad="gl3")
+    l_from_matrix = float(s @ lmat @ s)
+    l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))
+    l_lyle = float(
+        cfsem.self_inductance_lyle6(
+            r=major_radius,
+            dr=height / 2.0,
+            dz=height,
+            n=1.0,
+        )
+    )
+
+    assert lmat.shape == (nodes.shape[0], nodes.shape[0])
+    assert np.allclose(lmat, lmat.T, rtol=1e-12, atol=1e-12)
+    assert l_from_matrix == approx(l_wien, rel=0.12)
+    assert l_from_matrix == approx(l_lyle, rel=0.09)
 
 
 def test_triangle_mesh_invalid_inputs():

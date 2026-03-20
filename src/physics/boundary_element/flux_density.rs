@@ -8,7 +8,7 @@ use super::{
 };
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
-use crate::mesh::TriangleMeshView;
+use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
 /// Magnetic flux density (B-field) contribution of a given triangle's basis function
@@ -102,6 +102,88 @@ pub fn flux_density_triangle(
 }
 
 #[inline]
+fn validate_flux_density_mapping_inputs(
+    outx: &[f64],
+    outy: &[f64],
+    outz: &[f64],
+    nobs: usize,
+    nnode: usize,
+) -> Result<(), &'static str> {
+    let expected = nobs
+        .checked_mul(nnode)
+        .ok_or("Flux-density mapping size overflow")?;
+    if outx.len() != expected || outy.len() != expected || outz.len() != expected {
+        return Err("Output dimension mismatch");
+    }
+    Ok(())
+}
+
+#[inline]
+fn flux_density_triangle_mesh_mapping_chunk(
+    obs: (&[f64], &[f64], &[f64]),
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    nnode: usize,
+    ntri: usize,
+    quad_kind: QuadratureKind,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let nobs = obs.0.len(); // [-]
+    check_length_3tup!(nobs, obs);
+    validate_flux_density_mapping_inputs(out.0, out.1, out.2, nobs, nnode)?;
+
+    out.0.fill(0.0); // [T/A]
+    out.1.fill(0.0); // [T/A]
+    out.2.fill(0.0); // [T/A]
+
+    for iobs in 0..nobs {
+        let row_offset = iobs * nnode; // [-]
+        let obs_i = [obs.0[iobs], obs.1[iobs], obs.2[iobs]]; // [m]
+
+        for itri in 0..ntri {
+            let idx = [triangles.0[itri], triangles.1[itri], triangles.2[itri]]; // [-]
+            let tri_nodes = idx.map(|k| [nodes.0[k], nodes.1[k], nodes.2[k]]); // [m]
+
+            let b0 = triangle_flux_density_basis(
+                tri_nodes[0],
+                tri_nodes[1],
+                tri_nodes[2],
+                obs_i,
+                quad_kind,
+            ); // [T/A]
+            let b1 = triangle_flux_density_basis(
+                tri_nodes[1],
+                tri_nodes[2],
+                tri_nodes[0],
+                obs_i,
+                quad_kind,
+            ); // [T/A]
+            let b2 = triangle_flux_density_basis(
+                tri_nodes[2],
+                tri_nodes[0],
+                tri_nodes[1],
+                obs_i,
+                quad_kind,
+            ); // [T/A]
+
+            out.0[row_offset + idx[0]] += b0[0]; // [T/A]
+            out.1[row_offset + idx[0]] += b0[1]; // [T/A]
+            out.2[row_offset + idx[0]] += b0[2]; // [T/A]
+
+            out.0[row_offset + idx[1]] += b1[0]; // [T/A]
+            out.1[row_offset + idx[1]] += b1[1]; // [T/A]
+            out.2[row_offset + idx[1]] += b1[2]; // [T/A]
+
+            out.0[row_offset + idx[2]] += b2[0]; // [T/A]
+            out.1[row_offset + idx[2]] += b2[1]; // [T/A]
+            out.2[row_offset + idx[2]] += b2[2]; // [T/A]
+        }
+    }
+
+    Ok(())
+}
+
+#[inline]
 fn flux_density_triangle_mesh_inner(
     obs: (&[f64], &[f64], &[f64]),
     mesh: TriangleMeshView<'_>,
@@ -132,6 +214,143 @@ fn flux_density_triangle_mesh_inner(
             out.1[i] += contrib[1]; // [T]
             out.2[i] += contrib[2]; // [T]
         }
+    }
+
+    Ok(())
+}
+
+/// Assemble the dense source-node to target-point flux-density mapping for a triangle mesh.
+///
+/// Args:
+///     obs: Observation point component slices `(x, y, z)` (m).
+///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
+///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     out: Output mapping buffers `(bx_map, by_map, bz_map)` (T/A), each row-major in
+///         `(observation point, source node)` order.
+///
+/// Returns:
+///     `Ok(())` after writing the dense mapping to `out`, or an error if the mesh
+///     geometry or slice dimensions are inconsistent.
+#[inline]
+pub fn flux_density_triangle_mesh_mapping(
+    obs: (&[f64], &[f64], &[f64]),
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    quad_kind: QuadratureKind,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
+    flux_density_triangle_mesh_mapping_chunk(obs, nodes, triangles, nnode, ntri, quad_kind, out)
+}
+
+/// Parallel variant of [`flux_density_triangle_mesh_mapping`].
+///
+/// Args:
+///     obs: Observation point component slices `(x, y, z)` (m).
+///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
+///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     out: Output mapping buffers `(bx_map, by_map, bz_map)` (T/A), each row-major in
+///         `(observation point, source node)` order.
+///
+/// Returns:
+///     `Ok(())` after writing the dense mapping to `out`, or an error if the mesh
+///     geometry or slice dimensions are inconsistent.
+#[inline]
+pub fn flux_density_triangle_mesh_mapping_par(
+    obs: (&[f64], &[f64], &[f64]),
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+    quad_kind: QuadratureKind,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
+    let nobs = obs.0.len(); // [-]
+    check_length_3tup!(nobs, obs);
+    validate_flux_density_mapping_inputs(out.0, out.1, out.2, nobs, nnode)?;
+
+    if nobs == 0 || nnode == 0 {
+        return flux_density_triangle_mesh_mapping_chunk(
+            obs, nodes, triangles, nnode, ntri, quad_kind, out,
+        );
+    }
+
+    let nrow = chunksize(nobs); // [-]
+    let nflat = nrow
+        .checked_mul(nnode)
+        .ok_or("Flux-density mapping size overflow")?;
+    let (xpc, ypc, zpc) = par_chunks_3tup!(obs, nrow);
+    let bxc = out.0.par_chunks_mut(nflat);
+    let byc = out.1.par_chunks_mut(nflat);
+    let bzc = out.2.par_chunks_mut(nflat);
+
+    (bxc, byc, bzc, xpc, ypc, zpc)
+        .into_par_iter()
+        .try_for_each(|(bx, by, bz, xp, yp, zp)| {
+            flux_density_triangle_mesh_mapping_chunk(
+                (xp, yp, zp),
+                nodes,
+                triangles,
+                nnode,
+                ntri,
+                quad_kind,
+                (bx, by, bz),
+            )
+        })?;
+
+    Ok(())
+}
+
+/// Apply a dense source-node to target-point flux-density mapping to nodal current-potential values.
+///
+/// Args:
+///     bx_map: Row-major `Bx` mapping in `(observation point, source node)` order (T/A).
+///     by_map: Row-major `By` mapping in `(observation point, source node)` order (T/A).
+///     bz_map: Row-major `Bz` mapping in `(observation point, source node)` order (T/A).
+///     s: Nodal current-potential values (A).
+///     out: Output pointwise magnetic flux density `(bx, by, bz)` (T).
+///
+/// Returns:
+///     `Ok(())` after writing the contracted field to `out`, or an error if the mapping
+///     or output dimensions are inconsistent.
+#[inline]
+pub fn triangle_mesh_flux_density_from_potential_vectors(
+    bx_map: &[f64],
+    by_map: &[f64],
+    bz_map: &[f64],
+    s: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    if by_map.len() != bx_map.len() || bz_map.len() != bx_map.len() {
+        return Err("Flux-density mapping dimension mismatch");
+    }
+    if s.is_empty() {
+        if bx_map.is_empty() && out.0.is_empty() && out.1.is_empty() && out.2.is_empty() {
+            return Ok(());
+        }
+        return Err("Flux-density mapping dimension mismatch");
+    }
+    if bx_map.len() % s.len() != 0 {
+        return Err("Flux-density mapping dimension mismatch");
+    }
+
+    let nobs = bx_map.len() / s.len(); // [-]
+    check_length_3tup!(nobs, out);
+
+    for iobs in 0..nobs {
+        let row_offset = iobs * s.len(); // [-]
+        let mut bx = 0.0; // [T]
+        let mut by = 0.0; // [T]
+        let mut bz = 0.0; // [T]
+        for inode in 0..s.len() {
+            bx += bx_map[row_offset + inode] * s[inode]; // [T]
+            by += by_map[row_offset + inode] * s[inode]; // [T]
+            bz += bz_map[row_offset + inode] * s[inode]; // [T]
+        }
+        out.0[iobs] = bx; // [T]
+        out.1[iobs] = by; // [T]
+        out.2[iobs] = bz; // [T]
     }
 
     Ok(())

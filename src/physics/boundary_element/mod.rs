@@ -21,8 +21,9 @@ mod vector_potential;
 mod test;
 
 pub use flux_density::{
-    flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_par,
-    triangle_flux_density_basis,
+    flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
+    flux_density_triangle_mesh_mapping_par, flux_density_triangle_mesh_par,
+    triangle_flux_density_basis, triangle_mesh_flux_density_from_potential_vectors,
 };
 
 pub use body_force_density::{
@@ -46,7 +47,9 @@ pub use inductance::{
 };
 
 pub use vector_potential::{
-    triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
+    triangle_mesh_vector_potential_from_potential_vectors, triangle_vector_potential_basis,
+    vector_potential_triangle, vector_potential_triangle_mesh,
+    vector_potential_triangle_mesh_mapping, vector_potential_triangle_mesh_mapping_par,
     vector_potential_triangle_mesh_par,
 };
 

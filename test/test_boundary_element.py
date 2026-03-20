@@ -216,6 +216,59 @@ def test_triangle_mesh_serial_vs_parallel():
     assert np.allclose(a_serial, a_parallel, rtol=1e-12, atol=1e-12)
 
 
+@mark.parametrize("par", [True, False])
+def test_triangle_mesh_field_mappings_contract_to_collection_fields(par):
+    radius = 0.7312345987
+    height = radius * 1e-3
+    loop_current = 1.7
+    nodes, triangles, s = _triangle_strip_mesh(radius, height, loop_current, nphi=64)
+    obs = np.array(
+        [
+            [0.4, -0.2, 1.1],
+            [1.7, 0.8, -0.5],
+            [2.8, -0.7, 0.9],
+            [3.6, 1.2, -1.4],
+        ],
+        dtype=np.float64,
+    )
+
+    bx_map, by_map, bz_map = cfsem.flux_density_triangle_mesh_mapping(
+        obs, nodes, triangles, par=par, quad="gl3"
+    )
+    ax_map, ay_map, az_map = cfsem.vector_potential_triangle_mesh_mapping(
+        obs, nodes, triangles, par=par, quad="gl3"
+    )
+    bx_map_ref, by_map_ref, bz_map_ref = cfsem.flux_density_triangle_mesh_mapping(
+        obs, nodes, triangles, par=not par, quad="gl3"
+    )
+    ax_map_ref, ay_map_ref, az_map_ref = cfsem.vector_potential_triangle_mesh_mapping(
+        obs, nodes, triangles, par=not par, quad="gl3"
+    )
+
+    b_from_map = np.column_stack((bx_map @ s, by_map @ s, bz_map @ s))
+    a_from_map = np.column_stack((ax_map @ s, ay_map @ s, az_map @ s))
+    b_direct = np.column_stack(cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=False))
+    a_direct = np.column_stack(
+        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False)
+    )
+
+    assert bx_map.shape == (obs.shape[0], nodes.shape[0])
+    assert by_map.shape == (obs.shape[0], nodes.shape[0])
+    assert bz_map.shape == (obs.shape[0], nodes.shape[0])
+    assert ax_map.shape == (obs.shape[0], nodes.shape[0])
+    assert ay_map.shape == (obs.shape[0], nodes.shape[0])
+    assert az_map.shape == (obs.shape[0], nodes.shape[0])
+
+    assert np.allclose(bx_map, bx_map_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(by_map, by_map_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(bz_map, bz_map_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(ax_map, ax_map_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(ay_map, ay_map_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(az_map, az_map_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(b_from_map, b_direct, rtol=1e-12, atol=1e-12)
+    assert np.allclose(a_from_map, a_direct, rtol=1e-12, atol=1e-12)
+
+
 def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_lyle():
     major_radius = 0.5  # [m]
     minor_radius = 5e-3  # [m]

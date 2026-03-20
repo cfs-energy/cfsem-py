@@ -2,18 +2,21 @@ use core::f64::consts::PI;
 
 use super::{
     QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
-    flux_density_triangle_mesh, flux_density_triangle_mesh_par, map_tri_uv,
+    flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
+    flux_density_triangle_mesh_mapping_par, flux_density_triangle_mesh_par, map_tri_uv,
     triangle_basis_current_densities, triangle_basis_current_density, triangle_basis_force_block,
     triangle_basis_mutual_inductance_block, triangle_current_density,
     triangle_force_from_potential_vectors, triangle_inductance_from_potential_vectors,
-    triangle_mesh_current_density, triangle_mesh_force_from_potential_vectors,
-    triangle_mesh_force_mapping, triangle_mesh_force_mapping_par,
-    triangle_mesh_inductance_from_potential_vectors, triangle_mesh_inductance_matrix,
-    triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
-    triangle_mesh_quadrature_points, triangle_mesh_self_force_mapping,
-    triangle_mesh_self_force_mapping_par, triangle_quadrature_count, triangle_quadrature_points,
-    triangle_vector_potential_basis, vector_potential_triangle, vector_potential_triangle_mesh,
-    vector_potential_triangle_mesh_par,
+    triangle_mesh_current_density, triangle_mesh_flux_density_from_potential_vectors,
+    triangle_mesh_force_from_potential_vectors, triangle_mesh_force_mapping,
+    triangle_mesh_force_mapping_par, triangle_mesh_inductance_from_potential_vectors,
+    triangle_mesh_inductance_matrix, triangle_mesh_inductance_matrix_par,
+    triangle_mesh_inductive_energy, triangle_mesh_quadrature_points,
+    triangle_mesh_self_force_mapping, triangle_mesh_self_force_mapping_par,
+    triangle_mesh_vector_potential_from_potential_vectors, triangle_quadrature_count,
+    triangle_quadrature_points, triangle_vector_potential_basis, vector_potential_triangle,
+    vector_potential_triangle_mesh, vector_potential_triangle_mesh_mapping,
+    vector_potential_triangle_mesh_mapping_par, vector_potential_triangle_mesh_par,
 };
 use crate::math::{cartesian_to_cylindrical, cross3, dot3};
 use crate::physics::circular_filament::{
@@ -273,6 +276,68 @@ fn mesh_inductance_matrix(mesh: &TriangleMeshData, par: bool) -> Vec<f64> {
     out
 }
 
+fn mesh_flux_density_mapping(
+    mesh: &TriangleMeshData,
+    obs: &[[f64; 3]],
+    par: bool,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let obs_xyz = obs_components(obs);
+    let nnode = mesh.nodes.0.len();
+    let nout = obs.len() * nnode;
+    let (mut bx, mut by, mut bz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let result = match par {
+        true => flux_density_triangle_mesh_mapping_par(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            QuadratureKind::GaussLegendre3,
+            (&mut bx, &mut by, &mut bz),
+        ),
+        false => flux_density_triangle_mesh_mapping(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            QuadratureKind::GaussLegendre3,
+            (&mut bx, &mut by, &mut bz),
+        ),
+    };
+    result.unwrap();
+
+    (bx, by, bz)
+}
+
+fn mesh_vector_potential_mapping(
+    mesh: &TriangleMeshData,
+    obs: &[[f64; 3]],
+    par: bool,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let obs_xyz = obs_components(obs);
+    let nnode = mesh.nodes.0.len();
+    let nout = obs.len() * nnode;
+    let (mut ax, mut ay, mut az) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let result = match par {
+        true => vector_potential_triangle_mesh_mapping_par(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            QuadratureKind::GaussLegendre3,
+            (&mut ax, &mut ay, &mut az),
+        ),
+        false => vector_potential_triangle_mesh_mapping(
+            (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
+            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            QuadratureKind::GaussLegendre3,
+            (&mut ax, &mut ay, &mut az),
+        ),
+    };
+    result.unwrap();
+
+    (ax, ay, az)
+}
+
 fn mesh_force_mapping(
     mesh_src: &TriangleMeshData,
     mesh_tgt: &TriangleMeshData,
@@ -500,6 +565,70 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
     let b_mesh_par = mesh_flux_density(&mesh, &obs, true);
     let a_mesh = mesh_vector_potential(&mesh, &obs, false);
     let a_mesh_par = mesh_vector_potential(&mesh, &obs, true);
+    let (bx_map, by_map, bz_map) = mesh_flux_density_mapping(&mesh, &obs, false);
+    let (bx_map_par, by_map_par, bz_map_par) = mesh_flux_density_mapping(&mesh, &obs, true);
+    let (ax_map, ay_map, az_map) = mesh_vector_potential_mapping(&mesh, &obs, false);
+    let (ax_map_par, ay_map_par, az_map_par) = mesh_vector_potential_mapping(&mesh, &obs, true);
+    let mut b_from_map = (
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+    );
+    let mut b_from_map_par = (
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+    );
+    let mut a_from_map = (
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+    );
+    let mut a_from_map_par = (
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+        vec![0.0; obs.len()],
+    );
+    triangle_mesh_flux_density_from_potential_vectors(
+        &bx_map,
+        &by_map,
+        &bz_map,
+        &mesh.s,
+        (&mut b_from_map.0, &mut b_from_map.1, &mut b_from_map.2),
+    )
+    .unwrap();
+    triangle_mesh_flux_density_from_potential_vectors(
+        &bx_map_par,
+        &by_map_par,
+        &bz_map_par,
+        &mesh.s,
+        (
+            &mut b_from_map_par.0,
+            &mut b_from_map_par.1,
+            &mut b_from_map_par.2,
+        ),
+    )
+    .unwrap();
+    triangle_mesh_vector_potential_from_potential_vectors(
+        &ax_map,
+        &ay_map,
+        &az_map,
+        &mesh.s,
+        (&mut a_from_map.0, &mut a_from_map.1, &mut a_from_map.2),
+    )
+    .unwrap();
+    triangle_mesh_vector_potential_from_potential_vectors(
+        &ax_map_par,
+        &ay_map_par,
+        &az_map_par,
+        &mesh.s,
+        (
+            &mut a_from_map_par.0,
+            &mut a_from_map_par.1,
+            &mut a_from_map_par.2,
+        ),
+    )
+    .unwrap();
 
     for (i, point) in obs.iter().enumerate() {
         let b_direct = flux_density_triangle(
@@ -535,6 +664,165 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
             assert!(
                 approx(a_mesh_par[i][axis], a_direct[axis], 1e-12, 1e-14),
                 "single-triangle mesh parallel A mismatch at point {i}, axis {axis}"
+            );
+            let b_from_map_axis = match axis {
+                0 => b_from_map.0[i],
+                1 => b_from_map.1[i],
+                2 => b_from_map.2[i],
+                _ => unreachable!(),
+            };
+            let b_from_map_par_axis = match axis {
+                0 => b_from_map_par.0[i],
+                1 => b_from_map_par.1[i],
+                2 => b_from_map_par.2[i],
+                _ => unreachable!(),
+            };
+            let a_from_map_axis = match axis {
+                0 => a_from_map.0[i],
+                1 => a_from_map.1[i],
+                2 => a_from_map.2[i],
+                _ => unreachable!(),
+            };
+            let a_from_map_par_axis = match axis {
+                0 => a_from_map_par.0[i],
+                1 => a_from_map_par.1[i],
+                2 => a_from_map_par.2[i],
+                _ => unreachable!(),
+            };
+            assert!(
+                approx(b_from_map_axis, b_direct[axis], 1e-12, 1e-14),
+                "single-triangle mapped B mismatch at point {i}, axis {axis}"
+            );
+            assert!(
+                approx(b_from_map_par_axis, b_direct[axis], 1e-12, 1e-14),
+                "single-triangle parallel mapped B mismatch at point {i}, axis {axis}"
+            );
+            assert!(
+                approx(a_from_map_axis, a_direct[axis], 1e-12, 1e-14),
+                "single-triangle mapped A mismatch at point {i}, axis {axis}"
+            );
+            assert!(
+                approx(a_from_map_par_axis, a_direct[axis], 1e-12, 1e-14),
+                "single-triangle parallel mapped A mismatch at point {i}, axis {axis}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_triangle_mesh_field_mappings_match_collection_fields() {
+    let radius = 0.71;
+    let height = radius * 1e-3;
+    let mesh = triangle_patches_to_mesh(&circular_strip_triangles(radius, height, 1.4, 48));
+    let obs = [
+        [0.35, -0.18, 1.05],
+        [1.40, 0.55, -0.62],
+        [2.10, -0.44, 0.83],
+        [2.85, 0.91, -1.11],
+    ];
+
+    let b_direct = mesh_flux_density(&mesh, &obs, false);
+    let a_direct = mesh_vector_potential(&mesh, &obs, false);
+    let (bx_map, by_map, bz_map) = mesh_flux_density_mapping(&mesh, &obs, false);
+    let (bx_map_par, by_map_par, bz_map_par) = mesh_flux_density_mapping(&mesh, &obs, true);
+    let (ax_map, ay_map, az_map) = mesh_vector_potential_mapping(&mesh, &obs, false);
+    let (ax_map_par, ay_map_par, az_map_par) = mesh_vector_potential_mapping(&mesh, &obs, true);
+
+    let mut bx = vec![0.0; obs.len()];
+    let mut by = vec![0.0; obs.len()];
+    let mut bz = vec![0.0; obs.len()];
+    let mut bx_par = vec![0.0; obs.len()];
+    let mut by_par = vec![0.0; obs.len()];
+    let mut bz_par = vec![0.0; obs.len()];
+    let mut ax = vec![0.0; obs.len()];
+    let mut ay = vec![0.0; obs.len()];
+    let mut az = vec![0.0; obs.len()];
+    let mut ax_par = vec![0.0; obs.len()];
+    let mut ay_par = vec![0.0; obs.len()];
+    let mut az_par = vec![0.0; obs.len()];
+
+    triangle_mesh_flux_density_from_potential_vectors(
+        &bx_map,
+        &by_map,
+        &bz_map,
+        &mesh.s,
+        (&mut bx, &mut by, &mut bz),
+    )
+    .unwrap();
+    triangle_mesh_flux_density_from_potential_vectors(
+        &bx_map_par,
+        &by_map_par,
+        &bz_map_par,
+        &mesh.s,
+        (&mut bx_par, &mut by_par, &mut bz_par),
+    )
+    .unwrap();
+    triangle_mesh_vector_potential_from_potential_vectors(
+        &ax_map,
+        &ay_map,
+        &az_map,
+        &mesh.s,
+        (&mut ax, &mut ay, &mut az),
+    )
+    .unwrap();
+    triangle_mesh_vector_potential_from_potential_vectors(
+        &ax_map_par,
+        &ay_map_par,
+        &az_map_par,
+        &mesh.s,
+        (&mut ax_par, &mut ay_par, &mut az_par),
+    )
+    .unwrap();
+
+    for i in 0..bx_map.len() {
+        assert!(
+            approx(bx_map[i], bx_map_par[i], 1e-12, 1e-14),
+            "serial/parallel Bx mapping mismatch at flattened index {i}"
+        );
+        assert!(
+            approx(by_map[i], by_map_par[i], 1e-12, 1e-14),
+            "serial/parallel By mapping mismatch at flattened index {i}"
+        );
+        assert!(
+            approx(bz_map[i], bz_map_par[i], 1e-12, 1e-14),
+            "serial/parallel Bz mapping mismatch at flattened index {i}"
+        );
+        assert!(
+            approx(ax_map[i], ax_map_par[i], 1e-12, 1e-14),
+            "serial/parallel Ax mapping mismatch at flattened index {i}"
+        );
+        assert!(
+            approx(ay_map[i], ay_map_par[i], 1e-12, 1e-14),
+            "serial/parallel Ay mapping mismatch at flattened index {i}"
+        );
+        assert!(
+            approx(az_map[i], az_map_par[i], 1e-12, 1e-14),
+            "serial/parallel Az mapping mismatch at flattened index {i}"
+        );
+    }
+
+    for iobs in 0..obs.len() {
+        let b_map = [bx[iobs], by[iobs], bz[iobs]];
+        let b_map_par = [bx_par[iobs], by_par[iobs], bz_par[iobs]];
+        let a_map = [ax[iobs], ay[iobs], az[iobs]];
+        let a_map_par = [ax_par[iobs], ay_par[iobs], az_par[iobs]];
+
+        for axis in 0..3 {
+            assert!(
+                approx(b_map[axis], b_direct[iobs][axis], 1e-12, 1e-14),
+                "contracted B mapping mismatch at point {iobs}, axis {axis}"
+            );
+            assert!(
+                approx(b_map_par[axis], b_direct[iobs][axis], 1e-12, 1e-14),
+                "parallel contracted B mapping mismatch at point {iobs}, axis {axis}"
+            );
+            assert!(
+                approx(a_map[axis], a_direct[iobs][axis], 1e-12, 1e-14),
+                "contracted A mapping mismatch at point {iobs}, axis {axis}"
+            );
+            assert!(
+                approx(a_map_par[axis], a_direct[iobs][axis], 1e-12, 1e-14),
+                "parallel contracted A mapping mismatch at point {iobs}, axis {axis}"
             );
         }
     }

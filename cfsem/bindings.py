@@ -25,6 +25,7 @@ from .cfsem import (
 from .cfsem import flux_density_dipole as em_flux_density_dipole
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
+from .cfsem import flux_density_triangle_mesh_mapping as em_flux_density_triangle_mesh_mapping
 from .cfsem import flux_density_triangle_mesh as em_flux_density_triangle_mesh
 from .cfsem import flux_density_point_segment as em_flux_density_point_segment
 from .cfsem import gs_operator_order2 as em_gs_operator_order2
@@ -56,6 +57,9 @@ from .cfsem import (
 )
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
+)
+from .cfsem import (
+    vector_potential_triangle_mesh_mapping as em_vector_potential_triangle_mesh_mapping,
 )
 from .cfsem import (
     vector_potential_triangle_mesh as em_vector_potential_triangle_mesh,
@@ -374,6 +378,72 @@ def vector_potential_triangle_mesh(
     triangles = ascontiguousarray(triangles, dtype=int64)
     s = ascontiguousarray(s, dtype=float64).ravel()
     return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par, quad)
+
+
+def flux_density_triangle_mesh_mapping(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the dense source-node to target-point B-field mapping for a triangle mesh.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [T/A] `(bx_map, by_map, bz_map)` with shape `(nobs, nnode)`
+    """
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    bx, by, bz = em_flux_density_triangle_mesh_mapping(obs, nodes, triangles, par, quad)
+    nobs = obs.shape[0]
+    nnode = nodes.shape[0]
+    return (
+        ascontiguousarray(bx).reshape(nobs, nnode),
+        ascontiguousarray(by).reshape(nobs, nnode),
+        ascontiguousarray(bz).reshape(nobs, nnode),
+    )
+
+
+def vector_potential_triangle_mesh_mapping(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the dense source-node to target-point A-field mapping for a triangle mesh.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [V*s/(m*A)] `(ax_map, ay_map, az_map)` with shape `(nobs, nnode)`
+    """
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    ax, ay, az = em_vector_potential_triangle_mesh_mapping(obs, nodes, triangles, par, quad)
+    nobs = obs.shape[0]
+    nnode = nodes.shape[0]
+    return (
+        ascontiguousarray(ax).reshape(nobs, nnode),
+        ascontiguousarray(ay).reshape(nobs, nnode),
+        ascontiguousarray(az).reshape(nobs, nnode),
+    )
 
 
 def triangle_mesh_current_density(

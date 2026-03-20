@@ -519,6 +519,92 @@ fn vector_potential_triangle_mesh(
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
+#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="gl3"))]
+fn flux_density_triangle_mesh_mapping(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        obs.0
+            .len()
+            .checked_mul(nodes.0.len())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Flux-density mapping size overflow".to_string(),
+            })?;
+    let (mut bx, mut by, mut bz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::flux_density_triangle_mesh_mapping_par,
+        false => physics::boundary_element::flux_density_triangle_mesh_mapping,
+    };
+    match func(
+        (&obs.0, &obs.1, &obs.2),
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+        quad,
+        (&mut bx, &mut by, &mut bz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="gl3"))]
+fn vector_potential_triangle_mesh_mapping(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        obs.0
+            .len()
+            .checked_mul(nodes.0.len())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Vector-potential mapping size overflow".to_string(),
+            })?;
+    let (mut ax, mut ay, mut az) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::vector_potential_triangle_mesh_mapping_par,
+        false => physics::boundary_element::vector_potential_triangle_mesh_mapping,
+    };
+    match func(
+        (&obs.0, &obs.1, &obs.2),
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+        quad,
+        (&mut ax, &mut ay, &mut az),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
+}
+
 #[pyfunction]
 fn triangle_mesh_current_density(
     nodes: PyReadonlyArray2<f64>,
@@ -1403,6 +1489,14 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(vector_potential_triangle_mesh, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        flux_density_triangle_mesh_mapping,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_triangle_mesh_mapping,
+        m.clone()
+    )?)?;
     m.add_function(wrap_pyfunction!(vector_potential_point_segment, m.clone())?)?;
     #[cfg(feature = "rat-mlfmm")]
     m.add_function(wrap_pyfunction!(fields_linear_filament_mlfmm, m.clone())?)?;

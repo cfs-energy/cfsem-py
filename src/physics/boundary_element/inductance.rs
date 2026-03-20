@@ -37,9 +37,14 @@ fn triangle_scalar_potential_regular(
 /// triangle itself.
 ///
 /// Method:
-/// - Split the parent triangle into three sub-triangles sharing `obs`.
+/// - Split the parent triangle into three sub-triangles sharing `obs` as a vertex.
 /// - On each sub-triangle, use a Duffy-style collapse of the radial coordinate so the
 ///   `1 / R` singularity is canceled by the surface Jacobian.
+///     - Because the new triangles each end at `obs`, the local dS area (and local
+///       contribution to current) of each triangle goes to zero linearly (like `R`) as it
+///       approaches `obs`, while the vector potential becomes singular like `1/R`. So, the
+///       local contribution to the field at `obs` now goes to `R/R` at `obs` instead of
+///       diverging to a div/0.
 /// - The remaining 1D integral along the opposite edge is smooth and is evaluated by a
 ///   midpoint rule.
 ///
@@ -60,12 +65,15 @@ fn triangle_scalar_potential_self_duffy(
     let edges = [(n0, n1), (n1, n2), (n2, n0)];
     let mut out = 0.0; // [m]
 
+    // For each edge [nx, ny] in the triangle, treat [obs, nx, ny] as a
+    // new sub-triangle for nonsingular integration.
     for (va, vb) in edges {
         let area_sub = calc_tri_area(obs, va, vb); // [m^2]
         if area_sub == 0.0 {
             continue;
         }
 
+        // Integrate the transverse direction (across the triangle).
         let mut line_integral = 0.0; // [1/m]
         for i in 0..TRIANGLE_SELF_DUFFY_SAMPLES {
             let eta = (i as f64 + 0.5) / TRIANGLE_SELF_DUFFY_SAMPLES as f64;

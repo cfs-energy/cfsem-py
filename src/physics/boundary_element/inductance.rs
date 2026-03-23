@@ -5,7 +5,7 @@ use super::{
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::math::{cartesian_to_cylindrical, dot3, rss3};
-use crate::mesh::validate_triangle_mesh_geometry;
+use crate::mesh::{triangle_subdivide_about_point, validate_triangle_mesh_geometry};
 use crate::physics::circular_filament::vector_potential_circular_filament_scalar;
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::dipole::vector_potential_dipole_scalar;
@@ -68,13 +68,12 @@ fn triangle_scalar_potential_self_duffy(
     n2: [f64; 3],
     obs: [f64; 3],
 ) -> f64 {
-    let edges = [(n0, n1), (n1, n2), (n2, n0)];
     let mut out = 0.0; // [m]
 
-    // For each edge [nx, ny] in the triangle, treat [obs, nx, ny] as a
+    // For each [obs, nx, ny] in the triangle, treat it as a
     // new sub-triangle for nonsingular integration.
-    for (va, vb) in edges {
-        let area_sub = calc_tri_area(obs, va, vb); // [m^2]
+    for [p, va, vb] in triangle_subdivide_about_point(obs, n0, n1, n2) {
+        let area_sub = calc_tri_area(p, va, vb); // [m^2]
         if area_sub == 0.0 {
             continue;
         }

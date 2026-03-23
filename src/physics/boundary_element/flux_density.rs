@@ -4,12 +4,47 @@ use rayon::{
 };
 
 use super::{
-    QuadratureKind, map_tri_uv, triangle_basis_current_density, triangle_quadrature_points,
+    QuadratureKind, TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR, calc_tri_area, map_tri_uv,
+    triangle_basis_current_density, triangle_quadrature_points,
 };
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
-use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
+use crate::mesh::{
+    TriangleMeshView, triangle_closest_point, triangle_max_edge_length_squared,
+    triangle_subdivide_about_point, validate_triangle_mesh_geometry,
+};
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
+
+#[inline]
+fn triangle_flux_density_inner(
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+    current_density: [f64; 3],
+    obs: [f64; 3],
+    quad_kind: QuadratureKind,
+) -> [f64; 3] {
+    let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
+    let quad_points = triangle_quadrature_points(quad_kind);
+
+    let mut b = [0.0; 3]; // [T/A]
+
+    for qp in quad_points {
+        let (c, u, v) = (qp[0], qp[1], qp[2]);
+        let src = map_tri_uv(n0, n1, n2, [u, v]); // [m]
+        let moment = [
+            current_density[0] * c * tri_area, // [m]
+            current_density[1] * c * tri_area, // [m]
+            current_density[2] * c * tri_area, // [m]
+        ];
+        let contrib = flux_density_current_element_scalar(src, moment, obs); // [T/A]
+        b[0] += contrib[0]; // [T/A]
+        b[1] += contrib[1]; // [T/A]
+        b[2] += contrib[2]; // [T/A]
+    }
+
+    b
+}
 
 /// Magnetic flux density (B-field) contribution of a given triangle's basis function
 /// with unit weighting to a given observation point.
@@ -21,6 +56,9 @@ use crate::physics::point_source::current_element::flux_density_current_element_
 ///   element.
 /// - Each quadrature point is treated as a point current element with moment
 ///   `m = K * ΔS_q`.
+/// - When the target point is close to the triangle, the element is split once
+///   about the closest point before applying the same quadrature rule on each
+///   subtriangle.
 /// - Sum the Biot-Savart contributions with the full `μ0 / 4π` prefactor included.
 ///
 /// Args:
@@ -40,20 +78,27 @@ pub fn triangle_flux_density_basis(
     obs: [f64; 3],
     quad_kind: QuadratureKind,
 ) -> [f64; 3] {
-    let (tri_area, jref) = triangle_basis_current_density(n0, n1, n2); // [m^2], [1/m]
-    let quad_points = triangle_quadrature_points(quad_kind);
+    let (_, jref) = triangle_basis_current_density(n0, n1, n2); // [m^2], [1/m]
+    let max_edge_sq = triangle_max_edge_length_squared(n0, n1, n2); // [m^2]
+    let closest = triangle_closest_point(obs, n0, n1, n2); // [m]
+    let dx = obs[0] - closest[0]; // [m]
+    let dy = obs[1] - closest[1]; // [m]
+    let dz = obs[2] - closest[2]; // [m]
+    let dist_sq = dx.mul_add(dx, dy.mul_add(dy, dz * dz)); // [m^2]
+    let subdiv_threshold_sq = TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR.powi(2) * max_edge_sq; // [m^2]
+
+    if dist_sq > subdiv_threshold_sq {
+        return triangle_flux_density_inner(n0, n1, n2, jref, obs, quad_kind);
+    }
 
     let mut b = [0.0; 3]; // [T/A]
-
-    for qp in quad_points {
-        let (c, u, v) = (qp[0], qp[1], qp[2]);
-        let src = map_tri_uv(n0, n1, n2, [u, v]); // [m]
-        let moment = [
-            jref[0] * c * tri_area, // [m]
-            jref[1] * c * tri_area, // [m]
-            jref[2] * c * tri_area, // [m]
-        ];
-        let contrib = flux_density_current_element_scalar(src, moment, obs); // [T/A]
+    let min_sub_area = max_edge_sq * 1e-14; // [m^2]
+    for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
+        let [a, b0, c] = tri;
+        if calc_tri_area(a, b0, c) <= min_sub_area {
+            continue;
+        }
+        let contrib = triangle_flux_density_inner(a, b0, c, jref, obs, quad_kind);
         b[0] += contrib[0]; // [T/A]
         b[1] += contrib[1]; // [T/A]
         b[2] += contrib[2]; // [T/A]

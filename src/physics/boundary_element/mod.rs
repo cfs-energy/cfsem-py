@@ -20,6 +20,10 @@ mod vector_potential;
 #[cfg(test)]
 mod test;
 
+/// Near-field distance threshold relative to the triangle's maximum edge length
+/// for one level of closest-point subdivision in the B- and A-field kernels.
+pub(crate) const TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR: f64 = 1.0;
+
 pub use flux_density::{
     flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
     flux_density_triangle_mesh_mapping_par, flux_density_triangle_mesh_par,

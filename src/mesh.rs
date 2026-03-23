@@ -61,6 +61,97 @@ pub(crate) struct TriangleMeshView<'a> {
     s: &'a [f64],
 }
 
+#[inline]
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+#[inline]
+fn add_scaled3(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
+    [
+        scale.mul_add(b[0], a[0]),
+        scale.mul_add(b[1], a[1]),
+        scale.mul_add(b[2], a[2]),
+    ]
+}
+
+#[inline]
+fn dot3_arr(a: [f64; 3], b: [f64; 3]) -> f64 {
+    dot3(a[0], a[1], a[2], b[0], b[1], b[2])
+}
+
+#[inline]
+pub(crate) fn triangle_max_edge_length_squared(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> f64 {
+    let e01 = sub3(n1, n0);
+    let e12 = sub3(n2, n1);
+    let e20 = sub3(n0, n2);
+    dot3_arr(e01, e01)
+        .max(dot3_arr(e12, e12))
+        .max(dot3_arr(e20, e20))
+}
+
+#[inline]
+pub(crate) fn triangle_closest_point(
+    obs: [f64; 3],
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+) -> [f64; 3] {
+    let ab = sub3(n1, n0);
+    let ac = sub3(n2, n0);
+    let ap = sub3(obs, n0);
+    let d1 = dot3_arr(ab, ap);
+    let d2 = dot3_arr(ac, ap);
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return n0;
+    }
+
+    let bp = sub3(obs, n1);
+    let d3 = dot3_arr(ab, bp);
+    let d4 = dot3_arr(ac, bp);
+    if d3 >= 0.0 && d4 <= d3 {
+        return n1;
+    }
+
+    let vc = d1.mul_add(d4, -(d3 * d2));
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        return add_scaled3(n0, ab, d1 / (d1 - d3));
+    }
+
+    let cp = sub3(obs, n2);
+    let d5 = dot3_arr(ab, cp);
+    let d6 = dot3_arr(ac, cp);
+    if d6 >= 0.0 && d5 <= d6 {
+        return n2;
+    }
+
+    let vb = d5.mul_add(d2, -(d1 * d6));
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        return add_scaled3(n0, ac, d2 / (d2 - d6));
+    }
+
+    let bc = sub3(n2, n1);
+    let va = d3.mul_add(d6, -(d5 * d4));
+    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        return add_scaled3(n1, bc, (d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    }
+
+    let denom_inv = 1.0 / (va + vb + vc);
+    let v = vb * denom_inv;
+    let w = vc * denom_inv;
+    add_scaled3(add_scaled3(n0, ab, v), ac, w)
+}
+
+#[inline]
+pub(crate) fn triangle_subdivide_about_point(
+    point: [f64; 3],
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+) -> [[[f64; 3]; 3]; 3] {
+    [[point, n0, n1], [point, n1, n2], [point, n2, n0]]
+}
+
 pub(crate) fn validate_triangle_mesh_geometry(
     nodes: (&[f64], &[f64], &[f64]),
     triangles: (&[usize], &[usize], &[usize]),

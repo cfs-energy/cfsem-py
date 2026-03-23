@@ -449,6 +449,61 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
     assert energy_dip == approx(energy_dip_ref, rel=1e-11, abs=1e-12)
 
 
+def test_triangle_mesh_inductance_mappings_scalar_source_thickness_inputs():
+    radius = 0.54
+    height = radius * 1e-3
+    nodes_tgt, triangles_tgt, s_tgt = _triangle_strip_mesh(radius, height, 0.8, nphi=18, z_center=-0.12)
+
+    xyzfil = (
+        np.array([0.14, -0.11], dtype=np.float64),
+        np.array([-0.29, 0.24], dtype=np.float64),
+        np.array([0.38, -0.27], dtype=np.float64),
+    )
+    dlxyzfil = (
+        np.array([0.22, -0.16], dtype=np.float64),
+        np.array([0.13, 0.19], dtype=np.float64),
+        np.array([-0.09, 0.12], dtype=np.float64),
+    )
+    wire_radius_scalar = 2.3e-3
+
+    m_lin = cfsem.triangle_mesh_inductance_mapping_from_linear_filaments(
+        xyzfil,
+        dlxyzfil,
+        nodes_tgt,
+        triangles_tgt,
+        wire_radius=wire_radius_scalar,
+        par=False,
+        quad="gl3",
+    )
+
+    loc = (
+        np.array([0.19, -0.34], dtype=np.float64),
+        np.array([0.11, 0.22], dtype=np.float64),
+        np.array([-0.24, 0.31], dtype=np.float64),
+    )
+    moment_dir = (
+        np.array([0.0, 0.75], dtype=np.float64),
+        np.array([0.0, -0.35], dtype=np.float64),
+        np.array([1.0, 0.4], dtype=np.float64),
+    )
+    outer_radius_scalar = 1.7e-3
+
+    m_dip = cfsem.triangle_mesh_flux_linkage_mapping_from_dipoles(
+        loc,
+        moment_dir,
+        nodes_tgt,
+        triangles_tgt,
+        outer_radius=outer_radius_scalar,
+        par=False,
+        quad="gl3",
+    )
+
+    assert m_lin.shape == (nodes_tgt.shape[0], 2)
+    assert m_dip.shape == (nodes_tgt.shape[0], 2)
+    assert np.all(np.isfinite(m_lin))
+    assert np.all(np.isfinite(m_dip))
+
+
 @mark.parametrize("par", [True, False])
 def test_triangle_mesh_force_mapping_against_direct_target_quadrature(par):
     radius = 0.63

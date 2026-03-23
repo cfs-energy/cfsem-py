@@ -1,11 +1,11 @@
 //! Meshing and filamentization functions and data structures.
-use crate::math::{cross3, dot3, rss3};
+use crate::math::{add_scaled3, cross3, dot3, dot3_arr, rss3, sub3};
 use core::f64::consts::PI;
 
 use nalgebra::Vector3;
 use nalgebra::geometry::Rotation3;
 
-use num_traits::{Float, NumCast};
+use num_traits::Float;
 
 /// Linear segments in cartesian coordinates,
 /// defined in mesh format as references to points.
@@ -59,25 +59,6 @@ pub(crate) struct TriangleMeshView<'a> {
     nodes: (&'a [f64], &'a [f64], &'a [f64]),
     triangles: (&'a [usize], &'a [usize], &'a [usize]),
     s: &'a [f64],
-}
-
-#[inline]
-fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-#[inline]
-fn add_scaled3(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
-    [
-        scale.mul_add(b[0], a[0]),
-        scale.mul_add(b[1], a[1]),
-        scale.mul_add(b[2], a[2]),
-    ]
-}
-
-#[inline]
-fn dot3_arr(a: [f64; 3], b: [f64; 3]) -> f64 {
-    dot3(a[0], a[1], a[2], b[0], b[1], b[2])
 }
 
 #[inline]
@@ -216,22 +197,6 @@ impl<'a> TriangleMeshView<'a> {
         let s = idx.map(|k| self.s[k]); // [A]
         (nodes, s)
     }
-}
-
-/// Convert a point to f64 values
-///
-/// # Panics
-///
-/// * On encountering a value in the input that is not representable as f64.
-pub(crate) fn convert_point<T>(p: (T, T, T)) -> (f64, f64, f64)
-where
-    T: NumCast,
-{
-    (
-        NumCast::from(p.0).unwrap(),
-        NumCast::from(p.1).unwrap(),
-        NumCast::from(p.2).unwrap(),
-    )
 }
 
 /// Filamentize a helix about an arbitrary piecewise-linear path.

@@ -343,7 +343,7 @@ pub fn triangle_mesh_force_mapping_par(
                 rowy,
                 rowz,
             );
-            Ok(())
+            Ok::<(), &'static str>(())
         })?;
 
     Ok(())
@@ -419,7 +419,7 @@ pub fn triangle_mesh_self_force_mapping_par(
                 rowy,
                 rowz,
             );
-            Ok(())
+            Ok::<(), &'static str>(())
         })?;
 
     Ok(())
@@ -556,7 +556,7 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments_par(
                             bout.1[i] = b.1;
                             bout.2[i] = b.2;
                         }
-                        Ok(())
+                        Ok::<(), &'static str>(())
                     },
                 )?;
                 rowx[ifil] = force[0];
@@ -564,7 +564,7 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments_par(
                 rowz[ifil] = force[2];
             }
 
-            Ok(())
+            Ok::<(), &'static str>(())
         })?;
 
     Ok(())
@@ -673,7 +673,7 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments_par(
                             bout.1[i] = b.1;
                             bout.2[i] = b.2;
                         }
-                        Ok(())
+                        Ok::<(), &'static str>(())
                     },
                 )?;
                 rowx[ifil] = force[0];
@@ -681,7 +681,7 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments_par(
                 rowz[ifil] = force[2];
             }
 
-            Ok(())
+            Ok::<(), &'static str>(())
         })?;
 
     Ok(())
@@ -808,7 +808,7 @@ pub fn triangle_mesh_force_mapping_from_dipoles_par(
                             bout.1[i] = b.1;
                             bout.2[i] = b.2;
                         }
-                        Ok(())
+                        Ok::<(), &'static str>(())
                     },
                 )?;
                 rowx[idip] = force[0];
@@ -816,7 +816,7 @@ pub fn triangle_mesh_force_mapping_from_dipoles_par(
                 rowz[idip] = force[2];
             }
 
-            Ok(())
+            Ok::<(), &'static str>(())
         })?;
 
     Ok(())

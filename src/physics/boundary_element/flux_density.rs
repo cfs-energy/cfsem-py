@@ -91,6 +91,8 @@ pub fn triangle_flux_density_basis(
         return triangle_flux_density_inner(n0, n1, n2, jref, obs, quad_kind);
     }
 
+    // Single-level triangle subdivision for near-field calcs
+    // to ensure that quad point singularities are separated from the target point.
     let mut b = [0.0; 3]; // [T/A]
     let min_sub_area = max_edge_sq * 1e-14; // [m^2]
     for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {

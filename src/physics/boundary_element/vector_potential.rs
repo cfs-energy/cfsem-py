@@ -99,6 +99,8 @@ pub fn triangle_vector_potential_basis(
         return triangle_vector_potential_inner(n0, n1, n2, jref, obs, quad_kind);
     }
 
+    // Single-level triangle subdivision for near-field calcs
+    // to ensure that quad point singularities are separated from the target point.
     let mut a = [0.0; 3]; // [V*s/(A*m)]
     let min_sub_area = max_edge_sq * 1e-14; // [m^2]
     for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {

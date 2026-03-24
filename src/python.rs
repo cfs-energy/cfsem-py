@@ -663,11 +663,13 @@ fn inductance_linear_filaments_matrix(
     _3tup_slice_ro!(dlxyzfil_src);
     let wire_radius_src = wire_radius_src.as_slice()?;
 
-    let nout = xyzfil_tgt.0.len().checked_mul(xyzfil_src.0.len()).ok_or_else(|| {
-        PyInteropError::DimensionalityError {
+    let nout = xyzfil_tgt
+        .0
+        .len()
+        .checked_mul(xyzfil_src.0.len())
+        .ok_or_else(|| PyInteropError::DimensionalityError {
             msg: "Output size overflow in inductance_linear_filaments_matrix".to_string(),
-        }
-    })?;
+        })?;
     let mut out = vec![0.0; nout];
     let func = match par {
         true => physics::linear_filament::inductance_linear_filaments_matrix_par,

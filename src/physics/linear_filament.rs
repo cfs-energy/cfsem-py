@@ -2749,10 +2749,12 @@ mod test {
         let dlxyztgt = (&dlxtgt[..], &dlytgt[..], &dlztgt[..]);
 
         let mut out = vec![0.0; NTGT];
-        inductance_linear_filaments(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut out).unwrap();
-
-        let total = inductance_piecewise_linear_filaments(xyzsrc, dlxyzsrc, xyztgt, dlxyztgt, &wire_radius)
+        inductance_linear_filaments(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut out)
             .unwrap();
+
+        let total =
+            inductance_piecewise_linear_filaments(xyzsrc, dlxyzsrc, xyztgt, dlxyztgt, &wire_radius)
+                .unwrap();
         assert!(approx(total, out.iter().sum(), 1e-12, 1e-15));
 
         for j in 0..NTGT {
@@ -2793,14 +2795,29 @@ mod test {
         let dlxyztgt = (&dlxtgt[..], &dlytgt[..], &dlztgt[..]);
 
         let mut out = vec![0.0; NTGT];
-        inductance_linear_filaments(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut out).unwrap();
+        inductance_linear_filaments(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut out)
+            .unwrap();
 
         let mut mm = vec![0.0; NSRC * NTGT];
         let mut mmp = vec![0.0; NSRC * NTGT];
-        inductance_linear_filaments_matrix(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut mm)
-            .unwrap();
-        inductance_linear_filaments_matrix_par(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut mmp)
-            .unwrap();
+        inductance_linear_filaments_matrix(
+            xyztgt,
+            dlxyztgt,
+            xyzsrc,
+            dlxyzsrc,
+            &wire_radius,
+            &mut mm,
+        )
+        .unwrap();
+        inductance_linear_filaments_matrix_par(
+            xyztgt,
+            dlxyztgt,
+            xyzsrc,
+            dlxyzsrc,
+            &wire_radius,
+            &mut mmp,
+        )
+        .unwrap();
 
         assert_eq!(mm, mmp);
         for j in 0..NTGT {

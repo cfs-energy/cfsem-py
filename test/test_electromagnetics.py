@@ -1021,6 +1021,28 @@ def test_inductance_linear_filaments_matrix_contracts_to_vector(par):
         wire_radius=wire_radius_src,
     )
     assert float(np.sum(m_vec)) == approx(m_piecewise, rel=1e-12)
+    # Smoke-test scalar wire-radius broadcasting on both output paths.
+    m_vec_scalar = cfsem.inductance_linear_filaments(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src=2e-3,
+        output="vector",
+    )
+    m_mat_scalar = cfsem.inductance_linear_filaments(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src=2e-3,
+        par=par,
+        output="matrix",
+    )
+    assert m_vec_scalar.shape == (xyzfil_tgt[0].size,)
+    assert m_mat_scalar.shape == (xyzfil_src[0].size, xyzfil_tgt[0].size)
+    assert np.all(np.isfinite(m_vec_scalar))
+    assert np.all(np.isfinite(m_mat_scalar))
 
 
 @mark.parametrize("ndiscr", [128, 200])

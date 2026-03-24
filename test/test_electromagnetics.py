@@ -8,10 +8,44 @@ import cfsem
 from test import test_funcs as _test
 
 
+def _circular_loop_xyz(major_radius: float, ndiscr: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
+    x = major_radius * np.cos(phi)
+    y = major_radius * np.sin(phi)
+    z = np.zeros_like(x)
+    return x, y, z
+
+
+def _linear_filament_self_inductance_from_vector_potential(
+    major_radius: float,
+    minor_radius: float,
+    ndiscr: int,
+    par: bool,
+) -> float:
+    x, y, z = _circular_loop_xyz(major_radius, ndiscr)
+    dx = x[1:] - x[:-1]
+    dy = y[1:] - y[:-1]
+    dz = z[1:] - z[:-1]
+    xyzfil = (x[:-1], y[:-1], z[:-1])
+    dlxyzfil = (dx, dy, dz)
+    ifil = np.ones_like(dx)
+    xyzp = (x[:-1] + 0.5 * dx, y[:-1] + 0.5 * dy, z[:-1] + 0.5 * dz)
+    ax, ay, az = cfsem.vector_potential_linear_filament(
+        xyzp=xyzp,
+        xyzfil=xyzfil,
+        dlxyzfil=dlxyzfil,
+        ifil=ifil,
+        wire_radius=minor_radius,
+        par=par,
+    )
+    return float(np.sum(ax * dx + ay * dy + az * dz))
+
+
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("ndiscr", [1000, 2000])
 @mark.parametrize("par", [True, False])
-def test_body_force_density(r, z, par):
+def test_body_force_density(r, z, ndiscr, par):
     """Spot check bindings; more complete tests are run in Rust"""
     xp = np.linspace(0.1, 0.8, 5)
     yp = np.zeros(5)
@@ -25,7 +59,7 @@ def test_body_force_density(r, z, par):
     rng = np.random.default_rng(1234098)
     j = [rng.uniform(-1e6, 1e6, len(xmesh)) for _ in range(3)]
 
-    fil, dlxyzfil = _test._filament_loop(r, z, 1000)
+    fil, dlxyzfil = _test._filament_loop(r, z, ndiscr)
     xyzfil = (fil[0][:-1], fil[1][:-1], fil[2][:-1])
     ifil = np.ones_like(xyzfil[0])
 
@@ -141,12 +175,13 @@ def test_vector_potential_dipole(par):
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("ndiscr", [200, 400])
 @mark.parametrize("par", [True, False])
-def test_mutual_inductance_circular_to_linear(r, z, par):
+def test_mutual_inductance_circular_to_linear(r, z, ndiscr, par):
     """Spot check bindings; more complete tests are run in Rust"""
     r1, z1 = (r + 0.1, abs(z) ** 0.5)
-    fil, _dl = _test._filament_loop(r, z, ndiscr=200)
-    fil1, dl1 = _test._filament_loop(r1, z1, ndiscr=200)
+    fil, _dl = _test._filament_loop(r, z, ndiscr=ndiscr)
+    fil1, dl1 = _test._filament_loop(r1, z1, ndiscr=ndiscr)
     (x1, y1, z1) = fil1
 
     m_linear = cfsem.mutual_inductance_piecewise_linear_filaments(fil, fil1)
@@ -217,17 +252,16 @@ def test_self_inductance_piecewise_linear_filaments(r, z, h_over_r, n):
 @mark.parametrize("r1", [0.5, np.pi])
 @mark.parametrize("r2", [0.1, np.pi / 10.0])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("ndiscr", [100, 200])
 @mark.parametrize("par", [True, False])
-def test_mutual_inductance_piecewise_linear_filaments(r1, r2, z, par):
+def test_mutual_inductance_piecewise_linear_filaments(r1, r2, z, ndiscr, par):
     # Test against calc for mutual inductance of circular filaments
     rzn1 = np.array([[r1], [z], [1.0]])
     rzn2 = np.array([[r2], [-z / np.e], [1.0]])
 
     m_circular = cfsem.mutual_inductance_of_circular_filaments(rzn1, rzn2, par)
 
-    n = 100
-
-    thetas = np.linspace(0.0, 2.0 * np.pi, n, endpoint=True)
+    thetas = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
 
     x1 = np.cos(thetas) * rzn1[0]
     y1 = np.sin(thetas) * rzn1[0]
@@ -246,8 +280,9 @@ def test_mutual_inductance_piecewise_linear_filaments(r1, r2, z, par):
 
 
 @mark.parametrize("r", [0.1, np.pi / 10.0])
+@mark.parametrize("n_filaments", [int(1e4), int(2e4)])
 @mark.parametrize("par", [True, False])
-def test_biot_savart_against_flux_density_ideal_solenoid(r, par):
+def test_biot_savart_against_flux_density_ideal_solenoid(r, n_filaments, par):
     # Check Biot-Savart calc against ideal solenoid calc
     length = 20.0 * r  # [m]
     num_turns = 7  # [#]
@@ -258,7 +293,6 @@ def test_biot_savart_against_flux_density_ideal_solenoid(r, par):
 
     # Biot-Savart calc should produce the same magnitude
     #   Build a spiral coil
-    n_filaments = int(1e4)
     x1 = np.linspace(-length / 2, length / 2, n_filaments + 1)
     y1 = r * np.cos(num_turns * 2.0 * np.pi * x1 / length)
     z1 = r * np.sin(num_turns * 2.0 * np.pi * x1 / length)
@@ -289,12 +323,12 @@ def test_biot_savart_against_flux_density_ideal_solenoid(r, par):
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("n_filaments", [int(1e4), int(2e4)])
 @mark.parametrize("par", [True, False])
-def test_biot_savart_against_flux_density_circular_filament(r, z, par):
+def test_biot_savart_against_flux_density_circular_filament(r, z, n_filaments, par):
     # Note we are mapping between (x, y, z) and (r, phi, z) coordinates here
 
     # Biot-Savart filaments in cartesian coords
-    n_filaments = int(1e4)
     phi = np.linspace(0.0, 2.0 * np.pi, n_filaments)
     xfils = r * np.cos(phi)
     yfils = r * np.sin(phi)
@@ -480,10 +514,12 @@ def test_flux_density_circular_filament_against_numerical(a, z, par):
 
 
 @mark.parametrize("par", [True, False])
-def test_self_inductance_lyle6_against_filamentization_and_distributed_and_axisymmetric(par):
+@mark.parametrize("nr", [20])
+@mark.parametrize("nz", [20])
+def test_self_inductance_lyle6_against_filamentization_and_distributed_and_axisymmetric(par, nr, nz):
     # Test that the Lyle approximation gives a similar result to
     # a case done by brute-force filamentization w/ a heuristic for self-inductance of a loop
-    r, z, dr, dz, nt, nr, nz = (0.8, 0.0, 0.5, 2.0, 3.0, 20, 20)
+    r, z, dr, dz, nt = (0.8, 0.0, 0.5, 2.0, 3.0)
     L_Lyle = cfsem.self_inductance_lyle6(
         r, dr, dz, nt
     )  # Estimate self-inductance via closed-form approximation
@@ -627,17 +663,17 @@ def test_wien_against_paper_examples():
 @mark.parametrize("dr_over_r", [0.1, 0.2])
 @mark.parametrize("dz_over_r", [0.1, 3.5])
 @mark.parametrize("nt", [3.0, 400.0])
-def test_self_inductance_lyle6_against_filamentized(r, z, dr_over_r, dz_over_r, nt):
+@mark.parametrize("nr", [5])
+@mark.parametrize("nz", [100])
+def test_self_inductance_lyle6_against_filamentized(r, z, dr_over_r, dz_over_r, nt, nr, nz):
     # Test that the Lyle approximation gives a similar result to
     # a case done by brute-force filamentization w/ a heuristic for self-inductance of a loop
-    r, z, dr, dz, nt, nr, nz = (
+    r, z, dr, dz, nt = (
         r,
         z,
         r * dr_over_r,
         r * dz_over_r,
         nt,
-        5,
-        100,
     )
     L_Lyle = cfsem.self_inductance_lyle6(
         r, dr, dz, nt
@@ -651,7 +687,10 @@ def test_self_inductance_lyle6_against_filamentized(r, z, dr_over_r, dz_over_r, 
 @mark.parametrize("major_radius", np.linspace(0.35, 1.25, 3, endpoint=True))
 @mark.parametrize("a", np.linspace(0.01, 0.04, 3, endpoint=True))
 @mark.parametrize("b", np.linspace(0.05, 0.1, 3, endpoint=True))
-def test_self_inductance_annular_ring(major_radius, a, b):
+@mark.parametrize("n_grid", [100])
+@mark.parametrize("nr_fil", [10])
+@mark.parametrize("nz_fil", [10])
+def test_self_inductance_annular_ring(major_radius, a, b, n_grid, nr_fil, nz_fil):
     # First, test a near-solid version against Wien for a solid loop
     major_radius_1 = major_radius
     minor_radius_1 = b
@@ -669,18 +708,17 @@ def test_self_inductance_annular_ring(major_radius, a, b):
 
     L_annular_2 = cfsem.self_inductance_annular_ring(major_radius_2, inner_minor_radius_2, minor_radius_2)
 
-    n = 100
     rs = np.linspace(
         major_radius_2 - minor_radius_2,
         major_radius_2 + minor_radius_2,
-        n,
+        n_grid,
         endpoint=True,
     )
 
     zs = np.linspace(
         -minor_radius_2,
         minor_radius_2,
-        n,
+        n_grid,
         endpoint=True,
     )
 
@@ -699,8 +737,8 @@ def test_self_inductance_annular_ring(major_radius, a, b):
         minor_radius_2 * 2,
         minor_radius_2 * 2,
         nt=1.0,
-        nr=10,
-        nz=10,
+        nr=nr_fil,
+        nz=nz_fil,
         mask=(rs, zs, mask),
     )  # Estimate self-inductance via discretization
 
@@ -750,12 +788,12 @@ def test_vector_potential_axisymmetric(r, z, par):
 
 @mark.parametrize("r", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
+@mark.parametrize("n_filaments", [int(1e4)])
 @mark.parametrize("par", [True, False])
-def test_vector_potential_linear_against_circular_filament(r, z, par):
+def test_vector_potential_linear_against_circular_filament(r, z, n_filaments, par):
     # Note we are mapping between (x, y, z) and (r, phi, z) coordinates here
 
     # Biot-Savart filaments in cartesian coords
-    n_filaments = int(1e4)
     phi = np.linspace(0.0, 2.0 * np.pi, n_filaments)
     xfils = r * np.cos(phi)
     yfils = r * np.sin(phi)
@@ -789,60 +827,44 @@ def test_vector_potential_linear_against_circular_filament(r, z, par):
     assert np.allclose(ax, np.zeros_like(ax), atol=1e-9)  # ...
 
 
+@mark.parametrize("ndiscr", [100, 200, 400, 800])
 @mark.parametrize("par", [True, False])
-def test_vector_potential_linear_self_inductance_against_wien(par):
-    """Test integration of dot(A, dL) against Wien's formula for self-inductance.
-    This test also runs a discretization study to ensure that the self-inductance
-    is stable under changing discretization.
-    """
-    # Build a single-turn circular loop as piecewise-linear filaments.
+def test_vector_potential_linear_self_inductance_against_wien(ndiscr, par):
+    """Test integration of dot(A, dL) against Wien's formula for self-inductance."""
     major_radius = 0.5  # [m]
     minor_radius = 5e-3  # [m] finite conductor radius
-    ndiscr_levels = [100, 200, 400, 800]
-    l_from_a_levels = []
-
-    for ndiscr in ndiscr_levels:
-        phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
-
-        x = major_radius * np.cos(phi)
-        y = major_radius * np.sin(phi)
-        z = np.zeros_like(x)
-
-        dx = x[1:] - x[:-1]
-        dy = y[1:] - y[:-1]
-        dz = z[1:] - z[:-1]
-
-        xyzfil = (x[:-1], y[:-1], z[:-1])
-        dlxyzfil = (dx, dy, dz)
-        ifil = np.ones_like(dx)  # [A]
-
-        # Integrate A·dl around the same loop; with 1 A current this equals self-inductance.
-        xyzp = (x[:-1] + 0.5 * dx, y[:-1] + 0.5 * dy, z[:-1] + 0.5 * dz)
-        ax, ay, az = cfsem.vector_potential_linear_filament(
-            xyzp=xyzp,
-            xyzfil=xyzfil,
-            dlxyzfil=dlxyzfil,
-            ifil=ifil,
-            wire_radius=minor_radius,
-            par=par,
-        )
-        l_from_a_levels.append(float(np.sum(ax * dx + ay * dy + az * dz)))  # [H]
-
+    l_from_a = _linear_filament_self_inductance_from_vector_potential(
+        major_radius=major_radius,
+        minor_radius=minor_radius,
+        ndiscr=ndiscr,
+        par=par,
+    )
     l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))  # [H]
+    assert l_from_a == approx(l_wien, rel=8e-2), (
+        f"ndiscr={ndiscr}, L_from_A={l_from_a:.6e}, L_wien={l_wien:.6e}"
+    )
 
-    # Allow moderate error from polygonal discretization of the circular geometry.
-    for ndiscr, l_from_a in zip(ndiscr_levels, l_from_a_levels, strict=True):
-        assert l_from_a == approx(l_wien, rel=8e-2), (
-            f"ndiscr={ndiscr}, L_from_A={l_from_a:.6e}, L_wien={l_wien:.6e}"
-        )
 
-    # Discretization stability checks.
-    lvals = np.array(l_from_a_levels)
-    rel_spread = (np.max(lvals) - np.min(lvals)) / max(abs(l_wien), 1e-30)
-    rel_fine_delta = abs(lvals[-1] - lvals[-2]) / max(abs(l_wien), 1e-30)
-
-    assert rel_spread < 2e-2, f"rel_spread={rel_spread:.6e}, Lvals={lvals}"
-    assert rel_fine_delta < 5e-3, f"rel_fine_delta={rel_fine_delta:.6e}, Lvals={lvals}"
+@mark.parametrize("ndiscr_coarse", [100, 200, 400])
+@mark.parametrize("par", [True, False])
+def test_vector_potential_linear_self_inductance_discretization_stability(ndiscr_coarse, par):
+    major_radius = 0.5  # [m]
+    minor_radius = 5e-3  # [m] finite conductor radius
+    l_coarse = _linear_filament_self_inductance_from_vector_potential(
+        major_radius=major_radius,
+        minor_radius=minor_radius,
+        ndiscr=ndiscr_coarse,
+        par=par,
+    )
+    l_fine = _linear_filament_self_inductance_from_vector_potential(
+        major_radius=major_radius,
+        minor_radius=minor_radius,
+        ndiscr=2 * ndiscr_coarse,
+        par=par,
+    )
+    l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))  # [H]
+    rel_delta = abs(l_fine - l_coarse) / max(abs(l_wien), 1e-30)
+    assert rel_delta < 2e-2, f"ndiscr_coarse={ndiscr_coarse}, rel_delta={rel_delta:.6e}"
 
 
 @mark.parametrize("r", [0.5, np.pi])
@@ -866,16 +888,12 @@ def test_linear_filament_self_inductance_against_wien(r, a, n):
     assert l_self == approx(l_wien, rel=8e-2)
 
 
+@mark.parametrize("ndiscr", [128, 200])
 @mark.parametrize("par", [True, False])
-def test_vector_potential_linear_matrix_contracts_to_vector_and_inductance(par):
+def test_vector_potential_linear_matrix_contracts_to_vector_and_inductance(ndiscr, par):
     major_radius = 0.5  # [m]
     minor_radius = 5e-3  # [m]
-    ndiscr = 128
-
-    phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
-    x = major_radius * np.cos(phi)
-    y = major_radius * np.sin(phi)
-    z = np.zeros_like(x)
+    x, y, z = _circular_loop_xyz(major_radius, ndiscr)
 
     dx = x[1:] - x[:-1]
     dy = y[1:] - y[:-1]
@@ -949,16 +967,12 @@ def test_vector_potential_linear_invalid_output_mode():
         cfsem.vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius=0.0, output="bad")
 
 
+@mark.parametrize("ndiscr", [128, 200])
 @mark.parametrize("par", [True, False])
-def test_flux_density_linear_matrix_contracts_to_vector(par):
+def test_flux_density_linear_matrix_contracts_to_vector(ndiscr, par):
     major_radius = 0.5  # [m]
     minor_radius = 5e-3  # [m]
-    ndiscr = 128
-
-    phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
-    x = major_radius * np.cos(phi)
-    y = major_radius * np.sin(phi)
-    z = np.zeros_like(x)
+    x, y, z = _circular_loop_xyz(major_radius, ndiscr)
 
     dx = x[1:] - x[:-1]
     dy = y[1:] - y[:-1]

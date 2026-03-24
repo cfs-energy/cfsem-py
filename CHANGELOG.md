@@ -12,6 +12,8 @@
 
 * !Remove `point_segment::self_inductance_piecewise_linear_filaments`
     * This formula diverges slowly under increasing discretization due to 1/r singularity
+* !Remove `self_inductance_piecewise_linear_filaments` from Python API
+    * `inductance_piecewise_linear_filaments` now has the same behavior under self- and other- evaluation
 * !Update `linear_filament::inductance_piecewise_linear_filaments` to use vector potential integral method
     * !Remove `self_inductance` flag which is no longer needed
     * !Add `wire_radius` input

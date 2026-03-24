@@ -347,11 +347,6 @@ def inductance_piecewise_linear_filaments(
     """
     Estimate the inductive coupling between two piecewise-linear current filaments.
 
-    It may be easier to use wrappers of this function that are specialized for self- and mutual-inductance
-    calculations:
-    [`self_inductance_piecewise_linear_filaments`][cfsem.self_inductance_piecewise_linear_filaments]
-    and [`mutual_inductance_piecewise_linear_filaments`][cfsem.mutual_inductance_piecewise_linear_filaments].
-
     Uses the line-integral form `M = ∮ A_source · dl_target`, evaluated at the
     target segment midpoints with the finite-radius
     [`vector_potential_linear_filament`][cfsem.vector_potential_linear_filament] kernel.

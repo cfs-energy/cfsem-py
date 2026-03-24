@@ -860,24 +860,46 @@ def test_vector_potential_linear_matrix_contracts_to_vector_and_inductance(par):
     dz = z[1:] - z[:-1]
     xyzfil = (x[:-1], y[:-1], z[:-1])
     dlxyzfil = (dx, dy, dz)
-    xyzmid = (x[:-1] + 0.5 * dx, y[:-1] + 0.5 * dy, z[:-1] + 0.5 * dz)
+    tq = np.array(
+        [
+            0.11270166537925831,
+            0.5,
+            0.8872983346207417,
+        ]
+    )
+    wq = np.array(
+        [
+            0.2777777777777778,
+            0.4444444444444444,
+            0.2777777777777778,
+        ]
+    )
+    xq = x[:-1, None] + tq[None, :] * dx[:, None]
+    yq = y[:-1, None] + tq[None, :] * dy[:, None]
+    zq = z[:-1, None] + tq[None, :] * dz[:, None]
+    xyzquad = (xq.reshape(-1), yq.reshape(-1), zq.reshape(-1))
     ifil = np.ones_like(dx)
 
     ax, ay, az = cfsem.vector_potential_linear_filament(
-        xyzmid, xyzfil, dlxyzfil, ifil, wire_radius=minor_radius, par=par, output="vector"
+        xyzquad, xyzfil, dlxyzfil, ifil, wire_radius=minor_radius, par=par, output="vector"
     )
     axm, aym, azm = cfsem.vector_potential_linear_filament(
-        xyzmid, xyzfil, dlxyzfil, ifil, wire_radius=minor_radius, par=par, output="matrix"
+        xyzquad, xyzfil, dlxyzfil, ifil, wire_radius=minor_radius, par=par, output="matrix"
     )
 
-    assert axm.shape == (dx.size, dx.size)
-    assert aym.shape == (dx.size, dx.size)
-    assert azm.shape == (dx.size, dx.size)
+    assert axm.shape == (3 * dx.size, dx.size)
+    assert aym.shape == (3 * dx.size, dx.size)
+    assert azm.shape == (3 * dx.size, dx.size)
     assert np.allclose(ax, np.sum(axm, axis=1), rtol=1e-12, atol=1e-12)
     assert np.allclose(ay, np.sum(aym, axis=1), rtol=1e-12, atol=1e-12)
     assert np.allclose(az, np.sum(azm, axis=1), rtol=1e-12, atol=1e-12)
 
-    l_from_a = float(np.sum(ax * dx + ay * dy + az * dz))
+    aq_dot_dl = (
+        ax.reshape((-1, 3)) * dx[:, None]
+        + ay.reshape((-1, 3)) * dy[:, None]
+        + az.reshape((-1, 3)) * dz[:, None]
+    )
+    l_from_a = float(np.sum(wq[None, :] * aq_dot_dl))
     l_direct = float(
         cfsem.inductance_piecewise_linear_filaments(
             xyzfil0=xyzfil,

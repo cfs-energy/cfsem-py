@@ -15,11 +15,17 @@ use crate::{MU0_OVER_4PI, macros::*};
 /// (m) minimum representable nonzero wire thickness.
 const MIN_WIRE_THICKNESS: f64 = 1e-10;
 
+/// 3-point Gauss-Legendre nodes on the unit interval [0, 1].
+const GL3_UNIT_NODES: [f64; 3] = [0.11270166537925831, 0.5, 0.8872983346207417];
+
+/// 3-point Gauss-Legendre weights on the unit interval [0, 1].
+const GL3_UNIT_WEIGHTS: [f64; 3] = [0.2777777777777778, 0.4444444444444444, 0.2777777777777778];
+
 /// Estimate the inductive coupling between two piecewise-linear current filaments.
 ///
 /// This uses the vector-potential line-integral form
 /// `M = ∮ A_source · dl_target` with a 1 A source current on each source segment,
-/// evaluated at the target segment midpoints.
+/// evaluated with 3-point Gauss-Legendre quadrature on each target segment.
 ///
 /// # Arguments
 ///
@@ -64,16 +70,25 @@ pub fn inductance_piecewise_linear_filaments(
     let m = xfil1.len();
     check_length!(m, xfil1, yfil1, zfil1, dlxfil1, dlyfil1, dlzfil1);
 
-    let xmid1: Vec<f64> = (0..m).map(|j| dlxfil1[j].mul_add(0.5, xfil1[j])).collect(); // [m]
-    let ymid1: Vec<f64> = (0..m).map(|j| dlyfil1[j].mul_add(0.5, yfil1[j])).collect(); // [m]
-    let zmid1: Vec<f64> = (0..m).map(|j| dlzfil1[j].mul_add(0.5, zfil1[j])).collect(); // [m]
+    let nquad = 3 * m;
+    let mut xquad = vec![0.0; nquad]; // [m]
+    let mut yquad = vec![0.0; nquad]; // [m]
+    let mut zquad = vec![0.0; nquad]; // [m]
+    for j in 0..m {
+        let row = 3 * j;
+        for (iq, tq) in GL3_UNIT_NODES.iter().enumerate() {
+            xquad[row + iq] = dlxfil1[j].mul_add(*tq, xfil1[j]); // [m]
+            yquad[row + iq] = dlyfil1[j].mul_add(*tq, yfil1[j]); // [m]
+            zquad[row + iq] = dlzfil1[j].mul_add(*tq, zfil1[j]); // [m]
+        }
+    }
 
     let ifil0 = vec![1.0; n]; // [A]
-    let mut ax = vec![0.0; m]; // [V-s/m]
-    let mut ay = vec![0.0; m]; // [V-s/m]
-    let mut az = vec![0.0; m]; // [V-s/m]
+    let mut ax = vec![0.0; nquad]; // [V-s/m]
+    let mut ay = vec![0.0; nquad]; // [V-s/m]
+    let mut az = vec![0.0; nquad]; // [V-s/m]
     vector_potential_linear_filament(
-        (&xmid1, &ymid1, &zmid1),
+        (&xquad, &yquad, &zquad),
         xyzfil0,
         dlxyzfil0,
         &ifil0,
@@ -82,7 +97,17 @@ pub fn inductance_piecewise_linear_filaments(
     )?;
 
     let inductance = (0..m)
-        .map(|j| ax[j] * dlxfil1[j] + ay[j] * dlyfil1[j] + az[j] * dlzfil1[j])
+        .map(|j| {
+            let row = 3 * j;
+            let a_dot_dl = (0..3)
+                .map(|iq| {
+                    let idx = row + iq;
+                    GL3_UNIT_WEIGHTS[iq]
+                        * (ax[idx] * dlxfil1[j] + ay[idx] * dlyfil1[j] + az[idx] * dlzfil1[j])
+                })
+                .sum::<f64>();
+            a_dot_dl
+        })
         .sum(); // [H]
 
     Ok(inductance)
@@ -2037,28 +2062,23 @@ mod test {
         let dlzfil2: Vec<f64> = (0..=NFIL - 2).map(|i| zfil2[i + 1] - zfil2[i]).collect();
         let dlxyzfil2 = (&dlxfil2[..], &dlyfil2[..], &dlzfil2[..]);
 
-        let xmid2: Vec<f64> = xfil2
-            .iter()
-            .zip(dlxfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
-        let ymid2: Vec<f64> = yfil2
-            .iter()
-            .zip(dlyfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
-        let zmid2: Vec<f64> = zfil2
-            .iter()
-            .zip(dlzfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
+        let mut xquad2 = vec![0.0; 3 * (NFIL - 1)];
+        let mut yquad2 = vec![0.0; 3 * (NFIL - 1)];
+        let mut zquad2 = vec![0.0; 3 * (NFIL - 1)];
+        for i in 0..NFIL - 1 {
+            let row = 3 * i;
+            for (iq, tq) in GL3_UNIT_NODES.iter().enumerate() {
+                xquad2[row + iq] = dlxfil2[i].mul_add(*tq, xfil2[i]);
+                yquad2[row + iq] = dlyfil2[i].mul_add(*tq, yfil2[i]);
+                zquad2[row + iq] = dlzfil2[i].mul_add(*tq, zfil2[i]);
+            }
+        }
 
-        // Check against Neumann's formula for mutual inductance
-        let outx = &mut [0.0; NFIL - 1];
-        let outy = &mut [0.0; NFIL - 1];
-        let outz = &mut [0.0; NFIL - 1];
+        let outx = &mut [0.0; 3 * (NFIL - 1)];
+        let outy = &mut [0.0; 3 * (NFIL - 1)];
+        let outz = &mut [0.0; 3 * (NFIL - 1)];
         vector_potential_linear_filament(
-            (&xmid2, &ymid2, &zmid2),
+            (&xquad2, &yquad2, &zquad2),
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
             &[1.0],
@@ -2075,11 +2095,21 @@ mod test {
         // are not closed loops).
         //
         // This should match exactly because the inductance helper now uses the same
-        // midpoint A·dl construction with a 1 A source current.
-        let a_dot_dl: Vec<f64> = (0..NFIL - 1)
-            .map(|i| outx[i] * dlxfil2[i] + outy[i] * dlyfil2[i] + outz[i] * dlzfil2[i])
-            .collect();
-        let m_from_a = a_dot_dl.iter().sum();
+        // 3-point Gauss-Legendre A·dl construction with a 1 A source current.
+        let m_from_a = (0..NFIL - 1)
+            .map(|i| {
+                let row = 3 * i;
+                (0..3)
+                    .map(|iq| {
+                        let idx = row + iq;
+                        GL3_UNIT_WEIGHTS[iq]
+                            * (outx[idx] * dlxfil2[i]
+                                + outy[idx] * dlyfil2[i]
+                                + outz[idx] * dlzfil2[i])
+                    })
+                    .sum::<f64>()
+            })
+            .sum::<f64>();
         let wire_radius = [0.0];
         let m = inductance_piecewise_linear_filaments(
             (&xyz, &xyz, &xyz),

@@ -115,6 +115,7 @@ ax.axhline(
 ax.set_xlabel("Loop discretization count [-]")
 ax.set_ylabel("Self-inductance [$\\mu$H]")
 ax.set_title("Thin Loop Self-Inductance vs. Loop Discretization")
+ax.set_ylim(0.0, 2.0 * wien_inductance * 1e6)
 ax.grid(True, which="both", linestyle=":", linewidth=0.7)
 ax.legend(loc="best")
 fig.tight_layout()

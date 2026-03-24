@@ -1169,6 +1169,7 @@ mod test {
             let dlyfil0 = diff(&yfil);
             let dlzfil0 = diff(&zfil);
             let dlxyzfil0 = (&dlxfil0[..], &dlyfil0[..], &dlzfil0[..]);
+            let wire_radius = vec![0.0; ndiscr - 1];
             mutual_inductance_2 += nfil[i]
                 * crate::physics::linear_filament::inductance_piecewise_linear_filaments(
                     (
@@ -1179,7 +1180,7 @@ mod test {
                     dlxyzfil0,
                     (&x[0..n - 1], &y[0..n - 1], &z[0..n - 1]),
                     dlxyzfil1,
-                    false,
+                    &wire_radius,
                 )
                 .unwrap();
         }

@@ -5,6 +5,8 @@ This fulfills the function of typing stubs, while also guaranteeing arrays are
 passed as contiguous and reallocating into contiguous inputs if necessary.
 """
 
+from typing import Literal
+
 from numpy import asarray, ascontiguousarray, float64, full, zeros_like
 from numpy.typing import NDArray
 
@@ -40,6 +42,9 @@ from .cfsem import (
 )
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
+)
+from .cfsem import (
+    vector_potential_linear_filament_matrix as em_vector_potential_linear_filament_matrix,
 )
 from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
@@ -243,7 +248,8 @@ def vector_potential_linear_filament(
     ifil: NDArray[float64],
     wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
-) -> Array3xN:
+    output: Literal["vector", "matrix"] = "vector",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Vector potential calculation for A-field contribution from many current filament
     segments to many observation points.
@@ -255,9 +261,12 @@ def vector_potential_linear_filament(
         ifil: [A] current in each filament segment
         wire_radius: [m] filament radius, scalar or array of length `m`
         par: Whether to use CPU parallelism
+        output: `"vector"` for contracted field values at each target point,
+            or `"matrix"` for row-major `(nobs, nfil)` source-target interaction matrices
 
     Returns:
-        [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
+        [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points,
+        or explicit `(nobs, nfil)` interaction matrices if `output="matrix"`
     """
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
@@ -266,7 +275,20 @@ def vector_potential_linear_filament(
     if asarray(wire_radius).ndim == 0:
         wire_radius = full(ifil.size, float(wire_radius))
     wire_radius = ascontiguousarray(wire_radius).ravel()
-    return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
+    if output == "vector":
+        return em_vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
+    if output == "matrix":
+        ax, ay, az = em_vector_potential_linear_filament_matrix(
+            xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
+        )
+        nobs = xyzp[0].size
+        nfil = ifil.size
+        return (
+            ax.reshape((nobs, nfil)),
+            ay.reshape((nobs, nfil)),
+            az.reshape((nobs, nfil)),
+        )
+    raise ValueError("output must be 'vector' or 'matrix'")
 
 
 def vector_potential_point_segment(
@@ -302,52 +324,35 @@ def inductance_piecewise_linear_filaments(
     dlxyzfil0: Array3xN,
     xyzfil1: Array3xN,
     dlxyzfil1: Array3xN,
-    self_inductance: bool = False,
+    wire_radius: float | NDArray[float64] = 0.0,
 ) -> float:
     """
-    Estimate the mutual inductance between two piecewise-linear current filaments,
-    or estimate self-inductance by passing the same filaments twice and setting
-    `self_inductance = True`.
+    Estimate the inductive coupling between two piecewise-linear current filaments.
 
     It may be easier to use wrappers of this function that are specialized for self- and mutual-inductance
     calculations:
     [`self_inductance_piecewise_linear_filaments`][cfsem.self_inductance_piecewise_linear_filaments]
     and [`mutual_inductance_piecewise_linear_filaments`][cfsem.mutual_inductance_piecewise_linear_filaments].
 
-    Uses Neumann's Formula for the mutual inductance of arbitrary loops, which is
-    originally from [2] and can be found in a more friendly format on wikipedia.
-
-    When self_inductance flag is set, zeroes-out the contributions from self-pairings
-    to resolve the thin-filament self-inductance singularity and replaces the
-    segment self-inductance term with an analytic value from [3].
+    Uses the line-integral form `M = ∮ A_source · dl_target`, evaluated at the
+    target segment midpoints with the finite-radius
+    [`vector_potential_linear_filament`][cfsem.vector_potential_linear_filament] kernel.
 
     Assumes:
 
     * Thin, well-behaved filaments
     * Uniform current distribution within segments
         * Low frequency operation; no skin effect
-          (which would reduce the segment self-field term)
     * Vacuum permeability everywhere
     * Each filament has a constant current in all segments
-      (otherwise we need an inductance matrix)
-
-    References:
-        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
-            Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
-
-        [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-            Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
-
-        [3] R. Dengler, “Self inductance of a wire loop as a curve integral,”
-            AEM, vol. 5, no. 1, p. 1, Jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331)
+      (otherwise we need an interaction matrix)
 
     Args:
         xyzfil0: [m] Nx3 point series describing the filament origins
         dlxyzfil0: [m] Nx3 length vector of each filament
         xyzfil1: [m] Nx3 point series describing the filament origins
         dlxyzfil1: [m] Nx3 length vector of each filament
-        self_inductance: Whether this is being used as a self-inductance calc
-
+        wire_radius: [m] source filament radius, scalar or array of length `N`
     Returns:
         [H] Scalar inductance
     """
@@ -355,8 +360,12 @@ def inductance_piecewise_linear_filaments(
     dlxyzfil0 = _3tup_contig(dlxyzfil0)
     xyzfil1 = _3tup_contig(xyzfil1)
     dlxyzfil1 = _3tup_contig(dlxyzfil1)
+    nfil0 = xyzfil0[0].size
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(nfil0, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
 
-    return em_inductance_piecewise_linear_filaments(xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, self_inductance)
+    return em_inductance_piecewise_linear_filaments(xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, wire_radius)
 
 
 def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:

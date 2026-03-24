@@ -75,7 +75,10 @@ wien_inductance = float(cfsem.self_inductance_circular_ring_wien(LOOP_RADIUS, WI
 
 for i, n in enumerate(NSEG_SWEEP):
     xyz = circle_polyline(LOOP_RADIUS, int(n))
-    inductance_direct[i] = cfsem.self_inductance_piecewise_linear_filaments(xyz)
+    inductance_direct[i] = cfsem.self_inductance_piecewise_linear_filaments(
+        xyz,
+        wire_radius=WIRE_RADIUS,
+    )
     inductance_from_a[i] = loop_inductance_from_vector_potential(xyz, WIRE_RADIUS)
     print(
         f"N={int(n):5d}: self_inductance_piecewise_linear_filaments={inductance_direct[i]:.6e} H, "
@@ -91,7 +94,7 @@ ax.semilogx(
     marker=".",
     markersize=7,
     linewidth=1.2,
-    label="Direct cfsem self_inductance_piecewise_linear_filaments",
+    label="Direct cfsem self_inductance_piecewise_linear_filaments, wire radius = 1 cm",
 )
 ax.semilogx(
     NSEG_SWEEP,

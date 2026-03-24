@@ -5,7 +5,7 @@ use core::f64::consts::PI;
 use nalgebra::Vector3;
 use nalgebra::geometry::Rotation3;
 
-use num_traits::{Float, NumCast};
+use num_traits::Float;
 
 /// Linear segments in cartesian coordinates,
 /// defined in mesh format as references to points.
@@ -48,22 +48,6 @@ where
     pub fn edges(&self) -> &[(usize, usize)] {
         &self.edges[..]
     }
-}
-
-/// Convert a point to f64 values
-///
-/// # Panics
-///
-/// * On encountering a value in the input that is not representable as f64.
-pub(crate) fn convert_point<T>(p: (T, T, T)) -> (f64, f64, f64)
-where
-    T: NumCast,
-{
-    (
-        NumCast::from(p.0).unwrap(),
-        NumCast::from(p.1).unwrap(),
-        NumCast::from(p.2).unwrap(),
-    )
 }
 
 /// Filamentize a helix about an arbitrary piecewise-linear path.

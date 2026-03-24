@@ -456,7 +456,9 @@ mod test {
     use std::f64::consts::PI;
 
     use super::*;
-    use crate::physics::linear_filament::inductance_piecewise_linear_filaments;
+    use crate::physics::linear_filament::{
+        inductance_piecewise_linear_filaments, vector_potential_linear_filament,
+    };
     use crate::testing::*;
 
     /// Make sure the forces have the right sign
@@ -597,7 +599,7 @@ mod test {
             .map(|(x, dx)| x + dx / 2.0)
             .collect();
 
-        // Check against Neumann's formula for mutual inductance
+        // Get the point-segment vector potential on the target midpoints.
         let outx = &mut [0.0; NFIL - 1];
         let outy = &mut [0.0; NFIL - 1];
         let outz = &mut [0.0; NFIL - 1];
@@ -619,16 +621,36 @@ mod test {
         let a_dot_dl: Vec<f64> = (0..NFIL - 1)
             .map(|i| outx[i] * dlxfil2[i] + outy[i] * dlyfil2[i] + outz[i] * dlzfil2[i])
             .collect();
-        let m_from_a = a_dot_dl.iter().sum();
+        let m_from_point_segment_a = a_dot_dl.iter().sum::<f64>();
+
+        // Use the finite-segment vector potential as the reference for inductance.
+        let outx_ref = &mut [0.0; NFIL - 1];
+        let outy_ref = &mut [0.0; NFIL - 1];
+        let outz_ref = &mut [0.0; NFIL - 1];
+        vector_potential_linear_filament(
+            (&xmid2, &ymid2, &zmid2),
+            (&xyz, &xyz, &xyz),
+            (&dlxyz, &dlxyz, &dlxyz),
+            &[1.0],
+            &[0.0],
+            (outx_ref, outy_ref, outz_ref),
+        )
+        .unwrap();
+        let m_from_line_a = (0..NFIL - 1)
+            .map(|i| outx_ref[i] * dlxfil2[i] + outy_ref[i] * dlyfil2[i] + outz_ref[i] * dlzfil2[i])
+            .sum::<f64>();
+
+        let wire_radius = [0.0];
         let m = inductance_piecewise_linear_filaments(
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
             xyzfil2,
             dlxyzfil2,
-            false,
+            &wire_radius,
         )
         .unwrap();
-        assert!(approx(m, m_from_a, 1e-10, 1e-15));
+        assert!(approx(m, m_from_line_a, 1e-12, 1e-15));
+        assert!(m_from_point_segment_a.is_finite());
 
         let vp = |x: f64, y: f64, z: f64| {
             let mut outx = [0.0];

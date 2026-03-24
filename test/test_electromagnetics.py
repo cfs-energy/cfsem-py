@@ -183,7 +183,7 @@ def test_flux_density_circular_filament_cartesian(r, z, par):
 
 @mark.parametrize("r", [7.7, np.pi])  # Needs to be large for Lyle with very small width
 @mark.parametrize("z", [0.0, np.e / 2])
-@mark.parametrize("h_over_r", [5e-2, 0.25, 1.0])
+@mark.parametrize("h_over_r", [5e-2, 1e-2, 1e-3])
 def test_self_inductance_piecewise_linear_filaments(r, z, h_over_r):
     # Test self inductance via the finite-radius A·dl line integral
     # against Lyle's calc for finite-thickness coils.
@@ -209,7 +209,7 @@ def test_self_inductance_piecewise_linear_filaments(r, z, h_over_r):
 
     self_inductance_lyle6 = cfsem.self_inductance_lyle6(r, w, h, nt)  # [H]
 
-    rel = 5e-2 if h_over_r <= 5e-2 else 0.12 if h_over_r <= 0.25 else 0.3
+    rel = 5e-2
     assert self_inductance_piecewise_linear == approx(self_inductance_lyle6, rel=rel)
 
 

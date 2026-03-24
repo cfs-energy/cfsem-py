@@ -1,7 +1,7 @@
 //! Magnetics calculations for piecewise-linear current filaments.
 
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    iter::{IntoParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
@@ -191,14 +191,16 @@ pub fn flux_density_linear_filament_matrix_par(
     }
 
     let n = chunksize(nobs);
-    xyzp.0
-        .par_chunks(n)
-        .zip(xyzp.1.par_chunks(n))
-        .zip(xyzp.2.par_chunks(n))
-        .zip(out.0.par_chunks_mut(n * nfil))
-        .zip(out.1.par_chunks_mut(n * nfil))
-        .zip(out.2.par_chunks_mut(n * nfil))
-        .try_for_each(|(((((xp, yp), zp), bx), by), bz)| {
+    (
+        xyzp.0.par_chunks(n),
+        xyzp.1.par_chunks(n),
+        xyzp.2.par_chunks(n),
+        out.0.par_chunks_mut(n * nfil),
+        out.1.par_chunks_mut(n * nfil),
+        out.2.par_chunks_mut(n * nfil),
+    )
+        .into_par_iter()
+        .try_for_each(|(xp, yp, zp, bx, by, bz)| {
             flux_density_linear_filament_matrix(
                 (xp, yp, zp),
                 xyzfil,
@@ -546,14 +548,16 @@ pub fn vector_potential_linear_filament_matrix_par(
     }
 
     let n = chunksize(nobs);
-    xyzp.0
-        .par_chunks(n)
-        .zip(xyzp.1.par_chunks(n))
-        .zip(xyzp.2.par_chunks(n))
-        .zip(out.0.par_chunks_mut(n * nfil))
-        .zip(out.1.par_chunks_mut(n * nfil))
-        .zip(out.2.par_chunks_mut(n * nfil))
-        .try_for_each(|(((((xp, yp), zp), ax), ay), az)| {
+    (
+        xyzp.0.par_chunks(n),
+        xyzp.1.par_chunks(n),
+        xyzp.2.par_chunks(n),
+        out.0.par_chunks_mut(n * nfil),
+        out.1.par_chunks_mut(n * nfil),
+        out.2.par_chunks_mut(n * nfil),
+    )
+        .into_par_iter()
+        .try_for_each(|(xp, yp, zp, ax, ay, az)| {
             vector_potential_linear_filament_matrix(
                 (xp, yp, zp),
                 xyzfil,

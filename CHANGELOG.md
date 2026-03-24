@@ -6,6 +6,7 @@
 
 * Add interaction matrix output options for linear filament A-field and B-field
 * Add discretization sensitivity check to linear filament self inductance test against Lyle's calc
+* Add `loop_inductance.py` example comparing different methods of calculating the self-inductance of a loop
 
 ### Changed
 

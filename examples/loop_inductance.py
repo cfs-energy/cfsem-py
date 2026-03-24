@@ -69,9 +69,33 @@ def loop_inductance_from_vector_potential(
     return float(np.sum(ax * dlxyzfil[0] + ay * dlxyzfil[1] + az * dlxyzfil[2]))
 
 
+def loop_inductance_from_point_segment_vector_potential(
+    xyzp: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> float:
+    """Integrate A·dl around the loop using point-segment sources and one off-center target point."""
+    xyzfil, dlxyzfil, _ = polyline_to_segments(xyzp)
+    ifil = np.ones_like(xyzfil[0], dtype=np.float64)
+    xyzobs = (
+        xyzfil[0],
+        xyzfil[1],
+        xyzfil[2],
+    )
+    ax, ay, az = cfsem.vector_potential_point_segment(
+        xyzobs,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+    )
+    return float(np.sum(ax * dlxyzfil[0] + ay * dlxyzfil[1] + az * dlxyzfil[2]))
+
+
 inductance_direct = np.empty(NSEG_SWEEP.size, dtype=np.float64)
 inductance_from_a = np.empty(NSEG_SWEEP.size, dtype=np.float64)
+inductance_from_a_point = np.empty(NSEG_SWEEP.size, dtype=np.float64)
 wien_inductance = float(cfsem.self_inductance_circular_ring_wien(LOOP_RADIUS, WIRE_RADIUS))
+lyle_inductance = float(
+    cfsem.self_inductance_lyle6(LOOP_RADIUS, 2.0 * WIRE_RADIUS, 2.0 * WIRE_RADIUS, 1.0)
+)
 
 for i, n in enumerate(NSEG_SWEEP):
     xyz = circle_polyline(LOOP_RADIUS, int(n))
@@ -80,9 +104,11 @@ for i, n in enumerate(NSEG_SWEEP):
         wire_radius=WIRE_RADIUS,
     )
     inductance_from_a[i] = loop_inductance_from_vector_potential(xyz, WIRE_RADIUS)
+    inductance_from_a_point[i] = loop_inductance_from_point_segment_vector_potential(xyz)
     print(
         f"N={int(n):5d}: self_inductance_piecewise_linear_filaments={inductance_direct[i]:.6e} H, "
-        f"A·dl with {WIRE_RADIUS * 1e2:.1f} cm wire radius={inductance_from_a[i]:.6e} H"
+        f"A·dl with {WIRE_RADIUS * 1e2:.1f} cm wire radius={inductance_from_a[i]:.6e} H, "
+        f"point-segment A·dl={inductance_from_a_point[i]:.6e} H"
     )
 
 fig, ax = plt.subplots(figsize=(7.0, 4.5))
@@ -94,7 +120,7 @@ ax.semilogx(
     marker=".",
     markersize=7,
     linewidth=1.2,
-    label="Direct cfsem self_inductance_piecewise_linear_filaments, wire radius = 1 cm",
+    label="self_inductance_piecewise_linear_filaments",
 )
 ax.semilogx(
     NSEG_SWEEP,
@@ -103,19 +129,35 @@ ax.semilogx(
     marker="o",
     markersize=4,
     linewidth=1.2,
-    label="A·dl from vector_potential_linear_filament, wire radius = 1 cm",
+    label="A·dl (linear filament)",
+)
+ax.semilogx(
+    NSEG_SWEEP,
+    inductance_from_a_point * 1e6,
+    color="tab:green",
+    marker="s",
+    markersize=4,
+    linewidth=1.2,
+    label="A·dl (point-segment)",
 )
 ax.axhline(
     wien_inductance * 1e6,
     color="tab:red",
     linestyle="--",
     linewidth=1.2,
-    label="Wien formula, wire radius = 1 cm",
+    label="Wien formula",
+)
+ax.axhline(
+    lyle_inductance * 1e6,
+    color="tab:orange",
+    linestyle="-.",
+    linewidth=1.2,
+    label="Lyle formula",
 )
 ax.set_xlabel("Loop discretization count [-]")
 ax.set_ylabel("Self-inductance [$\\mu$H]")
 ax.set_title("Thin Loop Self-Inductance vs. Loop Discretization")
-ax.set_ylim(0.0, 2.0 * wien_inductance * 1e6)
+ax.set_ylim(0.0, 2.0 * max(wien_inductance, lyle_inductance) * 1e6)
 ax.grid(True, which="both", linestyle=":", linewidth=0.7)
 ax.legend(loc="best")
 fig.tight_layout()

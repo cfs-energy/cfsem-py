@@ -1,6 +1,6 @@
 # Changelog
 
-## 5.0.0 2025-03-24
+## 5.0.0 2026-03-24
 
 ### Added
 
@@ -20,7 +20,7 @@
 * Update python API for linear filament A and B with defaults that set output shape to vector by default
     * Preserves default behavior -> not breaking for python API
 
-## 4.0.1 2025-03-12
+## 4.0.1 2026-03-12
 
 ### Changed
 
@@ -30,7 +30,7 @@
 * Update build_docs script
 * Add lengthwise discretization slider to field explorer example
 
-## 4.0.0 2025-03-03
+## 4.0.0 2026-03-03
 
 ### Added
 

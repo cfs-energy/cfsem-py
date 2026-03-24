@@ -44,10 +44,12 @@ self_inductance_handcalc_1 = cfsem.self_inductance_lyle6(r1, w1, h1, nt1)
 self_inductance_handcalc_2 = cfsem.self_inductance_lyle6(r2, w2, h2, nt2)
 
 self_inductance_helical_1 = cfsem.self_inductance_piecewise_linear_filaments(
-    (xhelix1, yhelix1, zhelix1)
+    (xhelix1, yhelix1, zhelix1),
+    wire_radius=0.5 * cnd_w1,
 )
 self_inductance_helical_2 = cfsem.self_inductance_piecewise_linear_filaments(
-    (xhelix2, yhelix2, zhelix2)
+    (xhelix2, yhelix2, zhelix2),
+    wire_radius=0.5 * cnd_w2,
 )
 
 self_inductance_axisymmetric_1 = cfsem.self_inductance_axisymmetric_coil(

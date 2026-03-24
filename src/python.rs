@@ -266,6 +266,63 @@ fn flux_density_linear_filament(
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
+/// Python bindings for cfsemrs::physics::linear_filament::flux_density_linear_filament_matrix
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par=true))]
+fn flux_density_linear_filament_matrix(
+    xyzp: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Test point coords
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament origin coords (start of segment)
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament length delta
+    ifil: PyReadonlyArray1<f64>,        // [A] filament current
+    wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(xyzp);
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let ifil = ifil.as_slice()?;
+    let wire_radius = wire_radius.as_slice()?;
+
+    let nout = xyzp.0.len().checked_mul(xyzfil.0.len()).ok_or_else(|| {
+        PyInteropError::DimensionalityError {
+            msg: "Output size overflow in flux_density_linear_filament_matrix".to_string(),
+        }
+    })?;
+    let (mut bx, mut by, mut bz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::linear_filament::flux_density_linear_filament_matrix_par,
+        false => physics::linear_filament::flux_density_linear_filament_matrix,
+    };
+    match func(
+        xyzp,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        wire_radius,
+        (&mut bx, &mut by, &mut bz),
+    ) {
+        Ok(x) => x,
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
 /// Python bindings for cfsemrs::physics::point_source::segment::flux_density_point_segment
 #[pyfunction]
 fn flux_density_point_segment(
@@ -366,6 +423,63 @@ fn vector_potential_linear_filament(
     _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
+/// Python bindings for cfsemrs::physics::linear_filament::vector_potential_linear_filament_matrix
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par=true))]
+fn vector_potential_linear_filament_matrix(
+    xyzp: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Test point coords
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament origin coords (start of segment)
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Filament length delta
+    ifil: PyReadonlyArray1<f64>,        // [A] filament current
+    wire_radius: PyReadonlyArray1<f64>, // [m] filament radius
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(xyzp);
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let ifil = ifil.as_slice()?;
+    let wire_radius = wire_radius.as_slice()?;
+
+    let nout = xyzp.0.len().checked_mul(xyzfil.0.len()).ok_or_else(|| {
+        PyInteropError::DimensionalityError {
+            msg: "Output size overflow in vector_potential_linear_filament_matrix".to_string(),
+        }
+    })?;
+    let (mut outx, mut outy, mut outz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::linear_filament::vector_potential_linear_filament_matrix_par,
+        false => physics::linear_filament::vector_potential_linear_filament_matrix,
+    };
+    match func(
+        xyzp,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        wire_radius,
+        (&mut outx, &mut outy, &mut outz),
+    ) {
+        Ok(x) => x,
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    };
+
+    _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
+}
+
 /// Python bindings for cfsemrs::physics::point_source::segment::vector_potential_point_segment
 #[pyfunction]
 fn vector_potential_point_segment(
@@ -416,7 +530,7 @@ fn vector_potential_point_segment(
     _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
-#[pyfunction]
+#[pyfunction(signature = (xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, wire_radius))]
 fn inductance_piecewise_linear_filaments(
     xyzfil0: (
         PyReadonlyArray1<f64>,
@@ -438,7 +552,7 @@ fn inductance_piecewise_linear_filaments(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [m] Filament length delta
-    self_inductance: bool, // Whether this is being used as a self-inductance calc
+    wire_radius: PyReadonlyArray1<f64>, // [m] Source filament radius
 ) -> PyResult<f64> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
@@ -446,6 +560,7 @@ fn inductance_piecewise_linear_filaments(
     _3tup_slice_ro!(dlxyzfil0);
     _3tup_slice_ro!(xyzfil1);
     _3tup_slice_ro!(dlxyzfil1);
+    let wire_radius = wire_radius.as_slice()?;
 
     // Do calculations
     let inductance = match physics::linear_filament::inductance_piecewise_linear_filaments(
@@ -453,7 +568,7 @@ fn inductance_piecewise_linear_filaments(
         dlxyzfil0,
         xyzfil1,
         dlxyzfil1,
-        self_inductance,
+        wire_radius,
     ) {
         Ok(x) => x,
         Err(x) => {
@@ -837,9 +952,17 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
 
     // Linear filaments
     m.add_function(wrap_pyfunction!(flux_density_linear_filament, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        flux_density_linear_filament_matrix,
+        m.clone()
+    )?)?;
     m.add_function(wrap_pyfunction!(flux_density_point_segment, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_linear_filament,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_linear_filament_matrix,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(vector_potential_point_segment, m.clone())?)?;

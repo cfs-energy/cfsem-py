@@ -5,19 +5,29 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
-use crate::{
-    chunksize,
-    math::{cross3, dot3, rss3},
-};
+use crate::{chunksize, math::cross3};
+
+#[cfg(test)]
+use crate::math::rss3;
 
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.
 const MIN_WIRE_THICKNESS: f64 = 1e-10;
 
-/// Estimate the mutual inductance between two piecewise-linear current filaments.
+/// 3-point Gauss-Legendre nodes on the unit interval [0, 1].
+/// https://en.wikipedia.org/wiki/Gaussian_quadrature
+const GL3_UNIT_NODES: [f64; 3] = [0.11270166537925831, 0.5, 0.8872983346207417];
+
+/// 3-point Gauss-Legendre weights on the unit interval [0, 1].
+/// https://en.wikipedia.org/wiki/Gaussian_quadrature
+const GL3_UNIT_WEIGHTS: [f64; 3] = [0.2777777777777778, 0.4444444444444444, 0.2777777777777778];
+
+/// Estimate the inductive coupling between two piecewise-linear current filaments.
 ///
-/// Uses filament midpoints as field source and target.
+/// This uses the vector-potential line-integral form
+/// `M = ∮ A_source · dl_target` with a 1 A source current on each source segment,
+/// evaluated with 3-point Gauss-Legendre quadrature on each target segment.
 ///
 /// # Arguments
 ///
@@ -25,116 +35,76 @@ const MIN_WIRE_THICKNESS: f64 = 1e-10;
 /// * `dlxyzfil0`:       (m) filament segment lengths for first path, length `n`
 /// * `xyzfil1`:         (m) filament origin coordinates for second path, length `n`
 /// * `dlxyzfil1`:       (m) filament segment lengths for second path, length `n`
-/// * `self_inductance`: Flag for whether this calc is being used for self-inductance,
-///                      in which case segment self-field terms are replaced with a hand-calc
-///
-/// # Commentary
-///
-/// Uses Neumann's Formula for the mutual inductance of arbitrary loops, which is
-/// originally from \[2\] and can be found in a more friendly format on wikipedia.
-///
-/// When `self_inductance` flag is set, zeroes-out the contributions from self-pairings
-/// to resolve the thin-filament self-inductance singularity and replaces the
-/// segment self-inductance term with an analytic value from equation 4 (with Y=1/2) of \[3\],
-/// which is a scalar-per-length value for low-frequency operation (uniform section current).
+/// * `wire_radius`:     (m) source filament radius for first path, length `n`
 ///
 /// # Assumptions
 ///
 /// * Thin, well-behaved filaments
 /// * Uniform current distribution within segments
 ///     * Low frequency operation; no skin effect
-///       (which would reduce the segment self-field term)
 /// * Vacuum permeability everywhere
 /// * Each filament has a constant current in all segments
-///   (otherwise we need an inductance matrix)
-///
-/// # References
-///
-///   \[1\] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. \[Online\].
-///         Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
-///
-///   \[2\] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-///         Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103).
-///
-///   \[3\] R. Dengler, “Self inductance of a wire loop as a curve integral,”
-///         AEM, vol. 5, no. 1, p. 1, Jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331).
+///   (otherwise the result is an interaction matrix rather than a scalar)
 pub fn inductance_piecewise_linear_filaments(
     xyzfil0: (&[f64], &[f64], &[f64]),
     dlxyzfil0: (&[f64], &[f64], &[f64]),
     xyzfil1: (&[f64], &[f64], &[f64]),
     dlxyzfil1: (&[f64], &[f64], &[f64]),
-    self_inductance: bool,
+    wire_radius: &[f64],
 ) -> Result<f64, &'static str> {
     // Unpack
-    let (xfil0, yfil0, zfil0) = xyzfil0;
-    let (dlxfil0, dlyfil0, dlzfil0) = dlxyzfil0;
     let (xfil1, yfil1, zfil1) = xyzfil1;
     let (dlxfil1, dlyfil1, dlzfil1) = dlxyzfil1;
 
     // Check lengths; Error if they do not match
-    let n = xfil0.len();
-    check_length!(n, xfil0, yfil0, zfil0, dlxfil0, dlyfil0, dlzfil0);
+    let n = xyzfil0.0.len();
+    check_length!(
+        n,
+        xyzfil0.0,
+        xyzfil0.1,
+        xyzfil0.2,
+        dlxyzfil0.0,
+        dlxyzfil0.1,
+        dlxyzfil0.2,
+        wire_radius
+    );
 
     let m = xfil1.len();
     check_length!(m, xfil1, yfil1, zfil1, dlxfil1, dlyfil1, dlzfil1);
 
-    if self_inductance && m != n {
-        return Err(
-            "For self-inductance runs, the two paths must be the same length and should be identical",
-        );
-    }
+    let (xfil0, yfil0, zfil0) = xyzfil0;
+    let (dlxfil0, dlyfil0, dlzfil0) = dlxyzfil0;
+    let mut inductance = 0.0; // [H]
 
-    let mut inductance: f64 = 0.0; // [H], although it is in [m] until the final calc
-    let mut total_length: f64 = 0.0; // [m]
-    for i in 0..n {
-        // Filament i midpoint
-        let dlxi = dlxfil0[i]; // [m]
-        let dlyi = dlyfil0[i]; // [m]
-        let dlzi = dlzfil0[i]; // [m]
-        let xmidi = dlxi.mul_add(0.5, xfil0[i]); // [m]
-        let ymidi = dlyi.mul_add(0.5, yfil0[i]); // [m]
-        let zmidi = dlzi.mul_add(0.5, zfil0[i]); // [m]
+    for j in 0..m {
+        let dltgt = (dlxfil1[j], dlyfil1[j], dlzfil1[j]); // [m]
+        for (iq, tq) in GL3_UNIT_NODES.iter().enumerate() {
+            let obs = (
+                dltgt.0.mul_add(*tq, xfil1[j]), // [m]
+                dltgt.1.mul_add(*tq, yfil1[j]), // [m]
+                dltgt.2.mul_add(*tq, zfil1[j]), // [m]
+            );
+            let mut ax = 0.0; // [V-s/m]
+            let mut ay = 0.0; // [V-s/m]
+            let mut az = 0.0; // [V-s/m]
 
-        // Accumulate total length if we need it
-        if self_inductance {
-            total_length += rss3(dlxi, dlyi, dlzi);
-        }
-
-        for j in 0..m {
-            // Skip self-interaction terms which are handled separately
-            if self_inductance && i == j {
-                continue;
+            for i in 0..n {
+                let fil0 = (xfil0[i], yfil0[i], zfil0[i]); // [m]
+                let fil1 = (
+                    fil0.0 + dlxfil0[i],
+                    fil0.1 + dlyfil0[i],
+                    fil0.2 + dlzfil0[i],
+                ); // [m]
+                let (axc, ayc, azc) =
+                    vector_potential_linear_filament_scalar((fil0, fil1, 1.0), wire_radius[i], obs);
+                ax += axc; // [V-s/m]
+                ay += ayc; // [V-s/m]
+                az += azc; // [V-s/m]
             }
 
-            // Filament j midpoint
-            let dlxj = dlxfil1[j]; // [m]
-            let dlyj = dlyfil1[j]; // [m]
-            let dlzj = dlzfil1[j]; // [m]
-            let xmidj = dlxj.mul_add(0.5, xfil1[j]); // [m]
-            let ymidj = dlyj.mul_add(0.5, yfil1[j]); // [m]
-            let zmidj = dlzj.mul_add(0.5, zfil1[j]); // [m]
-
-            // Distance between midpoints
-            let rx = xmidi - xmidj;
-            let ry = ymidi - ymidj;
-            let rz = zmidi - zmidj;
-            let dist = rss3(rx, ry, rz);
-
-            // Dot product of segment vectors
-            let dxdot = dot3(dlxi, dlyi, dlzi, dlxj, dlyj, dlzj);
-
-            inductance += dxdot / dist;
+            inductance += GL3_UNIT_WEIGHTS[iq] * (ax * dltgt.0 + ay * dltgt.1 + az * dltgt.2); // [H]
         }
     }
-
-    // Add self-inductance of individual filament segments
-    // if this is a self-inductance calc
-    if self_inductance {
-        inductance += 0.5 * total_length;
-    }
-
-    // Finally, do the shared constant factor
-    inductance *= MU0_OVER_4PI;
 
     Ok(inductance)
 }
@@ -172,6 +142,60 @@ pub fn flux_density_linear_filament_par(
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
             flux_density_linear_filament(
+                (xp, yp, zp),
+                xyzfil,
+                dlxyzfil,
+                ifil,
+                wire_radius,
+                (bx, by, bz),
+            )
+        })?;
+
+    Ok(())
+}
+
+/// Biot-Savart calculation for B-field contribution from many current filament
+/// segments to many observation points, returned as explicit target-source matrices.
+///
+/// Each output array is row-major with shape `(nobs, nfil)`, where each row corresponds
+/// to one observation point and each column corresponds to one source segment. The source
+/// currents are applied before writing the matrix entries, so summing each row recovers
+/// the contracted output from [`flux_density_linear_filament`].
+///
+/// # Arguments
+///
+/// * `xyzp`:     (m) Observation point coords, each length `nobs`
+/// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `nfil`
+/// * `dlxyzfil`: (m) Filament segment length deltas, each length `nfil`
+/// * `ifil`:     (A) Filament current, length `nfil`
+/// * `wire_radius`: (m) conductor radius, length `nfil`
+/// * `out`:      (T) row-major `(nobs, nfil)` Bx, By, Bz matrices
+pub fn flux_density_linear_filament_matrix_par(
+    xyzp: (&[f64], &[f64], &[f64]),
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    ifil: &[f64],
+    wire_radius: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let nfil = xyzfil.0.len();
+    let nobs = xyzp.0.len();
+    if nobs == 0 || nfil == 0 {
+        return flux_density_linear_filament_matrix(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, out);
+    }
+
+    let n = chunksize(nobs);
+    (
+        xyzp.0.par_chunks(n),
+        xyzp.1.par_chunks(n),
+        xyzp.2.par_chunks(n),
+        out.0.par_chunks_mut(n * nfil),
+        out.1.par_chunks_mut(n * nfil),
+        out.2.par_chunks_mut(n * nfil),
+    )
+        .into_par_iter()
+        .try_for_each(|(xp, yp, zp, bx, by, bz)| {
+            flux_density_linear_filament_matrix(
                 (xp, yp, zp),
                 xyzfil,
                 dlxyzfil,
@@ -254,6 +278,77 @@ pub fn flux_density_linear_filament(
             bx[j] += bxc;
             by[j] += byc;
             bz[j] += bzc;
+        }
+    }
+
+    Ok(())
+}
+
+/// Biot-Savart calculation for B-field contribution from many current filament
+/// segments to many observation points, returned as explicit target-source matrices.
+///
+/// Each output array is row-major with shape `(nobs, nfil)`, where each row corresponds
+/// to one observation point and each column corresponds to one source segment. The source
+/// currents are applied before writing the matrix entries, so summing each row recovers
+/// the contracted output from [`flux_density_linear_filament`].
+///
+/// # Arguments
+///
+/// * `xyzp`:     (m) Observation point coords, each length `nobs`
+/// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `nfil`
+/// * `dlxyzfil`: (m) Filament segment length deltas, each length `nfil`
+/// * `ifil`:     (A) Filament current, length `nfil`
+/// * `wire_radius`: (m) conductor radius, length `nfil`
+/// * `out`:      (T) row-major `(nobs, nfil)` Bx, By, Bz matrices
+pub fn flux_density_linear_filament_matrix(
+    xyzp: (&[f64], &[f64], &[f64]),
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    ifil: &[f64],
+    wire_radius: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let (xp, yp, zp) = xyzp;
+    let (xfil, yfil, zfil) = xyzfil;
+    let (dlxfil, dlyfil, dlzfil) = dlxyzfil;
+    let (bx, by, bz) = out;
+
+    let nfil = xfil.len();
+    let nobs = xp.len();
+    check_length!(nobs, xp, yp, zp);
+    check_length!(
+        nfil,
+        xfil,
+        yfil,
+        zfil,
+        dlxfil,
+        dlyfil,
+        dlzfil,
+        ifil,
+        wire_radius
+    );
+
+    let expected_len = nobs
+        .checked_mul(nfil)
+        .ok_or("Output size overflow in flux_density_linear_filament_matrix")?;
+    check_length!(expected_len, bx, by, bz);
+
+    bx.fill(0.0);
+    by.fill(0.0);
+    bz.fill(0.0);
+
+    for j in 0..nobs {
+        let obs = (xp[j], yp[j], zp[j]); // [m]
+        let row = j * nfil;
+        for i in 0..nfil {
+            let fil0 = (xfil[i], yfil[i], zfil[i]); // [m]
+            let fil1 = (fil0.0 + dlxfil[i], fil0.1 + dlyfil[i], fil0.2 + dlzfil[i]); // [m]
+            let current = ifil[i]; // [A]
+            let (bxc, byc, bzc) =
+                flux_density_linear_filament_scalar((fil0, fil1, current), wire_radius[i], obs);
+            bx[row + i] = bxc; // [T]
+            by[row + i] = byc; // [T]
+            bz[row + i] = bzc; // [T]
         }
     }
 
@@ -410,6 +505,67 @@ pub fn vector_potential_linear_filament_par(
 }
 
 /// Vector potential calculation for A-field contribution from many current filament
+/// segments to many observation points, returned as explicit target-source matrices.
+///
+/// Each output array is row-major with shape `(nobs, nfil)`, where each row corresponds
+/// to one observation point and each column corresponds to one source segment. The source
+/// currents are applied before writing the matrix entries, so summing each row recovers
+/// the contracted output from [`vector_potential_linear_filament`].
+///
+/// # Arguments
+///
+/// * `xyzp`:     (m) Observation point coords, each length `nobs`
+/// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `nfil`
+/// * `dlxyzfil`: (m) Filament segment length deltas, each length `nfil`
+/// * `ifil`:     (A) Filament current, length `nfil`
+/// * `wire_radius`: (m) conductor radius, length `nfil`
+/// * `out`:      (V-s/m) row-major `(nobs, nfil)` Ax, Ay, Az matrices
+pub fn vector_potential_linear_filament_matrix_par(
+    xyzp: (&[f64], &[f64], &[f64]),
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    ifil: &[f64],
+    wire_radius: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let nfil = xyzfil.0.len();
+    let nobs = xyzp.0.len();
+    if nobs == 0 || nfil == 0 {
+        return vector_potential_linear_filament_matrix(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            ifil,
+            wire_radius,
+            out,
+        );
+    }
+
+    let n = chunksize(nobs);
+    (
+        xyzp.0.par_chunks(n),
+        xyzp.1.par_chunks(n),
+        xyzp.2.par_chunks(n),
+        out.0.par_chunks_mut(n * nfil),
+        out.1.par_chunks_mut(n * nfil),
+        out.2.par_chunks_mut(n * nfil),
+    )
+        .into_par_iter()
+        .try_for_each(|(xp, yp, zp, ax, ay, az)| {
+            vector_potential_linear_filament_matrix(
+                (xp, yp, zp),
+                xyzfil,
+                dlxyzfil,
+                ifil,
+                wire_radius,
+                (ax, ay, az),
+            )
+        })?;
+
+    Ok(())
+}
+
+/// Vector potential calculation for A-field contribution from many current filament
 /// segments to many observation points.
 ///
 /// Uses filament midpoint as field source.
@@ -479,6 +635,77 @@ pub fn vector_potential_linear_filament(
             ax[j] += axc;
             ay[j] += ayc;
             az[j] += azc;
+        }
+    }
+
+    Ok(())
+}
+
+/// Vector potential calculation for A-field contribution from many current filament
+/// segments to many observation points, returned as explicit target-source matrices.
+///
+/// Each output array is row-major with shape `(nobs, nfil)`, where each row corresponds
+/// to one observation point and each column corresponds to one source segment. The source
+/// currents are applied before writing the matrix entries, so summing each row recovers
+/// the contracted output from [`vector_potential_linear_filament`].
+///
+/// # Arguments
+///
+/// * `xyzp`:     (m) Observation point coords, each length `nobs`
+/// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `nfil`
+/// * `dlxyzfil`: (m) Filament segment length deltas, each length `nfil`
+/// * `ifil`:     (A) Filament current, length `nfil`
+/// * `wire_radius`: (m) conductor radius, length `nfil`
+/// * `out`:      (V-s/m) row-major `(nobs, nfil)` Ax, Ay, Az matrices
+pub fn vector_potential_linear_filament_matrix(
+    xyzp: (&[f64], &[f64], &[f64]),
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    ifil: &[f64],
+    wire_radius: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let (xp, yp, zp) = xyzp;
+    let (xfil, yfil, zfil) = xyzfil;
+    let (dlxfil, dlyfil, dlzfil) = dlxyzfil;
+    let (ax, ay, az) = out;
+
+    let nfil = xfil.len();
+    let nobs = xp.len();
+    check_length!(nobs, xp, yp, zp);
+    check_length!(
+        nfil,
+        xfil,
+        yfil,
+        zfil,
+        dlxfil,
+        dlyfil,
+        dlzfil,
+        ifil,
+        wire_radius
+    );
+
+    let expected_len = nobs
+        .checked_mul(nfil)
+        .ok_or("Output size overflow in vector_potential_linear_filament_matrix")?;
+    check_length!(expected_len, ax, ay, az);
+
+    ax.fill(0.0);
+    ay.fill(0.0);
+    az.fill(0.0);
+
+    for j in 0..nobs {
+        let obs = (xp[j], yp[j], zp[j]); // [m]
+        let row = j * nfil;
+        for i in 0..nfil {
+            let fil0 = (xfil[i], yfil[i], zfil[i]); // [m]
+            let fil1 = (fil0.0 + dlxfil[i], fil0.1 + dlyfil[i], fil0.2 + dlzfil[i]); // [m]
+            let current = ifil[i]; // [A]
+            let (axc, ayc, azc) =
+                vector_potential_linear_filament_scalar((fil0, fil1, current), wire_radius[i], obs);
+            ax[row + i] = axc; // [V-s/m]
+            ay[row + i] = ayc; // [V-s/m]
+            az[row + i] = azc; // [V-s/m]
         }
     }
 
@@ -1835,28 +2062,23 @@ mod test {
         let dlzfil2: Vec<f64> = (0..=NFIL - 2).map(|i| zfil2[i + 1] - zfil2[i]).collect();
         let dlxyzfil2 = (&dlxfil2[..], &dlyfil2[..], &dlzfil2[..]);
 
-        let xmid2: Vec<f64> = xfil2
-            .iter()
-            .zip(dlxfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
-        let ymid2: Vec<f64> = yfil2
-            .iter()
-            .zip(dlyfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
-        let zmid2: Vec<f64> = zfil2
-            .iter()
-            .zip(dlzfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
+        let mut xquad2 = vec![0.0; 3 * (NFIL - 1)];
+        let mut yquad2 = vec![0.0; 3 * (NFIL - 1)];
+        let mut zquad2 = vec![0.0; 3 * (NFIL - 1)];
+        for i in 0..NFIL - 1 {
+            let row = 3 * i;
+            for (iq, tq) in GL3_UNIT_NODES.iter().enumerate() {
+                xquad2[row + iq] = dlxfil2[i].mul_add(*tq, xfil2[i]);
+                yquad2[row + iq] = dlyfil2[i].mul_add(*tq, yfil2[i]);
+                zquad2[row + iq] = dlzfil2[i].mul_add(*tq, zfil2[i]);
+            }
+        }
 
-        // Check against Neumann's formula for mutual inductance
-        let outx = &mut [0.0; NFIL - 1];
-        let outy = &mut [0.0; NFIL - 1];
-        let outz = &mut [0.0; NFIL - 1];
+        let outx = &mut [0.0; 3 * (NFIL - 1)];
+        let outy = &mut [0.0; 3 * (NFIL - 1)];
+        let outz = &mut [0.0; 3 * (NFIL - 1)];
         vector_potential_linear_filament(
-            (&xmid2, &ymid2, &zmid2),
+            (&xquad2, &yquad2, &zquad2),
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
             &[1.0],
@@ -1872,23 +2094,33 @@ mod test {
         // (We are stretching the applicability of Stokes' therorem because the filaments
         // are not closed loops).
         //
-        // Because inductance_piecewise_linear_filaments uses Neumann's formula, which is
-        // exactly equivalent to the point-source formulation of the vector potential,
-        // we expect a small amount of error to the finite-length segment formula here.
-        let a_dot_dl: Vec<f64> = (0..NFIL - 1)
-            .map(|i| outx[i] * dlxfil2[i] + outy[i] * dlyfil2[i] + outz[i] * dlzfil2[i])
-            .collect();
-        let m_from_a = a_dot_dl.iter().sum();
+        // This should match exactly because the inductance helper now uses the same
+        // 3-point Gauss-Legendre A·dl construction with a 1 A source current.
+        let m_from_a = (0..NFIL - 1)
+            .map(|i| {
+                let row = 3 * i;
+                (0..3)
+                    .map(|iq| {
+                        let idx = row + iq;
+                        GL3_UNIT_WEIGHTS[iq]
+                            * (outx[idx] * dlxfil2[i]
+                                + outy[idx] * dlyfil2[i]
+                                + outz[idx] * dlzfil2[i])
+                    })
+                    .sum::<f64>()
+            })
+            .sum::<f64>();
+        let wire_radius = [0.0];
         let m = inductance_piecewise_linear_filaments(
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
             xyzfil2,
             dlxyzfil2,
-            false,
+            &wire_radius,
         )
         .unwrap();
         assert!(
-            approx(m, m_from_a, 1e-2, 1e-15),
+            approx(m, m_from_a, 1e-12, 1e-15),
             "m = {:.3e}, m_from_a = {:.3e}",
             m,
             m_from_a
@@ -2104,6 +2336,176 @@ mod test {
             assert_eq!(out0[i], out3[i]);
             assert_eq!(out1[i], out4[i]);
             assert_eq!(out2[i], out5[i]);
+        }
+    }
+
+    #[test]
+    fn test_vector_potential_matrix_contracts_to_vector() {
+        const NFIL: usize = 6;
+        const NOBS: usize = 5;
+
+        let xfil: Vec<f64> = (0..=NFIL).map(|i| 0.2 * i as f64).collect();
+        let yfil: Vec<f64> = (0..=NFIL).map(|i| (0.3 * i as f64).sin()).collect();
+        let zfil: Vec<f64> = (0..=NFIL).map(|i| (0.2 * i as f64).cos()).collect();
+        let xyzfil = (&xfil[..NFIL], &yfil[..NFIL], &zfil[..NFIL]);
+        let dlxfil: Vec<f64> = (0..NFIL).map(|i| xfil[i + 1] - xfil[i]).collect();
+        let dlyfil: Vec<f64> = (0..NFIL).map(|i| yfil[i + 1] - yfil[i]).collect();
+        let dlzfil: Vec<f64> = (0..NFIL).map(|i| zfil[i + 1] - zfil[i]).collect();
+        let dlxyzfil = (&dlxfil[..], &dlyfil[..], &dlzfil[..]);
+        let ifil: Vec<f64> = (0..NFIL).map(|i| 0.5 + i as f64).collect();
+        let wire_radius: Vec<f64> = (0..NFIL).map(|i| 1e-3 * (1.0 + i as f64)).collect();
+
+        let xp: Vec<f64> = (0..NOBS).map(|i| 0.1 + 0.4 * i as f64).collect();
+        let yp: Vec<f64> = (0..NOBS).map(|i| -0.3 + 0.2 * i as f64).collect();
+        let zp: Vec<f64> = (0..NOBS).map(|i| 0.2 - 0.1 * i as f64).collect();
+        let xyzp = (&xp[..], &yp[..], &zp[..]);
+
+        let mut ax = vec![0.0; NOBS];
+        let mut ay = vec![0.0; NOBS];
+        let mut az = vec![0.0; NOBS];
+        vector_potential_linear_filament(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut ax, &mut ay, &mut az),
+        )
+        .unwrap();
+
+        let mut axm = vec![0.0; NOBS * NFIL];
+        let mut aym = vec![0.0; NOBS * NFIL];
+        let mut azm = vec![0.0; NOBS * NFIL];
+        let mut axmp = vec![0.0; NOBS * NFIL];
+        let mut aymp = vec![0.0; NOBS * NFIL];
+        let mut azmp = vec![0.0; NOBS * NFIL];
+        vector_potential_linear_filament_matrix(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut axm, &mut aym, &mut azm),
+        )
+        .unwrap();
+        vector_potential_linear_filament_matrix_par(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut axmp, &mut aymp, &mut azmp),
+        )
+        .unwrap();
+
+        assert_eq!(axm, axmp);
+        assert_eq!(aym, aymp);
+        assert_eq!(azm, azmp);
+        for j in 0..NOBS {
+            let row = j * NFIL;
+            assert!(approx(
+                ax[j],
+                axm[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+            assert!(approx(
+                ay[j],
+                aym[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+            assert!(approx(
+                az[j],
+                azm[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+        }
+    }
+
+    #[test]
+    fn test_flux_density_matrix_contracts_to_vector() {
+        const NFIL: usize = 6;
+        const NOBS: usize = 5;
+
+        let xfil: Vec<f64> = (0..=NFIL).map(|i| 0.2 * i as f64).collect();
+        let yfil: Vec<f64> = (0..=NFIL).map(|i| (0.3 * i as f64).sin()).collect();
+        let zfil: Vec<f64> = (0..=NFIL).map(|i| (0.2 * i as f64).cos()).collect();
+        let xyzfil = (&xfil[..NFIL], &yfil[..NFIL], &zfil[..NFIL]);
+        let dlxfil: Vec<f64> = (0..NFIL).map(|i| xfil[i + 1] - xfil[i]).collect();
+        let dlyfil: Vec<f64> = (0..NFIL).map(|i| yfil[i + 1] - yfil[i]).collect();
+        let dlzfil: Vec<f64> = (0..NFIL).map(|i| zfil[i + 1] - zfil[i]).collect();
+        let dlxyzfil = (&dlxfil[..], &dlyfil[..], &dlzfil[..]);
+        let ifil: Vec<f64> = (0..NFIL).map(|i| 0.5 + i as f64).collect();
+        let wire_radius: Vec<f64> = (0..NFIL).map(|i| 1e-3 * (1.0 + i as f64)).collect();
+
+        let xp: Vec<f64> = (0..NOBS).map(|i| 0.1 + 0.4 * i as f64).collect();
+        let yp: Vec<f64> = (0..NOBS).map(|i| -0.3 + 0.2 * i as f64).collect();
+        let zp: Vec<f64> = (0..NOBS).map(|i| 0.2 - 0.1 * i as f64).collect();
+        let xyzp = (&xp[..], &yp[..], &zp[..]);
+
+        let mut bx = vec![0.0; NOBS];
+        let mut by = vec![0.0; NOBS];
+        let mut bz = vec![0.0; NOBS];
+        flux_density_linear_filament(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut bx, &mut by, &mut bz),
+        )
+        .unwrap();
+
+        let mut bxm = vec![0.0; NOBS * NFIL];
+        let mut bym = vec![0.0; NOBS * NFIL];
+        let mut bzm = vec![0.0; NOBS * NFIL];
+        let mut bxmp = vec![0.0; NOBS * NFIL];
+        let mut bymp = vec![0.0; NOBS * NFIL];
+        let mut bzmp = vec![0.0; NOBS * NFIL];
+        flux_density_linear_filament_matrix(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut bxm, &mut bym, &mut bzm),
+        )
+        .unwrap();
+        flux_density_linear_filament_matrix_par(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut bxmp, &mut bymp, &mut bzmp),
+        )
+        .unwrap();
+
+        assert_eq!(bxm, bxmp);
+        assert_eq!(bym, bymp);
+        assert_eq!(bzm, bzmp);
+        for j in 0..NOBS {
+            let row = j * NFIL;
+            assert!(approx(
+                bx[j],
+                bxm[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+            assert!(approx(
+                by[j],
+                bym[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+            assert!(approx(
+                bz[j],
+                bzm[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
         }
     }
 }

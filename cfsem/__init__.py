@@ -71,37 +71,29 @@ __all__ = [
 ]
 
 
-def self_inductance_piecewise_linear_filaments(xyzp: Array3xN) -> float:
+def self_inductance_piecewise_linear_filaments(
+    xyzp: Array3xN,
+    wire_radius: float | NDArray = 0.0,
+) -> float:
     """
     Estimate the self-inductance of one piecewise-linear current filament.
 
-    Uses Neumann's Formula for the mutual inductance of arbitrary loops
-    for non-self-pairings, zeroes-out the contributions from self-pairings
-    to resolve the thin-filament self-inductance singularity, and replaces the
-    segment self-inductance term with an analytic value from [3].
+    Uses the vector-potential line-integral form
+    $L = \\oint \\vec{A} \\cdot d\\vec{l}$ with the existing finite-radius
+    linear-filament vector-potential kernel.
 
     Assumes:
 
     * Thin, well-behaved filaments
     * Uniform current distribution within segments
         * Low frequency operation; no skin effect
-          (which would reduce the segment self-field term)
     * Vacuum permeability everywhere
     * Each filament has a constant current in all segments
-      (otherwise we need an inductance matrix)
-
-    References:
-        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
-            Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
-
-        [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-            Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
-
-        [3] R. Dengler, “Self inductance of a wire loop as a curve integral,”
-            AEM, vol. 5, no. 1, p. 1, Jan. 2016, doi: [10.7716/aem.v5i1.331](https://doi.org/10.7716/aem.v5i1.331)
+      (otherwise we need an interaction matrix)
 
     Args:
         xyzp: [m] 3xN point series describing the filament
+        wire_radius: [m] filament radius, scalar or array of length `N-1`
 
     Returns:
         [H] Scalar self-inductance
@@ -117,7 +109,7 @@ def self_inductance_piecewise_linear_filaments(xyzp: Array3xN) -> float:
         dlxyzfil,  # type: ignore
         xyzfil,  # type: ignore
         dlxyzfil,  # type: ignore
-        True,
+        wire_radius=wire_radius,
     )
 
     return self_inductance  # [H]
@@ -126,31 +118,27 @@ def self_inductance_piecewise_linear_filaments(xyzp: Array3xN) -> float:
 def mutual_inductance_piecewise_linear_filaments(
     xyz0: Array3xN,
     xyz1: Array3xN,
+    wire_radius: float | NDArray = 0.0,
 ) -> float:
     """
     Estimate the mutual inductance between two piecewise-linear current filaments.
 
-    Uses Neumann's Formula for the mutual inductance of arbitrary loops, which is
-    originally from [2] and can be found in a more friendly format on wikipedia.
+    Uses the vector-potential line-integral form
+    $M = \\oint \\vec{A}_{source} \\cdot d\\vec{l}_{target}$ with the finite-radius
+    linear-filament vector-potential kernel.
 
     Assumes:
 
     * Thin, well-behaved filaments
     * Vacuum permeability everywhere
     * Each filament has a constant current in all segments
-      (otherwise we need an inductance matrix)
+      (otherwise we need an interaction matrix)
     * All segments between the two filaments are distinct; no identical pairs
-
-    References:
-        [1] “Inductance,” Wikipedia. Dec. 12, 2022. Accessed: Jan. 23, 2023. [Online].
-            Available: <https://en.wikipedia.org/w/index.php?title=Inductance>
-
-        [2] F. E. Neumann, “Allgemeine Gesetze der inducirten elektrischen Ströme,”
-            Jan. 1846, doi: [10.1002/andp.18461430103](https://doi.org/10.1002/andp.18461430103)
 
     Args:
         xyz0: [m] 3xN point series describing the first filament
         xyz1: [m] 3xM point series describing the second filament
+        wire_radius: [m] source filament radius for `xyz0`, scalar or array of length `N-1`
 
     Returns:
         [H] Scalar mutual inductance between the two filaments
@@ -170,7 +158,7 @@ def mutual_inductance_piecewise_linear_filaments(
         dlxyzfil0,  # type: ignore
         xyzfil1,  # type: ignore
         dlxyzfil1,  # type: ignore
-        False,
+        wire_radius=wire_radius,
     )
 
     return inductance  # [H]

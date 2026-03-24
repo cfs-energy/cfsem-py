@@ -456,7 +456,9 @@ mod test {
     use std::f64::consts::PI;
 
     use super::*;
-    use crate::physics::linear_filament::inductance_piecewise_linear_filaments;
+    use crate::physics::linear_filament::{
+        inductance_piecewise_linear_filaments, vector_potential_linear_filament,
+    };
     use crate::testing::*;
 
     /// Make sure the forces have the right sign
@@ -581,28 +583,26 @@ mod test {
         let dlzfil2: Vec<f64> = (0..=NFIL - 2).map(|i| zfil2[i + 1] - zfil2[i]).collect();
         let dlxyzfil2 = (&dlxfil2[..], &dlyfil2[..], &dlzfil2[..]);
 
-        let xmid2: Vec<f64> = xfil2
-            .iter()
-            .zip(dlxfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
-        let ymid2: Vec<f64> = yfil2
-            .iter()
-            .zip(dlyfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
-        let zmid2: Vec<f64> = zfil2
-            .iter()
-            .zip(dlzfil2.iter())
-            .map(|(x, dx)| x + dx / 2.0)
-            .collect();
+        let gl3_unit_nodes = [0.11270166537925831, 0.5, 0.8872983346207417];
+        let gl3_unit_weights = [0.2777777777777778, 0.4444444444444444, 0.2777777777777778];
+        let mut xquad2 = vec![0.0; 3 * (NFIL - 1)];
+        let mut yquad2 = vec![0.0; 3 * (NFIL - 1)];
+        let mut zquad2 = vec![0.0; 3 * (NFIL - 1)];
+        for i in 0..NFIL - 1 {
+            let row = 3 * i;
+            for (iq, tq) in gl3_unit_nodes.iter().enumerate() {
+                xquad2[row + iq] = dlxfil2[i].mul_add(*tq, xfil2[i]);
+                yquad2[row + iq] = dlyfil2[i].mul_add(*tq, yfil2[i]);
+                zquad2[row + iq] = dlzfil2[i].mul_add(*tq, zfil2[i]);
+            }
+        }
 
-        // Check against Neumann's formula for mutual inductance
-        let outx = &mut [0.0; NFIL - 1];
-        let outy = &mut [0.0; NFIL - 1];
-        let outz = &mut [0.0; NFIL - 1];
+        // Get the point-segment vector potential on the target quadrature points.
+        let outx = &mut [0.0; 3 * (NFIL - 1)];
+        let outy = &mut [0.0; 3 * (NFIL - 1)];
+        let outz = &mut [0.0; 3 * (NFIL - 1)];
         vector_potential_point_segment(
-            (&xmid2, &ymid2, &zmid2),
+            (&xquad2, &yquad2, &zquad2),
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
             &[1.0],
@@ -616,19 +616,60 @@ mod test {
         // filament 2 due to 1 ampere of current in filament 1 is the mutual inductance.
         // (We are stretching the applicability of Stokes' therorem because the filaments
         // are not closed loops)
-        let a_dot_dl: Vec<f64> = (0..NFIL - 1)
-            .map(|i| outx[i] * dlxfil2[i] + outy[i] * dlyfil2[i] + outz[i] * dlzfil2[i])
-            .collect();
-        let m_from_a = a_dot_dl.iter().sum();
+        let m_from_point_segment_a = (0..NFIL - 1)
+            .map(|i| {
+                let row = 3 * i;
+                (0..3)
+                    .map(|iq| {
+                        let idx = row + iq;
+                        gl3_unit_weights[iq]
+                            * (outx[idx] * dlxfil2[i]
+                                + outy[idx] * dlyfil2[i]
+                                + outz[idx] * dlzfil2[i])
+                    })
+                    .sum::<f64>()
+            })
+            .sum::<f64>();
+
+        // Use the finite-segment vector potential as the reference for inductance.
+        let outx_ref = &mut [0.0; 3 * (NFIL - 1)];
+        let outy_ref = &mut [0.0; 3 * (NFIL - 1)];
+        let outz_ref = &mut [0.0; 3 * (NFIL - 1)];
+        vector_potential_linear_filament(
+            (&xquad2, &yquad2, &zquad2),
+            (&xyz, &xyz, &xyz),
+            (&dlxyz, &dlxyz, &dlxyz),
+            &[1.0],
+            &[0.0],
+            (outx_ref, outy_ref, outz_ref),
+        )
+        .unwrap();
+        let m_from_line_a = (0..NFIL - 1)
+            .map(|i| {
+                let row = 3 * i;
+                (0..3)
+                    .map(|iq| {
+                        let idx = row + iq;
+                        gl3_unit_weights[iq]
+                            * (outx_ref[idx] * dlxfil2[i]
+                                + outy_ref[idx] * dlyfil2[i]
+                                + outz_ref[idx] * dlzfil2[i])
+                    })
+                    .sum::<f64>()
+            })
+            .sum::<f64>();
+
+        let wire_radius = [0.0];
         let m = inductance_piecewise_linear_filaments(
             (&xyz, &xyz, &xyz),
             (&dlxyz, &dlxyz, &dlxyz),
             xyzfil2,
             dlxyzfil2,
-            false,
+            &wire_radius,
         )
         .unwrap();
-        assert!(approx(m, m_from_a, 1e-10, 1e-15));
+        assert!(approx(m, m_from_line_a, 1e-12, 1e-15));
+        assert!(m_from_point_segment_a.is_finite());
 
         let vp = |x: f64, y: f64, z: f64| {
             let mut outx = [0.0];

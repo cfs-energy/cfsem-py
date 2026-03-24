@@ -1,6 +1,26 @@
 # Changelog
 
-## 4.0.1 2025-03-12
+## 5.0.0 2026-03-24
+
+### Added
+
+* Add interaction matrix output options for linear filament A-field and B-field
+* Add discretization sensitivity check to linear filament self inductance test against Lyle's calc
+* Add `loop_inductance.py` example comparing different methods of calculating the self-inductance of a loop
+
+### Changed
+
+* !Remove `point_segment::self_inductance_piecewise_linear_filaments`
+    * This formula diverges slowly under increasing discretization due to 1/r singularity
+* !Update `linear_filament::inductance_piecewise_linear_filaments` to use vector potential integral method
+    * !Remove `self_inductance` flag which is no longer needed
+    * !Add `wire_radius` input
+    * Use finite-length, finite-radius vector potential method, which allows direct evaluation of self-field
+    * Use 3-point quadrature for target integration to reduce error in coupling with long segments
+* Update python API for linear filament A and B with defaults that set output shape to vector by default
+    * Preserves default behavior -> not breaking for python API
+
+## 4.0.1 2026-03-12
 
 ### Changed
 
@@ -10,7 +30,7 @@
 * Update build_docs script
 * Add lengthwise discretization slider to field explorer example
 
-## 4.0.0 2025-03-03
+## 4.0.0 2026-03-03
 
 ### Added
 

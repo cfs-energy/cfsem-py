@@ -2,11 +2,7 @@
 
 use core::f64::consts::{E, PI};
 
-use num_traits::{Float, NumCast};
-
 use itertools::{self, Itertools};
-
-use crate::mesh::MeshEdgeList;
 
 /// Divide-by-zero-resistant approximate comparison
 pub(crate) fn approx(truth: f64, val: f64, rtol: f64, atol: f64) -> bool {
@@ -127,30 +123,6 @@ pub(crate) fn midpoints(x: &[f64]) -> Vec<f64> {
         .zip(x[1..].iter())
         .map(|(this, next)| (this + next) / 2.0)
         .collect()
-}
-
-/// The example_helix filaments in mesh format
-pub(crate) fn example_mesh<T>() -> MeshEdgeList<T>
-where
-    T: Float + Send + Sync,
-{
-    let (x, y, z) = example_helix();
-    let mut nodes: Vec<(T, T, T)> = Vec::with_capacity(x.len());
-    let mut edges: Vec<(usize, usize)> = Vec::with_capacity(x.len() - 1);
-
-    for i in 0..x.len() {
-        nodes.push((
-            NumCast::from(x[i]).unwrap(),
-            NumCast::from(y[i]).unwrap(),
-            NumCast::from(z[i]).unwrap(),
-        ));
-    }
-
-    for i in 0..x.len() - 1 {
-        edges.push((i, i + 1));
-    }
-
-    MeshEdgeList::new(nodes, edges).unwrap()
 }
 
 #[cfg(test)]

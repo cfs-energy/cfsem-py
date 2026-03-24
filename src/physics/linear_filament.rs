@@ -16,9 +16,11 @@ use crate::{MU0_OVER_4PI, macros::*};
 const MIN_WIRE_THICKNESS: f64 = 1e-10;
 
 /// 3-point Gauss-Legendre nodes on the unit interval [0, 1].
+/// https://en.wikipedia.org/wiki/Gaussian_quadrature
 const GL3_UNIT_NODES: [f64; 3] = [0.11270166537925831, 0.5, 0.8872983346207417];
 
 /// 3-point Gauss-Legendre weights on the unit interval [0, 1].
+/// https://en.wikipedia.org/wiki/Gaussian_quadrature
 const GL3_UNIT_WEIGHTS: [f64; 3] = [0.2777777777777778, 0.4444444444444444, 0.2777777777777778];
 
 /// Estimate the inductive coupling between two piecewise-linear current filaments.

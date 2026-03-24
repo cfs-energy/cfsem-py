@@ -14,6 +14,7 @@
     * !Remove `self_inductance` flag which is no longer needed
     * !Add `wire_radius` input
     * Use finite-length, finite-radius vector potential method, which allows direct evaluation of self-field
+    * Use 3-point quadrature for target integration to reduce error in coupling with long segments
 * Update python API for linear filament A and B with defaults that set output shape to vector by default
     * Preserves default behavior -> not breaking for python API
 

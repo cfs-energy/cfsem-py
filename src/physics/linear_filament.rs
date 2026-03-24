@@ -72,45 +72,39 @@ pub fn inductance_piecewise_linear_filaments(
     let m = xfil1.len();
     check_length!(m, xfil1, yfil1, zfil1, dlxfil1, dlyfil1, dlzfil1);
 
-    let nquad = 3 * m;
-    let mut xquad = vec![0.0; nquad]; // [m]
-    let mut yquad = vec![0.0; nquad]; // [m]
-    let mut zquad = vec![0.0; nquad]; // [m]
+    let (xfil0, yfil0, zfil0) = xyzfil0;
+    let (dlxfil0, dlyfil0, dlzfil0) = dlxyzfil0;
+    let mut inductance = 0.0; // [H]
+
     for j in 0..m {
-        let row = 3 * j;
+        let dltgt = (dlxfil1[j], dlyfil1[j], dlzfil1[j]); // [m]
         for (iq, tq) in GL3_UNIT_NODES.iter().enumerate() {
-            xquad[row + iq] = dlxfil1[j].mul_add(*tq, xfil1[j]); // [m]
-            yquad[row + iq] = dlyfil1[j].mul_add(*tq, yfil1[j]); // [m]
-            zquad[row + iq] = dlzfil1[j].mul_add(*tq, zfil1[j]); // [m]
+            let obs = (
+                dltgt.0.mul_add(*tq, xfil1[j]), // [m]
+                dltgt.1.mul_add(*tq, yfil1[j]), // [m]
+                dltgt.2.mul_add(*tq, zfil1[j]), // [m]
+            );
+            let mut ax = 0.0; // [V-s/m]
+            let mut ay = 0.0; // [V-s/m]
+            let mut az = 0.0; // [V-s/m]
+
+            for i in 0..n {
+                let fil0 = (xfil0[i], yfil0[i], zfil0[i]); // [m]
+                let fil1 = (
+                    fil0.0 + dlxfil0[i],
+                    fil0.1 + dlyfil0[i],
+                    fil0.2 + dlzfil0[i],
+                ); // [m]
+                let (axc, ayc, azc) =
+                    vector_potential_linear_filament_scalar((fil0, fil1, 1.0), wire_radius[i], obs);
+                ax += axc; // [V-s/m]
+                ay += ayc; // [V-s/m]
+                az += azc; // [V-s/m]
+            }
+
+            inductance += GL3_UNIT_WEIGHTS[iq] * (ax * dltgt.0 + ay * dltgt.1 + az * dltgt.2); // [H]
         }
     }
-
-    let ifil0 = vec![1.0; n]; // [A]
-    let mut ax = vec![0.0; nquad]; // [V-s/m]
-    let mut ay = vec![0.0; nquad]; // [V-s/m]
-    let mut az = vec![0.0; nquad]; // [V-s/m]
-    vector_potential_linear_filament(
-        (&xquad, &yquad, &zquad),
-        xyzfil0,
-        dlxyzfil0,
-        &ifil0,
-        wire_radius,
-        (&mut ax, &mut ay, &mut az),
-    )?;
-
-    let inductance = (0..m)
-        .map(|j| {
-            let row = 3 * j;
-            let a_dot_dl = (0..3)
-                .map(|iq| {
-                    let idx = row + iq;
-                    GL3_UNIT_WEIGHTS[iq]
-                        * (ax[idx] * dlxfil1[j] + ay[idx] * dlyfil1[j] + az[idx] * dlzfil1[j])
-                })
-                .sum::<f64>();
-            a_dot_dl
-        })
-        .sum(); // [H]
 
     Ok(inductance)
 }

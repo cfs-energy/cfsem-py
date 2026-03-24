@@ -27,6 +27,9 @@ from .cfsem import (
 from .cfsem import flux_density_dipole as em_flux_density_dipole
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
+from .cfsem import (
+    flux_density_linear_filament_matrix as em_flux_density_linear_filament_matrix,
+)
 from .cfsem import flux_density_point_segment as em_flux_density_point_segment
 from .cfsem import gs_operator_order2 as em_gs_operator_order2
 from .cfsem import gs_operator_order4 as em_gs_operator_order4
@@ -187,7 +190,8 @@ def flux_density_linear_filament(
     ifil: NDArray[float64],
     wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
-) -> Array3xN:
+    output: Literal["vector", "matrix"] = "vector",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Biot-Savart law calculation for B-field contributions from many filament segments
     to many observation points.
@@ -199,9 +203,12 @@ def flux_density_linear_filament(
         ifil: [A] current in each filament segment
         wire_radius: [m] filament radius, scalar or array of length `m`
         par: Whether to use CPU parallelism
+        output: `"vector"` for contracted field values at each target point,
+            or `"matrix"` for row-major `(nobs, nfil)` source-target interaction matrices
 
     Returns:
-        [T] (Bx, By, Bz) magnetic flux density at observation points
+        [T] (Bx, By, Bz) magnetic flux density at observation points,
+        or explicit `(nobs, nfil)` interaction matrices if `output="matrix"`
     """
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
@@ -210,7 +217,18 @@ def flux_density_linear_filament(
     if asarray(wire_radius).ndim == 0:
         wire_radius = full(ifil.size, float(wire_radius))
     wire_radius = ascontiguousarray(wire_radius).ravel()
-    return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
+    if output == "vector":
+        return em_flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
+    if output == "matrix":
+        bx, by, bz = em_flux_density_linear_filament_matrix(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par)
+        nobs = xyzp[0].size
+        nfil = ifil.size
+        return (
+            bx.reshape((nobs, nfil)),
+            by.reshape((nobs, nfil)),
+            bz.reshape((nobs, nfil)),
+        )
+    raise ValueError("output must be 'vector' or 'matrix'")
 
 
 def flux_density_point_segment(

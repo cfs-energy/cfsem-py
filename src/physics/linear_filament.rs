@@ -134,6 +134,58 @@ pub fn flux_density_linear_filament_par(
 }
 
 /// Biot-Savart calculation for B-field contribution from many current filament
+/// segments to many observation points, returned as explicit target-source matrices.
+///
+/// Each output array is row-major with shape `(nobs, nfil)`, where each row corresponds
+/// to one observation point and each column corresponds to one source segment. The source
+/// currents are applied before writing the matrix entries, so summing each row recovers
+/// the contracted output from [`flux_density_linear_filament`].
+///
+/// # Arguments
+///
+/// * `xyzp`:     (m) Observation point coords, each length `nobs`
+/// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `nfil`
+/// * `dlxyzfil`: (m) Filament segment length deltas, each length `nfil`
+/// * `ifil`:     (A) Filament current, length `nfil`
+/// * `wire_radius`: (m) conductor radius, length `nfil`
+/// * `out`:      (T) row-major `(nobs, nfil)` Bx, By, Bz matrices
+pub fn flux_density_linear_filament_matrix_par(
+    xyzp: (&[f64], &[f64], &[f64]),
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    ifil: &[f64],
+    wire_radius: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let nfil = xyzfil.0.len();
+    let nobs = xyzp.0.len();
+    if nobs == 0 || nfil == 0 {
+        return flux_density_linear_filament_matrix(xyzp, xyzfil, dlxyzfil, ifil, wire_radius, out);
+    }
+
+    let n = chunksize(nobs);
+    xyzp.0
+        .par_chunks(n)
+        .zip(xyzp.1.par_chunks(n))
+        .zip(xyzp.2.par_chunks(n))
+        .zip(out.0.par_chunks_mut(n * nfil))
+        .zip(out.1.par_chunks_mut(n * nfil))
+        .zip(out.2.par_chunks_mut(n * nfil))
+        .try_for_each(|(((((xp, yp), zp), bx), by), bz)| {
+            flux_density_linear_filament_matrix(
+                (xp, yp, zp),
+                xyzfil,
+                dlxyzfil,
+                ifil,
+                wire_radius,
+                (bx, by, bz),
+            )
+        })?;
+
+    Ok(())
+}
+
+/// Biot-Savart calculation for B-field contribution from many current filament
 /// segments to many observation points.
 ///
 /// Uses filament midpoint as field source.
@@ -203,6 +255,77 @@ pub fn flux_density_linear_filament(
             bx[j] += bxc;
             by[j] += byc;
             bz[j] += bzc;
+        }
+    }
+
+    Ok(())
+}
+
+/// Biot-Savart calculation for B-field contribution from many current filament
+/// segments to many observation points, returned as explicit target-source matrices.
+///
+/// Each output array is row-major with shape `(nobs, nfil)`, where each row corresponds
+/// to one observation point and each column corresponds to one source segment. The source
+/// currents are applied before writing the matrix entries, so summing each row recovers
+/// the contracted output from [`flux_density_linear_filament`].
+///
+/// # Arguments
+///
+/// * `xyzp`:     (m) Observation point coords, each length `nobs`
+/// * `xyzfil`:   (m) Filament origin coords (start of segment), each length `nfil`
+/// * `dlxyzfil`: (m) Filament segment length deltas, each length `nfil`
+/// * `ifil`:     (A) Filament current, length `nfil`
+/// * `wire_radius`: (m) conductor radius, length `nfil`
+/// * `out`:      (T) row-major `(nobs, nfil)` Bx, By, Bz matrices
+pub fn flux_density_linear_filament_matrix(
+    xyzp: (&[f64], &[f64], &[f64]),
+    xyzfil: (&[f64], &[f64], &[f64]),
+    dlxyzfil: (&[f64], &[f64], &[f64]),
+    ifil: &[f64],
+    wire_radius: &[f64],
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let (xp, yp, zp) = xyzp;
+    let (xfil, yfil, zfil) = xyzfil;
+    let (dlxfil, dlyfil, dlzfil) = dlxyzfil;
+    let (bx, by, bz) = out;
+
+    let nfil = xfil.len();
+    let nobs = xp.len();
+    check_length!(nobs, xp, yp, zp);
+    check_length!(
+        nfil,
+        xfil,
+        yfil,
+        zfil,
+        dlxfil,
+        dlyfil,
+        dlzfil,
+        ifil,
+        wire_radius
+    );
+
+    let expected_len = nobs
+        .checked_mul(nfil)
+        .ok_or("Output size overflow in flux_density_linear_filament_matrix")?;
+    check_length!(expected_len, bx, by, bz);
+
+    bx.fill(0.0);
+    by.fill(0.0);
+    bz.fill(0.0);
+
+    for j in 0..nobs {
+        let obs = (xp[j], yp[j], zp[j]); // [m]
+        let row = j * nfil;
+        for i in 0..nfil {
+            let fil0 = (xfil[i], yfil[i], zfil[i]); // [m]
+            let fil1 = (fil0.0 + dlxfil[i], fil0.1 + dlyfil[i], fil0.2 + dlzfil[i]); // [m]
+            let current = ifil[i]; // [A]
+            let (bxc, byc, bzc) =
+                flux_density_linear_filament_scalar((fil0, fil1, current), wire_radius[i], obs);
+            bx[row + i] = bxc; // [T]
+            by[row + i] = byc; // [T]
+            bz[row + i] = bzc; // [T]
         }
     }
 
@@ -2265,6 +2388,91 @@ mod test {
             assert!(approx(
                 az[j],
                 azm[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+        }
+    }
+
+    #[test]
+    fn test_flux_density_matrix_contracts_to_vector() {
+        const NFIL: usize = 6;
+        const NOBS: usize = 5;
+
+        let xfil: Vec<f64> = (0..=NFIL).map(|i| 0.2 * i as f64).collect();
+        let yfil: Vec<f64> = (0..=NFIL).map(|i| (0.3 * i as f64).sin()).collect();
+        let zfil: Vec<f64> = (0..=NFIL).map(|i| (0.2 * i as f64).cos()).collect();
+        let xyzfil = (&xfil[..NFIL], &yfil[..NFIL], &zfil[..NFIL]);
+        let dlxfil: Vec<f64> = (0..NFIL).map(|i| xfil[i + 1] - xfil[i]).collect();
+        let dlyfil: Vec<f64> = (0..NFIL).map(|i| yfil[i + 1] - yfil[i]).collect();
+        let dlzfil: Vec<f64> = (0..NFIL).map(|i| zfil[i + 1] - zfil[i]).collect();
+        let dlxyzfil = (&dlxfil[..], &dlyfil[..], &dlzfil[..]);
+        let ifil: Vec<f64> = (0..NFIL).map(|i| 0.5 + i as f64).collect();
+        let wire_radius: Vec<f64> = (0..NFIL).map(|i| 1e-3 * (1.0 + i as f64)).collect();
+
+        let xp: Vec<f64> = (0..NOBS).map(|i| 0.1 + 0.4 * i as f64).collect();
+        let yp: Vec<f64> = (0..NOBS).map(|i| -0.3 + 0.2 * i as f64).collect();
+        let zp: Vec<f64> = (0..NOBS).map(|i| 0.2 - 0.1 * i as f64).collect();
+        let xyzp = (&xp[..], &yp[..], &zp[..]);
+
+        let mut bx = vec![0.0; NOBS];
+        let mut by = vec![0.0; NOBS];
+        let mut bz = vec![0.0; NOBS];
+        flux_density_linear_filament(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut bx, &mut by, &mut bz),
+        )
+        .unwrap();
+
+        let mut bxm = vec![0.0; NOBS * NFIL];
+        let mut bym = vec![0.0; NOBS * NFIL];
+        let mut bzm = vec![0.0; NOBS * NFIL];
+        let mut bxmp = vec![0.0; NOBS * NFIL];
+        let mut bymp = vec![0.0; NOBS * NFIL];
+        let mut bzmp = vec![0.0; NOBS * NFIL];
+        flux_density_linear_filament_matrix(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut bxm, &mut bym, &mut bzm),
+        )
+        .unwrap();
+        flux_density_linear_filament_matrix_par(
+            xyzp,
+            xyzfil,
+            dlxyzfil,
+            &ifil,
+            &wire_radius,
+            (&mut bxmp, &mut bymp, &mut bzmp),
+        )
+        .unwrap();
+
+        assert_eq!(bxm, bxmp);
+        assert_eq!(bym, bymp);
+        assert_eq!(bzm, bzmp);
+        for j in 0..NOBS {
+            let row = j * NFIL;
+            assert!(approx(
+                bx[j],
+                bxm[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+            assert!(approx(
+                by[j],
+                bym[row..row + NFIL].iter().sum(),
+                1e-12,
+                1e-15
+            ));
+            assert!(approx(
+                bz[j],
+                bzm[row..row + NFIL].iter().sum(),
                 1e-12,
                 1e-15
             ));

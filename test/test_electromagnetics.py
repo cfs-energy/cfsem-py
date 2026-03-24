@@ -907,6 +907,56 @@ def test_vector_potential_linear_invalid_output_mode():
         )
 
 
+@mark.parametrize("par", [True, False])
+def test_flux_density_linear_matrix_contracts_to_vector(par):
+    major_radius = 0.5  # [m]
+    minor_radius = 5e-3  # [m]
+    ndiscr = 128
+
+    phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
+    x = major_radius * np.cos(phi)
+    y = major_radius * np.sin(phi)
+    z = np.zeros_like(x)
+
+    dx = x[1:] - x[:-1]
+    dy = y[1:] - y[:-1]
+    dz = z[1:] - z[:-1]
+    xyzfil = (x[:-1], y[:-1], z[:-1])
+    dlxyzfil = (dx, dy, dz)
+    xyzobs = (
+        np.array([0.1, 0.2, -0.3]),
+        np.array([0.2, -0.1, 0.4]),
+        np.array([0.0, 0.3, -0.2]),
+    )
+    ifil = np.ones_like(dx)
+
+    bx, by, bz = cfsem.flux_density_linear_filament(
+        xyzobs, xyzfil, dlxyzfil, ifil, wire_radius=minor_radius, par=par, output="vector"
+    )
+    bxm, bym, bzm = cfsem.flux_density_linear_filament(
+        xyzobs, xyzfil, dlxyzfil, ifil, wire_radius=minor_radius, par=par, output="matrix"
+    )
+
+    assert bxm.shape == (xyzobs[0].size, dx.size)
+    assert bym.shape == (xyzobs[0].size, dx.size)
+    assert bzm.shape == (xyzobs[0].size, dx.size)
+    assert np.allclose(bx, np.sum(bxm, axis=1), rtol=1e-12, atol=1e-12)
+    assert np.allclose(by, np.sum(bym, axis=1), rtol=1e-12, atol=1e-12)
+    assert np.allclose(bz, np.sum(bzm, axis=1), rtol=1e-12, atol=1e-12)
+
+
+def test_flux_density_linear_invalid_output_mode():
+    xyzp = (np.array([0.1]), np.array([0.2]), np.array([0.3]))
+    xyzfil = (np.array([0.0]), np.array([0.0]), np.array([0.0]))
+    dlxyzfil = (np.array([1.0]), np.array([0.0]), np.array([0.0]))
+    ifil = np.array([1.0])
+
+    with raises(ValueError, match="output must be 'vector' or 'matrix'"):
+        cfsem.flux_density_linear_filament(
+            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=0.0, output="bad"
+        )
+
+
 def test_inductance_matrix_axisymmetric_coaxial_rectangular_coils():
     
     # Create set of four non-overlapping coaxial rectangular coils and prescribed turn density

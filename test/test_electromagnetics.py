@@ -1044,6 +1044,16 @@ def test_inductance_linear_filaments_matrix_contracts_to_vector(par):
     assert np.all(np.isfinite(m_vec_scalar))
     assert np.all(np.isfinite(m_mat_scalar))
 
+    with raises(ValueError, match="output must be 'vector' or 'matrix'"):
+        cfsem.inductance_linear_filaments(
+            xyzfil_tgt,
+            dlxyzfil_tgt,
+            xyzfil_src,
+            dlxyzfil_src,
+            wire_radius_src=2e-3,
+            output="bad",
+        )
+
 
 @mark.parametrize("ndiscr", [128, 200])
 @mark.parametrize("par", [True, False])

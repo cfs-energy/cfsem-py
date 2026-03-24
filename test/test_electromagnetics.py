@@ -845,6 +845,27 @@ def test_vector_potential_linear_self_inductance_against_wien(par):
     assert rel_fine_delta < 5e-3, f"rel_fine_delta={rel_fine_delta:.6e}, Lvals={lvals}"
 
 
+@mark.parametrize("r", [0.5, np.pi])
+@mark.parametrize("a", [1e-3, 1e-2, 2e-2])
+@mark.parametrize("n", [400, int(1e3)])
+def test_linear_filament_self_inductance_against_wien(r, a, n):
+    major_radius = r  # [m]
+    minor_radius = a  # [m]
+    ndiscr = n
+
+    phi = np.linspace(0.0, 2.0 * np.pi, ndiscr, endpoint=True)
+    x = major_radius * np.cos(phi)
+    y = major_radius * np.sin(phi)
+    z = np.zeros_like(x)
+
+    l_self = float(
+        cfsem.self_inductance_piecewise_linear_filaments((x, y, z), wire_radius=minor_radius)
+    )
+    l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))
+
+    assert l_self == approx(l_wien, rel=8e-2)
+
+
 @mark.parametrize("par", [True, False])
 def test_vector_potential_linear_matrix_contracts_to_vector_and_inductance(par):
     major_radius = 0.5  # [m]

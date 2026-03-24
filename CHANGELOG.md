@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.1.0 2026-03-24
+
+### Added
+
+* Add `inductance_linear_filaments,_par` and `inductance_linear_filaments_matrix,_par` inductance functions with disjoint-filament APIs matching the ones used for B-field and A-field. 
+
 ## 5.0.0 2026-03-24
 
 ### Added

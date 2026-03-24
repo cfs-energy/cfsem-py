@@ -34,6 +34,12 @@ from .cfsem import flux_density_point_segment as em_flux_density_point_segment
 from .cfsem import gs_operator_order2 as em_gs_operator_order2
 from .cfsem import gs_operator_order4 as em_gs_operator_order4
 from .cfsem import (
+    inductance_linear_filaments as em_inductance_linear_filaments,
+)
+from .cfsem import (
+    inductance_linear_filaments_matrix as em_inductance_linear_filaments_matrix,
+)
+from .cfsem import (
     inductance_piecewise_linear_filaments as em_inductance_piecewise_linear_filaments,
 )
 from .cfsem import (
@@ -379,6 +385,68 @@ def inductance_piecewise_linear_filaments(
     wire_radius = ascontiguousarray(wire_radius).ravel()
 
     return em_inductance_piecewise_linear_filaments(xyzfil0, dlxyzfil0, xyzfil1, dlxyzfil1, wire_radius)
+
+
+def inductance_linear_filaments(
+    xyzfil_tgt: Array3xN,
+    dlxyzfil_tgt: Array3xN,
+    xyzfil_src: Array3xN,
+    dlxyzfil_src: Array3xN,
+    wire_radius_src: float | NDArray[float64] = 0.0,
+    par: bool = True,
+    output: Literal["vector", "matrix"] = "vector",
+) -> NDArray[float64]:
+    """
+    Estimate inductive coupling from source filament segments to target filament segments.
+
+    Uses the same finite-radius `A·dl` kernel as
+    [`inductance_piecewise_linear_filaments`][cfsem.inductance_piecewise_linear_filaments],
+    but with a disjoint source/target segment API. The vector result is one inductive
+    coupling value per target segment. The matrix result is row-major `(nsrc, ntgt)`.
+
+    Args:
+        xyzfil_tgt: [m] target filament segment start points
+        dlxyzfil_tgt: [m] target filament segment deltas
+        xyzfil_src: [m] source filament segment start points
+        dlxyzfil_src: [m] source filament segment deltas
+        wire_radius_src: [m] source filament radius, scalar or array of length `nsrc`
+        par: Whether to use CPU parallelism for `output="matrix"`
+        output: `"vector"` for contracted target couplings,
+            or `"matrix"` for explicit row-major `(nsrc, ntgt)` source-target interaction matrix
+
+    Returns:
+        [H] Target coupling vector of length `ntgt`,
+        or explicit `(nsrc, ntgt)` interaction matrix if `output="matrix"`
+    """
+    xyzfil_tgt = _3tup_contig(xyzfil_tgt)
+    dlxyzfil_tgt = _3tup_contig(dlxyzfil_tgt)
+    xyzfil_src = _3tup_contig(xyzfil_src)
+    dlxyzfil_src = _3tup_contig(dlxyzfil_src)
+    nsrc = xyzfil_src[0].size
+    if asarray(wire_radius_src).ndim == 0:
+        wire_radius_src = full(nsrc, float(wire_radius_src))
+    wire_radius_src = ascontiguousarray(wire_radius_src).ravel()
+
+    if output == "vector":
+        return em_inductance_linear_filaments(
+            xyzfil_tgt,
+            dlxyzfil_tgt,
+            xyzfil_src,
+            dlxyzfil_src,
+            wire_radius_src,
+        )
+    if output == "matrix":
+        out = em_inductance_linear_filaments_matrix(
+            xyzfil_tgt,
+            dlxyzfil_tgt,
+            xyzfil_src,
+            dlxyzfil_src,
+            wire_radius_src,
+            par,
+        )
+        ntgt = xyzfil_tgt[0].size
+        return out.reshape((nsrc, ntgt))
+    raise ValueError("output must be 'vector' or 'matrix'")
 
 
 def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:

@@ -27,3 +27,5 @@
 ## General
 
 ::: cfsem.inductance_piecewise_linear_filaments
+
+::: cfsem.inductance_linear_filaments

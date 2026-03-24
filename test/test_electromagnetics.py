@@ -967,6 +967,94 @@ def test_vector_potential_linear_invalid_output_mode():
         cfsem.vector_potential_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius=0.0, output="bad")
 
 
+@mark.parametrize("par", [True, False])
+def test_inductance_linear_filaments_matrix_contracts_to_vector(par):
+    xyzfil_src = (
+        np.array([-0.4, -0.1, 0.2, 0.5]),
+        np.array([0.0, 0.1, -0.1, 0.05]),
+        np.array([-0.2, -0.1, 0.0, 0.1]),
+    )
+    dlxyzfil_src = (
+        np.array([0.06, 0.05, 0.04, 0.03]),
+        np.array([0.01, -0.02, 0.03, -0.01]),
+        np.array([0.02, 0.01, -0.01, 0.0]),
+    )
+    wire_radius_src = np.array([2e-3, 3e-3, 4e-3, 5e-3])
+
+    xyzfil_tgt = (
+        np.array([0.6, 0.9, 1.2]),
+        np.array([-0.1, -0.05, 0.0]),
+        np.array([0.3, 0.2, 0.1]),
+    )
+    dlxyzfil_tgt = (
+        np.array([-0.03, -0.02, -0.01]),
+        np.array([0.02, 0.025, 0.03]),
+        np.array([0.01, 0.008, 0.006]),
+    )
+
+    m_vec = cfsem.inductance_linear_filaments(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src=wire_radius_src,
+        output="vector",
+    )
+    m_mat = cfsem.inductance_linear_filaments(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src=wire_radius_src,
+        par=par,
+        output="matrix",
+    )
+
+    assert m_mat.shape == (xyzfil_src[0].size, xyzfil_tgt[0].size)
+    assert np.allclose(m_vec, np.sum(m_mat, axis=0), rtol=1e-12, atol=1e-15)
+
+    m_piecewise = cfsem.inductance_piecewise_linear_filaments(
+        xyzfil0=xyzfil_src,
+        dlxyzfil0=dlxyzfil_src,
+        xyzfil1=xyzfil_tgt,
+        dlxyzfil1=dlxyzfil_tgt,
+        wire_radius=wire_radius_src,
+    )
+    assert float(np.sum(m_vec)) == approx(m_piecewise, rel=1e-12)
+    # Smoke-test scalar wire-radius broadcasting on both output paths.
+    m_vec_scalar = cfsem.inductance_linear_filaments(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src=2e-3,
+        output="vector",
+    )
+    m_mat_scalar = cfsem.inductance_linear_filaments(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src=2e-3,
+        par=par,
+        output="matrix",
+    )
+    assert m_vec_scalar.shape == (xyzfil_tgt[0].size,)
+    assert m_mat_scalar.shape == (xyzfil_src[0].size, xyzfil_tgt[0].size)
+    assert np.all(np.isfinite(m_vec_scalar))
+    assert np.all(np.isfinite(m_mat_scalar))
+
+    with raises(ValueError, match="output must be 'vector' or 'matrix'"):
+        cfsem.inductance_linear_filaments(
+            xyzfil_tgt,
+            dlxyzfil_tgt,
+            xyzfil_src,
+            dlxyzfil_src,
+            wire_radius_src=2e-3,
+            output="bad",
+        )
+
+
 @mark.parametrize("ndiscr", [128, 200])
 @mark.parametrize("par", [True, False])
 def test_flux_density_linear_matrix_contracts_to_vector(ndiscr, par):

@@ -1,7 +1,7 @@
 //! Magnetics calculations for piecewise-linear current filaments.
 
 use rayon::{
-    iter::{IntoParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
@@ -107,6 +107,221 @@ pub fn inductance_piecewise_linear_filaments(
     }
 
     Ok(inductance)
+}
+
+/// Estimate the inductive coupling from many source filament segments to many target filament segments.
+///
+/// This uses the same `A·dl` kernel as [`inductance_piecewise_linear_filaments`], but with a
+/// source/target segment API analogous to the linear-filament field evaluators. Each output entry
+/// is the inductive coupling between the full source collection and one target segment.
+///
+/// # Arguments
+///
+/// * `xyzfil_tgt`:      (m) target filament origin coordinates, each length `ntgt`
+/// * `dlxyzfil_tgt`:    (m) target filament segment lengths, each length `ntgt`
+/// * `xyzfil_src`:      (m) source filament origin coordinates, each length `nsrc`
+/// * `dlxyzfil_src`:    (m) source filament segment lengths, each length `nsrc`
+/// * `wire_radius_src`: (m) source filament radius, length `nsrc`
+/// * `out`:             (H) inductive coupling to each target filament, length `ntgt`
+pub fn inductance_linear_filaments(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let ntgt = xyzfil_tgt.0.len();
+    check_length!(
+        ntgt,
+        xyzfil_tgt.0,
+        xyzfil_tgt.1,
+        xyzfil_tgt.2,
+        dlxyzfil_tgt.0,
+        dlxyzfil_tgt.1,
+        dlxyzfil_tgt.2,
+        out
+    );
+
+    let nsrc = xyzfil_src.0.len();
+    check_length!(
+        nsrc,
+        xyzfil_src.0,
+        xyzfil_src.1,
+        xyzfil_src.2,
+        dlxyzfil_src.0,
+        dlxyzfil_src.1,
+        dlxyzfil_src.2,
+        wire_radius_src
+    );
+
+    out.fill(0.0);
+    for j in 0..ntgt {
+        out[j] = inductance_piecewise_linear_filaments(
+            xyzfil_src,
+            dlxyzfil_src,
+            (
+                &xyzfil_tgt.0[j..j + 1],
+                &xyzfil_tgt.1[j..j + 1],
+                &xyzfil_tgt.2[j..j + 1],
+            ),
+            (
+                &dlxyzfil_tgt.0[j..j + 1],
+                &dlxyzfil_tgt.1[j..j + 1],
+                &dlxyzfil_tgt.2[j..j + 1],
+            ),
+            wire_radius_src,
+        )?; // [H]
+    }
+
+    Ok(())
+}
+
+/// Inductive coupling matrix between disjoint source and target filament segments.
+///
+/// The output is row-major with shape `(nsrc, ntgt)`, where each row corresponds to one source
+/// segment and each column corresponds to one target segment. Summing down the source rows for a
+/// fixed target column recovers the contracted output from [`inductance_linear_filaments`].
+///
+/// # Arguments
+///
+/// * `xyzfil_tgt`:      (m) target filament origin coordinates, each length `ntgt`
+/// * `dlxyzfil_tgt`:    (m) target filament segment lengths, each length `ntgt`
+/// * `xyzfil_src`:      (m) source filament origin coordinates, each length `nsrc`
+/// * `dlxyzfil_src`:    (m) source filament segment lengths, each length `nsrc`
+/// * `wire_radius_src`: (m) source filament radius, length `nsrc`
+/// * `out`:             (H) row-major `(nsrc, ntgt)` inductance matrix
+pub fn inductance_linear_filaments_matrix(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let ntgt = xyzfil_tgt.0.len();
+    check_length!(
+        ntgt,
+        xyzfil_tgt.0,
+        xyzfil_tgt.1,
+        xyzfil_tgt.2,
+        dlxyzfil_tgt.0,
+        dlxyzfil_tgt.1,
+        dlxyzfil_tgt.2
+    );
+
+    let nsrc = xyzfil_src.0.len();
+    check_length!(
+        nsrc,
+        xyzfil_src.0,
+        xyzfil_src.1,
+        xyzfil_src.2,
+        dlxyzfil_src.0,
+        dlxyzfil_src.1,
+        dlxyzfil_src.2,
+        wire_radius_src
+    );
+
+    let expected_len = nsrc
+        .checked_mul(ntgt)
+        .ok_or("Output size overflow in inductance_linear_filaments_matrix")?;
+    check_length!(expected_len, out);
+
+    out.fill(0.0);
+    for i in 0..nsrc {
+        let row = &mut out[i * ntgt..(i + 1) * ntgt];
+        inductance_linear_filaments(
+            xyzfil_tgt,
+            dlxyzfil_tgt,
+            (
+                &xyzfil_src.0[i..i + 1],
+                &xyzfil_src.1[i..i + 1],
+                &xyzfil_src.2[i..i + 1],
+            ),
+            (
+                &dlxyzfil_src.0[i..i + 1],
+                &dlxyzfil_src.1[i..i + 1],
+                &dlxyzfil_src.2[i..i + 1],
+            ),
+            &wire_radius_src[i..i + 1],
+            row,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Parallel inductive coupling matrix between disjoint source and target filament segments.
+///
+/// The output layout matches [`inductance_linear_filaments_matrix`].
+///
+/// # Arguments
+///
+/// * `xyzfil_tgt`:      (m) target filament origin coordinates, each length `ntgt`
+/// * `dlxyzfil_tgt`:    (m) target filament segment lengths, each length `ntgt`
+/// * `xyzfil_src`:      (m) source filament origin coordinates, each length `nsrc`
+/// * `dlxyzfil_src`:    (m) source filament segment lengths, each length `nsrc`
+/// * `wire_radius_src`: (m) source filament radius, length `nsrc`
+/// * `out`:             (H) row-major `(nsrc, ntgt)` inductance matrix
+pub fn inductance_linear_filaments_matrix_par(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let ntgt = xyzfil_tgt.0.len();
+    check_length!(
+        ntgt,
+        xyzfil_tgt.0,
+        xyzfil_tgt.1,
+        xyzfil_tgt.2,
+        dlxyzfil_tgt.0,
+        dlxyzfil_tgt.1,
+        dlxyzfil_tgt.2
+    );
+
+    let nsrc = xyzfil_src.0.len();
+    check_length!(
+        nsrc,
+        xyzfil_src.0,
+        xyzfil_src.1,
+        xyzfil_src.2,
+        dlxyzfil_src.0,
+        dlxyzfil_src.1,
+        dlxyzfil_src.2,
+        wire_radius_src
+    );
+
+    let expected_len = nsrc
+        .checked_mul(ntgt)
+        .ok_or("Output size overflow in inductance_linear_filaments_matrix_par")?;
+    check_length!(expected_len, out);
+
+    out.fill(0.0);
+    out.par_chunks_mut(ntgt)
+        .enumerate()
+        .try_for_each(|(i, row)| {
+            inductance_linear_filaments(
+                xyzfil_tgt,
+                dlxyzfil_tgt,
+                (
+                    &xyzfil_src.0[i..i + 1],
+                    &xyzfil_src.1[i..i + 1],
+                    &xyzfil_src.2[i..i + 1],
+                ),
+                (
+                    &dlxyzfil_src.0[i..i + 1],
+                    &dlxyzfil_src.1[i..i + 1],
+                    &dlxyzfil_src.2[i..i + 1],
+                ),
+                &wire_radius_src[i..i + 1],
+                row,
+            )
+        })?;
+
+    Ok(())
 }
 
 /// Biot-Savart calculation for B-field contribution from many current filament
@@ -2506,6 +2721,108 @@ mod test {
                 1e-12,
                 1e-15
             ));
+        }
+    }
+
+    #[test]
+    fn test_inductance_linear_filaments_contracts_piecewise() {
+        const NSRC: usize = 4;
+        const NTGT: usize = 5;
+
+        let xsrc: Vec<f64> = (0..NSRC).map(|i| -0.4 + 0.3 * i as f64).collect();
+        let ysrc: Vec<f64> = (0..NSRC).map(|i| 0.2 * (i as f64).sin()).collect();
+        let zsrc: Vec<f64> = (0..NSRC).map(|i| -0.1 + 0.15 * i as f64).collect();
+        let xyzsrc = (&xsrc[..], &ysrc[..], &zsrc[..]);
+        let dlxsrc: Vec<f64> = (0..NSRC).map(|i| 0.05 + 0.01 * i as f64).collect();
+        let dlysrc: Vec<f64> = (0..NSRC).map(|i| -0.03 + 0.02 * i as f64).collect();
+        let dlzsrc: Vec<f64> = (0..NSRC).map(|i| 0.04 - 0.01 * i as f64).collect();
+        let dlxyzsrc = (&dlxsrc[..], &dlysrc[..], &dlzsrc[..]);
+        let wire_radius: Vec<f64> = (0..NSRC).map(|i| 2e-3 * (1.0 + i as f64)).collect();
+
+        let xtgt: Vec<f64> = (0..NTGT).map(|i| 0.6 + 0.25 * i as f64).collect();
+        let ytgt: Vec<f64> = (0..NTGT).map(|i| -0.15 + 0.05 * i as f64).collect();
+        let ztgt: Vec<f64> = (0..NTGT).map(|i| 0.3 - 0.07 * i as f64).collect();
+        let xyztgt = (&xtgt[..], &ytgt[..], &ztgt[..]);
+        let dlxtgt: Vec<f64> = (0..NTGT).map(|i| -0.04 + 0.01 * i as f64).collect();
+        let dlytgt: Vec<f64> = (0..NTGT).map(|i| 0.03 + 0.005 * i as f64).collect();
+        let dlztgt: Vec<f64> = (0..NTGT).map(|i| 0.02 - 0.004 * i as f64).collect();
+        let dlxyztgt = (&dlxtgt[..], &dlytgt[..], &dlztgt[..]);
+
+        let mut out = vec![0.0; NTGT];
+        inductance_linear_filaments(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut out)
+            .unwrap();
+
+        let total =
+            inductance_piecewise_linear_filaments(xyzsrc, dlxyzsrc, xyztgt, dlxyztgt, &wire_radius)
+                .unwrap();
+        assert!(approx(total, out.iter().sum(), 1e-12, 1e-15));
+
+        for j in 0..NTGT {
+            let mj = inductance_piecewise_linear_filaments(
+                xyzsrc,
+                dlxyzsrc,
+                (&xtgt[j..j + 1], &ytgt[j..j + 1], &ztgt[j..j + 1]),
+                (&dlxtgt[j..j + 1], &dlytgt[j..j + 1], &dlztgt[j..j + 1]),
+                &wire_radius,
+            )
+            .unwrap();
+            assert!(approx(mj, out[j], 1e-12, 1e-15));
+        }
+    }
+
+    #[test]
+    fn test_inductance_linear_filaments_matrix_contracts_to_vector() {
+        const NSRC: usize = 4;
+        const NTGT: usize = 5;
+
+        let xsrc: Vec<f64> = (0..NSRC).map(|i| -0.4 + 0.3 * i as f64).collect();
+        let ysrc: Vec<f64> = (0..NSRC).map(|i| 0.2 * (i as f64).sin()).collect();
+        let zsrc: Vec<f64> = (0..NSRC).map(|i| -0.1 + 0.15 * i as f64).collect();
+        let xyzsrc = (&xsrc[..], &ysrc[..], &zsrc[..]);
+        let dlxsrc: Vec<f64> = (0..NSRC).map(|i| 0.05 + 0.01 * i as f64).collect();
+        let dlysrc: Vec<f64> = (0..NSRC).map(|i| -0.03 + 0.02 * i as f64).collect();
+        let dlzsrc: Vec<f64> = (0..NSRC).map(|i| 0.04 - 0.01 * i as f64).collect();
+        let dlxyzsrc = (&dlxsrc[..], &dlysrc[..], &dlzsrc[..]);
+        let wire_radius: Vec<f64> = (0..NSRC).map(|i| 2e-3 * (1.0 + i as f64)).collect();
+
+        let xtgt: Vec<f64> = (0..NTGT).map(|i| 0.6 + 0.25 * i as f64).collect();
+        let ytgt: Vec<f64> = (0..NTGT).map(|i| -0.15 + 0.05 * i as f64).collect();
+        let ztgt: Vec<f64> = (0..NTGT).map(|i| 0.3 - 0.07 * i as f64).collect();
+        let xyztgt = (&xtgt[..], &ytgt[..], &ztgt[..]);
+        let dlxtgt: Vec<f64> = (0..NTGT).map(|i| -0.04 + 0.01 * i as f64).collect();
+        let dlytgt: Vec<f64> = (0..NTGT).map(|i| 0.03 + 0.005 * i as f64).collect();
+        let dlztgt: Vec<f64> = (0..NTGT).map(|i| 0.02 - 0.004 * i as f64).collect();
+        let dlxyztgt = (&dlxtgt[..], &dlytgt[..], &dlztgt[..]);
+
+        let mut out = vec![0.0; NTGT];
+        inductance_linear_filaments(xyztgt, dlxyztgt, xyzsrc, dlxyzsrc, &wire_radius, &mut out)
+            .unwrap();
+
+        let mut mm = vec![0.0; NSRC * NTGT];
+        let mut mmp = vec![0.0; NSRC * NTGT];
+        inductance_linear_filaments_matrix(
+            xyztgt,
+            dlxyztgt,
+            xyzsrc,
+            dlxyzsrc,
+            &wire_radius,
+            &mut mm,
+        )
+        .unwrap();
+        inductance_linear_filaments_matrix_par(
+            xyztgt,
+            dlxyztgt,
+            xyzsrc,
+            dlxyzsrc,
+            &wire_radius,
+            &mut mmp,
+        )
+        .unwrap();
+
+        assert_eq!(mm, mmp);
+        for j in 0..NTGT {
+            let contracted = (0..NSRC).map(|i| mm[i * NTGT + j]).sum::<f64>();
+            assert!(approx(out[j], contracted, 1e-12, 1e-15));
         }
     }
 }

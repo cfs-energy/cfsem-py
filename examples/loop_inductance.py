@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 
@@ -110,6 +111,41 @@ for i, n in enumerate(NSEG_SWEEP):
         f"A·dl with {WIRE_RADIUS * 1e2:.1f} cm wire radius={inductance_from_a[i]:.6e} H, "
         f"point-segment A·dl={inductance_from_a_point[i]:.6e} H"
     )
+
+matrix_benchmark_n = 200 if os.getenv("CFSEM_TESTING") else 1000
+xyz_bench = circle_polyline(LOOP_RADIUS, matrix_benchmark_n)
+xyzfil_bench, dlxyzfil_bench, _ = polyline_to_segments(xyz_bench)
+
+t0 = perf_counter()
+m_serial = cfsem.inductance_linear_filaments(
+    xyzfil_bench,
+    dlxyzfil_bench,
+    xyzfil_bench,
+    dlxyzfil_bench,
+    wire_radius_src=WIRE_RADIUS,
+    par=False,
+    output="matrix",
+)
+serial_time = perf_counter() - t0
+
+t0 = perf_counter()
+m_parallel = cfsem.inductance_linear_filaments(
+    xyzfil_bench,
+    dlxyzfil_bench,
+    xyzfil_bench,
+    dlxyzfil_bench,
+    wire_radius_src=WIRE_RADIUS,
+    par=True,
+    output="matrix",
+)
+parallel_time = perf_counter() - t0
+
+print(
+    f"matrix benchmark NxN, N={matrix_benchmark_n}: "
+    f"serial={serial_time * 1e3:.1f} millis, parallel={parallel_time * 1e3:.1f} millis, "
+    f"speedup={serial_time / parallel_time:.2f}x, "
+    f"match={np.allclose(m_serial, m_parallel, rtol=1e-12, atol=1e-15)}"
+)
 
 fig, ax = plt.subplots(figsize=(7.0, 4.5))
 

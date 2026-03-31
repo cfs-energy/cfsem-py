@@ -44,6 +44,7 @@ from cfsem.bindings import (
 from cfsem.types import Array3xN
 
 from .cfsem import ellipe, ellipk
+from .cfsem import DimensionalityError
 
 MU_0 = 4.0 * np.pi * 1e-7 * (1.0 + 5.5e-10)
 """
@@ -98,6 +99,7 @@ __all__ = [
     "vector_potential_point_segment",
     "body_force_density_circular_filament_cartesian",
     "body_force_density_linear_filament",
+    "DimensionalityError",
 ]
 
 

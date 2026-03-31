@@ -1,5 +1,6 @@
 use numpy::PyArray1;
 use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadwriteArray1};
+use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use std::fmt::Debug;
@@ -8,16 +9,22 @@ use std::fmt::Debug;
 use crate::mlfmm::MlfmmOptions;
 use crate::{math, mesh, physics};
 
+create_exception!(cfsem, DimensionalityError, exceptions::PyValueError);
+
 /// Errors from mismatch between python and rust
 #[derive(Debug)]
 #[allow(dead_code)]
 enum PyInteropError {
     DimensionalityError { msg: String },
+    ValueError { msg: String },
 }
 
 impl From<PyInteropError> for PyErr {
     fn from(val: PyInteropError) -> Self {
-        exceptions::PyValueError::new_err(format!("{:#?}", &val))
+        match val {
+            PyInteropError::DimensionalityError { msg } => DimensionalityError::new_err(msg),
+            PyInteropError::ValueError { msg } => exceptions::PyValueError::new_err(msg),
+        }
     }
 }
 
@@ -69,7 +76,7 @@ fn split_triangle_index_array2(
         let idx1 = arr[[i, 1]];
         let idx2 = arr[[i, 2]];
         if idx0 < 0 || idx1 < 0 || idx2 < 0 {
-            return Err(PyInteropError::DimensionalityError {
+            return Err(PyInteropError::ValueError {
                 msg: format!("{name} must contain nonnegative node indices"),
             }
             .into());
@@ -87,7 +94,7 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
         "gl2" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre2),
         "gl3" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre3),
         "dunavant5" => Ok(physics::boundary_element::QuadratureKind::Dunavant5),
-        _ => Err(PyInteropError::DimensionalityError {
+        _ => Err(PyInteropError::ValueError {
             msg: format!("Unsupported triangle quadrature rule: {quad}"),
         }
         .into()),
@@ -103,7 +110,7 @@ fn triangle_mesh_view<'a>(
         (&triangles.0, &triangles.1, &triangles.2),
     )
     .map_err(|msg| {
-        PyInteropError::DimensionalityError {
+        PyInteropError::ValueError {
             msg: msg.to_string(),
         }
         .into()
@@ -1585,6 +1592,8 @@ fn body_force_density_linear_filament(
 #[pymodule]
 #[pyo3(name = "cfsem")]
 fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
+    m.add("DimensionalityError", _py.get_type::<DimensionalityError>())?;
+
     // Circular filaments
     m.add_function(wrap_pyfunction!(flux_circular_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(flux_density_circular_filament, m.clone())?)?;

@@ -722,10 +722,10 @@ def test_triangle_mesh_invalid_inputs():
     nodes, triangles, s = _triangle_strip_mesh(0.7, 7e-4, 1.2, nphi=32)
     obs = np.array([[0.4, -0.2, 1.1], [1.7, 0.8, -0.5]], dtype=np.float64)
 
-    with raises(ValueError, match="obs must have shape"):
+    with raises(cfsem.DimensionalityError, match="obs must have shape"):
         cfsem.flux_density_triangle_mesh(obs[:, :2], nodes, triangles, s)
 
-    with raises(ValueError, match="triangles must have shape"):
+    with raises(cfsem.DimensionalityError, match="triangles must have shape"):
         cfsem.vector_potential_triangle_mesh(obs, nodes, triangles[:, :2], s)
 
     bad_triangles = triangles.copy()
@@ -741,8 +741,10 @@ def test_triangle_mesh_invalid_inputs():
     with raises(ValueError, match="zero area"):
         cfsem.triangle_mesh_quadrature_points(nodes, degenerate_triangles, quad="gl3")
 
-    with raises(ValueError, match="Unsupported triangle quadrature rule"):
+    with raises(ValueError, match="Unsupported triangle quadrature rule") as excinfo:
         cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, quad="bad")
+    assert not isinstance(excinfo.value, cfsem.DimensionalityError)
 
-    with raises(ValueError, match="Unsupported triangle quadrature rule"):
+    with raises(ValueError, match="Unsupported triangle quadrature rule") as excinfo:
         cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="bad")
+    assert not isinstance(excinfo.value, cfsem.DimensionalityError)

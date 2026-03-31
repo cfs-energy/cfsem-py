@@ -104,7 +104,7 @@ const TABLE_GAUSS_LEGENDRE_3: [[f64; 3]; 9] = [
 ///
 /// References:
 /// * [7], Appendix II, rule with `p = 5`, `n_g = 7`.
-const TABLE_DUNAVANT_7: [[f64; 3]; 7] = [
+const TABLE_DUNAVANT_5: [[f64; 3]; 7] = [
     [0.112500000000000, 0.333333333333333, 0.333333333333333],
     [0.066197076394253, 0.470142064105115, 0.470142064105115],
     [0.066197076394253, 0.059715871789770, 0.470142064105115],
@@ -233,7 +233,7 @@ fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] 
     match quad_kind {
         QuadratureKind::GaussLegendre2 => &TABLE_GAUSS_LEGENDRE_2,
         QuadratureKind::GaussLegendre3 => &TABLE_GAUSS_LEGENDRE_3,
-        QuadratureKind::Dunavant5 => &TABLE_DUNAVANT_7,
+        QuadratureKind::Dunavant5 => &TABLE_DUNAVANT_5,
     }
 }
 

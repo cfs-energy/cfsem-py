@@ -6,6 +6,7 @@
 
 * Rust
     * Add `point_source::current_element` module with element kernels shared between point-segment and boundary-element methods
+        * These also include singularity-clamping that robustifies the point-segment B-field and A-field.
     * Add `boundary_element` module with B-field, A-field, inductance, and traction force
     * Add minimal triangle mesh view interface in `mesh.rs` using nodes-and-indices storage
 * Python

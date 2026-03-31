@@ -462,6 +462,32 @@ mod test {
         }
     }
 
+    #[test]
+    fn test_current_element_scalars_zero_inside_distance_tolerance() {
+        let src = [0.1, -0.2, 0.3];
+        let moment = [0.4, -0.7, 1.1];
+
+        let obs_near = [src[0] + 0.5e-14, src[1], src[2]];
+        let b_near = flux_density_current_element_scalar(src, moment, obs_near);
+        let a_near = vector_potential_current_element_scalar(src, moment, obs_near);
+        assert_eq!(b_near, [0.0, 0.0, 0.0]);
+        assert_eq!(a_near, [0.0, 0.0, 0.0]);
+
+        let obs_far = [src[0] + 2.0e-14, src[1], src[2]];
+        let b_far = flux_density_current_element_scalar(src, moment, obs_far);
+        let a_far = vector_potential_current_element_scalar(src, moment, obs_far);
+        assert!(b_far.iter().all(|v| v.is_finite()));
+        assert!(a_far.iter().all(|v| v.is_finite()));
+        assert!(
+            b_far.iter().any(|&v| v != 0.0),
+            "flux-density current-element kernel stayed zero outside distance tolerance"
+        );
+        assert!(
+            a_far.iter().any(|&v| v != 0.0),
+            "vector-potential current-element kernel stayed zero outside distance tolerance"
+        );
+    }
+
     /// Make sure the forces have the right sign
     /// and self-forces sum to zero within discretization error
     #[test]

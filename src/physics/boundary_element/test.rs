@@ -1,5 +1,6 @@
 use core::f64::consts::PI;
 
+use super::inductance::triangle_mesh_inductive_energy;
 use super::{
     QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
     flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
@@ -17,10 +18,9 @@ use super::{
     triangle_mesh_inductance_mapping_from_circular_filaments_par,
     triangle_mesh_inductance_mapping_from_linear_filaments,
     triangle_mesh_inductance_mapping_from_linear_filaments_par, triangle_mesh_inductance_matrix,
-    triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
-    triangle_mesh_interaction_energy_from_source_coefficients, triangle_mesh_quadrature_points,
-    triangle_mesh_self_force_mapping, triangle_mesh_self_force_mapping_par,
-    triangle_mesh_triangle_forces_from_potential_vectors,
+    triangle_mesh_inductance_matrix_par, triangle_mesh_interaction_energy_from_source_coefficients,
+    triangle_mesh_quadrature_points, triangle_mesh_self_force_mapping,
+    triangle_mesh_self_force_mapping_par, triangle_mesh_triangle_forces_from_potential_vectors,
     triangle_mesh_vector_potential_from_potential_vectors, triangle_quadrature_count,
     triangle_quadrature_points, triangle_vector_potential_basis, vector_potential_triangle,
     vector_potential_triangle_mesh, vector_potential_triangle_mesh_mapping,

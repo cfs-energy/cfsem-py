@@ -54,8 +54,7 @@ pub use inductance::{
     triangle_mesh_inductance_mapping_from_circular_filaments_par,
     triangle_mesh_inductance_mapping_from_linear_filaments,
     triangle_mesh_inductance_mapping_from_linear_filaments_par, triangle_mesh_inductance_matrix,
-    triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
-    triangle_mesh_interaction_energy_from_source_coefficients,
+    triangle_mesh_inductance_matrix_par, triangle_mesh_interaction_energy_from_source_coefficients,
 };
 
 pub use vector_potential::{

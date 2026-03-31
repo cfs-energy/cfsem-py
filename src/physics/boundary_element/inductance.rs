@@ -631,7 +631,7 @@ pub fn triangle_mesh_inductance_from_potential_vectors(
     Ok(out)
 }
 
-/// Magnetic self energy for a prescribed nodal current-potential vector on one mesh.
+/// Internal helper retained for boundary-element tests of dense inductance contractions.
 ///
 /// Args:
 ///     lmat: Row-major nodal inductance matrix of length `nnode * nnode` (H).
@@ -639,8 +639,9 @@ pub fn triangle_mesh_inductance_from_potential_vectors(
 ///
 /// Returns:
 ///     Magnetic energy `0.5 * s^T L s` (J).
+#[cfg_attr(not(test), allow(dead_code))]
 #[inline]
-pub fn triangle_mesh_inductive_energy(lmat: &[f64], s: &[f64]) -> Result<f64, &'static str> {
+pub(crate) fn triangle_mesh_inductive_energy(lmat: &[f64], s: &[f64]) -> Result<f64, &'static str> {
     Ok(0.5 * triangle_mesh_inductance_from_potential_vectors(lmat, s, s)?) // [J]
 }
 

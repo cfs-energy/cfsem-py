@@ -20,6 +20,7 @@ use super::{
     triangle_mesh_inductance_matrix_par, triangle_mesh_inductive_energy,
     triangle_mesh_interaction_energy_from_source_coefficients, triangle_mesh_quadrature_points,
     triangle_mesh_self_force_mapping, triangle_mesh_self_force_mapping_par,
+    triangle_mesh_triangle_forces_from_potential_vectors,
     triangle_mesh_vector_potential_from_potential_vectors, triangle_quadrature_count,
     triangle_quadrature_points, triangle_vector_potential_basis, vector_potential_triangle,
     vector_potential_triangle_mesh, vector_potential_triangle_mesh_mapping,
@@ -1719,6 +1720,142 @@ fn test_triangle_mesh_force_mapping_matches_direct_target_integration() {
 }
 
 #[test]
+fn test_triangle_mesh_triangle_forces_from_potential_vectors_match_direct_target_forces() {
+    let radius = 0.64;
+    let height = radius * 1e-3;
+    let nphi = 24;
+    let src = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 1.1, nphi, -0.21,
+    ));
+    let tgt = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 0.8, nphi, 0.19,
+    ));
+
+    let (fx, fy, fz) = mesh_force_mapping(&src, &tgt, false);
+    let (fxp, fyp, fzp) = mesh_force_mapping(&src, &tgt, true);
+    let ntri_tgt = tgt.triangles.0.len();
+
+    let mut tri_fx = vec![0.0; ntri_tgt];
+    let mut tri_fy = vec![0.0; ntri_tgt];
+    let mut tri_fz = vec![0.0; ntri_tgt];
+    triangle_mesh_triangle_forces_from_potential_vectors(
+        &fx,
+        &fy,
+        &fz,
+        &src.s,
+        (&mut tri_fx, &mut tri_fy, &mut tri_fz),
+    )
+    .unwrap();
+
+    let mut tri_fx_par = vec![0.0; ntri_tgt];
+    let mut tri_fy_par = vec![0.0; ntri_tgt];
+    let mut tri_fz_par = vec![0.0; ntri_tgt];
+    triangle_mesh_triangle_forces_from_potential_vectors(
+        &fxp,
+        &fyp,
+        &fzp,
+        &src.s,
+        (&mut tri_fx_par, &mut tri_fy_par, &mut tri_fz_par),
+    )
+    .unwrap();
+
+    let total = triangle_mesh_force_from_potential_vectors(&fx, &fy, &fz, &src.s).unwrap();
+    let total_par = triangle_mesh_force_from_potential_vectors(&fxp, &fyp, &fzp, &src.s).unwrap();
+    let mut direct_total = [0.0; 3];
+    for itgt in 0..ntri_tgt {
+        let idx = [
+            tgt.triangles.0[itgt],
+            tgt.triangles.1[itgt],
+            tgt.triangles.2[itgt],
+        ];
+        let tri_nodes = idx.map(|k| [tgt.nodes.0[k], tgt.nodes.1[k], tgt.nodes.2[k]]);
+        let tri_s = idx.map(|k| tgt.s[k]);
+        let direct = explicit_force_on_target_triangle_from_source_mesh(&src, tri_nodes, tri_s);
+        direct_total[0] += direct[0];
+        direct_total[1] += direct[1];
+        direct_total[2] += direct[2];
+
+        for axis in 0..3 {
+            let via_tri = [tri_fx[itgt], tri_fy[itgt], tri_fz[itgt]][axis];
+            let via_tri_par = [tri_fx_par[itgt], tri_fy_par[itgt], tri_fz_par[itgt]][axis];
+            assert!(
+                approx(via_tri, direct[axis], 1e-11, 1e-12),
+                "triangle force contraction mismatch for triangle {itgt}, axis {axis}: contraction={:.16e}, direct={:.16e}",
+                via_tri,
+                direct[axis],
+            );
+            assert!(
+                approx(via_tri_par, direct[axis], 1e-11, 1e-12),
+                "parallel triangle force contraction mismatch for triangle {itgt}, axis {axis}: contraction={:.16e}, direct={:.16e}",
+                via_tri_par,
+                direct[axis],
+            );
+        }
+    }
+
+    let tri_total = [
+        tri_fx.iter().sum::<f64>(),
+        tri_fy.iter().sum::<f64>(),
+        tri_fz.iter().sum::<f64>(),
+    ];
+    let tri_total_par = [
+        tri_fx_par.iter().sum::<f64>(),
+        tri_fy_par.iter().sum::<f64>(),
+        tri_fz_par.iter().sum::<f64>(),
+    ];
+    for axis in 0..3 {
+        assert!(
+            approx(tri_total[axis], total[axis], 1e-12, 1e-12),
+            "triangle-force sum mismatch on axis {axis}: summed={:.16e}, total={:.16e}",
+            tri_total[axis],
+            total[axis],
+        );
+        assert!(
+            approx(tri_total_par[axis], total_par[axis], 1e-12, 1e-12),
+            "parallel triangle-force sum mismatch on axis {axis}: summed={:.16e}, total={:.16e}",
+            tri_total_par[axis],
+            total_par[axis],
+        );
+        assert!(
+            approx(total[axis], direct_total[axis], 1e-11, 1e-12),
+            "triangle-force total mismatch on axis {axis}: total={:.16e}, direct={:.16e}",
+            total[axis],
+            direct_total[axis],
+        );
+    }
+}
+
+#[test]
+fn test_triangle_mesh_force_mapping_obeys_newtons_third_law_for_disjoint_meshes() {
+    let radius = 0.61;
+    let height = radius * 1e-3;
+    let nphi = 32;
+    let src = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 1.3, nphi, -0.17,
+    ));
+    let tgt = triangle_patches_to_mesh(&circular_strip_triangles_at_z(
+        radius, height, 0.9, nphi, 0.23,
+    ));
+
+    let (fx_tgt, fy_tgt, fz_tgt) = mesh_force_mapping(&src, &tgt, false);
+    let force_on_tgt =
+        triangle_mesh_force_from_potential_vectors(&fx_tgt, &fy_tgt, &fz_tgt, &src.s).unwrap();
+
+    let (fx_src, fy_src, fz_src) = mesh_force_mapping(&tgt, &src, false);
+    let force_on_src =
+        triangle_mesh_force_from_potential_vectors(&fx_src, &fy_src, &fz_src, &tgt.s).unwrap();
+
+    for axis in 0..3 {
+        assert!(
+            approx(force_on_tgt[axis], -force_on_src[axis], 1e-9, 1e-12),
+            "Newton's third law mismatch on axis {axis}: F_tgt={:.16e}, F_src={:.16e}",
+            force_on_tgt[axis],
+            force_on_src[axis],
+        );
+    }
+}
+
+#[test]
 fn test_triangle_mesh_self_force_mapping_serial_matches_parallel() {
     let radius = 0.73;
     let height = radius * 1e-3;
@@ -1747,6 +1884,99 @@ fn test_triangle_mesh_self_force_mapping_serial_matches_parallel() {
             "self force serial/parallel mismatch on axis {axis}: serial={:.16e}, parallel={:.16e}",
             total[axis],
             total_par[axis],
+        );
+    }
+}
+
+#[test]
+fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
+    let tri = TrianglePatch {
+        nodes: [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]],
+        s: [1.2, -0.4, 0.7],
+    };
+    let mesh = triangle_patches_to_mesh(&[tri]);
+    let obs_on = map_tri_uv(tri.nodes[0], tri.nodes[1], tri.nodes[2], [0.25, 0.5]);
+    let normal = calc_tri_normal(tri.nodes[0], tri.nodes[1], tri.nodes[2]);
+    let eps = 1e-12;
+    let obs_above = [
+        obs_on[0] + eps * normal[0],
+        obs_on[1] + eps * normal[1],
+        obs_on[2] + eps * normal[2],
+    ];
+    let obs_below = [
+        obs_on[0] - eps * normal[0],
+        obs_on[1] - eps * normal[1],
+        obs_on[2] - eps * normal[2],
+    ];
+    let obs = [obs_on, obs_above, obs_below];
+
+    let b_mesh = mesh_flux_density(&mesh, &obs, false);
+    let b_mesh_par = mesh_flux_density(&mesh, &obs, true);
+    let a_mesh = mesh_vector_potential(&mesh, &obs, false);
+    let a_mesh_par = mesh_vector_potential(&mesh, &obs, true);
+
+    for (i, point) in obs.iter().enumerate() {
+        let b_direct = flux_density_triangle(
+            tri.nodes[0],
+            tri.nodes[1],
+            tri.nodes[2],
+            tri.s,
+            *point,
+            QuadratureKind::GaussLegendre3,
+        );
+        let a_direct = vector_potential_triangle(
+            tri.nodes[0],
+            tri.nodes[1],
+            tri.nodes[2],
+            tri.s,
+            *point,
+            QuadratureKind::GaussLegendre3,
+        );
+
+        for axis in 0..3 {
+            assert!(
+                b_direct[axis].is_finite(),
+                "direct near-surface B is not finite at point {i}, axis {axis}: {:.16e}",
+                b_direct[axis],
+            );
+            assert!(
+                a_direct[axis].is_finite(),
+                "direct near-surface A is not finite at point {i}, axis {axis}: {:.16e}",
+                a_direct[axis],
+            );
+            assert!(
+                approx(b_mesh[i][axis], b_direct[axis], 1e-12, 1e-12),
+                "mesh near-surface B mismatch at point {i}, axis {axis}: mesh={:.16e}, direct={:.16e}",
+                b_mesh[i][axis],
+                b_direct[axis],
+            );
+            assert!(
+                approx(b_mesh_par[i][axis], b_direct[axis], 1e-12, 1e-12),
+                "parallel mesh near-surface B mismatch at point {i}, axis {axis}: mesh={:.16e}, direct={:.16e}",
+                b_mesh_par[i][axis],
+                b_direct[axis],
+            );
+            assert!(
+                approx(a_mesh[i][axis], a_direct[axis], 1e-12, 1e-12),
+                "mesh near-surface A mismatch at point {i}, axis {axis}: mesh={:.16e}, direct={:.16e}",
+                a_mesh[i][axis],
+                a_direct[axis],
+            );
+            assert!(
+                approx(a_mesh_par[i][axis], a_direct[axis], 1e-12, 1e-12),
+                "parallel mesh near-surface A mismatch at point {i}, axis {axis}: mesh={:.16e}, direct={:.16e}",
+                a_mesh_par[i][axis],
+                a_direct[axis],
+            );
+        }
+    }
+
+    for axis in 0..3 {
+        assert!(
+            approx(a_mesh[1][axis], a_mesh[2][axis], 1e-9, 1e-12),
+            "vector potential is not continuous across the surface on axis {axis}: above={:.16e}, below={:.16e}",
+            a_mesh[1][axis],
+            a_mesh[2][axis],
         );
     }
 }

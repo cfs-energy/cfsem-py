@@ -6,7 +6,7 @@
 
 * Rust
     * Add `point_source::current_element` module with element kernels shared between point-segment and boundary-element methods
-    * Add `boundary_element` module with B-field, A-field, inductance, and stored energy
+    * Add `boundary_element` module with B-field, A-field, inductance, and traction force
     * Add minimal triangle mesh view interface in `mesh.rs` using nodes-and-indices storage
 * Python
     * Add bindings for new BEM field methods as well as helpers for visualizing quadrature points and triangle surface current density

@@ -512,6 +512,9 @@ def triangle_mesh_inductance_matrix(
     """
     Assemble the dense nodal inductance matrix for a triangle stream-function mesh.
 
+    If `par=True` and the per-worker scratch matrices cannot be allocated, the
+    implementation falls back to the serial path instead of failing outright.
+
     Args:
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`

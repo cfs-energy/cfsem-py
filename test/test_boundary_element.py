@@ -733,6 +733,14 @@ def test_triangle_mesh_invalid_inputs():
     with raises(ValueError, match="nonnegative node indices"):
         cfsem.flux_density_triangle_mesh(obs, nodes, bad_triangles, s)
 
+    degenerate_triangles = triangles.copy()
+    degenerate_triangles[0, 2] = degenerate_triangles[0, 1]
+    with raises(ValueError, match="zero area"):
+        cfsem.triangle_mesh_current_density(nodes, degenerate_triangles, s)
+
+    with raises(ValueError, match="zero area"):
+        cfsem.triangle_mesh_quadrature_points(nodes, degenerate_triangles, quad="gl3")
+
     with raises(ValueError, match="Unsupported triangle quadrature rule"):
         cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, quad="bad")
 

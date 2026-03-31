@@ -133,6 +133,17 @@ pub(crate) fn triangle_subdivide_about_point(
     [[point, n0, n1], [point, n1, n2], [point, n2, n0]]
 }
 
+#[inline]
+fn triangle_area_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) -> f64 {
+    let n0 = [nodes.0[idx[0]], nodes.1[idx[0]], nodes.2[idx[0]]];
+    let n1 = [nodes.0[idx[1]], nodes.1[idx[1]], nodes.2[idx[1]]];
+    let n2 = [nodes.0[idx[2]], nodes.1[idx[2]], nodes.2[idx[2]]];
+    let v01 = sub3(n1, n0);
+    let v02 = sub3(n2, n0);
+    let cross = cross3(v01[0], v01[1], v01[2], v02[0], v02[1], v02[2]);
+    0.5 * rss3(cross.0, cross.1, cross.2)
+}
+
 pub(crate) fn validate_triangle_mesh_geometry(
     nodes: (&[f64], &[f64], &[f64]),
     triangles: (&[usize], &[usize], &[usize]),
@@ -155,6 +166,13 @@ pub(crate) fn validate_triangle_mesh_geometry(
         .any(|&idx| idx >= nnode)
     {
         return Err("Triangle refers to non-existent node");
+    }
+
+    for i in 0..ntri {
+        let idx = [triangles.0[i], triangles.1[i], triangles.2[i]];
+        if triangle_area_from_indices(nodes, idx) < 1e-14 {
+            return Err("Triangle has zero area");
+        }
     }
 
     Ok((nnode, ntri))
@@ -475,5 +493,33 @@ mod tests {
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
         );
         assert_eq!(tri_s, [1.0, -0.5, 0.25]);
+    }
+
+    #[test]
+    fn test_triangle_mesh_view_rejects_zero_area_triangle() {
+        let nodes = (
+            &[0.0, 1.0, 2.0][..],
+            &[0.0, 0.0, 0.0][..],
+            &[0.0, 0.0, 0.0][..],
+        );
+        let triangles = (&[0usize][..], &[1usize][..], &[2usize][..]);
+        let s = &[1.0, -0.5, 0.25][..];
+
+        let err = TriangleMeshView::new(nodes, triangles, s).unwrap_err();
+        assert_eq!(err, "Triangle has zero area");
+    }
+
+    #[test]
+    fn test_triangle_mesh_view_rejects_repeated_vertex_triangle() {
+        let nodes = (
+            &[0.0, 1.0, 0.0][..],
+            &[0.0, 0.0, 1.0][..],
+            &[0.0, 0.0, 0.0][..],
+        );
+        let triangles = (&[0usize][..], &[1usize][..], &[1usize][..]);
+        let s = &[1.0, -0.5, 0.25][..];
+
+        let err = TriangleMeshView::new(nodes, triangles, s).unwrap_err();
+        assert_eq!(err, "Triangle has zero area");
     }
 }

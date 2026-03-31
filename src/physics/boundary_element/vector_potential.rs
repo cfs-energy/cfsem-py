@@ -69,7 +69,7 @@ fn triangle_vector_potential_inner(
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///
 /// Returns:
-///     Basis-function magnetic vector potential `[ax, ay, az]` (V*s/m).
+///     Basis-function magnetic vector potential `[ax, ay, az]` (V*s/(A*m)).
 ///
 /// References:
 /// - [5], Eq. (3.24) for the stream-function surface current construction,

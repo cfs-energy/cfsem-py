@@ -69,7 +69,7 @@ fn triangle_flux_density_inner(
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///
 /// Returns:
-///     Basis-function magnetic flux density `[bx, by, bz]` (T).
+///     Basis-function magnetic flux density `[bx, by, bz]` (T/A).
 #[inline]
 pub fn triangle_flux_density_basis(
     n0: [f64; 3],

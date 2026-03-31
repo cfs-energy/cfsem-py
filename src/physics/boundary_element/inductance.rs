@@ -5,7 +5,7 @@ use super::{
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::math::{cartesian_to_cylindrical, dot3, rss3};
-use crate::mesh::{triangle_subdivide_about_point, validate_triangle_mesh_geometry};
+use crate::mesh::{TriangleMeshView, triangle_subdivide_about_point};
 use crate::physics::circular_filament::vector_potential_circular_filament_scalar;
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::dipole::vector_potential_dipole_scalar;
@@ -278,17 +278,6 @@ pub fn triangle_basis_mutual_inductance_block(
 }
 
 #[inline]
-fn triangle_nodes_and_indices(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
-    i: usize,
-) -> ([[f64; 3]; 3], [usize; 3]) {
-    let idx = [triangles.0[i], triangles.1[i], triangles.2[i]]; // [-]
-    let tri_nodes = idx.map(|k| [nodes.0[k], nodes.1[k], nodes.2[k]]); // [m]
-    (tri_nodes, idx)
-}
-
-#[inline]
 fn scatter_triangle_block(
     out: &mut [f64],
     nnode: usize,
@@ -360,8 +349,7 @@ fn validate_flux_linkage_mapping_vector_inputs(
 
 #[inline]
 fn triangle_mesh_source_mapping_from_vector_potential_fn<F>(
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     nsrc: usize,
     quad_kind: QuadratureKind,
     out: &mut [f64],
@@ -370,13 +358,12 @@ fn triangle_mesh_source_mapping_from_vector_potential_fn<F>(
 where
     F: Fn(usize, [f64; 3]) -> [f64; 3] + Sync,
 {
-    let (nnode_tgt, ntri_tgt) = validate_triangle_mesh_geometry(nodes_tgt, triangles_tgt)?;
-    validate_inductance_mapping_inputs(out, nnode_tgt, nsrc)?;
+    validate_inductance_mapping_inputs(out, mesh_tgt.nnode(), nsrc)?;
 
     out.fill(0.0); // [H] or source-dependent interaction units
 
-    for itgt in 0..ntri_tgt {
-        let (tgt_nodes, tgt_idx) = triangle_nodes_and_indices(nodes_tgt, triangles_tgt, itgt);
+    for itgt in 0..mesh_tgt.len() {
+        let (tgt_nodes, tgt_idx) = mesh_tgt.triangle_nodes_and_indices(itgt);
         let tri_area = calc_tri_area(tgt_nodes[0], tgt_nodes[1], tgt_nodes[2]); // [m^2]
         let ktgt = triangle_basis_current_densities(tgt_nodes[0], tgt_nodes[1], tgt_nodes[2]); // [1/m]
 
@@ -405,8 +392,7 @@ where
 
 #[inline]
 fn triangle_mesh_source_mapping_from_vector_potential_fn_par<F>(
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     nsrc: usize,
     quad_kind: QuadratureKind,
     out: &mut [f64],
@@ -415,27 +401,22 @@ fn triangle_mesh_source_mapping_from_vector_potential_fn_par<F>(
 where
     F: Fn(usize, [f64; 3]) -> [f64; 3] + Sync + Send,
 {
-    let (nnode_tgt, ntri_tgt) = validate_triangle_mesh_geometry(nodes_tgt, triangles_tgt)?;
-    let matrix_len = nnode_tgt
+    let matrix_len = mesh_tgt
+        .nnode()
         .checked_mul(nsrc)
         .ok_or("Inductance mapping size overflow")?;
     if out.len() != matrix_len {
         return Err("Output dimension mismatch");
     }
 
-    let chunk = chunksize(ntri_tgt.max(1)); // [-]
-    let starts: Vec<usize> = (0..ntri_tgt).step_by(chunk).collect();
+    let chunk = chunksize(mesh_tgt.len().max(1)); // [-]
+    let starts: Vec<usize> = (0..mesh_tgt.len()).step_by(chunk).collect();
     let mut partial_buffers = Vec::with_capacity(starts.len());
     for _ in 0..starts.len() {
         let mut local = Vec::new();
         if local.try_reserve_exact(matrix_len).is_err() {
             return triangle_mesh_source_mapping_from_vector_potential_fn(
-                nodes_tgt,
-                triangles_tgt,
-                nsrc,
-                quad_kind,
-                out,
-                eval_a,
+                mesh_tgt, nsrc, quad_kind, out, eval_a,
             );
         }
         local.resize(matrix_len, 0.0); // [H] or source-dependent interaction units
@@ -446,10 +427,9 @@ where
         .into_par_iter()
         .zip(partial_buffers.into_par_iter())
         .map(|(start, mut local)| {
-            let end = (start + chunk).min(ntri_tgt);
+            let end = (start + chunk).min(mesh_tgt.len());
             for itgt in start..end {
-                let (tgt_nodes, tgt_idx) =
-                    triangle_nodes_and_indices(nodes_tgt, triangles_tgt, itgt);
+                let (tgt_nodes, tgt_idx) = mesh_tgt.triangle_nodes_and_indices(itgt);
                 let tri_area = calc_tri_area(tgt_nodes[0], tgt_nodes[1], tgt_nodes[2]); // [m^2]
                 let ktgt =
                     triangle_basis_current_densities(tgt_nodes[0], tgt_nodes[1], tgt_nodes[2]); // [1/m]
@@ -500,8 +480,7 @@ where
 /// `L_ab = μ0 / 4π ∬ K_a(r) · K_b(r') / |r - r'| dS dS'`.
 ///
 /// Args:
-///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
 ///
@@ -515,22 +494,21 @@ where
 /// - [2], pp. 1448-1455.
 #[inline]
 pub fn triangle_mesh_inductance_matrix(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
-    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
+    let nnode = mesh.nnode();
     if out.len() != nnode * nnode {
         return Err("Output dimension mismatch");
     }
 
     out.fill(0.0); // [H]
 
-    for isrc in 0..ntri {
-        let (src_nodes, src_idx) = triangle_nodes_and_indices(nodes, triangles, isrc);
-        for itgt in 0..ntri {
-            let (tgt_nodes, tgt_idx) = triangle_nodes_and_indices(nodes, triangles, itgt);
+    for isrc in 0..mesh.len() {
+        let (src_nodes, src_idx) = mesh.triangle_nodes_and_indices(isrc);
+        for itgt in 0..mesh.len() {
+            let (tgt_nodes, tgt_idx) = mesh.triangle_nodes_and_indices(itgt);
             let block = triangle_basis_mutual_inductance_block(
                 src_nodes[0],
                 src_nodes[1],
@@ -555,8 +533,7 @@ pub fn triangle_mesh_inductance_matrix(
 /// the serial implementation rather than failing outright.
 ///
 /// Args:
-///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
 ///
@@ -565,26 +542,26 @@ pub fn triangle_mesh_inductance_matrix(
 ///     the mesh geometry or output dimensions are inconsistent.
 #[inline]
 pub fn triangle_mesh_inductance_matrix_par(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
-    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
-    let matrix_len = nnode
-        .checked_mul(nnode)
+    let nnode = mesh.nnode();
+    let matrix_len = mesh
+        .nnode()
+        .checked_mul(mesh.nnode())
         .ok_or("Inductance matrix size overflow")?;
     if out.len() != matrix_len {
         return Err("Output dimension mismatch");
     }
 
-    let chunk = chunksize(ntri.max(1)); // [-]
-    let starts: Vec<usize> = (0..ntri).step_by(chunk).collect();
+    let chunk = chunksize(mesh.len().max(1)); // [-]
+    let starts: Vec<usize> = (0..mesh.len()).step_by(chunk).collect();
     let mut partial_buffers = Vec::with_capacity(starts.len());
     for _ in 0..starts.len() {
         let mut local = Vec::new();
         if local.try_reserve_exact(matrix_len).is_err() {
-            return triangle_mesh_inductance_matrix(nodes, triangles, quad_kind, out);
+            return triangle_mesh_inductance_matrix(mesh, quad_kind, out);
         }
         local.resize(matrix_len, 0.0); // [H]
         partial_buffers.push(local);
@@ -594,11 +571,11 @@ pub fn triangle_mesh_inductance_matrix_par(
         .into_par_iter()
         .zip(partial_buffers.into_par_iter())
         .map(|(start, mut local)| {
-            let end = (start + chunk).min(ntri);
+            let end = (start + chunk).min(mesh.len());
             for isrc in start..end {
-                let (src_nodes, src_idx) = triangle_nodes_and_indices(nodes, triangles, isrc);
-                for itgt in 0..ntri {
-                    let (tgt_nodes, tgt_idx) = triangle_nodes_and_indices(nodes, triangles, itgt);
+                let (src_nodes, src_idx) = mesh.triangle_nodes_and_indices(isrc);
+                for itgt in 0..mesh.len() {
+                    let (tgt_nodes, tgt_idx) = mesh.triangle_nodes_and_indices(itgt);
                     let block = triangle_basis_mutual_inductance_block(
                         src_nodes[0],
                         src_nodes[1],
@@ -739,8 +716,7 @@ pub fn triangle_mesh_interaction_energy_from_source_coefficients(
 ///     xyzfil: Filament segment start coordinates `(x, y, z)` (m).
 ///     dlxyzfil: Filament segment deltas `(dx, dy, dz)` (m).
 ///     wire_radius: Filament radii (m).
-///     nodes_tgt: Target mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles_tgt: Target triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh_tgt: Borrowed target triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Row-major output mapping buffer of length `nnode_tgt * nfil` (H).
 ///
@@ -752,8 +728,7 @@ pub fn triangle_mesh_inductance_mapping_from_linear_filaments(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     wire_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
@@ -769,8 +744,7 @@ pub fn triangle_mesh_inductance_mapping_from_linear_filaments(
     }
 
     triangle_mesh_source_mapping_from_vector_potential_fn(
-        nodes_tgt,
-        triangles_tgt,
+        mesh_tgt,
         nfil,
         quad_kind,
         out,
@@ -797,8 +771,7 @@ pub fn triangle_mesh_inductance_mapping_from_linear_filaments_par(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     wire_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
@@ -814,8 +787,7 @@ pub fn triangle_mesh_inductance_mapping_from_linear_filaments_par(
     }
 
     triangle_mesh_source_mapping_from_vector_potential_fn_par(
-        nodes_tgt,
-        triangles_tgt,
+        mesh_tgt,
         nfil,
         quad_kind,
         out,
@@ -841,8 +813,7 @@ pub fn triangle_mesh_inductance_mapping_from_linear_filaments_par(
 /// Args:
 ///     rfil: Circular filament radii (m).
 ///     zfil: Circular filament axial coordinates (m).
-///     nodes_tgt: Target mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles_tgt: Target triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh_tgt: Borrowed target triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Row-major output mapping buffer of length `nnode_tgt * nfil` (H).
 ///
@@ -853,8 +824,7 @@ pub fn triangle_mesh_inductance_mapping_from_linear_filaments_par(
 pub fn triangle_mesh_inductance_mapping_from_circular_filaments(
     rfil: &[f64],
     zfil: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
@@ -864,8 +834,7 @@ pub fn triangle_mesh_inductance_mapping_from_circular_filaments(
     }
 
     triangle_mesh_source_mapping_from_vector_potential_fn(
-        nodes_tgt,
-        triangles_tgt,
+        mesh_tgt,
         nfil,
         quad_kind,
         out,
@@ -885,8 +854,7 @@ pub fn triangle_mesh_inductance_mapping_from_circular_filaments(
 pub fn triangle_mesh_inductance_mapping_from_circular_filaments_par(
     rfil: &[f64],
     zfil: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
@@ -896,8 +864,7 @@ pub fn triangle_mesh_inductance_mapping_from_circular_filaments_par(
     }
 
     triangle_mesh_source_mapping_from_vector_potential_fn_par(
-        nodes_tgt,
-        triangles_tgt,
+        mesh_tgt,
         nfil,
         quad_kind,
         out,
@@ -918,8 +885,7 @@ pub fn triangle_mesh_inductance_mapping_from_circular_filaments_par(
 ///     loc: Dipole locations `(x, y, z)` (m).
 ///     moment_dir: Dipole moment direction vectors `(mx, my, mz)`.
 ///     outer_radius: Dipole finite-core radii (m).
-///     nodes_tgt: Target mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles_tgt: Target triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh_tgt: Borrowed target triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Row-major output mapping buffer of length `nnode_tgt * ndip`.
 ///
@@ -931,8 +897,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles(
     loc: (&[f64], &[f64], &[f64]),
     moment_dir: (&[f64], &[f64], &[f64]),
     outer_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
@@ -948,8 +913,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles(
     }
 
     triangle_mesh_source_mapping_from_vector_potential_fn(
-        nodes_tgt,
-        triangles_tgt,
+        mesh_tgt,
         ndip,
         quad_kind,
         out,
@@ -971,8 +935,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
     loc: (&[f64], &[f64], &[f64]),
     moment_dir: (&[f64], &[f64], &[f64]),
     outer_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: &mut [f64],
 ) -> Result<(), &'static str> {
@@ -988,8 +951,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
     }
 
     triangle_mesh_source_mapping_from_vector_potential_fn_par(
-        nodes_tgt,
-        triangles_tgt,
+        mesh_tgt,
         ndip,
         quad_kind,
         out,

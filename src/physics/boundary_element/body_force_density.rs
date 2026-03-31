@@ -8,21 +8,10 @@ use super::{
     triangle_current_density, triangle_flux_density_basis, triangle_quadrature_points,
 };
 use crate::math::cross3;
-use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
+use crate::mesh::TriangleMeshView;
 use crate::physics::circular_filament::flux_density_circular_filament_cartesian_scalar;
 use crate::physics::linear_filament::flux_density_linear_filament_scalar;
 use crate::physics::point_source::dipole::flux_density_dipole_scalar;
-
-#[inline]
-fn triangle_nodes_and_indices(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
-    i: usize,
-) -> ([[f64; 3]; 3], [usize; 3]) {
-    let idx = [triangles.0[i], triangles.1[i], triangles.2[i]]; // [-]
-    let tri_nodes = idx.map(|k| [nodes.0[k], nodes.1[k], nodes.2[k]]); // [m]
-    (tri_nodes, idx)
-}
 
 #[inline]
 fn validate_force_mapping_inputs(
@@ -134,9 +123,7 @@ where
 
 #[inline]
 fn triangle_mesh_force_mapping_row(
-    nodes_src: (&[f64], &[f64], &[f64]),
-    triangles_src: (&[usize], &[usize], &[usize]),
-    ntri_src: usize,
+    mesh_src: &TriangleMeshView<'_>,
     tgt_nodes: [[f64; 3]; 3],
     tgt_s: [f64; 3],
     skip_identical_src: Option<usize>,
@@ -149,12 +136,12 @@ fn triangle_mesh_force_mapping_row(
     outy.fill(0.0); // [N/A]
     outz.fill(0.0); // [N/A]
 
-    for isrc in 0..ntri_src {
+    for isrc in 0..mesh_src.len() {
         if skip_identical_src == Some(isrc) {
             continue;
         }
 
-        let (src_nodes, src_idx) = triangle_nodes_and_indices(nodes_src, triangles_src, isrc);
+        let (src_nodes, src_idx) = mesh_src.triangle_nodes_and_indices(isrc);
         let block = triangle_basis_force_block(
             src_nodes[0],
             src_nodes[1],
@@ -261,10 +248,8 @@ pub fn triangle_force_from_potential_vectors(
 /// triangle meshes.
 ///
 /// Args:
-///     nodes_src: Source mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles_src: Source triangle-node index component slices `(i0, i1, i2)` (dimensionless).
-///     nodes_tgt: Target mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles_tgt: Target triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh_src: Borrowed source triangle-mesh geometry view.
+///     mesh_tgt: Borrowed target triangle-mesh geometry view.
 ///     s_tgt: Fixed target nodal current-potential values (A).
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     outx: Row-major target-triangle by source-node x-component mapping (N/A).
@@ -275,34 +260,23 @@ pub fn triangle_force_from_potential_vectors(
 ///     `Ok(())` after writing the frozen-target force mapping.
 #[inline]
 pub fn triangle_mesh_force_mapping(
-    nodes_src: (&[f64], &[f64], &[f64]),
-    triangles_src: (&[usize], &[usize], &[usize]),
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_src: &TriangleMeshView<'_>,
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (nnode_src, ntri_src) = validate_triangle_mesh_geometry(nodes_src, triangles_src)?;
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
-    validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), nnode_src)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
+    validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), mesh_src.nnode())?;
 
     for itgt in 0..mesh_tgt.len() {
-        let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
-        let rowx = &mut out.0[itgt * nnode_src..(itgt + 1) * nnode_src];
-        let rowy = &mut out.1[itgt * nnode_src..(itgt + 1) * nnode_src];
-        let rowz = &mut out.2[itgt * nnode_src..(itgt + 1) * nnode_src];
+        let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+        let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
+        let rowx = &mut out.0[itgt * mesh_src.nnode()..(itgt + 1) * mesh_src.nnode()];
+        let rowy = &mut out.1[itgt * mesh_src.nnode()..(itgt + 1) * mesh_src.nnode()];
+        let rowz = &mut out.2[itgt * mesh_src.nnode()..(itgt + 1) * mesh_src.nnode()];
         triangle_mesh_force_mapping_row(
-            nodes_src,
-            triangles_src,
-            ntri_src,
-            tgt_nodes,
-            tgt_s,
-            None,
-            quad_kind,
-            rowx,
-            rowy,
-            rowz,
+            mesh_src, tgt_nodes, tgt_s, None, quad_kind, rowx, rowy, rowz,
         );
     }
 
@@ -312,36 +286,25 @@ pub fn triangle_mesh_force_mapping(
 /// Parallel variant of [`triangle_mesh_force_mapping`].
 #[inline]
 pub fn triangle_mesh_force_mapping_par(
-    nodes_src: (&[f64], &[f64], &[f64]),
-    triangles_src: (&[usize], &[usize], &[usize]),
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_src: &TriangleMeshView<'_>,
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (nnode_src, ntri_src) = validate_triangle_mesh_geometry(nodes_src, triangles_src)?;
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
-    validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), nnode_src)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
+    validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), mesh_src.nnode())?;
 
     out.0
-        .par_chunks_mut(nnode_src)
-        .zip_eq(out.1.par_chunks_mut(nnode_src))
-        .zip_eq(out.2.par_chunks_mut(nnode_src))
+        .par_chunks_mut(mesh_src.nnode())
+        .zip_eq(out.1.par_chunks_mut(mesh_src.nnode()))
+        .zip_eq(out.2.par_chunks_mut(mesh_src.nnode()))
         .enumerate()
         .try_for_each(|(itgt, ((rowx, rowy), rowz))| {
-            let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
+            let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+            let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
             triangle_mesh_force_mapping_row(
-                nodes_src,
-                triangles_src,
-                ntri_src,
-                tgt_nodes,
-                tgt_s,
-                None,
-                quad_kind,
-                rowx,
-                rowy,
-                rowz,
+                mesh_src, tgt_nodes, tgt_s, None, quad_kind, rowx, rowy, rowz,
             );
             Ok::<(), &'static str>(())
         })?;
@@ -355,25 +318,22 @@ pub fn triangle_mesh_force_mapping_par(
 /// The identical source-triangle contribution is omitted for each target-triangle row.
 #[inline]
 pub fn triangle_mesh_self_force_mapping(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
-    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
-    validate_force_mapping_inputs(out.0, out.1, out.2, ntri, nnode)?;
+    mesh.validate_nodal_values(s)?;
+    validate_force_mapping_inputs(out.0, out.1, out.2, mesh.len(), mesh.nnode())?;
 
     for itgt in 0..mesh.len() {
-        let (tgt_nodes, tgt_s) = mesh.triangle_nodes(itgt);
-        let rowx = &mut out.0[itgt * nnode..(itgt + 1) * nnode];
-        let rowy = &mut out.1[itgt * nnode..(itgt + 1) * nnode];
-        let rowz = &mut out.2[itgt * nnode..(itgt + 1) * nnode];
+        let tgt_nodes = mesh.triangle_nodes(itgt);
+        let tgt_s = mesh.triangle_scalars(itgt, s);
+        let rowx = &mut out.0[itgt * mesh.nnode()..(itgt + 1) * mesh.nnode()];
+        let rowy = &mut out.1[itgt * mesh.nnode()..(itgt + 1) * mesh.nnode()];
+        let rowz = &mut out.2[itgt * mesh.nnode()..(itgt + 1) * mesh.nnode()];
         triangle_mesh_force_mapping_row(
-            nodes,
-            triangles,
-            ntri,
+            mesh,
             tgt_nodes,
             tgt_s,
             Some(itgt),
@@ -390,27 +350,24 @@ pub fn triangle_mesh_self_force_mapping(
 /// Parallel variant of [`triangle_mesh_self_force_mapping`].
 #[inline]
 pub fn triangle_mesh_self_force_mapping_par(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
-    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
-    validate_force_mapping_inputs(out.0, out.1, out.2, ntri, nnode)?;
+    mesh.validate_nodal_values(s)?;
+    validate_force_mapping_inputs(out.0, out.1, out.2, mesh.len(), mesh.nnode())?;
 
     out.0
-        .par_chunks_mut(nnode)
-        .zip_eq(out.1.par_chunks_mut(nnode))
-        .zip_eq(out.2.par_chunks_mut(nnode))
+        .par_chunks_mut(mesh.nnode())
+        .zip_eq(out.1.par_chunks_mut(mesh.nnode()))
+        .zip_eq(out.2.par_chunks_mut(mesh.nnode()))
         .enumerate()
         .try_for_each(|(itgt, ((rowx, rowy), rowz))| {
-            let (tgt_nodes, tgt_s) = mesh.triangle_nodes(itgt);
+            let tgt_nodes = mesh.triangle_nodes(itgt);
+            let tgt_s = mesh.triangle_scalars(itgt, s);
             triangle_mesh_force_mapping_row(
-                nodes,
-                triangles,
-                ntri,
+                mesh,
                 tgt_nodes,
                 tgt_s,
                 Some(itgt),
@@ -432,8 +389,7 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     wire_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -449,11 +405,12 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments(
         return Err("Length mismatch");
     }
 
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
     validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), nfil)?;
 
     for itgt in 0..mesh_tgt.len() {
-        let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
+        let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+        let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
         let rowx = &mut out.0[itgt * nfil..(itgt + 1) * nfil];
         let rowy = &mut out.1[itgt * nfil..(itgt + 1) * nfil];
         let rowz = &mut out.2[itgt * nfil..(itgt + 1) * nfil];
@@ -502,8 +459,7 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments_par(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     wire_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -519,7 +475,7 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments_par(
         return Err("Length mismatch");
     }
 
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
     validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), nfil)?;
 
     out.0
@@ -528,7 +484,8 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments_par(
         .zip_eq(out.2.par_chunks_mut(nfil))
         .enumerate()
         .try_for_each(|(itgt, ((rowx, rowy), rowz))| {
-            let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
+            let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+            let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
             rowx.fill(0.0);
             rowy.fill(0.0);
             rowz.fill(0.0);
@@ -576,8 +533,7 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments_par(
 pub fn triangle_mesh_force_mapping_from_circular_filaments(
     rfil: &[f64],
     zfil: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -587,11 +543,12 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments(
         return Err("Length mismatch");
     }
 
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
     validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), nfil)?;
 
     for itgt in 0..mesh_tgt.len() {
-        let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
+        let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+        let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
         let rowx = &mut out.0[itgt * nfil..(itgt + 1) * nfil];
         let rowy = &mut out.1[itgt * nfil..(itgt + 1) * nfil];
         let rowz = &mut out.2[itgt * nfil..(itgt + 1) * nfil];
@@ -632,8 +589,7 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments(
 pub fn triangle_mesh_force_mapping_from_circular_filaments_par(
     rfil: &[f64],
     zfil: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -643,7 +599,7 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments_par(
         return Err("Length mismatch");
     }
 
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
     validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), nfil)?;
 
     out.0
@@ -652,7 +608,8 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments_par(
         .zip_eq(out.2.par_chunks_mut(nfil))
         .enumerate()
         .try_for_each(|(itgt, ((rowx, rowy), rowz))| {
-            let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
+            let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+            let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
             rowx.fill(0.0);
             rowy.fill(0.0);
             rowz.fill(0.0);
@@ -694,8 +651,7 @@ pub fn triangle_mesh_force_mapping_from_dipoles(
     loc: (&[f64], &[f64], &[f64]),
     moment_dir: (&[f64], &[f64], &[f64]),
     outer_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -711,11 +667,12 @@ pub fn triangle_mesh_force_mapping_from_dipoles(
         return Err("Length mismatch");
     }
 
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
     validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), ndip)?;
 
     for itgt in 0..mesh_tgt.len() {
-        let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
+        let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+        let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
         let rowx = &mut out.0[itgt * ndip..(itgt + 1) * ndip];
         let rowy = &mut out.1[itgt * ndip..(itgt + 1) * ndip];
         let rowz = &mut out.2[itgt * ndip..(itgt + 1) * ndip];
@@ -759,8 +716,7 @@ pub fn triangle_mesh_force_mapping_from_dipoles_par(
     loc: (&[f64], &[f64], &[f64]),
     moment_dir: (&[f64], &[f64], &[f64]),
     outer_radius: &[f64],
-    nodes_tgt: (&[f64], &[f64], &[f64]),
-    triangles_tgt: (&[usize], &[usize], &[usize]),
+    mesh_tgt: &TriangleMeshView<'_>,
     s_tgt: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -776,7 +732,7 @@ pub fn triangle_mesh_force_mapping_from_dipoles_par(
         return Err("Length mismatch");
     }
 
-    let mesh_tgt = TriangleMeshView::new(nodes_tgt, triangles_tgt, s_tgt)?;
+    mesh_tgt.validate_nodal_values(s_tgt)?;
     validate_force_mapping_inputs(out.0, out.1, out.2, mesh_tgt.len(), ndip)?;
 
     out.0
@@ -785,7 +741,8 @@ pub fn triangle_mesh_force_mapping_from_dipoles_par(
         .zip_eq(out.2.par_chunks_mut(ndip))
         .enumerate()
         .try_for_each(|(itgt, ((rowx, rowy), rowz))| {
-            let (tgt_nodes, tgt_s) = mesh_tgt.triangle_nodes(itgt);
+            let tgt_nodes = mesh_tgt.triangle_nodes(itgt);
+            let tgt_s = mesh_tgt.triangle_scalars(itgt, s_tgt);
             rowx.fill(0.0);
             rowy.fill(0.0);
             rowz.fill(0.0);

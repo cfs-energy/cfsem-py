@@ -11,7 +11,7 @@ use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
 use crate::mesh::{
     TriangleMeshView, triangle_closest_point, triangle_max_edge_length_squared,
-    triangle_subdivide_about_point, validate_triangle_mesh_geometry,
+    triangle_subdivide_about_point,
 };
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
@@ -168,28 +168,24 @@ fn validate_flux_density_mapping_inputs(
 #[inline]
 fn flux_density_triangle_mesh_mapping_chunk(
     obs: (&[f64], &[f64], &[f64]),
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
-    nnode: usize,
-    ntri: usize,
+    mesh: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len(); // [-]
     check_length_3tup!(nobs, obs);
-    validate_flux_density_mapping_inputs(out.0, out.1, out.2, nobs, nnode)?;
+    validate_flux_density_mapping_inputs(out.0, out.1, out.2, nobs, mesh.nnode())?;
 
     out.0.fill(0.0); // [T/A]
     out.1.fill(0.0); // [T/A]
     out.2.fill(0.0); // [T/A]
 
     for iobs in 0..nobs {
-        let row_offset = iobs * nnode; // [-]
+        let row_offset = iobs * mesh.nnode(); // [-]
         let obs_i = [obs.0[iobs], obs.1[iobs], obs.2[iobs]]; // [m]
 
-        for itri in 0..ntri {
-            let idx = [triangles.0[itri], triangles.1[itri], triangles.2[itri]]; // [-]
-            let tri_nodes = idx.map(|k| [nodes.0[k], nodes.1[k], nodes.2[k]]); // [m]
+        for itri in 0..mesh.len() {
+            let (tri_nodes, idx) = mesh.triangle_nodes_and_indices(itri);
 
             let b0 = triangle_flux_density_basis(
                 tri_nodes[0],
@@ -233,13 +229,15 @@ fn flux_density_triangle_mesh_mapping_chunk(
 #[inline]
 fn flux_density_triangle_mesh_inner(
     obs: (&[f64], &[f64], &[f64]),
-    mesh: TriangleMeshView<'_>,
+    mesh: &TriangleMeshView<'_>,
+    s: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len();
     check_length_3tup!(nobs, obs);
     check_length_3tup!(nobs, out);
+    mesh.validate_nodal_values(s)?;
 
     out.0.fill(0.0); // [T]
     out.1.fill(0.0); // [T]
@@ -248,7 +246,8 @@ fn flux_density_triangle_mesh_inner(
     for i in 0..nobs {
         let obs_i = [obs.0[i], obs.1[i], obs.2[i]];
         for j in 0..mesh.len() {
-            let (tri_nodes, tri_s) = mesh.triangle_nodes(j);
+            let tri_nodes = mesh.triangle_nodes(j);
+            let tri_s = mesh.triangle_scalars(j, s);
             let contrib = flux_density_triangle(
                 tri_nodes[0],
                 tri_nodes[1],
@@ -270,8 +269,7 @@ fn flux_density_triangle_mesh_inner(
 ///
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
-///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output mapping buffers `(bx_map, by_map, bz_map)` (T/A), each row-major in
 ///         `(observation point, source node)` order.
@@ -282,21 +280,18 @@ fn flux_density_triangle_mesh_inner(
 #[inline]
 pub fn flux_density_triangle_mesh_mapping(
     obs: (&[f64], &[f64], &[f64]),
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
-    flux_density_triangle_mesh_mapping_chunk(obs, nodes, triangles, nnode, ntri, quad_kind, out)
+    flux_density_triangle_mesh_mapping_chunk(obs, mesh, quad_kind, out)
 }
 
 /// Parallel variant of [`flux_density_triangle_mesh_mapping`].
 ///
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
-///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output mapping buffers `(bx_map, by_map, bz_map)` (T/A), each row-major in
 ///         `(observation point, source node)` order.
@@ -307,25 +302,21 @@ pub fn flux_density_triangle_mesh_mapping(
 #[inline]
 pub fn flux_density_triangle_mesh_mapping_par(
     obs: (&[f64], &[f64], &[f64]),
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
     let nobs = obs.0.len(); // [-]
     check_length_3tup!(nobs, obs);
-    validate_flux_density_mapping_inputs(out.0, out.1, out.2, nobs, nnode)?;
+    validate_flux_density_mapping_inputs(out.0, out.1, out.2, nobs, mesh.nnode())?;
 
-    if nobs == 0 || nnode == 0 {
-        return flux_density_triangle_mesh_mapping_chunk(
-            obs, nodes, triangles, nnode, ntri, quad_kind, out,
-        );
+    if nobs == 0 || mesh.nnode() == 0 {
+        return flux_density_triangle_mesh_mapping_chunk(obs, mesh, quad_kind, out);
     }
 
     let nrow = chunksize(nobs); // [-]
     let nflat = nrow
-        .checked_mul(nnode)
+        .checked_mul(mesh.nnode())
         .ok_or("Flux-density mapping size overflow")?;
     let (xpc, ypc, zpc) = par_chunks_3tup!(obs, nrow);
     let bxc = out.0.par_chunks_mut(nflat);
@@ -335,15 +326,7 @@ pub fn flux_density_triangle_mesh_mapping_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            flux_density_triangle_mesh_mapping_chunk(
-                (xp, yp, zp),
-                nodes,
-                triangles,
-                nnode,
-                ntri,
-                quad_kind,
-                (bx, by, bz),
-            )
+            flux_density_triangle_mesh_mapping_chunk((xp, yp, zp), mesh, quad_kind, (bx, by, bz))
         })?;
 
     Ok(())
@@ -407,8 +390,7 @@ pub fn triangle_mesh_flux_density_from_potential_vectors(
 ///
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
-///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     s: Nodal current-potential values (A).
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output buffers for magnetic flux density `(bx, by, bz)` (T).
@@ -419,14 +401,12 @@ pub fn triangle_mesh_flux_density_from_potential_vectors(
 #[inline]
 pub fn flux_density_triangle_mesh(
     obs: (&[f64], &[f64], &[f64]),
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
-    flux_density_triangle_mesh_inner(obs, mesh, quad_kind, out)
+    flux_density_triangle_mesh_inner(obs, mesh, s, quad_kind, out)
 }
 
 /// Flux density contribution from a triangle mesh with nodal stream-function values.
@@ -434,8 +414,7 @@ pub fn flux_density_triangle_mesh(
 ///
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
-///     nodes: Mesh node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     s: Nodal current-potential values (A).
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output buffers for magnetic flux density `(bx, by, bz)` (T).
@@ -446,13 +425,12 @@ pub fn flux_density_triangle_mesh(
 #[inline]
 pub fn flux_density_triangle_mesh_par(
     obs: (&[f64], &[f64], &[f64]),
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
+    mesh.validate_nodal_values(s)?;
     let n = chunksize(obs.0.len());
     let (xpc, ypc, zpc) = par_chunks_3tup!(obs, n);
     let (bxc, byc, bzc) = mut_par_chunks_3tup!(out, n);
@@ -460,7 +438,7 @@ pub fn flux_density_triangle_mesh_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            flux_density_triangle_mesh_inner((xp, yp, zp), mesh, quad_kind, (bx, by, bz))
+            flux_density_triangle_mesh_inner((xp, yp, zp), mesh, s, quad_kind, (bx, by, bz))
         })?;
 
     Ok(())

@@ -10,7 +10,7 @@
 //! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
 
 use crate::math::{cross3, rss3};
-use crate::mesh::{TriangleMeshView, validate_triangle_mesh_geometry};
+use crate::mesh::TriangleMeshView;
 
 mod body_force_density;
 mod flux_density;
@@ -252,8 +252,7 @@ pub fn triangle_quadrature_count(quad_kind: QuadratureKind) -> usize {
 /// Extract the constant physical surface current density on each triangle of a mesh.
 ///
 /// Args:
-///     nodes: Node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     s: Nodal current-potential values (A).
 ///     out: Output buffers for triangle current-density components `(jx, jy, jz)` (A/m).
 ///
@@ -262,19 +261,19 @@ pub fn triangle_quadrature_count(quad_kind: QuadratureKind) -> usize {
 ///     error if the mesh geometry or output dimensions are inconsistent.
 #[inline]
 pub fn triangle_mesh_current_density(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     s: &[f64],
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let mesh = TriangleMeshView::new(nodes, triangles, s)?;
+    mesh.validate_nodal_values(s)?;
     let ntri = mesh.len();
     if out.0.len() != ntri || out.1.len() != ntri || out.2.len() != ntri {
         return Err("Output dimension mismatch");
     }
 
     for i in 0..ntri {
-        let (tri_nodes, tri_s) = mesh.triangle_nodes(i);
+        let tri_nodes = mesh.triangle_nodes(i);
+        let tri_s = mesh.triangle_scalars(i, s);
         let j = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s); // [A/m]
         out.0[i] = j[0]; // [A/m]
         out.1[i] = j[1]; // [A/m]
@@ -288,8 +287,7 @@ pub fn triangle_mesh_current_density(
 /// in triangle-major order.
 ///
 /// Args:
-///     nodes: Node-coordinate component slices `(x, y, z)` (m).
-///     triangles: Triangle-node index component slices `(i0, i1, i2)` (dimensionless).
+///     mesh: Borrowed triangle-mesh geometry view.
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output buffers for quadrature-point coordinates `(xq, yq, zq)` (m).
 ///     weights: Output buffer for physical quadrature weights `ΔS_q` (m^2).
@@ -299,36 +297,20 @@ pub fn triangle_mesh_current_density(
 ///     error if the mesh geometry or output dimensions are inconsistent.
 #[inline]
 pub fn triangle_mesh_quadrature_points(
-    nodes: (&[f64], &[f64], &[f64]),
-    triangles: (&[usize], &[usize], &[usize]),
+    mesh: &TriangleMeshView<'_>,
     quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
     weights: &mut [f64],
 ) -> Result<(), &'static str> {
-    let (_nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
     let quad_points = triangle_quadrature_points(quad_kind);
     let nqp = quad_points.len();
-    let nout = ntri * nqp;
+    let nout = mesh.len() * nqp;
     if out.0.len() != nout || out.1.len() != nout || out.2.len() != nout || weights.len() != nout {
         return Err("Output dimension mismatch");
     }
 
-    for i in 0..ntri {
-        let n0 = [
-            nodes.0[triangles.0[i]],
-            nodes.1[triangles.0[i]],
-            nodes.2[triangles.0[i]],
-        ];
-        let n1 = [
-            nodes.0[triangles.1[i]],
-            nodes.1[triangles.1[i]],
-            nodes.2[triangles.1[i]],
-        ];
-        let n2 = [
-            nodes.0[triangles.2[i]],
-            nodes.1[triangles.2[i]],
-            nodes.2[triangles.2[i]],
-        ];
+    for i in 0..mesh.len() {
+        let [n0, n1, n2] = mesh.triangle_nodes(i);
         let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
 
         for (k, qp) in quad_points.iter().enumerate() {

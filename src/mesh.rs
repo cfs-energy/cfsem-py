@@ -50,15 +50,11 @@ where
     }
 }
 
-/// Borrowed view of a triangle surface mesh with one scalar value per node.
-///
-/// Intended as an internal lowered representation for boundary-element kernels.
-#[doc(hidden)]
+/// Borrowed view of triangle surface-mesh geometry.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TriangleMeshView<'a> {
+pub struct TriangleMeshView<'a> {
     nodes: (&'a [f64], &'a [f64], &'a [f64]),
     triangles: (&'a [usize], &'a [usize], &'a [usize]),
-    s: &'a [f64],
 }
 
 #[inline]
@@ -144,7 +140,7 @@ fn triangle_area_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) 
     0.5 * rss3(cross.0, cross.1, cross.2)
 }
 
-pub(crate) fn validate_triangle_mesh_geometry(
+fn validate_triangle_mesh_geometry(
     nodes: (&[f64], &[f64], &[f64]),
     triangles: (&[usize], &[usize], &[usize]),
 ) -> Result<(usize, usize), &'static str> {
@@ -180,40 +176,66 @@ pub(crate) fn validate_triangle_mesh_geometry(
 
 impl<'a> TriangleMeshView<'a> {
     /// Validate dimensions and construct a borrowed mesh view.
-    pub(crate) fn new(
+    pub fn new(
         nodes: (&'a [f64], &'a [f64], &'a [f64]),
         triangles: (&'a [usize], &'a [usize], &'a [usize]),
-        s: &'a [f64],
     ) -> Result<Self, &'static str> {
-        let (nnode, _ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
-        if s.len() != nnode {
-            return Err("Nodal scalar dimension mismatch");
-        }
+        validate_triangle_mesh_geometry(nodes, triangles)?;
 
-        Ok(Self {
-            nodes,
-            triangles,
-            s,
-        })
+        Ok(Self { nodes, triangles })
+    }
+
+    /// Number of nodes in the view.
+    #[inline]
+    pub fn nnode(&self) -> usize {
+        self.nodes.0.len()
     }
 
     /// Number of triangles in the view.
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.triangles.0.len()
     }
 
-    /// Node coordinates and nodal scalar values for one triangle.
+    /// Triangle-node indices for one triangle.
     #[inline]
-    pub(crate) fn triangle_nodes(&self, i: usize) -> ([[f64; 3]; 3], [f64; 3]) {
-        let idx = [
+    pub fn triangle_indices(&self, i: usize) -> [usize; 3] {
+        [
             self.triangles.0[i],
             self.triangles.1[i],
             self.triangles.2[i],
-        ];
+        ]
+    }
+
+    /// Node coordinates for one triangle.
+    #[inline]
+    pub fn triangle_nodes(&self, i: usize) -> [[f64; 3]; 3] {
+        let idx = self.triangle_indices(i);
+        idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]) // [m]
+    }
+
+    /// Node coordinates and indices for one triangle.
+    #[inline]
+    pub fn triangle_nodes_and_indices(&self, i: usize) -> ([[f64; 3]; 3], [usize; 3]) {
+        let idx = self.triangle_indices(i);
         let nodes = idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]); // [m]
-        let s = idx.map(|k| self.s[k]); // [A]
-        (nodes, s)
+        (nodes, idx)
+    }
+
+    /// Validate that a nodal scalar slice matches the mesh node count.
+    #[inline]
+    pub fn validate_nodal_values(&self, s: &[f64]) -> Result<(), &'static str> {
+        if s.len() != self.nnode() {
+            return Err("Nodal scalar dimension mismatch");
+        }
+        Ok(())
+    }
+
+    /// Nodal scalar values for one triangle.
+    #[inline]
+    pub fn triangle_scalars(&self, i: usize, s: &[f64]) -> [f64; 3] {
+        let idx = self.triangle_indices(i);
+        idx.map(|k| s[k]) // [A]
     }
 }
 
@@ -484,10 +506,13 @@ mod tests {
         let triangles = (&[0usize][..], &[1usize][..], &[2usize][..]);
         let s = &[1.0, -0.5, 0.25][..];
 
-        let view = TriangleMeshView::new(nodes, triangles, s).unwrap();
+        let view = TriangleMeshView::new(nodes, triangles).unwrap();
         assert_eq!(view.len(), 1);
+        assert_eq!(view.nnode(), 3);
+        view.validate_nodal_values(s).unwrap();
 
-        let (tri_nodes, tri_s) = view.triangle_nodes(0);
+        let tri_nodes = view.triangle_nodes(0);
+        let tri_s = view.triangle_scalars(0, s);
         assert_eq!(
             tri_nodes,
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
@@ -503,9 +528,8 @@ mod tests {
             &[0.0, 0.0, 0.0][..],
         );
         let triangles = (&[0usize][..], &[1usize][..], &[2usize][..]);
-        let s = &[1.0, -0.5, 0.25][..];
 
-        let err = TriangleMeshView::new(nodes, triangles, s).unwrap_err();
+        let err = TriangleMeshView::new(nodes, triangles).unwrap_err();
         assert_eq!(err, "Triangle has zero area");
     }
 
@@ -517,9 +541,8 @@ mod tests {
             &[0.0, 0.0, 0.0][..],
         );
         let triangles = (&[0usize][..], &[1usize][..], &[1usize][..]);
-        let s = &[1.0, -0.5, 0.25][..];
 
-        let err = TriangleMeshView::new(nodes, triangles, s).unwrap_err();
+        let err = TriangleMeshView::new(nodes, triangles).unwrap_err();
         assert_eq!(err, "Triangle has zero area");
     }
 }

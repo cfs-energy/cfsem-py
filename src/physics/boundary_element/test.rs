@@ -26,6 +26,7 @@ use super::{
     vector_potential_triangle_mesh_mapping_par, vector_potential_triangle_mesh_par,
 };
 use crate::math::{cartesian_to_cylindrical, cross3, dot3};
+use crate::mesh::TriangleMeshView;
 use crate::physics::circular_filament::{
     flux_circular_filament_scalar, flux_density_circular_filament_cartesian_scalar,
     vector_potential_circular_filament_scalar,
@@ -47,6 +48,14 @@ struct TriangleMeshData {
     nodes: (Vec<f64>, Vec<f64>, Vec<f64>),
     triangles: (Vec<usize>, Vec<usize>, Vec<usize>),
     s: Vec<f64>,
+}
+
+fn mesh_view(mesh: &TriangleMeshData) -> TriangleMeshView<'_> {
+    TriangleMeshView::new(
+        (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
+        (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+    )
+    .unwrap()
 }
 
 fn circular_strip_triangles_at_z(
@@ -211,20 +220,19 @@ fn mesh_flux_density(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -> Ve
     let mut bx = vec![0.0; obs.len()];
     let mut by = vec![0.0; obs.len()];
     let mut bz = vec![0.0; obs.len()];
+    let view = mesh_view(mesh);
 
     let result = match par {
         true => flux_density_triangle_mesh_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             &mesh.s,
             QuadratureKind::GaussLegendre3,
             (&mut bx, &mut by, &mut bz),
         ),
         false => flux_density_triangle_mesh(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             &mesh.s,
             QuadratureKind::GaussLegendre3,
             (&mut bx, &mut by, &mut bz),
@@ -240,20 +248,19 @@ fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -
     let mut ax = vec![0.0; obs.len()];
     let mut ay = vec![0.0; obs.len()];
     let mut az = vec![0.0; obs.len()];
+    let view = mesh_view(mesh);
 
     let result = match par {
         true => vector_potential_triangle_mesh_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             &mesh.s,
             QuadratureKind::GaussLegendre3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             &mesh.s,
             QuadratureKind::GaussLegendre3,
             (&mut ax, &mut ay, &mut az),
@@ -267,19 +274,12 @@ fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -
 fn mesh_inductance_matrix(mesh: &TriangleMeshData, par: bool) -> Vec<f64> {
     let nnode = mesh.nodes.0.len();
     let mut out = vec![0.0; nnode * nnode];
+    let view = mesh_view(mesh);
     let result = match par {
-        true => triangle_mesh_inductance_matrix_par(
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
-            QuadratureKind::GaussLegendre3,
-            &mut out,
-        ),
-        false => triangle_mesh_inductance_matrix(
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
-            QuadratureKind::GaussLegendre3,
-            &mut out,
-        ),
+        true => {
+            triangle_mesh_inductance_matrix_par(&view, QuadratureKind::GaussLegendre3, &mut out)
+        }
+        false => triangle_mesh_inductance_matrix(&view, QuadratureKind::GaussLegendre3, &mut out),
     };
     result.unwrap();
     out
@@ -341,17 +341,13 @@ fn mesh_inductance_mapping_from_linear_filaments(
     let nnode = mesh_tgt.nodes.0.len();
     let nfil = xyzfil.0.len();
     let mut out = vec![0.0; nnode * nfil];
+    let view = mesh_view(mesh_tgt);
     let result = match par {
         true => triangle_mesh_inductance_mapping_from_linear_filaments_par(
             xyzfil,
             dlxyzfil,
             wire_radius,
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view,
             QuadratureKind::GaussLegendre3,
             &mut out,
         ),
@@ -359,12 +355,7 @@ fn mesh_inductance_mapping_from_linear_filaments(
             xyzfil,
             dlxyzfil,
             wire_radius,
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view,
             QuadratureKind::GaussLegendre3,
             &mut out,
         ),
@@ -382,28 +373,19 @@ fn mesh_inductance_mapping_from_circular_filaments(
     let nnode = mesh_tgt.nodes.0.len();
     let nfil = rfil.len();
     let mut out = vec![0.0; nnode * nfil];
+    let view = mesh_view(mesh_tgt);
     let result = match par {
         true => triangle_mesh_inductance_mapping_from_circular_filaments_par(
             rfil,
             zfil,
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view,
             QuadratureKind::GaussLegendre3,
             &mut out,
         ),
         false => triangle_mesh_inductance_mapping_from_circular_filaments(
             rfil,
             zfil,
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view,
             QuadratureKind::GaussLegendre3,
             &mut out,
         ),
@@ -422,17 +404,13 @@ fn mesh_flux_linkage_mapping_from_dipoles(
     let nnode = mesh_tgt.nodes.0.len();
     let ndip = loc.0.len();
     let mut out = vec![0.0; nnode * ndip];
+    let view = mesh_view(mesh_tgt);
     let result = match par {
         true => triangle_mesh_flux_linkage_mapping_from_dipoles_par(
             loc,
             moment_dir,
             outer_radius,
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view,
             QuadratureKind::GaussLegendre3,
             &mut out,
         ),
@@ -440,12 +418,7 @@ fn mesh_flux_linkage_mapping_from_dipoles(
             loc,
             moment_dir,
             outer_radius,
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view,
             QuadratureKind::GaussLegendre3,
             &mut out,
         ),
@@ -463,19 +436,18 @@ fn mesh_flux_density_mapping(
     let nnode = mesh.nodes.0.len();
     let nout = obs.len() * nnode;
     let (mut bx, mut by, mut bz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+    let view = mesh_view(mesh);
 
     let result = match par {
         true => flux_density_triangle_mesh_mapping_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             QuadratureKind::GaussLegendre3,
             (&mut bx, &mut by, &mut bz),
         ),
         false => flux_density_triangle_mesh_mapping(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             QuadratureKind::GaussLegendre3,
             (&mut bx, &mut by, &mut bz),
         ),
@@ -494,19 +466,18 @@ fn mesh_vector_potential_mapping(
     let nnode = mesh.nodes.0.len();
     let nout = obs.len() * nnode;
     let (mut ax, mut ay, mut az) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+    let view = mesh_view(mesh);
 
     let result = match par {
         true => vector_potential_triangle_mesh_mapping_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             QuadratureKind::GaussLegendre3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh_mapping(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             QuadratureKind::GaussLegendre3,
             (&mut ax, &mut ay, &mut az),
         ),
@@ -525,38 +496,20 @@ fn mesh_force_mapping(
     let ntri_tgt = mesh_tgt.triangles.0.len();
     let nout = nnode_src * ntri_tgt;
     let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+    let view_src = mesh_view(mesh_src);
+    let view_tgt = mesh_view(mesh_tgt);
 
     let result = match par {
         true => triangle_mesh_force_mapping_par(
-            (&mesh_src.nodes.0, &mesh_src.nodes.1, &mesh_src.nodes.2),
-            (
-                &mesh_src.triangles.0,
-                &mesh_src.triangles.1,
-                &mesh_src.triangles.2,
-            ),
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view_src,
+            &view_tgt,
             &mesh_tgt.s,
             QuadratureKind::GaussLegendre3,
             (&mut fx, &mut fy, &mut fz),
         ),
         false => triangle_mesh_force_mapping(
-            (&mesh_src.nodes.0, &mesh_src.nodes.1, &mesh_src.nodes.2),
-            (
-                &mesh_src.triangles.0,
-                &mesh_src.triangles.1,
-                &mesh_src.triangles.2,
-            ),
-            (&mesh_tgt.nodes.0, &mesh_tgt.nodes.1, &mesh_tgt.nodes.2),
-            (
-                &mesh_tgt.triangles.0,
-                &mesh_tgt.triangles.1,
-                &mesh_tgt.triangles.2,
-            ),
+            &view_src,
+            &view_tgt,
             &mesh_tgt.s,
             QuadratureKind::GaussLegendre3,
             (&mut fx, &mut fy, &mut fz),
@@ -572,18 +525,17 @@ fn mesh_self_force_mapping(mesh: &TriangleMeshData, par: bool) -> (Vec<f64>, Vec
     let ntri = mesh.triangles.0.len();
     let nout = nnode * ntri;
     let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+    let view = mesh_view(mesh);
 
     let result = match par {
         true => triangle_mesh_self_force_mapping_par(
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             &mesh.s,
             QuadratureKind::GaussLegendre3,
             (&mut fx, &mut fy, &mut fz),
         ),
         false => triangle_mesh_self_force_mapping(
-            (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-            (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+            &view,
             &mesh.s,
             QuadratureKind::GaussLegendre3,
             (&mut fx, &mut fy, &mut fz),
@@ -602,6 +554,7 @@ fn explicit_force_on_target_triangle_from_source_mesh(
     let tri_area = calc_tri_area(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
     let k_tgt = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s);
     let mut out = [0.0; 3];
+    let view = mesh_view(mesh_src);
     for qp in triangle_quadrature_points(QuadratureKind::GaussLegendre3) {
         let obs = map_tri_uv(tri_nodes[0], tri_nodes[1], tri_nodes[2], [qp[1], qp[2]]);
         let mut bx = [0.0];
@@ -609,12 +562,7 @@ fn explicit_force_on_target_triangle_from_source_mesh(
         let mut bz = [0.0];
         flux_density_triangle_mesh(
             (&[obs[0]], &[obs[1]], &[obs[2]]),
-            (&mesh_src.nodes.0, &mesh_src.nodes.1, &mesh_src.nodes.2),
-            (
-                &mesh_src.triangles.0,
-                &mesh_src.triangles.1,
-                &mesh_src.triangles.2,
-            ),
+            &view,
             &mesh_src.s,
             QuadratureKind::GaussLegendre3,
             (&mut bx, &mut by, &mut bz),
@@ -1059,13 +1007,7 @@ fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     let nqp = triangle_quadrature_count(quad_kind);
 
     let (mut jx, mut jy, mut jz) = (vec![0.0; ntri], vec![0.0; ntri], vec![0.0; ntri]);
-    triangle_mesh_current_density(
-        (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-        (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
-        &mesh.s,
-        (&mut jx, &mut jy, &mut jz),
-    )
-    .unwrap();
+    triangle_mesh_current_density(&mesh_view(&mesh), &mesh.s, (&mut jx, &mut jy, &mut jz)).unwrap();
 
     let (mut xq, mut yq, mut zq) = (
         vec![0.0; ntri * nqp],
@@ -1074,8 +1016,7 @@ fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     );
     let mut wq = vec![0.0; ntri * nqp];
     triangle_mesh_quadrature_points(
-        (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-        (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
+        &mesh_view(&mesh),
         quad_kind,
         (&mut xq, &mut yq, &mut zq),
         &mut wq,
@@ -1338,13 +1279,8 @@ fn test_triangle_mesh_inductance_matrix_has_constant_potential_null_mode() {
     let mut jy = vec![0.0; mesh.triangles.0.len()];
     let mut jz = vec![0.0; mesh.triangles.0.len()];
 
-    triangle_mesh_current_density(
-        (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
-        (&mesh.triangles.0, &mesh.triangles.1, &mesh.triangles.2),
-        &const_s,
-        (&mut jx, &mut jy, &mut jz),
-    )
-    .unwrap();
+    triangle_mesh_current_density(&mesh_view(&mesh), &const_s, (&mut jx, &mut jy, &mut jz))
+        .unwrap();
 
     for i in 0..mesh.triangles.0.len() {
         for (axis, comp) in [jx[i], jy[i], jz[i]].into_iter().enumerate() {

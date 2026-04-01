@@ -1002,6 +1002,80 @@ fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
     }
 }
 
+/// Checks that summing the three one-hot triangle bases cancels B and A fields.
+#[test]
+fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let basis_vectors = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let obs_far = [10.0, -7.5, 6.0];
+    let obs_on = map_tri_uv(tri[0], tri[1], tri[2], [0.23, 0.41]);
+    let normal = calc_tri_normal(tri[0], tri[1], tri[2]);
+    let eps = 1e-12;
+    let obs_near = [
+        obs_on[0] + eps * normal[0],
+        obs_on[1] + eps * normal[1],
+        obs_on[2] + eps * normal[2],
+    ];
+
+    for (obs_name, obs) in [("far", obs_far), ("near", obs_near)] {
+        let mut b_sum = [0.0; 3];
+        let mut a_sum = [0.0; 3];
+        let mut b_scale: f64 = 0.0;
+        let mut a_scale: f64 = 0.0;
+
+        for s_basis in basis_vectors {
+            let b = flux_density_triangle(
+                tri[0],
+                tri[1],
+                tri[2],
+                s_basis,
+                obs,
+                QuadratureKind::GaussLegendre3,
+            );
+            let a = vector_potential_triangle(
+                tri[0],
+                tri[1],
+                tri[2],
+                s_basis,
+                obs,
+                QuadratureKind::GaussLegendre3,
+            );
+            for axis in 0..3 {
+                b_sum[axis] += b[axis];
+                a_sum[axis] += a[axis];
+                b_scale = b_scale.max(b[axis].abs());
+                a_scale = a_scale.max(a[axis].abs());
+            }
+        }
+
+        let (b_rtol, a_rtol) = match obs_name {
+            "far" => (1e-8, 1e-8),
+            "near" => (1e-12, 1e-12),
+            _ => unreachable!(),
+        };
+        let b_atol = b_rtol * b_scale;
+        let a_atol = a_rtol * a_scale;
+        for axis in 0..3 {
+            assert!(
+                approx(b_sum[axis], 0.0, 0.0, b_atol),
+                "basis B cancellation failed at {obs_name} point, axis {axis}: sum={:.16e}, scale={:.16e}, rtol={:.16e}, atol={:.16e}",
+                b_sum[axis],
+                b_scale,
+                b_rtol,
+                b_atol,
+            );
+            assert!(
+                approx(a_sum[axis], 0.0, 0.0, a_atol),
+                "basis A cancellation failed at {obs_name} point, axis {axis}: sum={:.16e}, scale={:.16e}, rtol={:.16e}, atol={:.16e}",
+                a_sum[axis],
+                a_scale,
+                a_rtol,
+                a_atol,
+            );
+        }
+    }
+}
+
 /// Checks mesh quadrature-point extraction and triangle current-density reconstruction.
 #[test]
 fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {

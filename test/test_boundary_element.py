@@ -129,6 +129,7 @@ def _linear_filament_loop(
 
 
 def test_triangle_mesh_quadrature_points_and_current_density():
+    """Check quadrature-point extraction and current-density reconstruction on a strip mesh."""
     nodes, triangles, s = _triangle_strip_mesh(0.73, 7.3e-4, 1.7, nphi=32)
 
     j = cfsem.triangle_mesh_current_density(nodes, triangles, s)
@@ -163,6 +164,7 @@ def test_triangle_mesh_quadrature_points_and_current_density():
 @mark.parametrize("par", [True, False])
 @mark.parametrize("quad", ["gl3", "dunavant5"])
 def test_triangle_mesh_far_field_against_circular_filament(par, quad):
+    """Compare far-field triangle-mesh fields against the circular-filament reference."""
     radius = 0.7312345987
     height = radius * 1e-3
     loop_current = 1.7
@@ -202,6 +204,7 @@ def test_triangle_mesh_far_field_against_circular_filament(par, quad):
 
 
 def test_triangle_mesh_serial_vs_parallel():
+    """Check that serial and parallel triangle-mesh field evaluations agree."""
     radius = 0.7312345987
     height = radius * 1e-3
     loop_current = 1.7
@@ -227,6 +230,7 @@ def test_triangle_mesh_serial_vs_parallel():
 
 @mark.parametrize("par", [True, False])
 def test_triangle_mesh_field_mappings_contract_to_collection_fields(par):
+    """Check field mapping contractions against direct triangle-mesh field evaluation."""
     radius = 0.7312345987
     height = radius * 1e-3
     loop_current = 1.7
@@ -279,6 +283,7 @@ def test_triangle_mesh_field_mappings_contract_to_collection_fields(par):
 
 
 def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_lyle():
+    """Compare strip-mesh self-inductance and stored energy against Wien and Lyle references."""
     major_radius = 0.5  # [m]
     minor_radius = 5e-3  # [m]
     height = 2.0 * minor_radius  # [m]
@@ -323,6 +328,7 @@ def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_
 
 @mark.parametrize("par", [True, False])
 def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
+    """Check filament and dipole inductance mappings against direct target quadrature."""
     radius = 0.58
     height = radius * 1e-3
     nodes_tgt, triangles_tgt, s_tgt = _triangle_strip_mesh(radius, height, 0.9, nphi=20, z_center=0.14)
@@ -450,6 +456,7 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
 
 
 def test_triangle_mesh_inductance_mappings_scalar_source_thickness_inputs():
+    """Check scalar source-thickness inputs for inductance mappings produce finite outputs."""
     radius = 0.54
     height = radius * 1e-3
     nodes_tgt, triangles_tgt, s_tgt = _triangle_strip_mesh(radius, height, 0.8, nphi=18, z_center=-0.12)
@@ -506,6 +513,7 @@ def test_triangle_mesh_inductance_mappings_scalar_source_thickness_inputs():
 
 @mark.parametrize("par", [True, False])
 def test_triangle_mesh_force_mapping_against_direct_target_quadrature(par):
+    """Compare force mapping contraction against direct target-triangle quadrature."""
     radius = 0.63
     height = radius * 1e-3
     nodes_src, triangles_src, s_src = _triangle_strip_mesh(radius, height, 1.1, nphi=24, z_center=-0.19)
@@ -539,6 +547,7 @@ def test_triangle_mesh_force_mapping_against_direct_target_quadrature(par):
 
 @mark.parametrize("par", [True, False])
 def test_triangle_mesh_self_force_mapping_shapes_and_serial_parallel_agree(par):
+    """Check self-force mapping shapes and serial/parallel agreement."""
     radius = 0.71
     height = radius * 1e-3
     nodes, triangles, s = _triangle_strip_mesh(radius, height, 1.0, nphi=32)
@@ -560,6 +569,7 @@ def test_triangle_mesh_self_force_mapping_shapes_and_serial_parallel_agree(par):
 
 @mark.parametrize("par", [True, False])
 def test_triangle_mesh_force_mappings_from_other_source_models(par):
+    """Check filament and dipole force mappings against direct target quadrature."""
     radius = 0.58
     height = radius * 1e-3
     nodes_tgt, triangles_tgt, s_tgt = _triangle_strip_mesh(radius, height, 0.9, nphi=20, z_center=0.14)
@@ -669,6 +679,7 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
 
 @mark.parametrize("par", [True, False])
 def test_triangle_mesh_force_on_strip_against_linear_filament_loop(par):
+    """Compare strip force density against a discretized linear-filament loop reference."""
     radius = 0.63
     height = radius * 1e-3
     z_loop = -0.18
@@ -719,6 +730,7 @@ def test_triangle_mesh_force_on_strip_against_linear_filament_loop(par):
 
 
 def test_triangle_mesh_invalid_inputs():
+    """Check that the Python boundary-element wrappers reject invalid inputs cleanly."""
     nodes, triangles, s = _triangle_strip_mesh(0.7, 7e-4, 1.2, nphi=32)
     obs = np.array([[0.4, -0.2, 1.1], [1.7, 0.8, -0.5]], dtype=np.float64)
 

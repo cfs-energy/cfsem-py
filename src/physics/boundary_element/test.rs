@@ -679,6 +679,7 @@ fn strip_mutual_inductance(src: &[TrianglePatch], tgt: &[TrianglePatch]) -> f64 
     out
 }
 
+/// Checks that the collection kernels reproduce the single-triangle field kernels.
 #[test]
 fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
     let tri = TrianglePatch {
@@ -836,6 +837,7 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
     }
 }
 
+/// Checks that field mapping matrices contract to the same fields as direct mesh evaluation.
 #[test]
 fn test_triangle_mesh_field_mappings_match_collection_fields() {
     let radius = 0.71;
@@ -955,6 +957,7 @@ fn test_triangle_mesh_field_mappings_match_collection_fields() {
     }
 }
 
+/// Checks triangle basis fields against a direct current-element quadrature sum.
 #[test]
 fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
     let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
@@ -999,6 +1002,7 @@ fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
     }
 }
 
+/// Checks mesh quadrature-point extraction and triangle current-density reconstruction.
 #[test]
 fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     let tris = circular_strip_triangles(0.73, 7.3e-4, 1.7, 24);
@@ -1055,6 +1059,7 @@ fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     }
 }
 
+/// Checks that the Dunavant rule integrates reference-triangle monomials through degree five.
 #[test]
 fn test_dunavant_rule_integrates_reference_triangle_monomials_to_degree_five() {
     let quad_points = triangle_quadrature_points(QuadratureKind::Dunavant5);
@@ -1076,6 +1081,7 @@ fn test_dunavant_rule_integrates_reference_triangle_monomials_to_degree_five() {
     }
 }
 
+/// Checks disjoint-triangle inductance blocks against vector-potential contraction.
 #[test]
 fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disjoint_triangles() {
     let src = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.0]];
@@ -1129,6 +1135,7 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
     }
 }
 
+/// Checks a one-triangle mesh inductance matrix against the direct single-triangle block.
 #[test]
 fn test_triangle_mesh_inductance_matrix_matches_single_triangle_block() {
     let tri = TrianglePatch {
@@ -1167,6 +1174,7 @@ fn test_triangle_mesh_inductance_matrix_matches_single_triangle_block() {
     }
 }
 
+/// Checks that the self-inductance block stays finite, symmetric, and nearly PSD.
 #[test]
 fn test_triangle_basis_self_inductance_block_is_symmetric_and_finite() {
     let tri = [[0.0, 0.0, 0.0], [0.8, 0.1, 0.0], [0.2, 0.9, 0.2]];
@@ -1207,6 +1215,7 @@ fn test_triangle_basis_self_inductance_block_is_symmetric_and_finite() {
     }
 }
 
+/// Checks mesh inductance symmetry and agreement with direct bilinear contraction.
 #[test]
 fn test_triangle_mesh_inductance_matrix_is_symmetric_and_matches_direct_contraction() {
     let patches = [
@@ -1261,6 +1270,7 @@ fn test_triangle_mesh_inductance_matrix_is_symmetric_and_matches_direct_contract
     );
 }
 
+/// Checks that a constant nodal potential lies in the inductance matrix null mode.
 #[test]
 fn test_triangle_mesh_inductance_matrix_has_constant_potential_null_mode() {
     let patches = [
@@ -1308,6 +1318,7 @@ fn test_triangle_mesh_inductance_matrix_has_constant_potential_null_mode() {
     );
 }
 
+/// Checks linear-filament inductance mapping against direct target-triangle quadrature.
 #[test]
 fn test_triangle_mesh_inductance_mapping_from_linear_filaments_matches_direct_target_quadrature() {
     let radius = 0.62;
@@ -1390,6 +1401,7 @@ fn test_triangle_mesh_inductance_mapping_from_linear_filaments_matches_direct_ta
     );
 }
 
+/// Checks circular-filament inductance mapping against direct target-triangle quadrature.
 #[test]
 fn test_triangle_mesh_inductance_mapping_from_circular_filaments_matches_direct_target_quadrature()
 {
@@ -1453,6 +1465,7 @@ fn test_triangle_mesh_inductance_mapping_from_circular_filaments_matches_direct_
     );
 }
 
+/// Checks dipole flux-linkage mapping against direct target-triangle quadrature.
 #[test]
 fn test_triangle_mesh_flux_linkage_mapping_from_dipoles_matches_direct_target_quadrature() {
     let radius = 0.55;
@@ -1524,6 +1537,7 @@ fn test_triangle_mesh_flux_linkage_mapping_from_dipoles_matches_direct_target_qu
     );
 }
 
+/// Checks that touching-triangle inductance pairs remain finite and reciprocal.
 #[test]
 fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciprocal() {
     let tri0 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
@@ -1567,6 +1581,7 @@ fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciproca
     }
 }
 
+/// Checks strip mutual inductance against a circular-filament reference loop.
 #[test]
 fn test_triangle_strip_mutual_inductance_against_circular_filament() {
     let radius = 0.71;
@@ -1597,6 +1612,7 @@ fn test_triangle_strip_mutual_inductance_against_circular_filament() {
     );
 }
 
+/// Checks disconnected-mesh mutual coupling against an explicit triangle-pair sum.
 #[test]
 fn test_triangle_mesh_inductance_matrix_mutual_coupling_matches_triangle_pair_sum() {
     let radius = 0.71;
@@ -1624,6 +1640,7 @@ fn test_triangle_mesh_inductance_matrix_mutual_coupling_matches_triangle_pair_su
     );
 }
 
+/// Checks the triangle force block against direct contraction over the target triangle.
 #[test]
 fn test_triangle_basis_force_block_matches_direct_contraction() {
     let src0 = [0.0, 0.0, 0.0];
@@ -1669,6 +1686,7 @@ fn test_triangle_basis_force_block_matches_direct_contraction() {
     }
 }
 
+/// Checks mesh force mapping against direct target-triangle force integration.
 #[test]
 fn test_triangle_mesh_force_mapping_matches_direct_target_integration() {
     let radius = 0.61;
@@ -1719,6 +1737,7 @@ fn test_triangle_mesh_force_mapping_matches_direct_target_integration() {
     }
 }
 
+/// Checks per-triangle force contraction against explicit target-triangle forces.
 #[test]
 fn test_triangle_mesh_triangle_forces_from_potential_vectors_match_direct_target_forces() {
     let radius = 0.64;
@@ -1825,6 +1844,7 @@ fn test_triangle_mesh_triangle_forces_from_potential_vectors_match_direct_target
     }
 }
 
+/// Checks that disjoint-mesh force mappings satisfy Newton's third-law reciprocity.
 #[test]
 fn test_triangle_mesh_force_mapping_obeys_newtons_third_law_for_disjoint_meshes() {
     let radius = 0.61;
@@ -1855,6 +1875,7 @@ fn test_triangle_mesh_force_mapping_obeys_newtons_third_law_for_disjoint_meshes(
     }
 }
 
+/// Checks that self-force mapping gives the same result in serial and parallel.
 #[test]
 fn test_triangle_mesh_self_force_mapping_serial_matches_parallel() {
     let radius = 0.73;
@@ -1888,6 +1909,7 @@ fn test_triangle_mesh_self_force_mapping_serial_matches_parallel() {
     }
 }
 
+/// Checks that triangle B and A remain finite on and very near the source surface.
 #[test]
 fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
     let tri = TrianglePatch {
@@ -1981,6 +2003,7 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
     }
 }
 
+/// Checks far-field strip flux density and vector potential against a circular filament.
 #[test]
 fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field() {
     let radius = 0.7312345987;
@@ -2092,6 +2115,7 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
     }
 }
 
+/// Checks near-axis strip flux density against a circular-filament reference solution.
 #[test]
 fn test_flux_density_triangle_circular_strip_matches_circular_filament_near_axis() {
     let radius = 0.7312345987;

@@ -4,8 +4,9 @@ use rayon::{
 };
 
 use super::{
-    QuadratureKind, calc_tri_area, map_tri_uv, triangle_basis_current_densities,
-    triangle_current_density, triangle_flux_density_basis, triangle_quadrature_points,
+    QuadratureKind, TRIANGLE_MAX_QUADRATURE_POINTS, calc_tri_area, map_tri_uv,
+    triangle_basis_current_densities, triangle_current_density, triangle_flux_density_basis,
+    triangle_quadrature_points,
 };
 use crate::math::cross3;
 use crate::mesh::TriangleMeshView;
@@ -93,10 +94,10 @@ where
     let nqp = quad_points.len(); // [-]
     let k_tgt = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s); // [A/m]
 
-    let mut xq = vec![0.0; nqp];
-    let mut yq = vec![0.0; nqp];
-    let mut zq = vec![0.0; nqp];
-    let mut wq = vec![0.0; nqp];
+    let mut xq = [0.0; TRIANGLE_MAX_QUADRATURE_POINTS];
+    let mut yq = [0.0; TRIANGLE_MAX_QUADRATURE_POINTS];
+    let mut zq = [0.0; TRIANGLE_MAX_QUADRATURE_POINTS];
+    let mut wq = [0.0; TRIANGLE_MAX_QUADRATURE_POINTS];
     for (iqp, qp) in quad_points.iter().enumerate() {
         let obs = map_tri_uv(tri_nodes[0], tri_nodes[1], tri_nodes[2], [qp[1], qp[2]]); // [m]
         xq[iqp] = obs[0]; // [m]
@@ -105,10 +106,14 @@ where
         wq[iqp] = qp[0] * tri_area; // [m^2]
     }
 
-    let mut bx = vec![0.0; nqp];
-    let mut by = vec![0.0; nqp];
-    let mut bz = vec![0.0; nqp];
-    eval_b(tri_owner, (&xq, &yq, &zq), (&mut bx, &mut by, &mut bz))?;
+    let mut bx = [0.0; TRIANGLE_MAX_QUADRATURE_POINTS];
+    let mut by = [0.0; TRIANGLE_MAX_QUADRATURE_POINTS];
+    let mut bz = [0.0; TRIANGLE_MAX_QUADRATURE_POINTS];
+    eval_b(
+        tri_owner,
+        (&xq[..nqp], &yq[..nqp], &zq[..nqp]),
+        (&mut bx[..nqp], &mut by[..nqp], &mut bz[..nqp]),
+    )?;
 
     let mut out = [0.0; 3]; // [N / source-unit]
     for iqp in 0..nqp {

@@ -117,6 +117,9 @@ const TABLE_DUNAVANT_5: [[f64; 3]; 7] = [
 /// triangle self kernel.
 const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 
+/// Maximum number of quadrature points among the supported triangle rules.
+pub(crate) const TRIANGLE_MAX_QUADRATURE_POINTS: usize = TABLE_GAUSS_LEGENDRE_3.len();
+
 #[derive(Clone, Copy)]
 pub enum QuadratureKind {
     GaussLegendre2,

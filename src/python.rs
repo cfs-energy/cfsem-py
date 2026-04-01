@@ -5,8 +5,6 @@ use pyo3::exceptions;
 use pyo3::prelude::*;
 use std::fmt::Debug;
 
-#[cfg(feature = "rat-mlfmm")]
-use crate::mlfmm::MlfmmOptions;
 use crate::{math, mesh, physics};
 
 create_exception!(cfsem, DimensionalityError, exceptions::PyValueError);
@@ -99,22 +97,6 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
         }
         .into()),
     }
-}
-
-fn triangle_mesh_view<'a>(
-    nodes: &'a (Vec<f64>, Vec<f64>, Vec<f64>),
-    triangles: &'a (Vec<usize>, Vec<usize>, Vec<usize>),
-) -> PyResult<mesh::TriangleMeshView<'a>> {
-    mesh::TriangleMeshView::new(
-        (&nodes.0, &nodes.1, &nodes.2),
-        (&triangles.0, &triangles.1, &triangles.2),
-    )
-    .map_err(|msg| {
-        PyInteropError::ValueError {
-            msg: msg.to_string(),
-        }
-        .into()
-    })
 }
 
 #[pyfunction]
@@ -905,6 +887,22 @@ fn body_force_density_linear_filament(
     _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
+fn triangle_mesh_view<'a>(
+    nodes: &'a (Vec<f64>, Vec<f64>, Vec<f64>),
+    triangles: &'a (Vec<usize>, Vec<usize>, Vec<usize>),
+) -> PyResult<mesh::TriangleMeshView<'a>> {
+    mesh::TriangleMeshView::new(
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+    )
+    .map_err(|msg| {
+        PyInteropError::ValueError {
+            msg: msg.to_string(),
+        }
+        .into()
+    })
+}
+
 #[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="gl3"))]
 fn flux_density_triangle_mesh(
     obs: PyReadonlyArray2<f64>,
@@ -1670,8 +1668,6 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(vector_potential_point_segment, m.clone())?)?;
-    #[cfg(feature = "rat-mlfmm")]
-    m.add_function(wrap_pyfunction!(fields_linear_filament_mlfmm, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         inductance_piecewise_linear_filaments,
         m.clone()

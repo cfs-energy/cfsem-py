@@ -337,7 +337,7 @@ fn validate_flux_linkage_mapping_vector_inputs(
         }
         return Err("Source coefficient dimension mismatch");
     }
-    if map.len() % nsrc != 0 {
+    if !map.len().is_multiple_of(nsrc) {
         return Err("Inductance mapping dimension mismatch");
     }
     let nnode_tgt = map.len() / nsrc; // [-]

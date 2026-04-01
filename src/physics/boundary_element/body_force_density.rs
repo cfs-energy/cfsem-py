@@ -41,7 +41,7 @@ fn validate_force_mapping_vector_inputs(
     if fy.len() != fx.len() || fz.len() != fx.len() {
         return Err("Force mapping dimension mismatch");
     }
-    if nsrc == 0 || fx.len() % nsrc != 0 {
+    if nsrc == 0 || !fx.len().is_multiple_of(nsrc) {
         return Err("Force mapping dimension mismatch");
     }
     Ok(fx.len() / nsrc)

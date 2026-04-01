@@ -7,7 +7,7 @@ use rayon::{
 
 use crate::{
     chunksize,
-    math::{cross3, dot3, rss3},
+    math::cross3,
 };
 
 use crate::{MU0_OVER_4PI, macros::*};
@@ -668,9 +668,9 @@ pub fn flux_density_linear_filament_scalar(
 
     // Finally, determine whether we are clipping to zero.
     if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {
-        return (bx, by, bz);
+        (bx, by, bz)
     } else {
-        return (0.0, 0.0, 0.0);
+        (0.0, 0.0, 0.0)
     }
 }
 

@@ -383,7 +383,7 @@ pub fn triangle_mesh_vector_potential_from_potential_vectors(
         }
         return Err("Vector-potential mapping dimension mismatch");
     }
-    if ax_map.len() % s.len() != 0 {
+    if !ax_map.len().is_multiple_of(s.len()) {
         return Err("Vector-potential mapping dimension mismatch");
     }
 

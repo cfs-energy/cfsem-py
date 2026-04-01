@@ -361,7 +361,7 @@ pub fn triangle_mesh_flux_density_from_potential_vectors(
         }
         return Err("Flux-density mapping dimension mismatch");
     }
-    if bx_map.len() % s.len() != 0 {
+    if !bx_map.len().is_multiple_of(s.len()) {
         return Err("Flux-density mapping dimension mismatch");
     }
 

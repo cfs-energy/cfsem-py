@@ -41,7 +41,12 @@ jobs:
         uv run --locked ruff check ./cfsem
         uv run --locked ruff format ./cfsem --check
         uv run --locked pyright ./cfsem --pythonversion 3.10
+<<<<<<< HEAD
         uv run --locked pytest ./test/
+=======
+        uv run --locked coverage run --source=./cfsem -m pytest ./test/
+        uv run --locked coverage report --show-missing
+>>>>>>> release
 
         # Build docs
         sh build_docs.sh

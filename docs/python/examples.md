@@ -47,3 +47,14 @@ as thin helical filaments.
 ``` py title="examples/inductance.py"
 --8<-- "examples/inductance.py"
 ```
+
+## Loop Inductance
+
+Estimate the (low-frequency) self-inductance of a finite-radius wire loop by different methods.
+
+<figure markdown="span">
+  ![Helmholtz coil example](example_outputs/loop_inductance.png)
+  <figcaption>
+    Inductance of a wire loop by different integration methods.
+  </figcaption>
+</figure>

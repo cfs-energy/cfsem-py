@@ -1,0 +1,206 @@
+"""Plot thin-loop self-inductance versus piecewise-linear loop discretization."""
+
+import os
+from pathlib import Path
+from time import perf_counter
+
+import numpy as np
+
+if os.getenv("CFSEM_TESTING"):
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+from matplotlib import pyplot as plt
+
+import cfsem
+
+LOOP_RADIUS = 1.0  # [m]
+WIRE_RADIUS = 0.01  # [m]
+NSEG_SWEEP = np.unique(
+    np.rint(np.geomspace(8.0, 1e4, 9 if os.getenv("CFSEM_TESTING") else 25)).astype(int)
+)
+
+
+def circle_polyline(radius: float, nseg: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Closed polyline on a circle with `nseg` linear segments."""
+    phi = np.linspace(0.0, 2.0 * np.pi, nseg + 1)
+    x = radius * np.cos(phi)
+    y = radius * np.sin(phi)
+    z = np.zeros_like(phi)
+    return x, y, z
+
+
+def polyline_to_segments(
+    xyzp: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> tuple[
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+]:
+    """Convert a closed polyline point series into segment starts, deltas, and midpoints."""
+    x, y, z = xyzp
+    dlx = x[1:] - x[:-1]
+    dly = y[1:] - y[:-1]
+    dlz = z[1:] - z[:-1]
+    xyzfil = (x[:-1], y[:-1], z[:-1])
+    dlxyzfil = (dlx, dly, dlz)
+    xyzmid = (
+        x[:-1] + 0.5 * dlx,
+        y[:-1] + 0.5 * dly,
+        z[:-1] + 0.5 * dlz,
+    )
+    return xyzfil, dlxyzfil, xyzmid
+
+
+def loop_inductance_from_vector_potential(
+    xyzp: tuple[np.ndarray, np.ndarray, np.ndarray],
+    wire_radius: float,
+) -> float:
+    """Integrate A·dl around the loop using one evaluation point per target segment."""
+    xyzfil, dlxyzfil, xyzmid = polyline_to_segments(xyzp)
+    ifil = np.ones_like(xyzfil[0], dtype=np.float64)
+    ax, ay, az = cfsem.vector_potential_linear_filament(
+        xyzmid,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        wire_radius=wire_radius,
+    )
+    return float(np.sum(ax * dlxyzfil[0] + ay * dlxyzfil[1] + az * dlxyzfil[2]))
+
+
+def loop_inductance_from_point_segment_vector_potential(
+    xyzp: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> float:
+    """Integrate A·dl around the loop using point-segment sources and one off-center target point."""
+    xyzfil, dlxyzfil, _ = polyline_to_segments(xyzp)
+    ifil = np.ones_like(xyzfil[0], dtype=np.float64)
+    xyzobs = (
+        xyzfil[0],
+        xyzfil[1],
+        xyzfil[2],
+    )
+    ax, ay, az = cfsem.vector_potential_point_segment(
+        xyzobs,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+    )
+    return float(np.sum(ax * dlxyzfil[0] + ay * dlxyzfil[1] + az * dlxyzfil[2]))
+
+
+inductance_direct = np.empty(NSEG_SWEEP.size, dtype=np.float64)
+inductance_from_a = np.empty(NSEG_SWEEP.size, dtype=np.float64)
+inductance_from_a_point = np.empty(NSEG_SWEEP.size, dtype=np.float64)
+wien_inductance = float(cfsem.self_inductance_circular_ring_wien(LOOP_RADIUS, WIRE_RADIUS))
+lyle_inductance = float(
+    cfsem.self_inductance_lyle6(LOOP_RADIUS, 2.0 * WIRE_RADIUS, 2.0 * WIRE_RADIUS, 1.0)
+)
+
+for i, n in enumerate(NSEG_SWEEP):
+    xyz = circle_polyline(LOOP_RADIUS, int(n))
+    inductance_direct[i] = cfsem.self_inductance_piecewise_linear_filaments(
+        xyz,
+        wire_radius=WIRE_RADIUS,
+    )
+    inductance_from_a[i] = loop_inductance_from_vector_potential(xyz, WIRE_RADIUS)
+    inductance_from_a_point[i] = loop_inductance_from_point_segment_vector_potential(xyz)
+    print(
+        f"N={int(n):5d}: self_inductance_piecewise_linear_filaments={inductance_direct[i]:.6e} H, "
+        f"A·dl with {WIRE_RADIUS * 1e2:.1f} cm wire radius={inductance_from_a[i]:.6e} H, "
+        f"point-segment A·dl={inductance_from_a_point[i]:.6e} H"
+    )
+
+matrix_benchmark_n = 200 if os.getenv("CFSEM_TESTING") else 1000
+xyz_bench = circle_polyline(LOOP_RADIUS, matrix_benchmark_n)
+xyzfil_bench, dlxyzfil_bench, _ = polyline_to_segments(xyz_bench)
+
+t0 = perf_counter()
+m_serial = cfsem.inductance_linear_filaments(
+    xyzfil_bench,
+    dlxyzfil_bench,
+    xyzfil_bench,
+    dlxyzfil_bench,
+    wire_radius_src=WIRE_RADIUS,
+    par=False,
+    output="matrix",
+)
+serial_time = perf_counter() - t0
+
+t0 = perf_counter()
+m_parallel = cfsem.inductance_linear_filaments(
+    xyzfil_bench,
+    dlxyzfil_bench,
+    xyzfil_bench,
+    dlxyzfil_bench,
+    wire_radius_src=WIRE_RADIUS,
+    par=True,
+    output="matrix",
+)
+parallel_time = perf_counter() - t0
+
+print(
+    f"matrix benchmark NxN, N={matrix_benchmark_n}: "
+    f"serial={serial_time * 1e3:.1f} millis, parallel={parallel_time * 1e3:.1f} millis, "
+    f"speedup={serial_time / parallel_time:.2f}x, "
+    f"match={np.allclose(m_serial, m_parallel, rtol=1e-12, atol=1e-15)}"
+)
+
+fig, ax = plt.subplots(figsize=(7.0, 4.5))
+
+ax.semilogx(
+    NSEG_SWEEP,
+    inductance_direct * 1e6,
+    color="black",
+    marker=".",
+    markersize=7,
+    linewidth=1.2,
+    label="self_inductance_piecewise_linear_filaments",
+)
+ax.semilogx(
+    NSEG_SWEEP,
+    inductance_from_a * 1e6,
+    color="tab:blue",
+    marker="o",
+    markersize=4,
+    linewidth=1.2,
+    label="A·dl (linear filament)",
+)
+ax.semilogx(
+    NSEG_SWEEP,
+    inductance_from_a_point * 1e6,
+    color="tab:green",
+    marker="s",
+    markersize=4,
+    linewidth=1.2,
+    label="A·dl (point-segment)",
+)
+ax.axhline(
+    wien_inductance * 1e6,
+    color="tab:red",
+    linestyle="--",
+    linewidth=1.2,
+    label="Wien formula",
+)
+ax.axhline(
+    lyle_inductance * 1e6,
+    color="tab:orange",
+    linestyle="-.",
+    linewidth=1.2,
+    label="Lyle formula",
+)
+ax.set_xlabel("Loop discretization count [-]")
+ax.set_ylabel("Self-inductance [$\\mu$H]")
+ax.set_title("Thin Loop Self-Inductance vs. Loop Discretization")
+ax.set_ylim(0.0, 2.0 * max(wien_inductance, lyle_inductance) * 1e6)
+ax.grid(True, which="both", linestyle=":", linewidth=0.7)
+ax.legend(loc="best")
+fig.tight_layout()
+
+fpath = Path(__file__).with_suffix(".png")
+fig.savefig(fpath, dpi=300)
+print(f"Saved plot to {fpath}")
+
+if not os.getenv("CFSEM_TESTING"):
+    plt.show()

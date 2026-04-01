@@ -612,7 +612,6 @@ pub fn triangle_mesh_inductance_matrix_par(
 ///
 /// Returns:
 ///     Bilinear inductive coupling `s_src^T L s_tgt` (H*A^2 = J).
-///
 ///     This can be used to compute the mutual inductive energy between two collections
 ///     of nodes represented in the same nodal vector space.
 #[inline]

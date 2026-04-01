@@ -1246,6 +1246,7 @@ mod test {
     use std::f64::consts::{E, PI};
 
     use super::*;
+    use crate::math::rss3;
     use crate::physics::point_source::segment::{
         flux_density_point_segment, vector_potential_point_segment,
     };

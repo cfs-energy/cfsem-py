@@ -15,6 +15,19 @@ from cfsem.bindings import (
     flux_density_circular_filament_cartesian,
     flux_density_dipole,
     flux_density_linear_filament,
+    flux_density_triangle_mesh_mapping,
+    triangle_mesh_current_density,
+    triangle_mesh_force_mapping,
+    triangle_mesh_force_mapping_from_circular_filaments,
+    triangle_mesh_force_mapping_from_dipoles,
+    triangle_mesh_force_mapping_from_linear_filaments,
+    triangle_mesh_flux_linkage_mapping_from_dipoles,
+    triangle_mesh_inductance_mapping_from_circular_filaments,
+    triangle_mesh_inductance_mapping_from_linear_filaments,
+    triangle_mesh_inductance_matrix,
+    triangle_mesh_quadrature_points,
+    triangle_mesh_self_force_mapping,
+    flux_density_triangle_mesh,
     flux_density_point_segment,
     gs_operator_order2,
     gs_operator_order4,
@@ -24,12 +37,15 @@ from cfsem.bindings import (
     rotate_filaments_about_path,
     vector_potential_circular_filament,
     vector_potential_linear_filament,
+    vector_potential_triangle_mesh_mapping,
+    vector_potential_triangle_mesh,
     vector_potential_point_segment,
     vector_potential_dipole,
 )
 from cfsem.types import Array3xN
 
 from .cfsem import ellipe, ellipk
+from .cfsem import DimensionalityError
 
 MU_0 = 4.0 * np.pi * 1e-7 * (1.0 + 5.5e-10)
 """
@@ -40,6 +56,19 @@ https://www.physics.nist.gov/cuu/pdf/wall_2018.pdf .
 __all__ = [
     "flux_circular_filament",
     "flux_density_linear_filament",
+    "flux_density_triangle_mesh_mapping",
+    "triangle_mesh_current_density",
+    "triangle_mesh_force_mapping",
+    "triangle_mesh_force_mapping_from_circular_filaments",
+    "triangle_mesh_force_mapping_from_dipoles",
+    "triangle_mesh_force_mapping_from_linear_filaments",
+    "triangle_mesh_flux_linkage_mapping_from_dipoles",
+    "triangle_mesh_inductance_mapping_from_circular_filaments",
+    "triangle_mesh_inductance_mapping_from_linear_filaments",
+    "triangle_mesh_inductance_matrix",
+    "triangle_mesh_quadrature_points",
+    "triangle_mesh_self_force_mapping",
+    "flux_density_triangle_mesh",
     "flux_density_circular_filament",
     "gs_operator_order2",
     "gs_operator_order4",
@@ -61,6 +90,8 @@ __all__ = [
     "ellipk",
     "rotate_filaments_about_path",
     "vector_potential_linear_filament",
+    "vector_potential_triangle_mesh_mapping",
+    "vector_potential_triangle_mesh",
     "vector_potential_circular_filament",
     "flux_density_circular_filament_cartesian",
     "mutual_inductance_circular_to_linear",
@@ -70,6 +101,7 @@ __all__ = [
     "vector_potential_point_segment",
     "body_force_density_circular_filament_cartesian",
     "body_force_density_linear_filament",
+    "DimensionalityError",
 ]
 
 

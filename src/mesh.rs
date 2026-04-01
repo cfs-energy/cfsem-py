@@ -1,5 +1,5 @@
 //! Meshing and filamentization functions and data structures.
-use crate::math::{cross3, dot3, rss3};
+use crate::math::{add_scaled3, cross3, dot3, dot3_arr, rss3, sub3};
 use core::f64::consts::PI;
 
 use nalgebra::Vector3;
@@ -47,6 +47,195 @@ where
     /// Immutable reference to edge indices
     pub fn edges(&self) -> &[(usize, usize)] {
         &self.edges[..]
+    }
+}
+
+/// Borrowed view of triangle surface-mesh geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct TriangleMeshView<'a> {
+    nodes: (&'a [f64], &'a [f64], &'a [f64]),
+    triangles: (&'a [usize], &'a [usize], &'a [usize]),
+}
+
+#[inline]
+pub(crate) fn triangle_max_edge_length_squared(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> f64 {
+    let e01 = sub3(n1, n0);
+    let e12 = sub3(n2, n1);
+    let e20 = sub3(n0, n2);
+    dot3_arr(e01, e01)
+        .max(dot3_arr(e12, e12))
+        .max(dot3_arr(e20, e20))
+}
+
+#[inline]
+pub(crate) fn triangle_closest_point(
+    obs: [f64; 3],
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+) -> [f64; 3] {
+    let ab = sub3(n1, n0);
+    let ac = sub3(n2, n0);
+    let ap = sub3(obs, n0);
+    let d1 = dot3_arr(ab, ap);
+    let d2 = dot3_arr(ac, ap);
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return n0;
+    }
+
+    let bp = sub3(obs, n1);
+    let d3 = dot3_arr(ab, bp);
+    let d4 = dot3_arr(ac, bp);
+    if d3 >= 0.0 && d4 <= d3 {
+        return n1;
+    }
+
+    let vc = d1.mul_add(d4, -(d3 * d2));
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        return add_scaled3(n0, ab, d1 / (d1 - d3));
+    }
+
+    let cp = sub3(obs, n2);
+    let d5 = dot3_arr(ab, cp);
+    let d6 = dot3_arr(ac, cp);
+    if d6 >= 0.0 && d5 <= d6 {
+        return n2;
+    }
+
+    let vb = d5.mul_add(d2, -(d1 * d6));
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        return add_scaled3(n0, ac, d2 / (d2 - d6));
+    }
+
+    let bc = sub3(n2, n1);
+    let va = d3.mul_add(d6, -(d5 * d4));
+    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        return add_scaled3(n1, bc, (d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    }
+
+    let denom_inv = 1.0 / (va + vb + vc);
+    let v = vb * denom_inv;
+    let w = vc * denom_inv;
+    add_scaled3(add_scaled3(n0, ab, v), ac, w)
+}
+
+#[inline]
+pub(crate) fn triangle_subdivide_about_point(
+    point: [f64; 3],
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+) -> [[[f64; 3]; 3]; 3] {
+    [[point, n0, n1], [point, n1, n2], [point, n2, n0]]
+}
+
+#[inline]
+fn triangle_area_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) -> f64 {
+    let n0 = [nodes.0[idx[0]], nodes.1[idx[0]], nodes.2[idx[0]]];
+    let n1 = [nodes.0[idx[1]], nodes.1[idx[1]], nodes.2[idx[1]]];
+    let n2 = [nodes.0[idx[2]], nodes.1[idx[2]], nodes.2[idx[2]]];
+    let v01 = sub3(n1, n0);
+    let v02 = sub3(n2, n0);
+    let cross = cross3(v01[0], v01[1], v01[2], v02[0], v02[1], v02[2]);
+    0.5 * rss3(cross.0, cross.1, cross.2)
+}
+
+fn validate_triangle_mesh_geometry(
+    nodes: (&[f64], &[f64], &[f64]),
+    triangles: (&[usize], &[usize], &[usize]),
+) -> Result<(usize, usize), &'static str> {
+    let nnode = nodes.0.len(); // [-]
+    if nodes.1.len() != nnode || nodes.2.len() != nnode {
+        return Err("Node coordinate dimension mismatch");
+    }
+
+    let ntri = triangles.0.len(); // [-]
+    if triangles.1.len() != ntri || triangles.2.len() != ntri {
+        return Err("Triangle index dimension mismatch");
+    }
+
+    if triangles
+        .0
+        .iter()
+        .chain(triangles.1.iter())
+        .chain(triangles.2.iter())
+        .any(|&idx| idx >= nnode)
+    {
+        return Err("Triangle refers to non-existent node");
+    }
+
+    for i in 0..ntri {
+        let idx = [triangles.0[i], triangles.1[i], triangles.2[i]];
+        if triangle_area_from_indices(nodes, idx) < 1e-14 {
+            return Err("Triangle has zero area");
+        }
+    }
+
+    Ok((nnode, ntri))
+}
+
+impl<'a> TriangleMeshView<'a> {
+    /// Validate dimensions and construct a borrowed mesh view.
+    pub fn new(
+        nodes: (&'a [f64], &'a [f64], &'a [f64]),
+        triangles: (&'a [usize], &'a [usize], &'a [usize]),
+    ) -> Result<Self, &'static str> {
+        validate_triangle_mesh_geometry(nodes, triangles)?;
+
+        Ok(Self { nodes, triangles })
+    }
+
+    /// Number of nodes in the view.
+    #[inline]
+    pub fn nnode(&self) -> usize {
+        self.nodes.0.len()
+    }
+
+    /// Number of triangles in the view.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.triangles.0.len()
+    }
+
+    /// Triangle-node indices for one triangle.
+    #[inline]
+    pub fn triangle_indices(&self, i: usize) -> [usize; 3] {
+        [
+            self.triangles.0[i],
+            self.triangles.1[i],
+            self.triangles.2[i],
+        ]
+    }
+
+    /// Node coordinates for one triangle.
+    #[inline]
+    pub fn triangle_nodes(&self, i: usize) -> [[f64; 3]; 3] {
+        let idx = self.triangle_indices(i);
+        idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]) // [m]
+    }
+
+    /// Node coordinates and indices for one triangle.
+    #[inline]
+    pub fn triangle_nodes_and_indices(&self, i: usize) -> ([[f64; 3]; 3], [usize; 3]) {
+        let idx = self.triangle_indices(i);
+        let nodes = idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]); // [m]
+        (nodes, idx)
+    }
+
+    /// Validate that a nodal scalar slice matches the mesh node count.
+    #[inline]
+    pub fn validate_nodal_values(&self, s: &[f64]) -> Result<(), &'static str> {
+        if s.len() != self.nnode() {
+            return Err("Nodal scalar dimension mismatch");
+        }
+        Ok(())
+    }
+
+    /// Nodal scalar values for one triangle.
+    #[inline]
+    pub fn triangle_scalars(&self, i: usize, s: &[f64]) -> [f64; 3] {
+        let idx = self.triangle_indices(i);
+        idx.map(|k| s[k]) // [A]
     }
 }
 
@@ -301,4 +490,59 @@ fn tuplenormalize(a: (f64, f64, f64)) -> (f64, f64, f64) {
 #[inline]
 fn tuplecross(a: (f64, f64, f64), b: (f64, f64, f64)) -> (f64, f64, f64) {
     cross3(a.0, a.1, a.2, b.0, b.1, b.2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TriangleMeshView;
+
+    #[test]
+    fn test_triangle_mesh_view_valid() {
+        let nodes = (
+            &[0.0, 1.0, 0.0][..],
+            &[0.0, 0.0, 1.0][..],
+            &[0.0, 0.0, 0.0][..],
+        );
+        let triangles = (&[0usize][..], &[1usize][..], &[2usize][..]);
+        let s = &[1.0, -0.5, 0.25][..];
+
+        let view = TriangleMeshView::new(nodes, triangles).unwrap();
+        assert_eq!(view.len(), 1);
+        assert_eq!(view.nnode(), 3);
+        view.validate_nodal_values(s).unwrap();
+
+        let tri_nodes = view.triangle_nodes(0);
+        let tri_s = view.triangle_scalars(0, s);
+        assert_eq!(
+            tri_nodes,
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert_eq!(tri_s, [1.0, -0.5, 0.25]);
+    }
+
+    #[test]
+    fn test_triangle_mesh_view_rejects_zero_area_triangle() {
+        let nodes = (
+            &[0.0, 1.0, 2.0][..],
+            &[0.0, 0.0, 0.0][..],
+            &[0.0, 0.0, 0.0][..],
+        );
+        let triangles = (&[0usize][..], &[1usize][..], &[2usize][..]);
+
+        let err = TriangleMeshView::new(nodes, triangles).unwrap_err();
+        assert_eq!(err, "Triangle has zero area");
+    }
+
+    #[test]
+    fn test_triangle_mesh_view_rejects_repeated_vertex_triangle() {
+        let nodes = (
+            &[0.0, 1.0, 0.0][..],
+            &[0.0, 0.0, 1.0][..],
+            &[0.0, 0.0, 0.0][..],
+        );
+        let triangles = (&[0usize][..], &[1usize][..], &[1usize][..]);
+
+        let err = TriangleMeshView::new(nodes, triangles).unwrap_err();
+        assert_eq!(err, "Triangle has zero area");
+    }
 }

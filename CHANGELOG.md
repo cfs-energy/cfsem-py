@@ -1,5 +1,25 @@
 # Changelog
 
+## 5.2.0 2026-04-01
+
+### Added
+
+* Rust
+    * Add `point_source::current_element` module with element kernels shared between point-segment and boundary-element methods
+    * Add `boundary_element` module with B-field, A-field, inductance, and traction force
+    * Add minimal triangle mesh view interface in `mesh.rs` using nodes-and-indices storage
+* Python
+    * Add bindings for new BEM field methods as well as helpers for visualizing quadrature points and triangle surface current density
+    * Add boundary element method to field_explorer example
+
+### Changed
+
+* Refactor point-segment calculations to extract B-field and A-field kernels to `current_element.rs`
+    * These kernels are shared between `point_segment` and `boundary_element` modules, and will likely be used by a future finite element module as well.
+    * These kernels include singularity-clamping that robustifies the point-segment B-field and A-field.
+* Removed experimental mesh_filament module in favor of more rigorous boundary element method
+    * Minor change because this was not part of the public API
+
 ## 5.1.0 2026-03-24
 
 ### Added

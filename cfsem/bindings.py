@@ -7,7 +7,7 @@ passed as contiguous and reallocating into contiguous inputs if necessary.
 
 from typing import Literal
 
-from numpy import asarray, ascontiguousarray, float64, full, zeros_like
+from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -27,6 +27,8 @@ from .cfsem import (
 from .cfsem import flux_density_dipole as em_flux_density_dipole
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
+from .cfsem import flux_density_triangle_mesh_mapping as em_flux_density_triangle_mesh_mapping
+from .cfsem import flux_density_triangle_mesh as em_flux_density_triangle_mesh
 from .cfsem import (
     flux_density_linear_filament_matrix as em_flux_density_linear_filament_matrix,
 )
@@ -46,6 +48,29 @@ from .cfsem import (
     mutual_inductance_circular_to_linear as em_mutual_inductance_circular_to_linear,
 )
 from .cfsem import rotate_filaments_about_path as em_rotate_filaments_about_path
+from .cfsem import triangle_mesh_current_density as em_triangle_mesh_current_density
+from .cfsem import triangle_mesh_force_mapping as em_triangle_mesh_force_mapping
+from .cfsem import (
+    triangle_mesh_force_mapping_from_circular_filaments as em_triangle_mesh_force_mapping_from_circular_filaments,  # noqa: E501
+)
+from .cfsem import (
+    triangle_mesh_force_mapping_from_dipoles as em_triangle_mesh_force_mapping_from_dipoles,
+)
+from .cfsem import (
+    triangle_mesh_force_mapping_from_linear_filaments as em_triangle_mesh_force_mapping_from_linear_filaments,
+)
+from .cfsem import (
+    triangle_mesh_flux_linkage_mapping_from_dipoles as em_triangle_mesh_flux_linkage_mapping_from_dipoles,
+)
+from .cfsem import (
+    triangle_mesh_inductance_mapping_from_circular_filaments as em_triangle_mesh_inductance_mapping_from_circular_filaments,  # noqa: E501
+)
+from .cfsem import (
+    triangle_mesh_inductance_mapping_from_linear_filaments as em_triangle_mesh_inductance_mapping_from_linear_filaments,  # noqa: E501
+)
+from .cfsem import triangle_mesh_inductance_matrix as em_triangle_mesh_inductance_matrix
+from .cfsem import triangle_mesh_quadrature_points as em_triangle_mesh_quadrature_points
+from .cfsem import triangle_mesh_self_force_mapping as em_triangle_mesh_self_force_mapping
 from .cfsem import (
     vector_potential_circular_filament as em_vector_potential_circular_filament,
 )
@@ -53,6 +78,10 @@ from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
 from .cfsem import (
+    vector_potential_triangle_mesh_mapping as em_vector_potential_triangle_mesh_mapping,
+)
+from .cfsem import (
+    vector_potential_triangle_mesh as em_vector_potential_triangle_mesh,
     vector_potential_linear_filament_matrix as em_vector_potential_linear_filament_matrix,
 )
 from .cfsem import (
@@ -341,6 +370,521 @@ def vector_potential_point_segment(
     dlxyzfil = _3tup_contig(dlxyzfil)
     ifil = ascontiguousarray(ifil).ravel()
     return em_vector_potential_point_segment(xyzp, xyzfil, dlxyzfil, ifil, par)
+
+
+def flux_density_triangle_mesh(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    s: NDArray[float64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> Array3xN:
+    """
+    Biot-Savart law calculation for B-field contribution from a triangle mesh
+    with one stream-function value per node.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        s: [A] nodal stream-function values with shape `(nnode,)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [T] (Bx, By, Bz) magnetic flux density at observation points
+    """
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    s = ascontiguousarray(s, dtype=float64).ravel()
+    return em_flux_density_triangle_mesh(obs, nodes, triangles, s, par, quad)
+
+
+def vector_potential_triangle_mesh(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    s: NDArray[float64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> Array3xN:
+    """
+    Vector potential calculation for A-field contribution from a triangle mesh
+    with one stream-function value per node.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        s: [A] nodal stream-function values with shape `(nnode,)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
+    """
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    s = ascontiguousarray(s, dtype=float64).ravel()
+    return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par, quad)
+
+
+def flux_density_triangle_mesh_mapping(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the dense source-node to target-point B-field mapping for a triangle mesh.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [T/A] `(bx_map, by_map, bz_map)` with shape `(nobs, nnode)`
+    """
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    bx, by, bz = em_flux_density_triangle_mesh_mapping(obs, nodes, triangles, par, quad)
+    nobs = obs.shape[0]
+    nnode = nodes.shape[0]
+    return (
+        ascontiguousarray(bx).reshape(nobs, nnode),
+        ascontiguousarray(by).reshape(nobs, nnode),
+        ascontiguousarray(bz).reshape(nobs, nnode),
+    )
+
+
+def vector_potential_triangle_mesh_mapping(
+    obs: NDArray[float64],
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the dense source-node to target-point A-field mapping for a triangle mesh.
+
+    Args:
+        obs: [m] observation points with shape `(nobs, 3)`
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [V*s/(m*A)] `(ax_map, ay_map, az_map)` with shape `(nobs, nnode)`
+    """
+    obs = ascontiguousarray(obs, dtype=float64)
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    ax, ay, az = em_vector_potential_triangle_mesh_mapping(obs, nodes, triangles, par, quad)
+    nobs = obs.shape[0]
+    nnode = nodes.shape[0]
+    return (
+        ascontiguousarray(ax).reshape(nobs, nnode),
+        ascontiguousarray(ay).reshape(nobs, nnode),
+        ascontiguousarray(az).reshape(nobs, nnode),
+    )
+
+
+def triangle_mesh_current_density(
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    s: NDArray[float64],
+) -> NDArray[float64]:
+    """
+    Extract the constant physical surface current density on each triangle of a mesh.
+
+    Args:
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        s: [A] nodal stream-function values with shape `(nnode,)`
+
+    Returns:
+        [A/m] triangle-wise surface current density with shape `(ntri, 3)`
+    """
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    s = ascontiguousarray(s, dtype=float64).ravel()
+    jx, jy, jz = em_triangle_mesh_current_density(nodes, triangles, s)
+    return column_stack((jx, jy, jz))
+
+
+def triangle_mesh_quadrature_points(
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64]]:
+    """
+    Extract physical quadrature-point coordinates and area weights for each triangle.
+
+    Args:
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        points: [m] quadrature-point coordinates with shape `(ntri, nqp, 3)`
+        weights: [m^2] physical quadrature weights with shape `(ntri, nqp)`
+    """
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    xq, yq, zq, wq, nqp = em_triangle_mesh_quadrature_points(nodes, triangles, quad)
+    ntri = triangles.shape[0]
+    points = column_stack((xq, yq, zq)).reshape(ntri, nqp, 3)
+    weights = ascontiguousarray(wq).reshape(ntri, nqp)
+    return points, weights
+
+
+def triangle_mesh_inductance_matrix(
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the dense nodal inductance matrix for a triangle stream-function mesh.
+
+    If `par=True` and the per-worker scratch matrices cannot be allocated, the
+    implementation falls back to the serial path instead of failing outright.
+
+    Args:
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [H] dense nodal inductance matrix with shape `(nnode, nnode)`
+    """
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    lmat = em_triangle_mesh_inductance_matrix(nodes, triangles, par, quad)
+    nnode = nodes.shape[0]
+    return ascontiguousarray(lmat).reshape(nnode, nnode)
+
+
+def triangle_mesh_inductance_mapping_from_linear_filaments(
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    wire_radius: float | NDArray[float64] = 0.0,
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the source-current to target-node inductance mapping from linear filaments.
+
+    Args:
+        xyzfil: [m] x,y,z filament start coordinates
+        dlxyzfil: [m] x,y,z filament segment deltas
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        wire_radius: [m] filament radius, scalar or array of length `nfil`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [H] mapping matrix with shape `(nnode_tgt, nfil)`
+    """
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(xyzfil[0].size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
+    out = em_triangle_mesh_inductance_mapping_from_linear_filaments(
+        xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, par, quad
+    )
+    return ascontiguousarray(out).reshape(nodes_tgt.shape[0], xyzfil[0].size)
+
+
+def triangle_mesh_inductance_mapping_from_circular_filaments(
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the source-current to target-node inductance mapping from circular filaments.
+
+    Args:
+        rfil: [m] circular filament radii
+        zfil: [m] circular filament axial coordinates
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [H] mapping matrix with shape `(nnode_tgt, nfil)`
+    """
+    rfil = ascontiguousarray(rfil, dtype=float64).ravel()
+    zfil = ascontiguousarray(zfil, dtype=float64).ravel()
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    out = em_triangle_mesh_inductance_mapping_from_circular_filaments(
+        rfil, zfil, nodes_tgt, triangles_tgt, par, quad
+    )
+    return ascontiguousarray(out).reshape(nodes_tgt.shape[0], rfil.size)
+
+
+def triangle_mesh_flux_linkage_mapping_from_dipoles(
+    loc: Array3xN,
+    moment_dir: Array3xN,
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    outer_radius: float | NDArray[float64] = 0.0,
+    par: bool = True,
+    quad: str = "gl3",
+) -> NDArray[float64]:
+    """
+    Assemble the source-amplitude to target-node flux-linkage mapping from dipoles.
+
+    Args:
+        loc: [m] dipole locations
+        moment_dir: dipole moment direction vectors
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        outer_radius: [m] dipole finite-core radius, scalar or array of length `ndip`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        mapping matrix with shape `(nnode_tgt, ndip)`
+    """
+    loc = _3tup_contig(loc)
+    moment_dir = _3tup_contig(moment_dir)
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    if asarray(outer_radius).ndim == 0:
+        outer_radius = full(loc[0].size, float(outer_radius))
+    outer_radius = ascontiguousarray(outer_radius).ravel()
+    out = em_triangle_mesh_flux_linkage_mapping_from_dipoles(
+        loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, par, quad
+    )
+    return ascontiguousarray(out).reshape(nodes_tgt.shape[0], loc[0].size)
+
+
+def triangle_mesh_force_mapping(
+    nodes_src: NDArray[float64],
+    triangles_src: NDArray[int64],
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    s_tgt: NDArray[float64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the frozen-target source-node to target-triangle force mapping between two meshes.
+
+    Args:
+        nodes_src: [m] source mesh node coordinates with shape `(nnode_src, 3)`
+        triangles_src: source node indices with shape `(ntri_src, 3)`
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, nnode_src)`
+    """
+    nodes_src = ascontiguousarray(nodes_src, dtype=float64)
+    triangles_src = ascontiguousarray(triangles_src, dtype=int64)
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    s_tgt = ascontiguousarray(s_tgt, dtype=float64).ravel()
+    fx, fy, fz = em_triangle_mesh_force_mapping(
+        nodes_src, triangles_src, nodes_tgt, triangles_tgt, s_tgt, par, quad
+    )
+    ntri_tgt = triangles_tgt.shape[0]
+    nnode_src = nodes_src.shape[0]
+    return (
+        ascontiguousarray(fx).reshape(ntri_tgt, nnode_src),
+        ascontiguousarray(fy).reshape(ntri_tgt, nnode_src),
+        ascontiguousarray(fz).reshape(ntri_tgt, nnode_src),
+    )
+
+
+def triangle_mesh_self_force_mapping(
+    nodes: NDArray[float64],
+    triangles: NDArray[int64],
+    s: NDArray[float64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the self-excluded frozen-target source-node to target-triangle force mapping.
+
+    Args:
+        nodes: [m] mesh node coordinates with shape `(nnode, 3)`
+        triangles: node indices with shape `(ntri, 3)`
+        s: [A] fixed nodal current-potential values with shape `(nnode,)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri, nnode)`
+    """
+    nodes = ascontiguousarray(nodes, dtype=float64)
+    triangles = ascontiguousarray(triangles, dtype=int64)
+    s = ascontiguousarray(s, dtype=float64).ravel()
+    fx, fy, fz = em_triangle_mesh_self_force_mapping(nodes, triangles, s, par, quad)
+    ntri = triangles.shape[0]
+    nnode = nodes.shape[0]
+    return (
+        ascontiguousarray(fx).reshape(ntri, nnode),
+        ascontiguousarray(fy).reshape(ntri, nnode),
+        ascontiguousarray(fz).reshape(ntri, nnode),
+    )
+
+
+def triangle_mesh_force_mapping_from_linear_filaments(
+    xyzfil: Array3xN,
+    dlxyzfil: Array3xN,
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    s_tgt: NDArray[float64],
+    wire_radius: float | NDArray[float64] = 0.0,
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the frozen-target source-current to target-triangle force mapping from linear filaments.
+
+    Args:
+        xyzfil: [m] x,y,z filament start coordinates
+        dlxyzfil: [m] x,y,z filament segment deltas
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
+        wire_radius: [m] filament radius, scalar or array of length `nfil`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, nfil)`
+    """
+    xyzfil = _3tup_contig(xyzfil)
+    dlxyzfil = _3tup_contig(dlxyzfil)
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    s_tgt = ascontiguousarray(s_tgt, dtype=float64).ravel()
+    if asarray(wire_radius).ndim == 0:
+        wire_radius = full(xyzfil[0].size, float(wire_radius))
+    wire_radius = ascontiguousarray(wire_radius).ravel()
+    fx, fy, fz = em_triangle_mesh_force_mapping_from_linear_filaments(
+        xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, s_tgt, par, quad
+    )
+    ntri_tgt = triangles_tgt.shape[0]
+    nfil = xyzfil[0].size
+    return (
+        ascontiguousarray(fx).reshape(ntri_tgt, nfil),
+        ascontiguousarray(fy).reshape(ntri_tgt, nfil),
+        ascontiguousarray(fz).reshape(ntri_tgt, nfil),
+    )
+
+
+def triangle_mesh_force_mapping_from_circular_filaments(
+    rfil: NDArray[float64],
+    zfil: NDArray[float64],
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    s_tgt: NDArray[float64],
+    par: bool = True,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the frozen-target source-current to target-triangle force mapping from circular filaments.
+
+    Args:
+        rfil: [m] circular filament radii
+        zfil: [m] circular filament axial coordinates
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
+        par: Whether to use CPU parallelism
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, nfil)`
+    """
+    rfil = ascontiguousarray(rfil, dtype=float64).ravel()
+    zfil = ascontiguousarray(zfil, dtype=float64).ravel()
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    s_tgt = ascontiguousarray(s_tgt, dtype=float64).ravel()
+    fx, fy, fz = em_triangle_mesh_force_mapping_from_circular_filaments(
+        rfil, zfil, nodes_tgt, triangles_tgt, s_tgt, par, quad
+    )
+    ntri_tgt = triangles_tgt.shape[0]
+    nfil = rfil.size
+    return (
+        ascontiguousarray(fx).reshape(ntri_tgt, nfil),
+        ascontiguousarray(fy).reshape(ntri_tgt, nfil),
+        ascontiguousarray(fz).reshape(ntri_tgt, nfil),
+    )
+
+
+def triangle_mesh_force_mapping_from_dipoles(
+    loc: Array3xN,
+    moment_dir: Array3xN,
+    nodes_tgt: NDArray[float64],
+    triangles_tgt: NDArray[int64],
+    s_tgt: NDArray[float64],
+    par: bool = True,
+    outer_radius: NDArray[float64] | None = None,
+    quad: str = "gl3",
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
+    """
+    Assemble the frozen-target source-amplitude to target-triangle force mapping from dipoles.
+
+    Args:
+        loc: [m] x,y,z dipole locations
+        moment_dir: dipole moment direction vectors, linear in scalar source amplitudes
+        nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
+        triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
+        s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
+        par: Whether to use CPU parallelism
+        outer_radius: [m] radius inside which to defer to magnetized sphere calc. Defaults to zeroes.
+        quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
+
+    Returns:
+        [N/source_amplitude] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, ndip)`
+    """
+    loc = _3tup_contig(loc)
+    moment_dir = _3tup_contig(moment_dir)
+    nodes_tgt = ascontiguousarray(nodes_tgt, dtype=float64)
+    triangles_tgt = ascontiguousarray(triangles_tgt, dtype=int64)
+    s_tgt = ascontiguousarray(s_tgt, dtype=float64).ravel()
+    outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
+    outer_radius = ascontiguousarray(outer_radius).ravel()
+    fx, fy, fz = em_triangle_mesh_force_mapping_from_dipoles(
+        loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, s_tgt, par, quad
+    )
+    ntri_tgt = triangles_tgt.shape[0]
+    ndip = loc[0].size
+    return (
+        ascontiguousarray(fx).reshape(ntri_tgt, ndip),
+        ascontiguousarray(fy).reshape(ntri_tgt, ndip),
+        ascontiguousarray(fz).reshape(ntri_tgt, ndip),
+    )
 
 
 def inductance_piecewise_linear_filaments(

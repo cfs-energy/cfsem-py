@@ -1,3 +1,5 @@
+pub(crate) mod current_element;
+
 pub mod dipole;
 pub use dipole::*;
 

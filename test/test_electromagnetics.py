@@ -663,8 +663,8 @@ def test_wien_against_paper_examples():
 @mark.parametrize("dr_over_r", [0.1, 0.2])
 @mark.parametrize("dz_over_r", [0.1, 3.5])
 @mark.parametrize("nt", [3.0, 400.0])
-@mark.parametrize("nr", [5])
-@mark.parametrize("nz", [100])
+@mark.parametrize("nr", [5, 7])
+@mark.parametrize("nz", [50, 100])
 def test_self_inductance_lyle6_against_filamentized(r, z, dr_over_r, dz_over_r, nt, nr, nz):
     # Test that the Lyle approximation gives a similar result to
     # a case done by brute-force filamentization w/ a heuristic for self-inductance of a loop

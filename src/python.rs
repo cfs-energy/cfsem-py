@@ -1,23 +1,101 @@
 use numpy::PyArray1;
-use numpy::borrow::{PyReadonlyArray1, PyReadwriteArray1};
+use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadwriteArray1};
+use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use std::fmt::Debug;
 
-#[cfg(feature = "rat-mlfmm")]
-use crate::mlfmm::MlfmmOptions;
 use crate::{math, mesh, physics};
+
+create_exception!(cfsem, DimensionalityError, exceptions::PyValueError);
 
 /// Errors from mismatch between python and rust
 #[derive(Debug)]
 #[allow(dead_code)]
 enum PyInteropError {
     DimensionalityError { msg: String },
+    ValueError { msg: String },
 }
 
 impl From<PyInteropError> for PyErr {
     fn from(val: PyInteropError) -> Self {
-        exceptions::PyValueError::new_err(format!("{:#?}", &val))
+        match val {
+            PyInteropError::DimensionalityError { msg } => DimensionalityError::new_err(msg),
+            PyInteropError::ValueError { msg } => exceptions::PyValueError::new_err(msg),
+        }
+    }
+}
+
+fn split_xyz_array2(
+    name: &str,
+    arr: PyReadonlyArray2<f64>,
+) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
+    let arr = arr.as_array();
+    let shape = arr.shape();
+    if shape.len() != 2 || shape[1] != 3 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (n, 3)"),
+        }
+        .into());
+    }
+
+    let n = shape[0];
+    let mut x = Vec::with_capacity(n);
+    let mut y = Vec::with_capacity(n);
+    let mut z = Vec::with_capacity(n);
+    for i in 0..n {
+        x.push(arr[[i, 0]]);
+        y.push(arr[[i, 1]]);
+        z.push(arr[[i, 2]]);
+    }
+
+    Ok((x, y, z))
+}
+
+fn split_triangle_index_array2(
+    name: &str,
+    arr: PyReadonlyArray2<i64>,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+    let arr = arr.as_array();
+    let shape = arr.shape();
+    if shape.len() != 2 || shape[1] != 3 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (n, 3)"),
+        }
+        .into());
+    }
+
+    let n = shape[0];
+    let mut i0 = Vec::with_capacity(n);
+    let mut i1 = Vec::with_capacity(n);
+    let mut i2 = Vec::with_capacity(n);
+    for i in 0..n {
+        let idx0 = arr[[i, 0]];
+        let idx1 = arr[[i, 1]];
+        let idx2 = arr[[i, 2]];
+        if idx0 < 0 || idx1 < 0 || idx2 < 0 {
+            return Err(PyInteropError::ValueError {
+                msg: format!("{name} must contain nonnegative node indices"),
+            }
+            .into());
+        }
+        i0.push(idx0 as usize);
+        i1.push(idx1 as usize);
+        i2.push(idx2 as usize);
+    }
+
+    Ok((i0, i1, i2))
+}
+
+fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::QuadratureKind> {
+    match quad {
+        "gl2" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre2),
+        "gl3" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre3),
+        "dunavant5" => Ok(physics::boundary_element::QuadratureKind::Dunavant5),
+        _ => Err(PyInteropError::ValueError {
+            msg: format!("Unsupported triangle quadrature rule: {quad}"),
+        }
+        .into()),
     }
 }
 
@@ -1037,12 +1115,711 @@ fn body_force_density_linear_filament(
     _3tup_ret!((outx, f64), (outy, f64), (outz, f64))
 }
 
+fn triangle_mesh_view<'a>(
+    nodes: &'a (Vec<f64>, Vec<f64>, Vec<f64>),
+    triangles: &'a (Vec<usize>, Vec<usize>, Vec<usize>),
+) -> PyResult<mesh::TriangleMeshView<'a>> {
+    mesh::TriangleMeshView::new(
+        (&nodes.0, &nodes.1, &nodes.2),
+        (&triangles.0, &triangles.1, &triangles.2),
+    )
+    .map_err(|msg| {
+        PyInteropError::ValueError {
+            msg: msg.to_string(),
+        }
+        .into()
+    })
+}
+
+#[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="gl3"))]
+fn flux_density_triangle_mesh(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let s = s.as_slice()?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let n = obs.0.len();
+    let (mut bx, mut by, mut bz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+
+    let func = match par {
+        true => physics::boundary_element::flux_density_triangle_mesh_par,
+        false => physics::boundary_element::flux_density_triangle_mesh,
+    };
+    match func(
+        (&obs.0, &obs.1, &obs.2),
+        &mesh,
+        s,
+        quad,
+        (&mut bx, &mut by, &mut bz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+#[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="gl3"))]
+fn vector_potential_triangle_mesh(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let s = s.as_slice()?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let n = obs.0.len();
+    let (mut ax, mut ay, mut az) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+
+    let func = match par {
+        true => physics::boundary_element::vector_potential_triangle_mesh_par,
+        false => physics::boundary_element::vector_potential_triangle_mesh,
+    };
+    match func(
+        (&obs.0, &obs.1, &obs.2),
+        &mesh,
+        s,
+        quad,
+        (&mut ax, &mut ay, &mut az),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
+}
+
+#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="gl3"))]
+fn flux_density_triangle_mesh_mapping(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        obs.0
+            .len()
+            .checked_mul(mesh.nnode())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Flux-density mapping size overflow".to_string(),
+            })?;
+    let (mut bx, mut by, mut bz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::flux_density_triangle_mesh_mapping_par,
+        false => physics::boundary_element::flux_density_triangle_mesh_mapping,
+    };
+    match func(
+        (&obs.0, &obs.1, &obs.2),
+        &mesh,
+        quad,
+        (&mut bx, &mut by, &mut bz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="gl3"))]
+fn vector_potential_triangle_mesh_mapping(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        obs.0
+            .len()
+            .checked_mul(mesh.nnode())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Vector-potential mapping size overflow".to_string(),
+            })?;
+    let (mut ax, mut ay, mut az) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::vector_potential_triangle_mesh_mapping_par,
+        false => physics::boundary_element::vector_potential_triangle_mesh_mapping,
+    };
+    match func(
+        (&obs.0, &obs.1, &obs.2),
+        &mesh,
+        quad,
+        (&mut ax, &mut ay, &mut az),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
+}
+
+#[pyfunction]
+fn triangle_mesh_current_density(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let s = s.as_slice()?;
+
+    let ntri = mesh.len();
+    let (mut jx, mut jy, mut jz) = (vec![0.0; ntri], vec![0.0; ntri], vec![0.0; ntri]);
+
+    match physics::boundary_element::triangle_mesh_current_density(
+        &mesh,
+        s,
+        (&mut jx, &mut jy, &mut jz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((jx, f64), (jy, f64), (jz, f64))
+}
+
+#[pyfunction(signature = (nodes, triangles, quad="gl3"))]
+fn triangle_mesh_quadrature_points(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    quad: &str,
+) -> PyResult<(
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    usize,
+)> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let ntri = mesh.len();
+    let nqp = physics::boundary_element::triangle_quadrature_count(quad);
+    let nout = ntri * nqp;
+    let (mut xq, mut yq, mut zq, mut wq) = (
+        vec![0.0; nout],
+        vec![0.0; nout],
+        vec![0.0; nout],
+        vec![0.0; nout],
+    );
+
+    match physics::boundary_element::triangle_mesh_quadrature_points(
+        &mesh,
+        quad,
+        (&mut xq, &mut yq, &mut zq),
+        &mut wq,
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| {
+        Ok((
+            PyArray1::from_vec(py, xq).unbind(),
+            PyArray1::from_vec(py, yq).unbind(),
+            PyArray1::from_vec(py, zq).unbind(),
+            PyArray1::from_vec(py, wq).unbind(),
+            nqp,
+        ))
+    })
+}
+
+#[pyfunction(signature = (nodes, triangles, par=true, quad="gl3"))]
+fn triangle_mesh_inductance_matrix(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nnode = mesh.nnode();
+    let nout = nnode
+        .checked_mul(nnode)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Inductance matrix size overflow".to_string(),
+        })?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_inductance_matrix_par,
+        false => physics::boundary_element::triangle_mesh_inductance_matrix,
+    };
+    match func(&mesh, quad, &mut out) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
+#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_inductance_mapping_from_linear_filaments(
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    wire_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let wire_radius = wire_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let mesh_tgt = triangle_mesh_view(&nodes_tgt, &triangles_tgt)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout = mesh_tgt.nnode().checked_mul(xyzfil.0.len()).ok_or(
+        PyInteropError::DimensionalityError {
+            msg: "Inductance mapping size overflow".to_string(),
+        },
+    )?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => {
+            physics::boundary_element::triangle_mesh_inductance_mapping_from_linear_filaments_par
+        }
+        false => physics::boundary_element::triangle_mesh_inductance_mapping_from_linear_filaments,
+    };
+    match func(xyzfil, dlxyzfil, wire_radius, &mesh_tgt, quad, &mut out) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
+#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_inductance_mapping_from_circular_filaments(
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    let rfil = rfil.as_slice()?;
+    let zfil = zfil.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let mesh_tgt = triangle_mesh_view(&nodes_tgt, &triangles_tgt)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        mesh_tgt
+            .nnode()
+            .checked_mul(rfil.len())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Inductance mapping size overflow".to_string(),
+            })?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => {
+            physics::boundary_element::triangle_mesh_inductance_mapping_from_circular_filaments_par
+        }
+        false => {
+            physics::boundary_element::triangle_mesh_inductance_mapping_from_circular_filaments
+        }
+    };
+    match func(rfil, zfil, &mesh_tgt, quad, &mut out) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
+#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_flux_linkage_mapping_from_dipoles(
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    moment_dir: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    outer_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<Py<PyArray1<f64>>> {
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(moment_dir);
+    let outer_radius = outer_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let mesh_tgt = triangle_mesh_view(&nodes_tgt, &triangles_tgt)?;
+    let quad = parse_triangle_quadrature(&quad)?;
+
+    let nout =
+        mesh_tgt
+            .nnode()
+            .checked_mul(loc.0.len())
+            .ok_or(PyInteropError::DimensionalityError {
+                msg: "Flux-linkage mapping size overflow".to_string(),
+            })?;
+    let mut out = vec![0.0; nout];
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_flux_linkage_mapping_from_dipoles_par,
+        false => physics::boundary_element::triangle_mesh_flux_linkage_mapping_from_dipoles,
+    };
+    match func(loc, moment_dir, outer_radius, &mesh_tgt, quad, &mut out) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
+}
+
+#[pyfunction(signature = (nodes_src, triangles_src, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping(
+    nodes_src: PyReadonlyArray2<f64>,
+    triangles_src: PyReadonlyArray2<i64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let nodes_src = split_xyz_array2("nodes_src", nodes_src)?;
+    let triangles_src = split_triangle_index_array2("triangles_src", triangles_src)?;
+    let mesh_src = triangle_mesh_view(&nodes_src, &triangles_src)?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let mesh_tgt = triangle_mesh_view(&nodes_tgt, &triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nnode_src = mesh_src.nnode();
+    let ntri_tgt = mesh_tgt.len();
+    let nout = nnode_src
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping,
+    };
+    match func(
+        &mesh_src,
+        &mesh_tgt,
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (nodes, triangles, s, par=true, quad="gl3"))]
+fn triangle_mesh_self_force_mapping(
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let s = s.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nnode = mesh.nnode();
+    let ntri = mesh.len();
+    let nout = nnode
+        .checked_mul(ntri)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_self_force_mapping_par,
+        false => physics::boundary_element::triangle_mesh_self_force_mapping,
+    };
+    match func(&mesh, s, quad, (&mut fx, &mut fy, &mut fz)) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping_from_linear_filaments(
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    wire_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let wire_radius = wire_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let mesh_tgt = triangle_mesh_view(&nodes_tgt, &triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nfil = xyzfil.0.len();
+    let ntri_tgt = mesh_tgt.len();
+    let nout = nfil
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_from_linear_filaments_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping_from_linear_filaments,
+    };
+    match func(
+        xyzfil,
+        dlxyzfil,
+        wire_radius,
+        &mesh_tgt,
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping_from_circular_filaments(
+    rfil: PyReadonlyArray1<f64>,
+    zfil: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let rfil = rfil.as_slice()?;
+    let zfil = zfil.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let mesh_tgt = triangle_mesh_view(&nodes_tgt, &triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let nfil = rfil.len();
+    let ntri_tgt = mesh_tgt.len();
+    let nout = nfil
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_from_circular_filaments_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping_from_circular_filaments,
+    };
+    match func(
+        rfil,
+        zfil,
+        &mesh_tgt,
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
+#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+fn triangle_mesh_force_mapping_from_dipoles(
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    moment_dir: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    outer_radius: PyReadonlyArray1<f64>,
+    nodes_tgt: PyReadonlyArray2<f64>,
+    triangles_tgt: PyReadonlyArray2<i64>,
+    s_tgt: PyReadonlyArray1<f64>,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(moment_dir);
+    let outer_radius = outer_radius.as_slice()?;
+    let nodes_tgt = split_xyz_array2("nodes_tgt", nodes_tgt)?;
+    let triangles_tgt = split_triangle_index_array2("triangles_tgt", triangles_tgt)?;
+    let mesh_tgt = triangle_mesh_view(&nodes_tgt, &triangles_tgt)?;
+    let s_tgt = s_tgt.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+
+    let ndip = loc.0.len();
+    let ntri_tgt = mesh_tgt.len();
+    let nout = ndip
+        .checked_mul(ntri_tgt)
+        .ok_or(PyInteropError::DimensionalityError {
+            msg: "Force mapping size overflow".to_string(),
+        })?;
+    let (mut fx, mut fy, mut fz) = (vec![0.0; nout], vec![0.0; nout], vec![0.0; nout]);
+
+    let func = match par {
+        true => physics::boundary_element::triangle_mesh_force_mapping_from_dipoles_par,
+        false => physics::boundary_element::triangle_mesh_force_mapping_from_dipoles,
+    };
+    match func(
+        loc,
+        moment_dir,
+        outer_radius,
+        &mesh_tgt,
+        s_tgt,
+        quad,
+        (&mut fx, &mut fy, &mut fz),
+    ) {
+        Ok(_) => (),
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
+}
+
 /// A Python module implemented in Rust. The name of this function must match
 /// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
 /// import the module.
 #[pymodule]
 #[pyo3(name = "cfsem")]
 fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
+    m.add("DimensionalityError", _py.get_type::<DimensionalityError>())?;
+
     // Circular filaments
     m.add_function(wrap_pyfunction!(flux_circular_filament, m.clone())?)?;
     m.add_function(wrap_pyfunction!(flux_density_circular_filament, m.clone())?)?;
@@ -1065,22 +1842,68 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
 
     // Linear filaments
     m.add_function(wrap_pyfunction!(flux_density_linear_filament, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(flux_density_triangle_mesh, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(flux_density_point_segment, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(triangle_mesh_current_density, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_quadrature_points,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(triangle_mesh_force_mapping, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_self_force_mapping,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_force_mapping_from_linear_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_force_mapping_from_circular_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_force_mapping_from_dipoles,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_inductance_matrix,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_inductance_mapping_from_linear_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_inductance_mapping_from_circular_filaments,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        triangle_mesh_flux_linkage_mapping_from_dipoles,
+        m.clone()
+    )?)?;
     m.add_function(wrap_pyfunction!(
         flux_density_linear_filament_matrix,
         m.clone()
     )?)?;
-    m.add_function(wrap_pyfunction!(flux_density_point_segment, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_linear_filament,
         m.clone()
     )?)?;
+    m.add_function(wrap_pyfunction!(vector_potential_triangle_mesh, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(
+        flux_density_triangle_mesh_mapping,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_triangle_mesh_mapping,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(vector_potential_point_segment, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_linear_filament_matrix,
         m.clone()
     )?)?;
-    m.add_function(wrap_pyfunction!(vector_potential_point_segment, m.clone())?)?;
-    #[cfg(feature = "rat-mlfmm")]
-    m.add_function(wrap_pyfunction!(fields_linear_filament_mlfmm, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         inductance_piecewise_linear_filaments,
         m.clone()

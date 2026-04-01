@@ -7,9 +7,6 @@ use rayon::{
 
 use crate::{chunksize, math::cross3};
 
-#[cfg(test)]
-use crate::math::rss3;
-
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.
@@ -668,9 +665,9 @@ pub fn flux_density_linear_filament_scalar(
 
     // Finally, determine whether we are clipping to zero.
     if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {
-        return (bx, by, bz);
+        (bx, by, bz)
     } else {
-        return (0.0, 0.0, 0.0);
+        (0.0, 0.0, 0.0)
     }
 }
 
@@ -1249,6 +1246,7 @@ mod test {
     use std::f64::consts::{E, PI};
 
     use super::*;
+    use crate::math::rss3;
     use crate::physics::point_source::segment::{
         flux_density_point_segment, vector_potential_point_segment,
     };

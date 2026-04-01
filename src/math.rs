@@ -134,6 +134,28 @@ pub fn dot3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> f32 {
     x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
 }
 
+/// Elementwise subtraction of fixed-size 3D vectors.
+#[inline]
+pub(crate) fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/// Affine combination `a + scale * b` of fixed-size 3D vectors using `mul_add`.
+#[inline]
+pub(crate) fn add_scaled3(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
+    [
+        scale.mul_add(b[0], a[0]),
+        scale.mul_add(b[1], a[1]),
+        scale.mul_add(b[2], a[2]),
+    ]
+}
+
+/// Fixed-size 3D dot product wrapper around [`dot3`].
+#[inline]
+pub(crate) fn dot3_arr(a: [f64; 3], b: [f64; 3]) -> f64 {
+    dot3(a[0], a[1], a[2], b[0], b[1], b[2])
+}
+
 /// Convert a point from cartesian to cylindrical coordinates.
 #[inline]
 pub fn cartesian_to_cylindrical(x: f64, y: f64, z: f64) -> (f64, f64, f64) {

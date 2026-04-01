@@ -26,14 +26,14 @@ license = "MIT"
 dev = [
     # Tests
     "pytest >= 9.0.2",
-    "coverage >= 7.13.5",
+    "pytest-cov >= 7.1.0",
     "ruff >= 0.6.2",
     "pyright == 1.1.402",
     "scipy >= 1.8",
     # Docs
     "mkdocs >= 1.6.0",
     "mkdocs-material >= 9.5.25",
-    "mkdocstrings[python] >= 0.25.1",
+    "mkdocstrings[python] >= 1.0.3",
     # Examples
     "matplotlib >= 3.9",
     "plotly>=6.6.0,<7",
@@ -69,3 +69,4 @@ fail_under = 100
 
 [tool.pytest.ini_options]
 norecursedirs = ["vendor", "target", ".venv", "dist", "build"]
+addopts = "--cov=cfsem --cov-report=html --cov-report=term-missing --cov-fail-under=100"

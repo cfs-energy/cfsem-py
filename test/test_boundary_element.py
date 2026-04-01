@@ -162,7 +162,7 @@ def test_triangle_mesh_quadrature_points_and_current_density():
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("quad", ["gl3", "dunavant5"])
+@mark.parametrize("quad", ["gl2", "gl3", "dunavant5"])
 def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     """Compare far-field triangle-mesh fields against the circular-filament reference."""
     radius = 0.7312345987

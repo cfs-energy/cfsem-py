@@ -6,7 +6,6 @@
 
 * Rust
     * Add `point_source::current_element` module with element kernels shared between point-segment and boundary-element methods
-        * These also include singularity-clamping that robustifies the point-segment B-field and A-field.
     * Add `boundary_element` module with B-field, A-field, inductance, and traction force
     * Add minimal triangle mesh view interface in `mesh.rs` using nodes-and-indices storage
 * Python
@@ -17,6 +16,7 @@
 
 * Refactor point-segment calculations to extract B-field and A-field kernels to `current_element.rs`
     * These kernels are shared between `point_segment` and `boundary_element` modules, and will likely be used by a future finite element module as well.
+    * These kernels include singularity-clamping that robustifies the point-segment B-field and A-field.
 * Removed experimental mesh_filament module in favor of more rigorous boundary element method
     * Minor change because this was not part of the public API
 

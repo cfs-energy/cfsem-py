@@ -5,8 +5,6 @@ use pyo3::exceptions;
 use pyo3::prelude::*;
 use std::fmt::Debug;
 
-#[cfg(feature = "rat-mlfmm")]
-use crate::mlfmm::MlfmmOptions;
 use crate::{math, mesh, physics};
 
 create_exception!(cfsem, DimensionalityError, exceptions::PyValueError);
@@ -1888,7 +1886,6 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         flux_density_linear_filament_matrix,
         m.clone()
     )?)?;
-    m.add_function(wrap_pyfunction!(flux_density_point_segment, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_linear_filament,
         m.clone()
@@ -1907,9 +1904,6 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         vector_potential_linear_filament_matrix,
         m.clone()
     )?)?;
-    m.add_function(wrap_pyfunction!(vector_potential_point_segment, m.clone())?)?;
-    #[cfg(feature = "rat-mlfmm")]
-    m.add_function(wrap_pyfunction!(fields_linear_filament_mlfmm, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         inductance_piecewise_linear_filaments,
         m.clone()

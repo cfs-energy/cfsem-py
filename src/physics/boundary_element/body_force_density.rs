@@ -252,9 +252,8 @@ pub fn triangle_force_from_potential_vectors(
 ///     mesh_tgt: Borrowed target triangle-mesh geometry view.
 ///     s_tgt: Fixed target nodal current-potential values (A).
 ///     quad_kind: Triangle quadrature rule selector (dimensionless).
-///     outx: Row-major target-triangle by source-node x-component mapping (N/A).
-///     outy: Row-major target-triangle by source-node y-component mapping (N/A).
-///     outz: Row-major target-triangle by source-node z-component mapping (N/A).
+///     out: Output force mapping buffers `(fx_map, fy_map, fz_map)` (N/A), each row-major
+///         in `(target triangle, source node)` order.
 ///
 /// Returns:
 ///     `Ok(())` after writing the frozen-target force mapping.

@@ -388,7 +388,7 @@ def flux_density_triangle_mesh(
         obs: [m] observation points with shape `(nobs, 3)`
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
-        s: nodal stream-function values with shape `(nnode,)`
+        s: [A] nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
         quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
 
@@ -418,7 +418,7 @@ def vector_potential_triangle_mesh(
         obs: [m] observation points with shape `(nobs, 3)`
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
-        s: nodal stream-function values with shape `(nnode,)`
+        s: [A] nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
         quad: Triangle quadrature rule, one of `"gl2"`, `"gl3"`, or `"dunavant5"`
 
@@ -509,7 +509,7 @@ def triangle_mesh_current_density(
     Args:
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
-        s: nodal stream-function values with shape `(nnode,)`
+        s: [A] nodal stream-function values with shape `(nnode,)`
 
     Returns:
         [A/m] triangle-wise surface current density with shape `(ntri, 3)`

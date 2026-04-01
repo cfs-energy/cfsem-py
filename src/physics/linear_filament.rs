@@ -5,10 +5,7 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
-use crate::{
-    chunksize,
-    math::cross3,
-};
+use crate::{chunksize, math::cross3};
 
 use crate::{MU0_OVER_4PI, macros::*};
 

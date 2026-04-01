@@ -418,7 +418,9 @@ mod test {
 
     use super::*;
     use crate::math::rss3;
-    use crate::physics::linear_filament::{inductance_piecewise_linear_filaments, vector_potential_linear_filament};
+    use crate::physics::linear_filament::{
+        inductance_piecewise_linear_filaments, vector_potential_linear_filament,
+    };
     use crate::physics::point_source::current_element::{
         flux_density_current_element_scalar, vector_potential_current_element_scalar,
     };

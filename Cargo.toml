@@ -1,6 +1,6 @@
 [package]
 name = "cfsem"
-version = "4.1.0"
+version = "4.2.0"
 edition = "2024"
 authors = ["Commonwealth Fusion Systems <jlogan@cfs.energy>"]
 license = "MIT"
@@ -35,10 +35,8 @@ codegen-units = 1
 overflow-checks = true
 
 [profile.dev]
-# Nearly full optimizations for debug builds to test for perf regressions
-# when using maturin develop
+# Nearly full optimizations so that tests run in a reasonable time
 opt-level = 3
-#lto = true
 codegen-units = 16
 
 [features]

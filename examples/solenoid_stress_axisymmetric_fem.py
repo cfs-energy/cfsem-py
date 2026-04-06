@@ -48,6 +48,9 @@ SOURCE_CURRENT_RANGE_MA = (0.0, 5.0)
 SECTION_TARGET_FRACTIONS = (0.2, 0.5, 0.8)
 SECTION_LABELS = ("Lower", "Middle", "Upper")
 SECTION_COLORS = ("firebrick", "royalblue", "darkgreen")
+SECTION_WIDTHS = (4.5, 3.25, 2.0)
+SECTION_MARKERS = ("circle", "square", "diamond")
+SECTION_DASHES = ("solid", "dashdot", "dot")
 
 MESH_LONG_SIDE_ELEMENTS = 14 if TESTING else 28
 FIELD_GRID_R = 121 if TESTING else 241
@@ -75,8 +78,12 @@ class SectionComparison:
     e_tt_1d: np.ndarray
     s_rr_fe: np.ndarray
     s_rr_1d: np.ndarray
+    s_zz_fe: np.ndarray
+    s_zz_1d: np.ndarray
     s_tt_fe: np.ndarray
     s_tt_1d: np.ndarray
+    s_vm_fe: np.ndarray
+    s_vm_1d: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +120,8 @@ class CaseResult:
     pressure_bottom: float
     net_total_force_z: float
     peak_body_force_density: float
+    vm_stress_fem: np.ndarray
+    vm_stress_1d: np.ndarray
 
 
 def export_docs_example_figure(fig) -> None:
@@ -160,6 +169,27 @@ def build_annulus_strip_mesh(
     return nodes, np.asarray(elements, dtype=np.uint64), radii, zs
 
 
+def section_style(label: str) -> dict[str, object]:
+    for candidate, width, marker, dash in zip(
+        SECTION_LABELS,
+        SECTION_WIDTHS,
+        SECTION_MARKERS,
+        SECTION_DASHES,
+        strict=True,
+    ):
+        if label == candidate:
+            return {
+                "width": width,
+                "marker_symbol": marker,
+                "dash": dash,
+            }
+    return {
+        "width": 2.5,
+        "marker_symbol": "circle",
+        "dash": "solid",
+    }
+
+
 def choose_mesh_counts(width: float, height: float) -> tuple[int, int]:
     width = max(width, 1.0e-12)
     height = max(height, 1.0e-12)
@@ -198,7 +228,14 @@ def solenoid_outline(ri: float, ro: float, z_min: float, z_max: float) -> tuple[
     )
 
 
-def source_intersects_solenoid(ri: float, ro: float, z_min: float, z_max: float, source_r: float, source_z: float) -> bool:
+def source_intersects_solenoid(
+    ri: float,
+    ro: float,
+    z_min: float,
+    z_max: float,
+    source_r: float,
+    source_z: float,
+) -> bool:
     return ri <= source_r <= ro and z_min <= source_z <= z_max
 
 
@@ -253,7 +290,13 @@ def quad4_center_point_strain_stress(
     return point, u_center, eps_center, sig_center
 
 
-def field_grid(source_r: float, source_z: float, source_current: float, ro: float, height: float) -> tuple[np.ndarray, ...]:
+def field_grid(
+    source_r: float,
+    source_z: float,
+    source_current: float,
+    ro: float,
+    height: float,
+) -> tuple[np.ndarray, ...]:
     r_max = max(1.1 * ro, 1.3 * source_r, ro + 0.25)
     z_extent = max(0.8 * height, abs(source_z) + 0.6 * height, 0.25)
     r = np.linspace(0.0, r_max, FIELD_GRID_R, dtype=np.float64)
@@ -281,10 +324,26 @@ def field_grid(source_r: float, source_z: float, source_current: float, ro: floa
 
 
 def max_relative_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) -> float:
-    scale = max(float(np.max(np.abs(fe_values))), float(np.max(np.abs(ref_values))), 1.0e-30)
-    if scale <= 1.0e-30:
-        return 0.0
-    return 100.0 * float(np.max(np.abs(fe_values - ref_values))) / scale
+    return float(np.max(relative_error_percent(fe_values, ref_values)))
+
+
+def relative_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) -> np.ndarray:
+    peak_abs = max(float(np.max(np.abs(fe_values))), float(np.max(np.abs(ref_values))), 1.0e-30)
+    denominator_floor = 1.0e-6 * peak_abs
+    denominator = np.maximum(np.abs(ref_values), denominator_floor)
+    return 100.0 * np.abs(fe_values - ref_values) / denominator
+
+
+def von_mises_stress(
+    s_rr: np.ndarray | float,
+    s_zz: np.ndarray | float,
+    s_tt: np.ndarray | float,
+    tau_rz: np.ndarray | float = 0.0,
+) -> np.ndarray:
+    return np.sqrt(
+        0.5 * ((s_rr - s_zz) ** 2 + (s_zz - s_tt) ** 2 + (s_tt - s_rr) ** 2)
+        + 3.0 * tau_rz**2
+    )
 
 
 def build_section_comparisons(
@@ -313,7 +372,9 @@ def build_section_comparisons(
         e_rr_fe = np.zeros(nr, dtype=np.float64)
         e_tt_fe = np.zeros(nr, dtype=np.float64)
         s_rr_fe = np.zeros(nr, dtype=np.float64)
+        s_zz_fe = np.zeros(nr, dtype=np.float64)
         s_tt_fe = np.zeros(nr, dtype=np.float64)
+        s_vm_fe = np.zeros(nr, dtype=np.float64)
 
         for i_local, element_index in enumerate(element_indices):
             conn = elements[element_index]
@@ -329,7 +390,9 @@ def build_section_comparisons(
             e_rr_fe[i_local] = eps_center[0]
             e_tt_fe[i_local] = eps_center[2]
             s_rr_fe[i_local] = sig_center[0]
+            s_zz_fe[i_local] = sig_center[1]
             s_tt_fe[i_local] = sig_center[2]
+            s_vm_fe[i_local] = von_mises_stress(sig_center[0], sig_center[1], sig_center[2], sig_center[3])
 
         z_value = float(row_centers[row])
         b_z_fe = body_force_r[row] / current_density if current_density > 0.0 else np.zeros_like(radius)
@@ -356,6 +419,10 @@ def build_section_comparisons(
         strain_1d_full = np.asarray(reference.operators.a_eu @ u_r_1d_full, dtype=np.float64).reshape(-1)
         stress_1d_full = np.asarray(reference.operators.a_se @ strain_1d_full, dtype=np.float64).reshape(-1)
         n_1d = rgrid.size
+        s_rr_1d = stress_1d_full[:n_1d][1:-1]
+        s_zz_1d = np.zeros_like(radius)
+        s_tt_1d = stress_1d_full[n_1d:][1:-1]
+        s_vm_1d = von_mises_stress(s_rr_1d, s_zz_1d, s_tt_1d)
 
         section_list.append(
             SectionComparison(
@@ -372,13 +439,80 @@ def build_section_comparisons(
                 e_tt_fe=e_tt_fe,
                 e_tt_1d=strain_1d_full[n_1d:][1:-1],
                 s_rr_fe=s_rr_fe,
-                s_rr_1d=stress_1d_full[:n_1d][1:-1],
+                s_rr_1d=s_rr_1d,
+                s_zz_fe=s_zz_fe,
+                s_zz_1d=s_zz_1d,
                 s_tt_fe=s_tt_fe,
-                s_tt_1d=stress_1d_full[n_1d:][1:-1],
+                s_tt_1d=s_tt_1d,
+                s_vm_fe=s_vm_fe,
+                s_vm_1d=s_vm_1d,
             )
         )
 
     return tuple(section_list)
+
+
+def build_vm_stress_grids(
+    nodes: np.ndarray,
+    elements: np.ndarray,
+    radii: np.ndarray,
+    zs: np.ndarray,
+    nr: int,
+    nz: int,
+    displacement: np.ndarray,
+    material: np.ndarray,
+    source_radius: float,
+    source_z: float,
+    source_current: float,
+    current_density: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    vm_fem = np.zeros((nz, nr), dtype=np.float64)
+    c_struct = solenoid_1d_structural_factor(YOUNGS_MODULUS, POISSON_RATIO)
+    row_centers = 0.5 * (zs[:-1] + zs[1:])
+    elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
+    nudge = 1.0e-6
+
+    for row in range(nz):
+        for col in range(nr):
+            element_index = row * nr + col
+            conn = elements[element_index]
+            coords = nodes[conn]
+            displacement_local = displacement[conn]
+            _point, _u_center, _eps_center, sig_center = quad4_center_point_strain_stress(
+                coords,
+                displacement_local,
+                material,
+            )
+            vm_fem[row, col] = von_mises_stress(sig_center[0], sig_center[1], sig_center[2], sig_center[3])
+
+    vm_1d = np.zeros((nz, nr), dtype=np.float64)
+    for row, z_value in enumerate(row_centers):
+        rgrid = np.concatenate([[radii[0] - nudge], elem_r_centers, [radii[-1] + nudge]])
+        zgrid = np.full_like(rgrid, z_value)
+        _br, bz_grid = cfsem.flux_density_circular_filament(
+            [source_current],
+            [source_radius],
+            [source_z],
+            rgrid,
+            zgrid,
+            par=True,
+        )
+        rhs = solenoid_1d_structural_rhs(c_struct, np.full_like(rgrid, current_density), bz_grid)
+        reference = SolenoidStress1D(
+            rgrid=rgrid,
+            elasticity_modulus=YOUNGS_MODULUS,
+            poisson_ratio=POISSON_RATIO,
+            direct_inverse=False,
+        )
+        u_r_1d_full = np.asarray(reference.displacement_solver(rhs), dtype=np.float64).reshape(-1)
+        strain_1d_full = np.asarray(reference.operators.a_eu @ u_r_1d_full, dtype=np.float64).reshape(-1)
+        stress_1d_full = np.asarray(reference.operators.a_se @ strain_1d_full, dtype=np.float64).reshape(-1)
+        n_1d = rgrid.size
+        s_rr_1d = stress_1d_full[:n_1d][1:-1]
+        s_tt_1d = stress_1d_full[n_1d:][1:-1]
+        vm_1d[row, :] = von_mises_stress(s_rr_1d, 0.0, s_tt_1d)
+
+    return vm_fem, vm_1d
 
 
 @lru_cache(maxsize=128)
@@ -482,6 +616,20 @@ def solve_case(
         current_density=current_density,
         body_force_r=body_force_r,
     )
+    vm_stress_fem, vm_stress_1d = build_vm_stress_grids(
+        nodes=nodes,
+        elements=elements,
+        radii=radii,
+        zs=zs,
+        nr=nr,
+        nz=nz,
+        displacement=displacement,
+        material=material,
+        source_radius=source_radius,
+        source_z=source_z,
+        source_current=source_current,
+        current_density=current_density,
+    )
     field_r, field_z, bmag_field, bz_field = field_grid(source_radius, source_z, source_current, ro, height)
 
     return CaseResult(
@@ -517,6 +665,8 @@ def solve_case(
         pressure_bottom=pressure_bottom,
         net_total_force_z=float(np.sum(assembly.rhs[1::2])),
         peak_body_force_density=float(np.max(np.sqrt(body_force[:, 0] ** 2 + body_force[:, 1] ** 2))),
+        vm_stress_fem=vm_stress_fem,
+        vm_stress_1d=vm_stress_1d,
     )
 
 
@@ -546,159 +696,85 @@ def message_figure(title: str, message: str):
     return fig
 
 
-def build_overview_figure(case: CaseResult):
+def build_heatmap_figure(
+    case: CaseResult,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    *,
+    title: str,
+    colorbar_title: str,
+    colorscale: str,
+    zmin: float | None = None,
+    zmax: float | None = None,
+    zmid: float | None = None,
+    outline_color: str = "black",
+    source_color: str = "black",
+    source_line_color: str = "white",
+):
     import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
 
-    bmag_log = np.maximum(np.log10(np.asarray(case.bmag_field, dtype=np.float64) + 1.0e-30), LOG10_FLOOR)
-    bmag_finite = bmag_log[np.isfinite(bmag_log)]
-    bmag_range = (
-        float(np.nanmin(bmag_finite)) if bmag_finite.size else LOG10_FLOOR,
-        float(np.nanpercentile(bmag_finite, 99.0)) if bmag_finite.size else 0.0,
-    )
-
-    bz_clip = float(np.nanpercentile(np.abs(case.bz_field), 99.0)) if np.isfinite(case.bz_field).any() else 1.0
-    force_r_clip = float(np.nanpercentile(np.abs(case.body_force_r), 99.0))
-    force_z_clip = float(np.nanpercentile(np.abs(case.body_force_z), 99.0))
-    force_r_clip = force_r_clip if force_r_clip > 0.0 else 1.0
-    force_z_clip = force_z_clip if force_z_clip > 0.0 else 1.0
-
-    fig = make_subplots(
-        rows=2,
-        cols=2,
-        horizontal_spacing=0.12,
-        vertical_spacing=0.16,
-        subplot_titles=[
-            "Loop-source |B| [T] (log10)",
-            "Loop-source B_z [T]",
-            "Element body force f_r = J_theta B_z [N/m^3]",
-            "Element body force f_z = -J_theta B_r [N/m^3]",
-        ],
-    )
-
+    fig = go.Figure()
     fig.add_trace(
         go.Heatmap(
-            x=case.field_r,
-            y=case.field_z,
-            z=bmag_log,
-            colorscale="Magma",
-            zmin=bmag_range[0],
-            zmax=bmag_range[1],
-            colorbar={"title": "log10(|B|)", "thickness": 14, "x": -0.14, "xanchor": "left"},
-        ),
-        row=1,
-        col=1,
+            x=x,
+            y=y,
+            z=z,
+            colorscale=colorscale,
+            zmin=zmin,
+            zmax=zmax,
+            zmid=zmid,
+            colorbar={"title": colorbar_title, "thickness": 14},
+        )
     )
     fig.add_trace(
-        go.Heatmap(
-            x=case.field_r,
-            y=case.field_z,
-            z=case.bz_field,
-            colorscale="RdBu",
-            zmid=0.0,
-            zmin=-bz_clip,
-            zmax=bz_clip,
-            colorbar={"title": "B_z [T]", "thickness": 14},
-        ),
-        row=1,
-        col=2,
+        go.Scatter(
+            x=case.outline_r,
+            y=case.outline_z,
+            mode="lines",
+            line={"color": outline_color, "width": 2},
+            name="Solenoid section",
+            hoverinfo="skip",
+        )
     )
-    fig.add_trace(
-        go.Heatmap(
-            x=case.elem_r_centers,
-            y=case.elem_z_centers,
-            z=case.body_force_r,
-            colorscale="RdBu",
-            zmid=0.0,
-            zmin=-force_r_clip,
-            zmax=force_r_clip,
-            colorbar={"title": "f_r [N/m^3]", "thickness": 14, "x": -0.14, "xanchor": "left"},
-        ),
-        row=2,
-        col=1,
-    )
-    fig.add_trace(
-        go.Heatmap(
-            x=case.elem_r_centers,
-            y=case.elem_z_centers,
-            z=case.body_force_z,
-            colorscale="RdBu",
-            zmid=0.0,
-            zmin=-force_z_clip,
-            zmax=force_z_clip,
-            colorbar={"title": "f_z [N/m^3]", "thickness": 14},
-        ),
-        row=2,
-        col=2,
-    )
-
-    for row, col in ((1, 1), (1, 2), (2, 1), (2, 2)):
+    for section in case.sections:
         fig.add_trace(
             go.Scatter(
-                x=case.outline_r,
-                y=case.outline_z,
+                x=np.array([case.ri, case.ro], dtype=np.float64),
+                y=np.array([section.z_value, section.z_value], dtype=np.float64),
                 mode="lines",
-                line={"color": "white" if row == 1 else "black", "width": 2},
-                name="Solenoid section",
-                legendgroup="solenoid",
-                showlegend=(row == 1 and col == 1),
+                line={"color": section.color, "width": 2, "dash": "dot"},
+                name=f"{section.label} section",
                 hoverinfo="skip",
-            ),
-            row=row,
-            col=col,
-        )
-        for section in case.sections:
-            fig.add_trace(
-                go.Scatter(
-                    x=np.array([case.ri, case.ro], dtype=np.float64),
-                    y=np.array([section.z_value, section.z_value], dtype=np.float64),
-                    mode="lines",
-                    line={"color": section.color, "width": 2, "dash": "dot"},
-                    name=f"{section.label} section",
-                    legendgroup=section.label,
-                    showlegend=(row == 1 and col == 1),
-                    hoverinfo="skip",
-                ),
-                row=row,
-                col=col,
             )
-        fig.add_trace(
-            go.Scatter(
-                x=[case.source_radius],
-                y=[case.source_z],
-                mode="markers",
-                marker={
-                    "size": 11,
-                    "color": "cyan" if row == 1 else "black",
-                    "line": {"color": "black" if row == 1 else "white", "width": 1},
-                    "symbol": "circle",
-                },
-                name="Loop source",
-                legendgroup="source",
-                showlegend=(row == 1 and col == 1),
-            ),
-            row=row,
-            col=col,
         )
-
-    for row, col in ((1, 1), (1, 2), (2, 1), (2, 2)):
-        fig.update_xaxes(title_text="r [m]", row=row, col=col)
-        fig.update_yaxes(title_text="z [m]", row=row, col=col)
-
+    fig.add_trace(
+        go.Scatter(
+            x=[case.source_radius],
+            y=[case.source_z],
+            mode="markers",
+            marker={
+                "size": 11,
+                "color": source_color,
+                "line": {"color": source_line_color, "width": 1},
+                "symbol": "circle",
+            },
+            name="Loop source",
+        )
+    )
+    fig.update_xaxes(title_text="r [m]")
+    fig.update_yaxes(title_text="z [m]")
     fig.update_layout(
-        height=920,
-        title=(
-            "Axisymmetric FEM source/load overview | "
-            f"ri={case.ri:.3f} m, width={case.width:.3f} m, height={case.height:.3f} m"
-        ),
-        margin={"l": 60, "r": 20, "t": 110, "b": 50},
+        height=430,
+        title=title,
+        margin={"l": 60, "r": 20, "t": 90, "b": 50},
         plot_bgcolor="white",
         paper_bgcolor="white",
         legend={
             "orientation": "h",
             "x": 0.5,
             "xanchor": "center",
-            "y": 1.08,
+            "y": 1.02,
             "yanchor": "bottom",
             "bgcolor": "rgba(255,255,255,0.8)",
         },
@@ -711,7 +787,7 @@ def build_profile_figure(case: CaseResult):
     from plotly.subplots import make_subplots
 
     fig = make_subplots(
-        rows=3,
+        rows=4,
         cols=2,
         horizontal_spacing=0.12,
         vertical_spacing=0.14,
@@ -720,7 +796,9 @@ def build_profile_figure(case: CaseResult):
             "Radial strain e_rr [-]",
             "Hoop strain e_tt [-]",
             "Radial stress s_rr [Pa]",
+            "Axial stress s_zz [Pa]",
             "Hoop stress s_tt [Pa]",
+            "Von Mises stress [Pa]",
             "B_z used for loading [T]",
         ],
     )
@@ -730,19 +808,22 @@ def build_profile_figure(case: CaseResult):
         ("e_rr_fe", "e_rr_1d", 1, 2),
         ("e_tt_fe", "e_tt_1d", 2, 1),
         ("s_rr_fe", "s_rr_1d", 2, 2),
-        ("s_tt_fe", "s_tt_1d", 3, 1),
-        ("b_z_fe", "b_z_1d", 3, 2),
+        ("s_zz_fe", "s_zz_1d", 3, 1),
+        ("s_tt_fe", "s_tt_1d", 3, 2),
+        ("s_vm_fe", "s_vm_1d", 4, 1),
+        ("b_z_fe", "b_z_1d", 4, 2),
     ]
 
     for i_subplot, (fe_name, ref_name, row, col) in enumerate(subplot_specs):
         for section in case.sections:
+            style = section_style(section.label)
             fig.add_trace(
                 go.Scatter(
                     x=section.radius,
                     y=getattr(section, fe_name),
                     mode="lines+markers",
-                    line={"color": section.color, "width": 2},
-                    marker={"size": 5},
+                    line={"color": section.color, "width": style["width"]},
+                    marker={"size": 5.5, "symbol": style["marker_symbol"]},
                     name=f"{section.label} FEM",
                     legendgroup=f"{section.label}-fem",
                     showlegend=i_subplot == 0,
@@ -755,7 +836,11 @@ def build_profile_figure(case: CaseResult):
                     x=section.radius,
                     y=getattr(section, ref_name),
                     mode="lines",
-                    line={"color": section.color, "width": 2, "dash": "dash"},
+                    line={
+                        "color": section.color,
+                        "width": style["width"],
+                        "dash": "dash" if style["dash"] == "solid" else style["dash"],
+                    },
                     name=f"{section.label} 1D",
                     legendgroup=f"{section.label}-1d",
                     showlegend=i_subplot == 0,
@@ -766,7 +851,7 @@ def build_profile_figure(case: CaseResult):
         fig.update_xaxes(title_text="r [m]", row=row, col=col)
 
     fig.update_layout(
-        height=1060,
+        height=1380,
         title=(
             "Radial section comparison | "
             "FEM uses the full axisymmetric body force; 1D uses local B_z(r, z_section)"
@@ -796,11 +881,11 @@ def build_error_figure(case: CaseResult):
         horizontal_spacing=0.12,
         vertical_spacing=0.14,
         subplot_titles=[
-            "Absolute error |u_r,FEM - u_r,1D| [m]",
-            "Absolute error |e_rr,FEM - e_rr,1D| [-]",
-            "Absolute error |e_tt,FEM - e_tt,1D| [-]",
-            "Absolute error |s_rr,FEM - s_rr,1D| [Pa]",
-            "Absolute error |s_tt,FEM - s_tt,1D| [Pa]",
+            "Relative error in u_r [%]",
+            "Relative error in e_rr [%]",
+            "Relative error in e_tt [%]",
+            "Relative error in s_rr [%]",
+            "Relative error in s_tt [%]",
             "Max relative error by section [%]",
         ],
     )
@@ -815,12 +900,14 @@ def build_error_figure(case: CaseResult):
 
     for i_subplot, (fe_name, ref_name, row, col) in enumerate(error_specs):
         for section in case.sections:
+            style = section_style(section.label)
             fig.add_trace(
                 go.Scatter(
                     x=section.radius,
-                    y=np.abs(getattr(section, fe_name) - getattr(section, ref_name)),
-                    mode="lines",
-                    line={"color": section.color, "width": 2},
+                    y=relative_error_percent(getattr(section, fe_name), getattr(section, ref_name)),
+                    mode="lines+markers",
+                    line={"color": section.color, "width": style["width"], "dash": style["dash"]},
+                    marker={"size": 5.5, "symbol": style["marker_symbol"]},
                     name=section.label,
                     legendgroup=section.label,
                     showlegend=i_subplot == 0,
@@ -878,7 +965,8 @@ def build_summary(case: CaseResult) -> str:
     return (
         f"Mesh {case.nr}x{case.nz} ({case.ndof} dof, K nnz={case.stiffness_nnz}) | "
         f"J_theta={case.current_density:.3e} A/m^2 | "
-        f"source I={case.source_current:.3e} A-turn at (r={case.source_radius:.3f} m, z={case.source_z:.3f} m) | "
+        f"source I={case.source_current:.3e} A-turn at "
+        f"(r={case.source_radius:.3f} m, z={case.source_z:.3f} m) | "
         f"net axial body force={case.net_body_force_z:.3e} N | "
         f"top/bottom pressure values=({case.pressure_top:.3e}, {case.pressure_bottom:.3e}) Pa | "
         f"net axial load after balance={case.net_total_force_z:.3e} N | "
@@ -906,7 +994,10 @@ def create_app():
                 [
                     html.Div(
                         [
-                            html.P("Solenoid width [m]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}),
+                            html.P(
+                                "Solenoid width [m]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
                             dcc.Slider(
                                 id="solenoid-width",
                                 min=WIDTH_RANGE[0],
@@ -920,7 +1011,10 @@ def create_app():
                     ),
                     html.Div(
                         [
-                            html.P("Solenoid height [m]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}),
+                            html.P(
+                                "Solenoid height [m]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
                             dcc.Slider(
                                 id="solenoid-height",
                                 min=HEIGHT_RANGE[0],
@@ -968,7 +1062,10 @@ def create_app():
                     ),
                     html.Div(
                         [
-                            html.P("Loop source z [m]", style={"marginTop": "0.25rem", "marginBottom": "0.25rem"}),
+                            html.P(
+                                "Loop source z [m]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
                             dcc.Slider(
                                 id="source-z",
                                 min=SOURCE_Z_RANGE[0],
@@ -1012,7 +1109,10 @@ def create_app():
                         id="balance-axial-load",
                         options=[
                             {
-                                "label": "Balance net axial body force with equal-and-opposite top/bottom pressure values",
+                                "label": (
+                                    "Balance net axial body force with equal-and-opposite "
+                                    "top/bottom pressure values"
+                                ),
                                 "value": "balance",
                             }
                         ],
@@ -1031,8 +1131,51 @@ def create_app():
                         label="Overview",
                         children=[
                             html.Div(
-                                dcc.Loading(type="circle", children=dcc.Graph(id="overview-figure")),
-                                style={"marginTop": "0.5rem"},
+                                [
+                                    html.Div(
+                                        dcc.Loading(
+                                            type="circle",
+                                            children=dcc.Graph(id="overview-bmag-figure"),
+                                        )
+                                    ),
+                                    html.Div(
+                                        dcc.Loading(
+                                            type="circle",
+                                            children=dcc.Graph(id="overview-bz-figure"),
+                                        )
+                                    ),
+                                    html.Div(
+                                        dcc.Loading(
+                                            type="circle",
+                                            children=dcc.Graph(id="overview-force-r-figure"),
+                                        )
+                                    ),
+                                    html.Div(
+                                        dcc.Loading(
+                                            type="circle",
+                                            children=dcc.Graph(id="overview-force-z-figure"),
+                                        )
+                                    ),
+                                    html.Div(
+                                        dcc.Loading(
+                                            type="circle",
+                                            children=dcc.Graph(id="overview-vm-fem-figure"),
+                                        )
+                                    ),
+                                    html.Div(
+                                        dcc.Loading(
+                                            type="circle",
+                                            children=dcc.Graph(id="overview-vm-1d-figure"),
+                                        )
+                                    ),
+                                ],
+                                style={
+                                    "display": "grid",
+                                    "gridTemplateColumns": "repeat(2, minmax(320px, 1fr))",
+                                    "columnGap": "1rem",
+                                    "rowGap": "1rem",
+                                    "marginTop": "0.5rem",
+                                },
                             )
                         ],
                     ),
@@ -1062,7 +1205,12 @@ def create_app():
 
     @app.callback(
         Output("case-summary", "children"),
-        Output("overview-figure", "figure"),
+        Output("overview-bmag-figure", "figure"),
+        Output("overview-bz-figure", "figure"),
+        Output("overview-force-r-figure", "figure"),
+        Output("overview-force-z-figure", "figure"),
+        Output("overview-vm-fem-figure", "figure"),
+        Output("overview-vm-1d-figure", "figure"),
         Output("profile-figure", "figure"),
         Output("error-figure", "figure"),
         Input("solenoid-width", "value"),
@@ -1095,11 +1243,115 @@ def create_app():
         except ValueError as exc:
             message = str(exc)
             fig = message_figure("Invalid source placement", message)
-            return message, fig, fig, fig
+            return message, fig, fig, fig, fig, fig, fig, fig, fig
+
+        bmag_log = np.maximum(np.log10(np.asarray(case.bmag_field, dtype=np.float64) + 1.0e-30), LOG10_FLOOR)
+        bmag_finite = bmag_log[np.isfinite(bmag_log)]
+        bmag_zmin = float(np.nanmin(bmag_finite)) if bmag_finite.size else LOG10_FLOOR
+        bmag_zmax = float(np.nanpercentile(bmag_finite, 99.0)) if bmag_finite.size else 0.0
+        bz_clip = (
+            float(np.nanpercentile(np.abs(case.bz_field), 99.0))
+            if np.isfinite(case.bz_field).any()
+            else 1.0
+        )
+        force_r_clip = float(np.nanpercentile(np.abs(case.body_force_r), 99.0))
+        force_z_clip = float(np.nanpercentile(np.abs(case.body_force_z), 99.0))
+        vm_fem_clip = float(np.nanpercentile(case.vm_stress_fem, 99.0))
+        vm_1d_clip = float(np.nanpercentile(case.vm_stress_1d, 99.0))
+        force_r_clip = force_r_clip if force_r_clip > 0.0 else 1.0
+        force_z_clip = force_z_clip if force_z_clip > 0.0 else 1.0
+        vm_fem_clip = vm_fem_clip if vm_fem_clip > 0.0 else 1.0
+        vm_1d_clip = vm_1d_clip if vm_1d_clip > 0.0 else 1.0
 
         return (
             build_summary(case),
-            build_overview_figure(case),
+            build_heatmap_figure(
+                case,
+                case.field_r,
+                case.field_z,
+                bmag_log,
+                title="Loop-source |B| [T] (log10)",
+                colorbar_title="log10(|B|)",
+                colorscale="Magma",
+                zmin=bmag_zmin,
+                zmax=bmag_zmax,
+                outline_color="white",
+                source_color="cyan",
+                source_line_color="black",
+            ),
+            build_heatmap_figure(
+                case,
+                case.field_r,
+                case.field_z,
+                case.bz_field,
+                title="Loop-source B_z [T]",
+                colorbar_title="B_z [T]",
+                colorscale="RdBu",
+                zmin=-bz_clip,
+                zmax=bz_clip,
+                zmid=0.0,
+                outline_color="white",
+                source_color="cyan",
+                source_line_color="black",
+            ),
+            build_heatmap_figure(
+                case,
+                case.elem_r_centers,
+                case.elem_z_centers,
+                case.body_force_r,
+                title="Element body force f_r = J_theta B_z [N/m^3]",
+                colorbar_title="f_r [N/m^3]",
+                colorscale="RdBu",
+                zmin=-force_r_clip,
+                zmax=force_r_clip,
+                zmid=0.0,
+                outline_color="black",
+                source_color="black",
+                source_line_color="white",
+            ),
+            build_heatmap_figure(
+                case,
+                case.elem_r_centers,
+                case.elem_z_centers,
+                case.body_force_z,
+                title="Element body force f_z = -J_theta B_r [N/m^3]",
+                colorbar_title="f_z [N/m^3]",
+                colorscale="RdBu",
+                zmin=-force_z_clip,
+                zmax=force_z_clip,
+                zmid=0.0,
+                outline_color="black",
+                source_color="black",
+                source_line_color="white",
+            ),
+            build_heatmap_figure(
+                case,
+                case.elem_r_centers,
+                case.elem_z_centers,
+                case.vm_stress_fem,
+                title="Von Mises stress from FEM [Pa]",
+                colorbar_title="VM FEM [Pa]",
+                colorscale="Cividis",
+                zmin=0.0,
+                zmax=vm_fem_clip,
+                outline_color="black",
+                source_color="black",
+                source_line_color="white",
+            ),
+            build_heatmap_figure(
+                case,
+                case.elem_r_centers,
+                case.elem_z_centers,
+                case.vm_stress_1d,
+                title="Von Mises stress from row-wise 1D reference [Pa]",
+                colorbar_title="VM 1D [Pa]",
+                colorscale="Cividis",
+                zmin=0.0,
+                zmax=vm_1d_clip,
+                outline_color="black",
+                source_color="black",
+                source_line_color="white",
+            ),
             build_profile_figure(case),
             build_error_figure(case),
         )
@@ -1122,7 +1374,18 @@ def main() -> None:
         DEFAULT_SOURCE_CURRENT_MA,
         True,
     )
-    overview = build_overview_figure(case)
+    overview = build_heatmap_figure(
+        case,
+        case.field_r,
+        case.field_z,
+        np.maximum(np.log10(np.asarray(case.bmag_field, dtype=np.float64) + 1.0e-30), LOG10_FLOOR),
+        title="Loop-source |B| [T] (log10)",
+        colorbar_title="log10(|B|)",
+        colorscale="Magma",
+        outline_color="white",
+        source_color="cyan",
+        source_line_color="black",
+    )
     export_docs_example_figure(overview)
     build_profile_figure(case)
     build_error_figure(case)

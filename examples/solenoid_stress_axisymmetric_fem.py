@@ -323,15 +323,16 @@ def field_grid(
     return r, z, bmag, bz_grid
 
 
-def max_relative_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) -> float:
-    return float(np.max(relative_error_percent(fe_values, ref_values)))
+def normalized_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) -> np.ndarray:
+    x_max = max(float(np.max(np.abs(fe_values))), float(np.max(np.abs(ref_values))), 1.0e-30)
+    return 100.0 * (fe_values - ref_values) / x_max
 
 
-def relative_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) -> np.ndarray:
-    peak_abs = max(float(np.max(np.abs(fe_values))), float(np.max(np.abs(ref_values))), 1.0e-30)
-    denominator_floor = 1.0e-6 * peak_abs
-    denominator = np.maximum(np.abs(ref_values), denominator_floor)
-    return 100.0 * np.abs(fe_values - ref_values) / denominator
+def peak_magnitude_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) -> float:
+    fe_peak = float(np.max(np.abs(fe_values)))
+    ref_peak = float(np.max(np.abs(ref_values)))
+    x_peak = max(fe_peak, ref_peak, 1.0e-30)
+    return 100.0 * (fe_peak - ref_peak) / x_peak
 
 
 def von_mises_stress(
@@ -766,15 +767,22 @@ def build_heatmap_figure(
     fig.update_yaxes(title_text="z [m]")
     fig.update_layout(
         height=430,
-        title=title,
-        margin={"l": 60, "r": 20, "t": 90, "b": 50},
+        title={
+            "text": title,
+            "pad": {"b": 18},
+            "y": 0.985,
+            "yanchor": "top",
+            "x": 0.5,
+            "xanchor": "center",
+        },
+        margin={"l": 60, "r": 20, "t": 110, "b": 50},
         plot_bgcolor="white",
         paper_bgcolor="white",
         legend={
             "orientation": "h",
             "x": 0.5,
             "xanchor": "center",
-            "y": 1.02,
+            "y": 1.01,
             "yanchor": "bottom",
             "bgcolor": "rgba(255,255,255,0.8)",
         },
@@ -881,12 +889,12 @@ def build_error_figure(case: CaseResult):
         horizontal_spacing=0.12,
         vertical_spacing=0.14,
         subplot_titles=[
-            "Relative error in u_r [%]",
-            "Relative error in e_rr [%]",
-            "Relative error in e_tt [%]",
-            "Relative error in s_rr [%]",
-            "Relative error in s_tt [%]",
-            "Max relative error by section [%]",
+            "Normalized error in u_r [%]",
+            "Normalized error in e_rr [%]",
+            "Normalized error in e_tt [%]",
+            "Normalized error in s_rr [%]",
+            "Normalized error in s_tt [%]",
+            "Peak-magnitude error by section [%]",
         ],
     )
 
@@ -904,7 +912,7 @@ def build_error_figure(case: CaseResult):
             fig.add_trace(
                 go.Scatter(
                     x=section.radius,
-                    y=relative_error_percent(getattr(section, fe_name), getattr(section, ref_name)),
+                    y=normalized_error_percent(getattr(section, fe_name), getattr(section, ref_name)),
                     mode="lines+markers",
                     line={"color": section.color, "width": style["width"], "dash": style["dash"]},
                     marker={"size": 5.5, "symbol": style["marker_symbol"]},
@@ -919,17 +927,17 @@ def build_error_figure(case: CaseResult):
 
     quantity_labels = ["u_r", "e_rr", "e_tt", "s_rr", "s_tt"]
     for section in case.sections:
-        max_rel = [
-            max_relative_error_percent(section.u_r_fe, section.u_r_1d),
-            max_relative_error_percent(section.e_rr_fe, section.e_rr_1d),
-            max_relative_error_percent(section.e_tt_fe, section.e_tt_1d),
-            max_relative_error_percent(section.s_rr_fe, section.s_rr_1d),
-            max_relative_error_percent(section.s_tt_fe, section.s_tt_1d),
+        peak_error = [
+            peak_magnitude_error_percent(section.u_r_fe, section.u_r_1d),
+            peak_magnitude_error_percent(section.e_rr_fe, section.e_rr_1d),
+            peak_magnitude_error_percent(section.e_tt_fe, section.e_tt_1d),
+            peak_magnitude_error_percent(section.s_rr_fe, section.s_rr_1d),
+            peak_magnitude_error_percent(section.s_tt_fe, section.s_tt_1d),
         ]
         fig.add_trace(
             go.Bar(
                 x=quantity_labels,
-                y=max_rel,
+                y=peak_error,
                 marker={"color": section.color},
                 name=section.label,
                 legendgroup=section.label,
@@ -940,18 +948,32 @@ def build_error_figure(case: CaseResult):
         )
 
     fig.update_xaxes(title_text="Quantity", row=3, col=2)
-    fig.update_yaxes(title_text="Max relative error [%]", row=3, col=2)
+    fig.update_yaxes(title_text="Peak-magnitude error [%]", row=3, col=2)
     fig.update_layout(
         height=1060,
-        title="Radial section errors against the 1D finite-difference reference",
-        margin={"l": 55, "r": 20, "t": 110, "b": 50},
+        title={
+            "text": (
+                "Radial section errors against the 1D finite-difference reference<br>"
+                "curves: normalized error = 100 * (x_FEM - x_FD) / x_max,<br>"
+                "x_max = max(max|x_FEM|, max|x_FD|) over each section<br>"
+                "bars: peak-magnitude error = 100 * (x_peak,FEM - x_peak,FD) / "
+                "max(x_peak,FEM, x_peak,FD),<br>"
+                "x_peak = max|x| over each section"
+            ),
+            "pad": {"b": 28},
+            "y": 0.985,
+            "yanchor": "top",
+            "x": 0.5,
+            "xanchor": "center",
+        },
+        margin={"l": 55, "r": 20, "t": 230, "b": 50},
         plot_bgcolor="white",
         paper_bgcolor="white",
         legend={
             "orientation": "h",
             "x": 0.5,
             "xanchor": "center",
-            "y": 1.08,
+            "y": 1.02,
             "yanchor": "bottom",
             "bgcolor": "rgba(255,255,255,0.8)",
         },

@@ -884,8 +884,14 @@ def build_error_figure(case: CaseResult):
     from plotly.subplots import make_subplots
 
     fig = make_subplots(
-        rows=3,
+        rows=4,
         cols=2,
+        specs=[
+            [{}, {}],
+            [{}, {}],
+            [{}, {}],
+            [{"colspan": 2}, None],
+        ],
         horizontal_spacing=0.12,
         vertical_spacing=0.14,
         subplot_titles=[
@@ -893,6 +899,7 @@ def build_error_figure(case: CaseResult):
             "Normalized error in e_rr [%]",
             "Normalized error in e_tt [%]",
             "Normalized error in s_rr [%]",
+            "Normalized error in VM stress [%]",
             "Normalized error in s_tt [%]",
             "Peak-magnitude error by section [%]",
         ],
@@ -903,7 +910,8 @@ def build_error_figure(case: CaseResult):
         ("e_rr_fe", "e_rr_1d", 1, 2),
         ("e_tt_fe", "e_tt_1d", 2, 1),
         ("s_rr_fe", "s_rr_1d", 2, 2),
-        ("s_tt_fe", "s_tt_1d", 3, 1),
+        ("s_vm_fe", "s_vm_1d", 3, 1),
+        ("s_tt_fe", "s_tt_1d", 3, 2),
     ]
 
     for i_subplot, (fe_name, ref_name, row, col) in enumerate(error_specs):
@@ -925,13 +933,14 @@ def build_error_figure(case: CaseResult):
             )
         fig.update_xaxes(title_text="r [m]", row=row, col=col)
 
-    quantity_labels = ["u_r", "e_rr", "e_tt", "s_rr", "s_tt"]
+    quantity_labels = ["u_r", "e_rr", "e_tt", "s_rr", "s_vm", "s_tt"]
     for section in case.sections:
         peak_error = [
             peak_magnitude_error_percent(section.u_r_fe, section.u_r_1d),
             peak_magnitude_error_percent(section.e_rr_fe, section.e_rr_1d),
             peak_magnitude_error_percent(section.e_tt_fe, section.e_tt_1d),
             peak_magnitude_error_percent(section.s_rr_fe, section.s_rr_1d),
+            peak_magnitude_error_percent(section.s_vm_fe, section.s_vm_1d),
             peak_magnitude_error_percent(section.s_tt_fe, section.s_tt_1d),
         ]
         fig.add_trace(
@@ -943,14 +952,14 @@ def build_error_figure(case: CaseResult):
                 legendgroup=section.label,
                 showlegend=False,
             ),
-            row=3,
-            col=2,
+            row=4,
+            col=1,
         )
 
-    fig.update_xaxes(title_text="Quantity", row=3, col=2)
-    fig.update_yaxes(title_text="Peak-magnitude error [%]", row=3, col=2)
+    fig.update_xaxes(title_text="Quantity", row=4, col=1)
+    fig.update_yaxes(title_text="Peak-magnitude error [%]", row=4, col=1)
     fig.update_layout(
-        height=1060,
+        height=1320,
         title={
             "text": (
                 "Radial section errors against the 1D finite-difference reference<br>"

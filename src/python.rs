@@ -1,5 +1,6 @@
+use numpy::Element as NumpyElement;
 use numpy::PyArray1;
-use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadwriteArray1};
+use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadwriteArray1};
 use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
@@ -97,6 +98,344 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
         }
         .into()),
     }
+}
+
+fn read_axisym_nodes<F: physics::solenoid_stress::Real + NumpyElement>(
+    name: &str,
+    nodes: PyReadonlyArray2<'_, F>,
+) -> PyResult<Vec<[F; 2]>> {
+    let view = nodes.as_array();
+    let shape = view.shape();
+    if shape.len() != 2 || shape[1] != 2 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (nnode, 2)"),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(shape[0]);
+    for row in view.rows() {
+        out.push([row[0], row[1]]);
+    }
+    Ok(out)
+}
+
+fn read_axisym_elements(
+    name: &str,
+    elements: PyReadonlyArray2<'_, u64>,
+) -> PyResult<Vec<[usize; 4]>> {
+    let view = elements.as_array();
+    let shape = view.shape();
+    if shape.len() != 2 || shape[1] != 4 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (nelem, 4)"),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(shape[0]);
+    for row in view.rows() {
+        out.push([
+            usize::try_from(row[0]).map_err(|_| PyInteropError::ValueError {
+                msg: format!("{name} contains an index that overflows usize"),
+            })?,
+            usize::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
+                msg: format!("{name} contains an index that overflows usize"),
+            })?,
+            usize::try_from(row[2]).map_err(|_| PyInteropError::ValueError {
+                msg: format!("{name} contains an index that overflows usize"),
+            })?,
+            usize::try_from(row[3]).map_err(|_| PyInteropError::ValueError {
+                msg: format!("{name} contains an index that overflows usize"),
+            })?,
+        ]);
+    }
+    Ok(out)
+}
+
+fn read_axisym_material_ids(
+    name: &str,
+    material_ids: PyReadonlyArray1<'_, u64>,
+) -> PyResult<Vec<usize>> {
+    let view = material_ids.as_array();
+    let shape = view.shape();
+    if shape.len() != 1 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (nelem,)"),
+        }
+        .into());
+    }
+    view.iter()
+        .map(|&value| {
+            usize::try_from(value).map_err(|_| PyInteropError::ValueError {
+                msg: format!("{name} contains a value that overflows usize"),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+fn read_axisym_material_table<F: physics::solenoid_stress::Real + NumpyElement>(
+    name: &str,
+    material_table: PyReadonlyArray3<'_, F>,
+) -> PyResult<Vec<[[F; 4]; 4]>> {
+    let view = material_table.as_array();
+    let shape = view.shape();
+    if shape.len() != 3 || shape[1] != 4 || shape[2] != 4 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (nmat, 4, 4)"),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(shape[0]);
+    for matrix in view.outer_iter() {
+        let mut entry = [[F::zero(); 4]; 4];
+        for row in 0..4 {
+            for col in 0..4 {
+                entry[row][col] = matrix[[row, col]];
+            }
+        }
+        out.push(entry);
+    }
+    Ok(out)
+}
+
+fn read_axisym_body_force<F: physics::solenoid_stress::Real + NumpyElement>(
+    name: &str,
+    body_force: PyReadonlyArray2<'_, F>,
+) -> PyResult<Vec<[F; 2]>> {
+    let view = body_force.as_array();
+    let shape = view.shape();
+    if shape.len() != 2 || shape[1] != 2 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (nelem, 2)"),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(shape[0]);
+    for row in view.rows() {
+        out.push([row[0], row[1]]);
+    }
+    Ok(out)
+}
+
+fn read_axisym_pressure_loads<F: physics::solenoid_stress::Real + NumpyElement>(
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    pressure_values: PyReadonlyArray1<'_, F>,
+) -> PyResult<Vec<physics::solenoid_stress::PressureLoad<F>>> {
+    let faces_view = pressure_faces.as_array();
+    let values_view = pressure_values.as_array();
+    let faces_shape = faces_view.shape();
+    let values_shape = values_view.shape();
+    if faces_shape.len() != 2 || faces_shape[1] != 2 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "pressure_faces must have shape (nload, 2)".to_string(),
+        }
+        .into());
+    }
+    if values_shape.len() != 1 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "pressure_values must have shape (nload,)".to_string(),
+        }
+        .into());
+    }
+    if faces_shape[0] != values_view.len() {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!(
+                "pressure_faces has {} rows, but pressure_values has length {}",
+                faces_shape[0],
+                values_view.len()
+            ),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(values_view.len());
+    for (index, row) in faces_view.rows().into_iter().enumerate() {
+        out.push(physics::solenoid_stress::PressureLoad {
+            element: usize::try_from(row[0]).map_err(|_| PyInteropError::ValueError {
+                msg: "pressure_faces element index overflowed usize".to_string(),
+            })?,
+            local_face: u8::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
+                msg: "pressure_faces local face overflowed u8".to_string(),
+            })?,
+            value: values_view[index],
+        });
+    }
+    Ok(out)
+}
+
+fn parse_solenoid_fem_quadrature(
+    quadrature: u8,
+) -> PyResult<physics::solenoid_stress::QuadratureRule> {
+    physics::solenoid_stress::QuadratureRule::from_code(quadrature)
+        .map_err(|msg| PyInteropError::ValueError { msg }.into())
+}
+
+fn assemble_axisymmetric_quad4_low_level<F: physics::solenoid_stress::Real + NumpyElement>(
+    nodes: PyReadonlyArray2<'_, F>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, F>,
+    body_force: PyReadonlyArray2<'_, F>,
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    pressure_values: PyReadonlyArray1<'_, F>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, Vec<F>, usize)> {
+    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let elements = read_axisym_elements("elements", elements)?;
+    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
+    let material_table = read_axisym_material_table("material_table", material_table)?;
+    let body_force = read_axisym_body_force("body_force", body_force)?;
+    let pressure_loads = read_axisym_pressure_loads(pressure_faces, pressure_values)?;
+    let mesh = physics::solenoid_stress::MeshView {
+        nodes_rz: &nodes,
+        elements: &elements,
+    };
+    let result = physics::solenoid_stress::assemble_axisymmetric_quad4(
+        mesh,
+        &material_ids,
+        &material_table,
+        &body_force,
+        &pressure_loads,
+        quadrature,
+    )
+    .map_err(|msg| PyInteropError::ValueError { msg })?;
+    Ok((
+        result.rows,
+        result.cols,
+        result.vals,
+        result.rhs,
+        result.ndof,
+    ))
+}
+
+fn element_measures_axisymmetric_quad4_low_level<
+    F: physics::solenoid_stress::Real + NumpyElement,
+>(
+    nodes: PyReadonlyArray2<'_, F>,
+    elements: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<F>, Vec<F>)> {
+    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let elements = read_axisym_elements("elements", elements)?;
+    let mesh = physics::solenoid_stress::MeshView {
+        nodes_rz: &nodes,
+        elements: &elements,
+    };
+    let measures = physics::solenoid_stress::element_measures(mesh, quadrature)
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    Ok((measures.areas, measures.swept_volumes))
+}
+
+fn element_quadrature_axisymmetric_quad4_low_level<
+    F: physics::solenoid_stress::Real + NumpyElement,
+>(
+    nodes: PyReadonlyArray2<'_, F>,
+    elements: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<F>, Vec<F>, Vec<F>, usize)> {
+    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let elements = read_axisym_elements("elements", elements)?;
+    let mesh = physics::solenoid_stress::MeshView {
+        nodes_rz: &nodes,
+        elements: &elements,
+    };
+    let quadrature_data = physics::solenoid_stress::element_quadrature(mesh, quadrature)
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let mut points_flat = Vec::with_capacity(quadrature_data.points_rz.len() * 2);
+    for point in quadrature_data.points_rz {
+        points_flat.push(point[0]);
+        points_flat.push(point[1]);
+    }
+    Ok((
+        points_flat,
+        quadrature_data.weights_area,
+        quadrature_data.weights_volume,
+        quadrature_data.nq_per_element,
+    ))
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f64>,
+    body_force: PyReadonlyArray2<'_, f64>,
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    pressure_values: PyReadonlyArray1<'_, f64>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize)> {
+    assemble_axisymmetric_quad4_low_level(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        body_force,
+        pressure_faces,
+        pressure_values,
+        quadrature,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f32>,
+    body_force: PyReadonlyArray2<'_, f32>,
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    pressure_values: PyReadonlyArray1<'_, f32>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize)> {
+    assemble_axisymmetric_quad4_low_level(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        body_force,
+        pressure_faces,
+        pressure_values,
+        quadrature,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_element_measures_axisymmetric_quad4_f64(
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<f64>, Vec<f64>)> {
+    element_measures_axisymmetric_quad4_low_level(nodes, elements, quadrature)
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_element_measures_axisymmetric_quad4_f32(
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<f32>, Vec<f32>)> {
+    element_measures_axisymmetric_quad4_low_level(nodes, elements, quadrature)
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64(
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, usize)> {
+    element_quadrature_axisymmetric_quad4_low_level(nodes, elements, quadrature)
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32(
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>, usize)> {
+    element_quadrature_axisymmetric_quad4_low_level(nodes, elements, quadrature)
 }
 
 #[pyfunction]
@@ -1933,6 +2272,32 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     // Point sources
     m.add_function(wrap_pyfunction!(flux_density_dipole, m.clone())?)?;
     m.add_function(wrap_pyfunction!(vector_potential_dipole, m.clone())?)?;
+
+    // Solenoid stress FEM
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_assemble_axisymmetric_quad4_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_assemble_axisymmetric_quad4_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_element_measures_axisymmetric_quad4_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_element_measures_axisymmetric_quad4_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32,
+        m.clone()
+    )?)?;
 
     Ok(())
 }

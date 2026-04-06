@@ -18,7 +18,8 @@ dependencies = [
     "interpn[pydantic]>=0.8.2,<0.12",
     "findiff >= 0.12.1",
     "pydantic >= 2",
-    "pydantic-numpy >= 6"
+    "pydantic-numpy >= 6",
+    "scipy >= 1.8",
 ]
 license = "MIT"
 

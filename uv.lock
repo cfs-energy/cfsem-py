@@ -65,6 +65,8 @@ dependencies = [
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pydantic" },
     { name = "pydantic-numpy" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.dev-dependencies]
@@ -91,6 +93,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-numpy", specifier = ">=6" },
+    { name = "scipy", specifier = ">=1.8" },
 ]
 
 [package.metadata.requires-dev]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 
 from cfsem.solenoid_stress import axisymmetric_fem as fem
 from cfsem.solenoid_stress.axisymmetric_fem import (
@@ -12,7 +13,6 @@ from cfsem.solenoid_stress.axisymmetric_fem import (
     evaluate_axisymmetric_strain_stress_at_quadrature,
     isotropic_axisymmetric_material,
     assemble_axisymmetric,
-    solve_dirichlet,
 )
 from cfsem.solenoid_stress.solenoid_1d import (
     SolenoidStress1D,
@@ -80,6 +80,17 @@ def tolerance(dtype: DType) -> tuple[float, float]:
     if dtype is np.float32:
         return 5.0e-5, 5.0e-6
     return 1.0e-12, 1.0e-12
+
+
+def solve_with_factorized_dirichlet(
+    matrix: sp.spmatrix,
+    rhs: np.ndarray,
+    prescribed: dict[int, float] | None = None,
+) -> np.ndarray:
+    reduced = fem.apply_dirichlet(matrix, rhs, prescribed=prescribed)
+    if reduced.matrix.shape[0] == 0:
+        return reduced.recover(np.zeros((0,), dtype=reduced.rhs.dtype))
+    return reduced.recover(spla.factorized(reduced.matrix.tocsc())(reduced.rhs))
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
@@ -173,7 +184,7 @@ def test_pressure_vessel_stresses_match_lame_reference(dtype: DType, quadrature:
         pressure_values=pressure_values,
         quadrature=quadrature,
     )
-    displacement = solve_dirichlet(
+    displacement = solve_with_factorized_dirichlet(
         assembly.to_csr(),
         assembly.rhs,
         prescribed=prescribed_z_dofs(nodes.shape[0]),
@@ -230,7 +241,7 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
         ),
         quadrature=quadrature,
     )
-    displacement = solve_dirichlet(
+    displacement = solve_with_factorized_dirichlet(
         assembly.to_csr(),
         assembly.rhs,
         prescribed=prescribed_z_dofs(nodes.shape[0]),
@@ -360,12 +371,16 @@ def test_dirichlet_and_solver_validation_branches() -> None:
     with pytest.raises(ValueError, match="out of bounds"):
         fem.apply_dirichlet(matrix, rhs, prescribed={2: 0.0})
 
+    solution = fem.solve_dirichlet(matrix, rhs)
+    assert np.allclose(matrix @ solution, rhs)
+
     called = {"count": 0}
 
     def solver(mat: sp.csr_matrix, vec: np.ndarray) -> np.ndarray:
         called["count"] += 1
         assert mat.shape == (2, 2)
-        return np.linalg.solve(mat.toarray(), vec)
+        assert sp.isspmatrix_csr(mat)
+        return spla.factorized(mat.tocsc())(vec)
 
     solution = fem.solve_dirichlet(matrix, rhs, solver=solver)
     assert called["count"] == 1

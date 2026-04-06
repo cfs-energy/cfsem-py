@@ -427,13 +427,13 @@ def solve_dirichlet(
     prescribed: Mapping[int, float] | None = None,
     solver: Any | None = None,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Solve the linear system after applying prescribed Dirichlet values."""
+    """Solve the reduced sparse system after applying prescribed Dirichlet values."""
 
     reduced = apply_dirichlet(matrix, rhs, prescribed)
     if reduced.matrix.shape[0] == 0:
         return reduced.recover(np.zeros((0,), dtype=reduced.rhs.dtype))
     if solver is None:
-        free_solution = spla.spsolve(reduced.matrix, reduced.rhs)
+        free_solution = spla.factorized(reduced.matrix.tocsc())(reduced.rhs)
     else:
         free_solution = solver(reduced.matrix, reduced.rhs)
     return reduced.recover(free_solution)

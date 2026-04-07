@@ -29,9 +29,8 @@ from cfsem.flux_solver import calc_flux_density_from_flux, solve_flux_axisymmetr
 TESTING = bool(os.getenv("CFSEM_TESTING"))
 
 SOLENOID_INNER_RADIUS = 0.5  # [m]
-YOUNGS_MODULUS = 200.0e9  # [Pa]
-POISSON_RATIO = 0.27  # [-]
-QUADRATURE = "2x2"
+DEFAULT_QUADRATURE = "2x2"
+DEFAULT_MATERIAL_MODEL = "isotropic"
 
 DEFAULT_WIDTH = 0.18  # [m]
 DEFAULT_HEIGHT = 0.24  # [m]
@@ -39,6 +38,15 @@ DEFAULT_CURRENT_DENSITY_MA = 75.0  # [MA/m^2]
 DEFAULT_SOURCE_RADIUS = 0.32  # [m]
 DEFAULT_SOURCE_Z = 0.0  # [m]
 DEFAULT_SOURCE_CURRENT_MA = 1.2  # [MA-turn]
+DEFAULT_ISO_YOUNGS_MODULUS_GPA = 200.0  # [GPa]
+DEFAULT_ISO_POISSON_RATIO = 0.27  # [-]
+DEFAULT_ORTHO_YOUNGS_R_GPA = 200.0  # [GPa]
+DEFAULT_ORTHO_YOUNGS_Z_GPA = 200.0  # [GPa]
+DEFAULT_ORTHO_YOUNGS_THETA_GPA = 200.0  # [GPa]
+DEFAULT_ORTHO_NU_RZ = 0.27  # [-]
+DEFAULT_ORTHO_NU_RTHETA = 0.27  # [-]
+DEFAULT_ORTHO_NU_ZTHETA = 0.27  # [-]
+DEFAULT_ORTHO_SHEAR_RZ_GPA = DEFAULT_ISO_YOUNGS_MODULUS_GPA / (2.0 * (1.0 + DEFAULT_ISO_POISSON_RATIO))
 
 WIDTH_RANGE = (0.05, 0.35)
 HEIGHT_RANGE = (0.05, 0.50)
@@ -46,6 +54,9 @@ CURRENT_DENSITY_RANGE_MA = (0.0, 200.0)
 SOURCE_RADIUS_RANGE = (0.05, 1.20)
 SOURCE_Z_RANGE = (-0.60, 0.60)
 SOURCE_CURRENT_RANGE_MA = (-5.0, 5.0)
+YOUNGS_MODULUS_RANGE_GPA = (20.0, 400.0)
+POISSON_RATIO_RANGE = (0.0, 0.45)
+SHEAR_MODULUS_RANGE_GPA = (5.0, 200.0)
 
 SECTION_TARGET_FRACTIONS = (0.2, 0.5, 0.8)
 SECTION_LABELS = ("Lower", "Middle", "Upper")
@@ -56,6 +67,7 @@ SECTION_DASHES = ("solid", "dashdot", "dot")
 
 MESH_LONG_SIDE_ELEMENTS = 14 if TESTING else 28
 MESH_MIN_SHORT_SIDE_ELEMENTS = 6
+FEM_RESOLUTION_RANGE = (8, 56)
 FIELD_GRID_LONG_SIDE_POINTS = 141 if TESTING else 281
 FIELD_GRID_MIN_SHORT_SIDE_POINTS = 41 if TESTING else 81
 FD_REFERENCE_SPACING = 1.0e-3  # [m]
@@ -95,6 +107,11 @@ class SectionComparison:
 class CaseResult:
     width: float
     height: float
+    quadrature: str
+    fem_resolution: int
+    material_model: str
+    fem_material_label: str
+    reference_material_label: str
     current_density: float
     source_radius: float
     source_z: float
@@ -166,6 +183,46 @@ def normalize_float(value: float, bounds: tuple[float, float]) -> float:
     return float(np.clip(float(value), lower, upper))
 
 
+def orthotropic_axisymmetric_material(
+    youngs_r: float,
+    youngs_z: float,
+    youngs_theta: float,
+    nu_rz: float,
+    nu_rtheta: float,
+    nu_ztheta: float,
+    shear_rz: float,
+) -> np.ndarray:
+    compliance = np.array(
+        [
+            [1.0 / youngs_r, -nu_rz / youngs_r, -nu_rtheta / youngs_r, 0.0],
+            [-nu_rz / youngs_r, 1.0 / youngs_z, -nu_ztheta / youngs_z, 0.0],
+            [-nu_rtheta / youngs_r, -nu_ztheta / youngs_z, 1.0 / youngs_theta, 0.0],
+            [0.0, 0.0, 0.0, 1.0 / shear_rz],
+        ],
+        dtype=np.float64,
+    )
+    eigvals = np.linalg.eigvalsh(compliance)
+    if np.any(eigvals <= 0.0):
+        raise ValueError(
+            "Orthotropic material compliance is not positive definite; "
+            "reduce Poisson couplings or increase stiffness values."
+        )
+    return np.linalg.inv(compliance)
+
+
+def isotropic_approximation_from_orthotropic(
+    youngs_r: float,
+    youngs_z: float,
+    youngs_theta: float,
+    nu_rz: float,
+    nu_rtheta: float,
+    nu_ztheta: float,
+) -> tuple[float, float]:
+    youngs_avg = float(np.mean([youngs_r, youngs_z, youngs_theta]))
+    nu_avg = float(np.clip(np.mean([nu_rz, nu_rtheta, nu_ztheta]), *POISSON_RATIO_RANGE))
+    return youngs_avg, nu_avg
+
+
 def build_annulus_strip_mesh(
     ri: float,
     ro: float,
@@ -216,13 +273,14 @@ def section_style(label: str) -> dict[str, object]:
     }
 
 
-def choose_mesh_counts(width: float, height: float) -> tuple[int, int]:
+def choose_mesh_counts(width: float, height: float, long_side_elements: int) -> tuple[int, int]:
     width = max(width, 1.0e-12)
     height = max(height, 1.0e-12)
+    long_side_elements = max(int(long_side_elements), 1)
     long_side = max(width, height)
     short_side = min(width, height)
     target_size = min(
-        long_side / MESH_LONG_SIDE_ELEMENTS,
+        long_side / long_side_elements,
         short_side / MESH_MIN_SHORT_SIDE_ELEMENTS,
     )
     nr = max(1, int(np.ceil(width / target_size)))
@@ -545,6 +603,8 @@ def solve_reference_profile_1d(
     sample_r: np.ndarray,
     sample_bz: np.ndarray,
     current_density: float,
+    elasticity_modulus: float,
+    poisson_ratio: float,
     *,
     pi: float = 0.0,
     po: float = 0.0,
@@ -557,12 +617,12 @@ def solve_reference_profile_1d(
     jgrid = np.concatenate([[fine_j[0]], fine_j, [fine_j[-1]]])
     bz_grid = np.concatenate([[fine_bz[0]], fine_bz, [fine_bz[-1]]])
 
-    c_struct = solenoid_1d_structural_factor(YOUNGS_MODULUS, POISSON_RATIO)
+    c_struct = solenoid_1d_structural_factor(elasticity_modulus, poisson_ratio)
     rhs = solenoid_1d_structural_rhs(c_struct, jgrid, bz_grid, pi=pi, po=po)
     reference = SolenoidStress1D(
         rgrid=rgrid,
-        elasticity_modulus=YOUNGS_MODULUS,
-        poisson_ratio=POISSON_RATIO,
+        elasticity_modulus=elasticity_modulus,
+        poisson_ratio=poisson_ratio,
         direct_inverse=False,
     )
     u_r_full = np.asarray(reference.displacement_solver(rhs), dtype=np.float64).reshape(-1)
@@ -617,6 +677,8 @@ def build_section_comparisons(
     source_current: float,
     current_density: float,
     body_force_r: np.ndarray,
+    reference_elasticity_modulus: float,
+    reference_poisson_ratio: float,
 ) -> tuple[SectionComparison, ...]:
     section_list: list[SectionComparison] = []
     row_centers = 0.5 * (zs[:-1] + zs[1:])
@@ -654,7 +716,13 @@ def build_section_comparisons(
         b_z_fe = body_force_r[row] / current_density if current_density > 0.0 else np.zeros_like(radius)
         _br_self, bz_self = sample_smooth_self_field(self_field, radius, np.full_like(radius, z_value))
         b_z_section = sample_loop_bz(radius, z_value, source_radius, source_z, source_current) + bz_self
-        reference = solve_reference_profile_1d(radius, b_z_section, current_density)
+        reference = solve_reference_profile_1d(
+            radius,
+            b_z_section,
+            current_density,
+            reference_elasticity_modulus,
+            reference_poisson_ratio,
+        )
 
         section_list.append(
             SectionComparison(
@@ -698,6 +766,8 @@ def build_vm_stress_grids(
     source_z: float,
     source_current: float,
     current_density: float,
+    reference_elasticity_modulus: float,
+    reference_poisson_ratio: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     vm_fem = np.zeros((nz, nr), dtype=np.float64)
     row_centers = 0.5 * (zs[:-1] + zs[1:])
@@ -724,7 +794,13 @@ def build_vm_stress_grids(
             np.full_like(elem_r_centers, z_value),
         )
         b_z_row = sample_loop_bz(elem_r_centers, z_value, source_radius, source_z, source_current) + bz_self
-        reference = solve_reference_profile_1d(elem_r_centers, b_z_row, current_density)
+        reference = solve_reference_profile_1d(
+            elem_r_centers,
+            b_z_row,
+            current_density,
+            reference_elasticity_modulus,
+            reference_poisson_ratio,
+        )
         vm_1d[row, :] = reference.s_vm
 
     return vm_fem, vm_1d
@@ -734,6 +810,18 @@ def build_vm_stress_grids(
 def solve_case(
     width: float,
     height: float,
+    quadrature: str,
+    fem_resolution: int,
+    material_model: str,
+    iso_youngs_modulus_gpa: float,
+    iso_poisson_ratio: float,
+    ortho_youngs_r_gpa: float,
+    ortho_youngs_z_gpa: float,
+    ortho_youngs_theta_gpa: float,
+    ortho_nu_rz: float,
+    ortho_nu_rtheta: float,
+    ortho_nu_ztheta: float,
+    ortho_shear_rz_gpa: float,
     current_density_ma: float,
     source_radius: float,
     source_z: float,
@@ -742,11 +830,26 @@ def solve_case(
 ) -> CaseResult:
     width = normalize_float(width, WIDTH_RANGE)
     height = normalize_float(height, HEIGHT_RANGE)
+    if quadrature not in {"2x2", "3x3"}:
+        raise ValueError(f"Unsupported quadrature {quadrature!r}.")
+    fem_resolution = int(np.clip(int(round(fem_resolution)), *FEM_RESOLUTION_RANGE))
+    if material_model not in {"isotropic", "orthotropic"}:
+        raise ValueError(f"Unsupported material model {material_model!r}.")
     current_density = 1.0e6 * normalize_float(current_density_ma, CURRENT_DENSITY_RANGE_MA)
     source_radius = normalize_float(source_radius, SOURCE_RADIUS_RANGE)
     source_z = normalize_float(source_z, SOURCE_Z_RANGE)
     source_current = 1.0e6 * normalize_float(source_current_ma, SOURCE_CURRENT_RANGE_MA)
     balance_axial_load = bool(balance_axial_load)
+
+    iso_youngs_modulus = 1.0e9 * normalize_float(iso_youngs_modulus_gpa, YOUNGS_MODULUS_RANGE_GPA)
+    iso_poisson_ratio = normalize_float(iso_poisson_ratio, POISSON_RATIO_RANGE)
+    ortho_youngs_r = 1.0e9 * normalize_float(ortho_youngs_r_gpa, YOUNGS_MODULUS_RANGE_GPA)
+    ortho_youngs_z = 1.0e9 * normalize_float(ortho_youngs_z_gpa, YOUNGS_MODULUS_RANGE_GPA)
+    ortho_youngs_theta = 1.0e9 * normalize_float(ortho_youngs_theta_gpa, YOUNGS_MODULUS_RANGE_GPA)
+    ortho_nu_rz = normalize_float(ortho_nu_rz, POISSON_RATIO_RANGE)
+    ortho_nu_rtheta = normalize_float(ortho_nu_rtheta, POISSON_RATIO_RANGE)
+    ortho_nu_ztheta = normalize_float(ortho_nu_ztheta, POISSON_RATIO_RANGE)
+    ortho_shear_rz = 1.0e9 * normalize_float(ortho_shear_rz_gpa, SHEAR_MODULUS_RANGE_GPA)
 
     ri = SOLENOID_INNER_RADIUS
     ro = ri + width
@@ -755,16 +858,54 @@ def solve_case(
     if source_intersects_solenoid(ri, ro, z_min, z_max, source_radius, source_z):
         raise ValueError("Move the source loop outside the solenoid conductor cross-section.")
 
-    nr, nz = choose_mesh_counts(width, height)
+    nr, nz = choose_mesh_counts(width, height, fem_resolution)
     nodes, elements, radii, zs = build_annulus_strip_mesh(ri, ro, height, nr, nz)
     elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
     elem_z_centers = 0.5 * (zs[:-1] + zs[1:])
     self_field = build_smooth_self_field(elem_r_centers, elem_z_centers, current_density)
-    material = cfsem_radial_material(YOUNGS_MODULUS, POISSON_RATIO)
+    if material_model == "isotropic":
+        material = cfsem_radial_material(iso_youngs_modulus, iso_poisson_ratio)
+        reference_elasticity_modulus = iso_youngs_modulus
+        reference_poisson_ratio = iso_poisson_ratio
+        fem_material_label = f"iso FEM: E={iso_youngs_modulus / 1.0e9:.1f} GPa, nu={iso_poisson_ratio:.3f}"
+        reference_material_label = "1D ref: same isotropic E, nu as FEM"
+    else:
+        material = orthotropic_axisymmetric_material(
+            ortho_youngs_r,
+            ortho_youngs_z,
+            ortho_youngs_theta,
+            ortho_nu_rz,
+            ortho_nu_rtheta,
+            ortho_nu_ztheta,
+            ortho_shear_rz,
+        )
+        reference_elasticity_modulus, reference_poisson_ratio = isotropic_approximation_from_orthotropic(
+            ortho_youngs_r,
+            ortho_youngs_z,
+            ortho_youngs_theta,
+            ortho_nu_rz,
+            ortho_nu_rtheta,
+            ortho_nu_ztheta,
+        )
+        fem_material_label = (
+            "ortho FEM: "
+            f"E_r={ortho_youngs_r / 1.0e9:.1f}, "
+            f"E_z={ortho_youngs_z / 1.0e9:.1f}, "
+            f"E_t={ortho_youngs_theta / 1.0e9:.1f} GPa; "
+            f"nu_rz={ortho_nu_rz:.3f}, "
+            f"nu_rt={ortho_nu_rtheta:.3f}, "
+            f"nu_zt={ortho_nu_ztheta:.3f}; "
+            f"G_rz={ortho_shear_rz / 1.0e9:.1f} GPa"
+        )
+        reference_material_label = (
+            "1D ref: isotropic avg "
+            f"E={reference_elasticity_modulus / 1.0e9:.1f} GPa, "
+            f"nu={reference_poisson_ratio:.3f}; cannot match orthotropy exactly"
+        )
     material_table = np.asarray([material], dtype=np.float64)
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
 
-    quadrature_data = element_quadrature_axisymmetric(nodes, elements, quadrature=QUADRATURE)
+    quadrature_data = element_quadrature_axisymmetric(nodes, elements, quadrature=quadrature)
     quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
     br_loop_q, bz_loop_q = sample_loop_field(
         quadrature_points[:, 0],
@@ -788,7 +929,7 @@ def solve_case(
     bz_mean = np.sum(bz_weighted, axis=1) / weights_sum
     body_force = np.column_stack((current_density * bz_mean, -current_density * br_mean))
 
-    measures = element_measures_axisymmetric(nodes, elements, quadrature=QUADRATURE)
+    measures = element_measures_axisymmetric(nodes, elements, quadrature=quadrature)
     net_body_force_z = float(np.sum(body_force[:, 1] * measures.swept_volumes))
     top_area = np.pi * (ro**2 - ri**2)
     pressure_top = net_body_force_z / (2.0 * top_area) if balance_axial_load else 0.0
@@ -814,7 +955,7 @@ def solve_case(
         body_force=body_force,
         pressure_faces=pressure_faces,
         pressure_values=pressure_values,
-        quadrature=QUADRATURE,
+        quadrature=quadrature,
     )
     stiffness = assembly.to_csr()
     reduced = apply_dirichlet(stiffness, assembly.rhs, prescribed={1: 0.0})
@@ -838,6 +979,8 @@ def solve_case(
         source_current=source_current,
         current_density=current_density,
         body_force_r=body_force_r,
+        reference_elasticity_modulus=reference_elasticity_modulus,
+        reference_poisson_ratio=reference_poisson_ratio,
     )
     vm_stress_fem, vm_stress_1d = build_vm_stress_grids(
         nodes=nodes,
@@ -853,6 +996,8 @@ def solve_case(
         source_z=source_z,
         source_current=source_current,
         current_density=current_density,
+        reference_elasticity_modulus=reference_elasticity_modulus,
+        reference_poisson_ratio=reference_poisson_ratio,
     )
     field_r, field_z, bmag_field, bz_field = total_field_grid(
         self_field,
@@ -868,6 +1013,11 @@ def solve_case(
     return CaseResult(
         width=width,
         height=height,
+        quadrature=quadrature,
+        fem_resolution=fem_resolution,
+        material_model=material_model,
+        fem_material_label=fem_material_label,
+        reference_material_label=reference_material_label,
         current_density=current_density,
         source_radius=source_radius,
         source_z=source_z,
@@ -1126,7 +1276,8 @@ def build_profile_figure(case: CaseResult):
         title=(
             "Radial section comparison | "
             "FEM uses loop-source + smooth self-field loading; "
-            "1D uses local total B_z(r, z_section)"
+            "1D uses local total B_z(r, z_section) | "
+            f"{case.reference_material_label}"
         ),
         margin={"l": 55, "r": 20, "t": 110, "b": 50},
         plot_bgcolor="white",
@@ -1259,6 +1410,10 @@ def build_summary(case: CaseResult) -> str:
     section_text = ", ".join(f"{section.label}: z={section.z_value:.3f} m" for section in case.sections)
     return (
         f"Mesh {case.nr}x{case.nz} ({case.ndof} dof, K nnz={case.stiffness_nnz}) | "
+        f"quadrature={case.quadrature} | "
+        f"resolution={case.fem_resolution} long-side elems | "
+        f"{case.fem_material_label} | "
+        f"{case.reference_material_label} | "
         f"J_theta={case.current_density:.3e} A/m^2 | "
         f"source I={case.source_current:.3e} A-turn at "
         f"(r={case.source_radius:.3f} m, z={case.source_z:.3f} m) | "
@@ -1274,6 +1429,13 @@ def create_app():
     from dash import Dash, Input, Output, dcc, html
 
     app = Dash(__name__)
+    material_grid_style = {
+        "display": "grid",
+        "gridTemplateColumns": "repeat(2, minmax(320px, 1fr))",
+        "columnGap": "1rem",
+        "rowGap": "1rem",
+        "paddingBottom": "0.5rem",
+    }
     app.layout = html.Div(
         [
             html.H3("CFSEM Axisymmetric FEM Solenoid Stress Explorer"),
@@ -1342,6 +1504,40 @@ def create_app():
                     html.Div(
                         [
                             html.P(
+                                "FEM quadrature",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Dropdown(
+                                id="fem-quadrature",
+                                options=[
+                                    {"label": "2x2 Gauss", "value": "2x2"},
+                                    {"label": "3x3 Gauss", "value": "3x3"},
+                                ],
+                                value=DEFAULT_QUADRATURE,
+                                clearable=False,
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "FEM resolution [long-side elements]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="fem-resolution",
+                                min=FEM_RESOLUTION_RANGE[0],
+                                max=FEM_RESOLUTION_RANGE[1],
+                                step=2,
+                                value=MESH_LONG_SIDE_ELEMENTS,
+                                marks={8: "8", 16: "16", 28: "28", 40: "40", 56: "56"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
                                 "Loop source radius [m]",
                                 style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
                             ),
@@ -1398,6 +1594,189 @@ def create_app():
                     "rowGap": "1rem",
                     "paddingBottom": "0.5rem",
                 },
+            ),
+            html.Div(
+                [
+                    html.P(
+                        "FEM material model",
+                        style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                    ),
+                    dcc.Dropdown(
+                        id="material-model",
+                        options=[
+                            {"label": "Isotropic (1D-compatible)", "value": "isotropic"},
+                            {"label": "Orthotropic FEM", "value": "orthotropic"},
+                        ],
+                        value=DEFAULT_MATERIAL_MODEL,
+                        clearable=False,
+                    ),
+                ],
+                style={"marginTop": "0.5rem", "marginBottom": "0.75rem"},
+            ),
+            html.Div(
+                id="isotropic-material-controls",
+                children=[
+                    html.Div(
+                        [
+                            html.P(
+                                "Isotropic E [GPa]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="iso-youngs-modulus",
+                                min=YOUNGS_MODULUS_RANGE_GPA[0],
+                                max=YOUNGS_MODULUS_RANGE_GPA[1],
+                                step=5.0,
+                                value=DEFAULT_ISO_YOUNGS_MODULUS_GPA,
+                                marks={20: "20", 100: "100", 200: "200", 300: "300", 400: "400"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Isotropic nu [-]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="iso-poisson-ratio",
+                                min=POISSON_RATIO_RANGE[0],
+                                max=POISSON_RATIO_RANGE[1],
+                                step=0.01,
+                                value=DEFAULT_ISO_POISSON_RATIO,
+                                marks={0.0: "0.00", 0.15: "0.15", 0.30: "0.30", 0.45: "0.45"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                ],
+                style=material_grid_style,
+            ),
+            html.Div(
+                id="orthotropic-material-controls",
+                children=[
+                    html.Div(
+                        [
+                            html.P(
+                                "Orthotropic E_r [GPa]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="ortho-youngs-r",
+                                min=YOUNGS_MODULUS_RANGE_GPA[0],
+                                max=YOUNGS_MODULUS_RANGE_GPA[1],
+                                step=5.0,
+                                value=DEFAULT_ORTHO_YOUNGS_R_GPA,
+                                marks={20: "20", 100: "100", 200: "200", 300: "300", 400: "400"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Orthotropic E_z [GPa]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="ortho-youngs-z",
+                                min=YOUNGS_MODULUS_RANGE_GPA[0],
+                                max=YOUNGS_MODULUS_RANGE_GPA[1],
+                                step=5.0,
+                                value=DEFAULT_ORTHO_YOUNGS_Z_GPA,
+                                marks={20: "20", 100: "100", 200: "200", 300: "300", 400: "400"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Orthotropic E_theta [GPa]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="ortho-youngs-theta",
+                                min=YOUNGS_MODULUS_RANGE_GPA[0],
+                                max=YOUNGS_MODULUS_RANGE_GPA[1],
+                                step=5.0,
+                                value=DEFAULT_ORTHO_YOUNGS_THETA_GPA,
+                                marks={20: "20", 100: "100", 200: "200", 300: "300", 400: "400"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Orthotropic G_rz [GPa]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="ortho-shear-rz",
+                                min=SHEAR_MODULUS_RANGE_GPA[0],
+                                max=SHEAR_MODULUS_RANGE_GPA[1],
+                                step=2.5,
+                                value=DEFAULT_ORTHO_SHEAR_RZ_GPA,
+                                marks={5: "5", 50: "50", 100: "100", 150: "150", 200: "200"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Orthotropic nu_rz [-]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="ortho-nu-rz",
+                                min=POISSON_RATIO_RANGE[0],
+                                max=POISSON_RATIO_RANGE[1],
+                                step=0.01,
+                                value=DEFAULT_ORTHO_NU_RZ,
+                                marks={0.0: "0.00", 0.15: "0.15", 0.30: "0.30", 0.45: "0.45"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Orthotropic nu_rtheta [-]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="ortho-nu-rtheta",
+                                min=POISSON_RATIO_RANGE[0],
+                                max=POISSON_RATIO_RANGE[1],
+                                step=0.01,
+                                value=DEFAULT_ORTHO_NU_RTHETA,
+                                marks={0.0: "0.00", 0.15: "0.15", 0.30: "0.30", 0.45: "0.45"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Orthotropic nu_ztheta [-]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="ortho-nu-ztheta",
+                                min=POISSON_RATIO_RANGE[0],
+                                max=POISSON_RATIO_RANGE[1],
+                                step=0.01,
+                                value=DEFAULT_ORTHO_NU_ZTHETA,
+                                marks={0.0: "0.00", 0.15: "0.15", 0.30: "0.30", 0.45: "0.45"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                ],
+                style={**material_grid_style, "display": "none"},
             ),
             html.Div(
                 [
@@ -1500,6 +1879,16 @@ def create_app():
     )
 
     @app.callback(
+        Output("isotropic-material-controls", "style"),
+        Output("orthotropic-material-controls", "style"),
+        Input("material-model", "value"),
+    )
+    def update_material_control_visibility(material_model: str):
+        if material_model == "orthotropic":
+            return {**material_grid_style, "display": "none"}, material_grid_style
+        return material_grid_style, {**material_grid_style, "display": "none"}
+
+    @app.callback(
         Output("case-summary", "children"),
         Output("overview-bmag-figure", "figure"),
         Output("overview-bz-figure", "figure"),
@@ -1511,6 +1900,18 @@ def create_app():
         Output("error-figure", "figure"),
         Input("solenoid-width", "value"),
         Input("solenoid-height", "value"),
+        Input("fem-quadrature", "value"),
+        Input("fem-resolution", "value"),
+        Input("material-model", "value"),
+        Input("iso-youngs-modulus", "value"),
+        Input("iso-poisson-ratio", "value"),
+        Input("ortho-youngs-r", "value"),
+        Input("ortho-youngs-z", "value"),
+        Input("ortho-youngs-theta", "value"),
+        Input("ortho-nu-rz", "value"),
+        Input("ortho-nu-rtheta", "value"),
+        Input("ortho-nu-ztheta", "value"),
+        Input("ortho-shear-rz", "value"),
         Input("current-density", "value"),
         Input("source-radius", "value"),
         Input("source-z", "value"),
@@ -1520,6 +1921,18 @@ def create_app():
     def update_figures(
         width: float,
         height: float,
+        quadrature: str,
+        fem_resolution: int,
+        material_model: str,
+        iso_youngs_modulus: float,
+        iso_poisson_ratio: float,
+        ortho_youngs_r: float,
+        ortho_youngs_z: float,
+        ortho_youngs_theta: float,
+        ortho_nu_rz: float,
+        ortho_nu_rtheta: float,
+        ortho_nu_ztheta: float,
+        ortho_shear_rz: float,
         current_density: float,
         source_radius: float,
         source_z: float,
@@ -1530,6 +1943,18 @@ def create_app():
             case = solve_case(
                 width,
                 height,
+                quadrature,
+                fem_resolution,
+                material_model,
+                iso_youngs_modulus,
+                iso_poisson_ratio,
+                ortho_youngs_r,
+                ortho_youngs_z,
+                ortho_youngs_theta,
+                ortho_nu_rz,
+                ortho_nu_rtheta,
+                ortho_nu_ztheta,
+                ortho_shear_rz,
                 current_density,
                 source_radius,
                 source_z,
@@ -1678,6 +2103,18 @@ def main() -> None:
     case = solve_case(
         DEFAULT_WIDTH,
         DEFAULT_HEIGHT,
+        DEFAULT_QUADRATURE,
+        MESH_LONG_SIDE_ELEMENTS,
+        DEFAULT_MATERIAL_MODEL,
+        DEFAULT_ISO_YOUNGS_MODULUS_GPA,
+        DEFAULT_ISO_POISSON_RATIO,
+        DEFAULT_ORTHO_YOUNGS_R_GPA,
+        DEFAULT_ORTHO_YOUNGS_Z_GPA,
+        DEFAULT_ORTHO_YOUNGS_THETA_GPA,
+        DEFAULT_ORTHO_NU_RZ,
+        DEFAULT_ORTHO_NU_RTHETA,
+        DEFAULT_ORTHO_NU_ZTHETA,
+        DEFAULT_ORTHO_SHEAR_RZ_GPA,
         DEFAULT_CURRENT_DENSITY_MA,
         DEFAULT_SOURCE_RADIUS,
         DEFAULT_SOURCE_Z,

@@ -53,8 +53,11 @@ SECTION_MARKERS = ("circle", "square", "diamond")
 SECTION_DASHES = ("solid", "dashdot", "dot")
 
 MESH_LONG_SIDE_ELEMENTS = 14 if TESTING else 28
-FIELD_GRID_R = 121 if TESTING else 241
-FIELD_GRID_Z = 141 if TESTING else 281
+MESH_MIN_SHORT_SIDE_ELEMENTS = 6
+FIELD_GRID_LONG_SIDE_POINTS = 141 if TESTING else 281
+FIELD_GRID_MIN_SHORT_SIDE_POINTS = 41 if TESTING else 81
+FD_REFERENCE_SPACING = 1.0e-3  # [m]
+GRID_NUDGE = 1.0e-6  # [m]
 LOG10_FLOOR = -16.0
 
 DOCS_EXAMPLE_HTML = (
@@ -122,6 +125,18 @@ class CaseResult:
     peak_body_force_density: float
     vm_stress_fem: np.ndarray
     vm_stress_1d: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class Reference1DProfile:
+    b_z: np.ndarray
+    u_r: np.ndarray
+    e_rr: np.ndarray
+    e_tt: np.ndarray
+    s_rr: np.ndarray
+    s_zz: np.ndarray
+    s_tt: np.ndarray
+    s_vm: np.ndarray
 
 
 def export_docs_example_figure(fig) -> None:
@@ -193,13 +208,37 @@ def section_style(label: str) -> dict[str, object]:
 def choose_mesh_counts(width: float, height: float) -> tuple[int, int]:
     width = max(width, 1.0e-12)
     height = max(height, 1.0e-12)
-    if width >= height:
-        nr = MESH_LONG_SIDE_ELEMENTS
-        nz = max(6, int(round(MESH_LONG_SIDE_ELEMENTS * height / width)))
-    else:
-        nz = MESH_LONG_SIDE_ELEMENTS
-        nr = max(6, int(round(MESH_LONG_SIDE_ELEMENTS * width / height)))
+    long_side = max(width, height)
+    short_side = min(width, height)
+    target_size = min(
+        long_side / MESH_LONG_SIDE_ELEMENTS,
+        short_side / MESH_MIN_SHORT_SIDE_ELEMENTS,
+    )
+    nr = max(1, int(np.ceil(width / target_size)))
+    nz = max(1, int(np.ceil(height / target_size)))
     return nr, nz
+
+
+def choose_field_grid_counts(r_extent: float, z_extent: float) -> tuple[int, int]:
+    r_extent = max(r_extent, 1.0e-12)
+    z_extent = max(z_extent, 1.0e-12)
+    long_side = max(r_extent, z_extent)
+    short_side = min(r_extent, z_extent)
+    target_spacing = min(
+        long_side / max(FIELD_GRID_LONG_SIDE_POINTS - 1, 1),
+        short_side / max(FIELD_GRID_MIN_SHORT_SIDE_POINTS - 1, 1),
+    )
+    nr = max(2, int(np.ceil(r_extent / target_spacing)) + 1)
+    nz = max(2, int(np.ceil(z_extent / target_spacing)) + 1)
+    return nr, nz
+
+
+def build_uniform_interval_grid(start: float, stop: float, spacing: float) -> np.ndarray:
+    start = float(start)
+    stop = float(stop)
+    spacing = max(float(spacing), 1.0e-12)
+    n = max(2, int(np.ceil((stop - start) / spacing)) + 1)
+    return np.linspace(start, stop, n, dtype=np.float64)
 
 
 def top_bottom_pressure_faces(nr: int, nz: int) -> tuple[np.ndarray, np.ndarray]:
@@ -299,8 +338,9 @@ def field_grid(
 ) -> tuple[np.ndarray, ...]:
     r_max = max(1.1 * ro, 1.3 * source_r, ro + 0.25)
     z_extent = max(0.8 * height, abs(source_z) + 0.6 * height, 0.25)
-    r = np.linspace(0.0, r_max, FIELD_GRID_R, dtype=np.float64)
-    z = np.linspace(-z_extent, z_extent, FIELD_GRID_Z, dtype=np.float64)
+    nr_field, nz_field = choose_field_grid_counts(r_max, 2.0 * z_extent)
+    r = np.linspace(0.0, r_max, nr_field, dtype=np.float64)
+    z = np.linspace(-z_extent, z_extent, nz_field, dtype=np.float64)
     rr, zz = np.meshgrid(r, z, indexing="xy")
     br, bz = cfsem.flux_density_circular_filament(
         [source_current],
@@ -335,6 +375,73 @@ def peak_magnitude_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) 
     return 100.0 * (fe_peak - ref_peak) / x_peak
 
 
+def sample_loop_bz(
+    sample_r: np.ndarray,
+    z_value: float,
+    source_radius: float,
+    source_z: float,
+    source_current: float,
+) -> np.ndarray:
+    _br, bz = cfsem.flux_density_circular_filament(
+        [source_current],
+        [source_radius],
+        [source_z],
+        sample_r,
+        np.full_like(sample_r, z_value),
+        par=True,
+    )
+    return np.asarray(bz, dtype=np.float64)
+
+
+def solve_reference_profile_1d(
+    sample_r: np.ndarray,
+    sample_bz: np.ndarray,
+    current_density: float,
+    *,
+    pi: float = 0.0,
+    po: float = 0.0,
+) -> Reference1DProfile:
+    fine_r = build_uniform_interval_grid(sample_r[0], sample_r[-1], FD_REFERENCE_SPACING)
+    fine_bz = np.interp(fine_r, sample_r, sample_bz)
+    fine_j = np.full_like(fine_r, current_density)
+
+    rgrid = np.concatenate([[fine_r[0] - GRID_NUDGE], fine_r, [fine_r[-1] + GRID_NUDGE]])
+    jgrid = np.concatenate([[fine_j[0]], fine_j, [fine_j[-1]]])
+    bz_grid = np.concatenate([[fine_bz[0]], fine_bz, [fine_bz[-1]]])
+
+    c_struct = solenoid_1d_structural_factor(YOUNGS_MODULUS, POISSON_RATIO)
+    rhs = solenoid_1d_structural_rhs(c_struct, jgrid, bz_grid, pi=pi, po=po)
+    reference = SolenoidStress1D(
+        rgrid=rgrid,
+        elasticity_modulus=YOUNGS_MODULUS,
+        poisson_ratio=POISSON_RATIO,
+        direct_inverse=False,
+    )
+    u_r_full = np.asarray(reference.displacement_solver(rhs), dtype=np.float64).reshape(-1)
+    strain_full = np.asarray(reference.operators.a_eu @ u_r_full, dtype=np.float64).reshape(-1)
+    stress_full = np.asarray(reference.operators.a_se @ strain_full, dtype=np.float64).reshape(-1)
+    n_fine = rgrid.size
+
+    u_r = np.interp(sample_r, fine_r, u_r_full[1:-1])
+    e_rr = np.interp(sample_r, fine_r, strain_full[:n_fine][1:-1])
+    e_tt = np.interp(sample_r, fine_r, strain_full[n_fine:][1:-1])
+    s_rr = np.interp(sample_r, fine_r, stress_full[:n_fine][1:-1])
+    s_tt = np.interp(sample_r, fine_r, stress_full[n_fine:][1:-1])
+    s_zz = np.zeros_like(sample_r)
+    s_vm = von_mises_stress(s_rr, s_zz, s_tt)
+
+    return Reference1DProfile(
+        b_z=np.interp(sample_r, fine_r, fine_bz),
+        u_r=u_r,
+        e_rr=e_rr,
+        e_tt=e_tt,
+        s_rr=s_rr,
+        s_zz=s_zz,
+        s_tt=s_tt,
+        s_vm=s_vm,
+    )
+
+
 def von_mises_stress(
     s_rr: np.ndarray | float,
     s_zz: np.ndarray | float,
@@ -364,7 +471,6 @@ def build_section_comparisons(
 ) -> tuple[SectionComparison, ...]:
     section_list: list[SectionComparison] = []
     row_centers = 0.5 * (zs[:-1] + zs[1:])
-    c_struct = solenoid_1d_structural_factor(YOUNGS_MODULUS, POISSON_RATIO)
 
     for label, color, row in section_rows(nz):
         element_indices = row * nr + np.arange(nr, dtype=np.int64)
@@ -397,33 +503,8 @@ def build_section_comparisons(
 
         z_value = float(row_centers[row])
         b_z_fe = body_force_r[row] / current_density if current_density > 0.0 else np.zeros_like(radius)
-
-        nudge = 1.0e-6
-        rgrid = np.concatenate([[radii[0] - nudge], radius, [radii[-1] + nudge]])
-        zgrid = np.full_like(rgrid, z_value)
-        _br, bz_grid = cfsem.flux_density_circular_filament(
-            [source_current],
-            [source_radius],
-            [source_z],
-            rgrid,
-            zgrid,
-            par=True,
-        )
-        rhs = solenoid_1d_structural_rhs(c_struct, np.full_like(rgrid, current_density), bz_grid)
-        reference = SolenoidStress1D(
-            rgrid=rgrid,
-            elasticity_modulus=YOUNGS_MODULUS,
-            poisson_ratio=POISSON_RATIO,
-            direct_inverse=False,
-        )
-        u_r_1d_full = np.asarray(reference.displacement_solver(rhs), dtype=np.float64).reshape(-1)
-        strain_1d_full = np.asarray(reference.operators.a_eu @ u_r_1d_full, dtype=np.float64).reshape(-1)
-        stress_1d_full = np.asarray(reference.operators.a_se @ strain_1d_full, dtype=np.float64).reshape(-1)
-        n_1d = rgrid.size
-        s_rr_1d = stress_1d_full[:n_1d][1:-1]
-        s_zz_1d = np.zeros_like(radius)
-        s_tt_1d = stress_1d_full[n_1d:][1:-1]
-        s_vm_1d = von_mises_stress(s_rr_1d, s_zz_1d, s_tt_1d)
+        b_z_section = sample_loop_bz(radius, z_value, source_radius, source_z, source_current)
+        reference = solve_reference_profile_1d(radius, b_z_section, current_density)
 
         section_list.append(
             SectionComparison(
@@ -432,21 +513,21 @@ def build_section_comparisons(
                 z_value=z_value,
                 radius=radius,
                 b_z_fe=np.asarray(b_z_fe, dtype=np.float64),
-                b_z_1d=np.asarray(bz_grid[1:-1], dtype=np.float64),
+                b_z_1d=reference.b_z,
                 u_r_fe=u_r_fe,
-                u_r_1d=u_r_1d_full[1:-1],
+                u_r_1d=reference.u_r,
                 e_rr_fe=e_rr_fe,
-                e_rr_1d=strain_1d_full[:n_1d][1:-1],
+                e_rr_1d=reference.e_rr,
                 e_tt_fe=e_tt_fe,
-                e_tt_1d=strain_1d_full[n_1d:][1:-1],
+                e_tt_1d=reference.e_tt,
                 s_rr_fe=s_rr_fe,
-                s_rr_1d=s_rr_1d,
+                s_rr_1d=reference.s_rr,
                 s_zz_fe=s_zz_fe,
-                s_zz_1d=s_zz_1d,
+                s_zz_1d=reference.s_zz,
                 s_tt_fe=s_tt_fe,
-                s_tt_1d=s_tt_1d,
+                s_tt_1d=reference.s_tt,
                 s_vm_fe=s_vm_fe,
-                s_vm_1d=s_vm_1d,
+                s_vm_1d=reference.s_vm,
             )
         )
 
@@ -468,10 +549,8 @@ def build_vm_stress_grids(
     current_density: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     vm_fem = np.zeros((nz, nr), dtype=np.float64)
-    c_struct = solenoid_1d_structural_factor(YOUNGS_MODULUS, POISSON_RATIO)
     row_centers = 0.5 * (zs[:-1] + zs[1:])
     elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
-    nudge = 1.0e-6
 
     for row in range(nz):
         for col in range(nr):
@@ -488,30 +567,9 @@ def build_vm_stress_grids(
 
     vm_1d = np.zeros((nz, nr), dtype=np.float64)
     for row, z_value in enumerate(row_centers):
-        rgrid = np.concatenate([[radii[0] - nudge], elem_r_centers, [radii[-1] + nudge]])
-        zgrid = np.full_like(rgrid, z_value)
-        _br, bz_grid = cfsem.flux_density_circular_filament(
-            [source_current],
-            [source_radius],
-            [source_z],
-            rgrid,
-            zgrid,
-            par=True,
-        )
-        rhs = solenoid_1d_structural_rhs(c_struct, np.full_like(rgrid, current_density), bz_grid)
-        reference = SolenoidStress1D(
-            rgrid=rgrid,
-            elasticity_modulus=YOUNGS_MODULUS,
-            poisson_ratio=POISSON_RATIO,
-            direct_inverse=False,
-        )
-        u_r_1d_full = np.asarray(reference.displacement_solver(rhs), dtype=np.float64).reshape(-1)
-        strain_1d_full = np.asarray(reference.operators.a_eu @ u_r_1d_full, dtype=np.float64).reshape(-1)
-        stress_1d_full = np.asarray(reference.operators.a_se @ strain_1d_full, dtype=np.float64).reshape(-1)
-        n_1d = rgrid.size
-        s_rr_1d = stress_1d_full[:n_1d][1:-1]
-        s_tt_1d = stress_1d_full[n_1d:][1:-1]
-        vm_1d[row, :] = von_mises_stress(s_rr_1d, 0.0, s_tt_1d)
+        b_z_row = sample_loop_bz(elem_r_centers, z_value, source_radius, source_z, source_current)
+        reference = solve_reference_profile_1d(elem_r_centers, b_z_row, current_density)
+        vm_1d[row, :] = reference.s_vm
 
     return vm_fem, vm_1d
 

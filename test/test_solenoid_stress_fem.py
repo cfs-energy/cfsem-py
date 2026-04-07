@@ -159,6 +159,104 @@ def test_body_force_total_matches_requested_total_force(
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
+def test_axisymmetric_model_rhs_matches_direct_assembly(dtype: DType, quadrature: str) -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
+    pressure_faces = np.vstack([inner_faces, outer_faces])
+    pressure_values = np.linspace(1.0e5, 6.0e5, pressure_faces.shape[0], dtype=dtype)
+    body_force = np.column_stack(
+        [
+            np.linspace(-3.0e4, 7.0e4, elements.shape[0], dtype=dtype),
+            np.linspace(4.0e4, -5.0e4, elements.shape[0], dtype=dtype),
+        ]
+    )
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+
+    model = fem.assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        pressure_faces=pressure_faces,
+        quadrature=quadrature,
+    )
+    assembly = assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=body_force,
+        pressure_faces=pressure_faces,
+        pressure_values=pressure_values,
+        quadrature=quadrature,
+    )
+
+    assert np.allclose(model.stiffness.toarray(), assembly.to_csr().toarray())
+    assert np.allclose(model.rhs(body_force=body_force, pressure_values=pressure_values), assembly.rhs)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType, quadrature: str) -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=4, nz=2, dtype=dtype)
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=4, nz=2)
+    pressure_faces = np.vstack([inner_faces, outer_faces])
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    model = fem.assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        pressure_faces=pressure_faces,
+        quadrature=quadrature,
+    )
+    prescribed = prescribed_z_dofs(nodes.shape[0])
+    solve_case = model.factorized_solver(prescribed=prescribed)
+
+    cases = [
+        (
+            np.column_stack(
+                [
+                    np.linspace(0.0, 2.0e4, elements.shape[0], dtype=dtype),
+                    np.linspace(-1.0e4, 1.0e4, elements.shape[0], dtype=dtype),
+                ]
+            ),
+            np.linspace(2.0e5, 5.0e5, pressure_faces.shape[0], dtype=dtype),
+        ),
+        (
+            np.column_stack(
+                [
+                    np.linspace(-3.0e4, 1.0e4, elements.shape[0], dtype=dtype),
+                    np.linspace(2.5e4, -2.5e4, elements.shape[0], dtype=dtype),
+                ]
+            ),
+            np.linspace(-1.5e5, 3.5e5, pressure_faces.shape[0], dtype=dtype),
+        ),
+    ]
+
+    rtol, atol = tolerance(dtype)
+    for body_force, pressure_values in cases:
+        assembly = assemble_axisymmetric(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+            material_table=np.asarray([material]),
+            body_force=body_force,
+            pressure_faces=pressure_faces,
+            pressure_values=pressure_values,
+            quadrature=quadrature,
+        )
+        expected = solve_with_factorized_dirichlet(
+            assembly.to_csr(),
+            assembly.rhs,
+            prescribed=prescribed,
+        )
+        actual = solve_case(body_force, pressure_values)
+        assert np.allclose(actual, expected, rtol=rtol, atol=max(atol, 1.0e-6))
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
+@pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize("nr", PRESSURE_NR_CASES, ids=["coarse", "refined"])
 def test_pressure_vessel_stresses_match_lame_reference(dtype: DType, quadrature: str, nr: int) -> None:
     ri, ro = 0.5, 1.0
@@ -291,7 +389,11 @@ def test_axisymmetric_fem_helper_validation_branches() -> None:
         fem._normalize_elements(np.zeros((2, 3), dtype=np.uint64))
 
     with pytest.raises(ValueError, match="material_ids must have shape"):
-        fem._normalize_materials(np.zeros((1, 1), dtype=np.uint64), np.asarray([material]), np.dtype(np.float64))
+        fem._normalize_materials(
+            np.zeros((1, 1), dtype=np.uint64),
+            np.asarray([material]),
+            np.dtype(np.float64),
+        )
 
     with pytest.raises(ValueError, match="material_table mapping cannot be empty"):
         fem._normalize_materials(np.zeros((1,), dtype=np.uint64), {}, np.dtype(np.float64))
@@ -340,7 +442,11 @@ def test_axisymmetric_fem_helper_validation_branches() -> None:
     with pytest.raises(ValueError, match="pressure_faces must have shape"):
         fem._normalize_pressure_loads(np.zeros((1, 3), dtype=np.uint64), np.zeros((1,)), np.dtype(np.float64))
     with pytest.raises(ValueError, match="pressure_values must have shape"):
-        fem._normalize_pressure_loads(np.zeros((1, 2), dtype=np.uint64), np.zeros((1, 1)), np.dtype(np.float64))
+        fem._normalize_pressure_loads(
+            np.zeros((1, 2), dtype=np.uint64),
+            np.zeros((1, 1)),
+            np.dtype(np.float64),
+        )
     with pytest.raises(ValueError, match="pressure_faces has 1 rows, but pressure_values has 2 entries"):
         fem._normalize_pressure_loads(
             np.zeros((1, 2), dtype=np.uint64),
@@ -403,7 +509,11 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
             body_force=np.array([0.0, 0.0]),
         )
 
-    reshaped = fem._normalize_displacements(np.zeros((nodes.shape[0], 2)), nodes.shape[0], np.dtype(np.float64))
+    reshaped = fem._normalize_displacements(
+        np.zeros((nodes.shape[0], 2)),
+        nodes.shape[0],
+        np.dtype(np.float64),
+    )
     assert reshaped.shape == (nodes.shape[0], 2)
     with pytest.raises(ValueError, match="displacements must have shape"):
         fem._normalize_displacements(np.zeros((nodes.shape[0], 3)), nodes.shape[0], np.dtype(np.float64))

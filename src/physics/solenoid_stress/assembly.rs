@@ -4,6 +4,11 @@
 //! `K_e = integral(B^T D B 2*pi*r dA)` and the consistent load vectors are assembled from the
 //! same weak form.  This follows the conventional displacement-based finite-element construction
 //! described in Hughes (1987), Bathe (1996), and Reddy (2005).
+//!
+//! For readers coming from linear algebra rather than FEM: each element produces a small dense
+//! matrix `K_e` and load vector `f_e`.  The loops in this module simply evaluate those local
+//! objects by quadrature, then scatter-add them into a global sparse matrix represented as row,
+//! column, value triplets.
 
 use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
 use crate::physics::solenoid_stress::geometry::volume_samples;
@@ -13,6 +18,14 @@ use crate::physics::solenoid_stress::quad4::DOF_PER_ELEMENT;
 use crate::physics::solenoid_stress::quadrature::QuadratureRule;
 use crate::physics::solenoid_stress::types::{Real, two_pi};
 
+/// Assemble the global axisymmetric Quad4 stiffness matrix and right-hand side.
+///
+/// Inputs are element-major material and body-force data, plus optional pressure loads applied
+/// to element faces.  The output uses sparse triplets `(rows, cols, vals)` rather than building
+/// a dense matrix in Rust; the Python layer converts those triplets to SciPy sparse matrices.
+///
+/// The constitutive matrices in `material_table` are expected to act on the axisymmetric strain
+/// vector `[e_rr, e_zz, e_tt, g_rz]`, where `g_rz` is the engineering shear strain.
 pub fn assemble_axisymmetric_quad4<F: Real>(
     mesh: MeshView<'_, F>,
     material_ids: &[usize],
@@ -66,6 +79,7 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
 
         let mut local_dofs = [0usize; DOF_PER_ELEMENT];
         for (local_node, global_node) in nodes.into_iter().enumerate() {
+            // Node i contributes radial and axial displacement unknowns in adjacent columns.
             local_dofs[2 * local_node] = 2 * global_node;
             local_dofs[2 * local_node + 1] = 2 * global_node + 1;
         }
@@ -90,6 +104,8 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
+        // Face pressure contributes only to the global right-hand side because it is an external
+        // traction, not part of the material stiffness.
         let fe = pressure_element_load(&coords, load.local_face, load.value, quadrature)?;
         for (local_node, global_node) in nodes.into_iter().enumerate() {
             rhs[2 * global_node] = rhs[2 * global_node] + fe[2 * local_node];

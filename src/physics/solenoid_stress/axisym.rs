@@ -3,10 +3,19 @@
 //! The `B` matrix uses the standard small-strain axisymmetric ordering
 //! `[e_rr, e_zz, e_tt, g_rz]` with `e_tt = u_r / r`.  The resulting element stiffness is the
 //! conventional `B^T D B` construction; see Hughes (1987), Bathe (1996), and Reddy (2005).
+//!
+//! In this formulation each node carries only two displacement unknowns: radial `u_r` and axial
+//! `u_z`.  Circumferential displacement is omitted by the axisymmetric assumption, but the hoop
+//! normal strain `e_tt` still appears because moving a ring outward changes its circumference.
 
 use crate::physics::solenoid_stress::quad4::{DOF_PER_ELEMENT, NODES_PER_ELEMENT};
 use crate::physics::solenoid_stress::types::Real;
 
+/// Build the axisymmetric strain-displacement matrix `B` at one quadrature point.
+///
+/// Multiplying this matrix by the element displacement vector
+/// `[u_r1, u_z1, u_r2, u_z2, ...]^T` gives the strain vector
+/// `[e_rr, e_zz, e_tt, g_rz]^T` at that point.
 pub fn build_b_matrix<F: Real>(
     n: &[F; NODES_PER_ELEMENT],
     grad_phys: &[[F; 2]; NODES_PER_ELEMENT],
@@ -23,15 +32,23 @@ pub fn build_b_matrix<F: Real>(
         let col_z = col_r + 1;
         let dndr = grad_phys[i][0];
         let dndz = grad_phys[i][1];
+        // e_rr = du_r/dr
         b[0][col_r] = dndr;
+        // e_zz = du_z/dz
         b[1][col_z] = dndz;
+        // e_tt = u_r/r, so only the radial displacement shape function enters.
         b[2][col_r] = n[i] / radius;
+        // g_rz = du_r/dz + du_z/dr in engineering-shear convention.
         b[3][col_r] = dndz;
         b[3][col_z] = dndr;
     }
     Ok(b)
 }
 
+/// Accumulate `scale * B^T D B` into the element stiffness matrix.
+///
+/// The caller supplies `scale = 2*pi*r*det(J)*w`, so this routine is purely the dense local
+/// linear-algebra kernel for one quadrature point.
 pub fn accumulate_stiffness<F: Real>(
     ke: &mut [[F; DOF_PER_ELEMENT]; DOF_PER_ELEMENT],
     d: &[[F; 4]; 4],

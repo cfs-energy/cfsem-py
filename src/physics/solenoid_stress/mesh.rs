@@ -1,37 +1,52 @@
+//! Lightweight validated views of the axisymmetric Quad4 mesh and assembled outputs.
+
 use crate::physics::solenoid_stress::quad4::NODES_PER_ELEMENT;
 use crate::physics::solenoid_stress::types::Real;
 
 #[derive(Clone, Copy)]
 pub struct MeshView<'a, F: Real> {
+    /// Node coordinates stored as `(r, z)`.
     pub nodes_rz: &'a [[F; 2]],
+    /// Element connectivity, one `[n0, n1, n2, n3]` tuple per Quad4 element.
     pub elements: &'a [[usize; NODES_PER_ELEMENT]],
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct PressureLoad<F: Real> {
+    /// Element index receiving the load.
     pub element: usize,
+    /// Local face index in the Quad4 numbering used by `face_reference`.
     pub local_face: u8,
+    /// Pressure magnitude, taken positive in the inward normal direction.
     pub value: F,
 }
 
 #[derive(Debug, Clone)]
 pub struct AssemblyResult<F: Real> {
+    /// Sparse row indices for the assembled stiffness matrix triplets.
     pub rows: Vec<usize>,
+    /// Sparse column indices for the assembled stiffness matrix triplets.
     pub cols: Vec<usize>,
+    /// Sparse values for the assembled stiffness matrix triplets.
     pub vals: Vec<F>,
+    /// Global right-hand side vector.
     pub rhs: Vec<F>,
+    /// Total number of displacement unknowns in the global system.
     pub ndof: usize,
 }
 
 impl<'a, F: Real> MeshView<'a, F> {
+    /// Number of mesh nodes.
     pub fn num_nodes(&self) -> usize {
         self.nodes_rz.len()
     }
 
+    /// Number of Quad4 elements.
     pub fn num_elements(&self) -> usize {
         self.elements.len()
     }
 
+    /// Validate node coordinates that are specific to the axisymmetric setting.
     pub fn validate_nodes(&self) -> Result<(), String> {
         for (index, node) in self.nodes_rz.iter().enumerate() {
             if node[0] < F::zero() {
@@ -44,6 +59,7 @@ impl<'a, F: Real> MeshView<'a, F> {
         Ok(())
     }
 
+    /// Validate that every connectivity entry references an existing node.
     pub fn validate_connectivity(&self) -> Result<(), String> {
         let node_count = self.num_nodes();
         for (element_index, element) in self.elements.iter().enumerate() {
@@ -58,6 +74,7 @@ impl<'a, F: Real> MeshView<'a, F> {
         Ok(())
     }
 
+    /// Return the node indices of one element.
     pub fn element_nodes(
         &self,
         element_index: usize,
@@ -68,6 +85,7 @@ impl<'a, F: Real> MeshView<'a, F> {
             .ok_or_else(|| format!("element index {element_index} out of bounds"))
     }
 
+    /// Gather the physical `(r, z)` coordinates of one element's nodes.
     pub fn element_coords(
         &self,
         element_index: usize,

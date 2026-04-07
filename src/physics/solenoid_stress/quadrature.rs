@@ -1,12 +1,20 @@
+//! Gauss quadrature rules used by the axisymmetric Quad4 formulation.
+//!
+//! The volume rule is the tensor product of the 1D rule in `xi` and `eta`, while the face rule
+//! reuses the same 1D points along a reference edge.
+
 use crate::physics::solenoid_stress::types::{Real, cast};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QuadratureRule {
+    /// Tensor-product 2-point rule in each parametric direction.
     Gauss2x2,
+    /// Tensor-product 3-point rule in each parametric direction.
     Gauss3x3,
 }
 
 impl QuadratureRule {
+    /// Parse the compact integer code exposed through the Python bindings.
     pub fn from_code(code: u8) -> Result<Self, String> {
         match code {
             2 => Ok(Self::Gauss2x2),
@@ -17,6 +25,7 @@ impl QuadratureRule {
         }
     }
 
+    /// Number of quadrature points contributed by one element volume integral.
     pub fn points_per_element(self) -> usize {
         match self {
             Self::Gauss2x2 => 4,
@@ -25,6 +34,7 @@ impl QuadratureRule {
     }
 }
 
+/// 1D Gauss-Legendre points and weights on `[-1, 1]`.
 pub fn gauss_1d<F: Real>(rule: QuadratureRule) -> Vec<(F, F)> {
     match rule {
         QuadratureRule::Gauss2x2 => {
@@ -42,6 +52,7 @@ pub fn gauss_1d<F: Real>(rule: QuadratureRule) -> Vec<(F, F)> {
     }
 }
 
+/// Tensor-product Gauss rule on the reference square `[-1, 1]^2`.
 pub fn gauss_volume<F: Real>(rule: QuadratureRule) -> Vec<([F; 2], F)> {
     let line = gauss_1d::<F>(rule);
     let mut out = Vec::with_capacity(line.len() * line.len());
@@ -53,6 +64,7 @@ pub fn gauss_volume<F: Real>(rule: QuadratureRule) -> Vec<([F; 2], F)> {
     out
 }
 
+/// 1D Gauss rule reused for integrating along a reference element face.
 pub fn gauss_face<F: Real>(rule: QuadratureRule) -> Vec<(F, F)> {
     gauss_1d::<F>(rule)
 }

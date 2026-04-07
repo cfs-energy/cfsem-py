@@ -1,9 +1,21 @@
+//! Reference-element definitions for bilinear 4-node quadrilateral elements.
+//!
+//! This module contains the purely geometric pieces of the formulation:
+//! - scalar shape functions `N_i(\xi, \eta)`,
+//! - their gradients in reference coordinates,
+//! - the Jacobian that maps reference coordinates into physical `(r, z)` space, and
+//! - the local-face parameterization used by pressure loads.
+
 use crate::physics::solenoid_stress::types::{Real, cast};
 
+/// Number of nodes in the bilinear quadrilateral element.
 pub const NODES_PER_ELEMENT: usize = 4;
+/// Number of displacement unknowns per node: radial and axial.
 pub const DOF_PER_NODE: usize = 2;
+/// Number of displacement unknowns per element.
 pub const DOF_PER_ELEMENT: usize = NODES_PER_ELEMENT * DOF_PER_NODE;
 
+/// Bilinear shape functions on the reference square `[-1, 1]^2`.
 pub fn shape<F: Real>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
     let quarter = cast::<F>(0.25);
     [
@@ -14,6 +26,7 @@ pub fn shape<F: Real>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
     ]
 }
 
+/// Shape-function gradients with respect to the reference coordinates `(\xi, \eta)`.
 pub fn grad_ref<F: Real>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
     let quarter = cast::<F>(0.25);
     [
@@ -24,6 +37,7 @@ pub fn grad_ref<F: Real>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
     ]
 }
 
+/// Map one reference point into physical `(r, z)` coordinates using the element interpolation.
 pub fn map_point<F: Real>(
     coords: &[[F; 2]; NODES_PER_ELEMENT],
     n: &[F; NODES_PER_ELEMENT],
@@ -36,6 +50,10 @@ pub fn map_point<F: Real>(
     point
 }
 
+/// Jacobian matrix of the reference-to-physical map.
+///
+/// Rows correspond to physical coordinates `(r, z)` and columns to reference coordinates
+/// `(\xi, \eta)`.
 pub fn jacobian<F: Real>(
     coords: &[[F; 2]; NODES_PER_ELEMENT],
     grad: &[[F; 2]; NODES_PER_ELEMENT],
@@ -50,10 +68,14 @@ pub fn jacobian<F: Real>(
     jac
 }
 
+/// Determinant of the element Jacobian.
+///
+/// For a valid element this must stay positive at every quadrature point.
 pub fn det_j<F: Real>(jac: &[[F; 2]; 2]) -> F {
     jac[0][0] * jac[1][1] - jac[0][1] * jac[1][0]
 }
 
+/// Inverse Jacobian used to transform reference gradients into physical gradients.
 pub fn inv_j<F: Real>(jac: &[[F; 2]; 2]) -> Result<[[F; 2]; 2], String> {
     let det = det_j(jac);
     if det <= F::zero() {
@@ -68,6 +90,7 @@ pub fn inv_j<F: Real>(jac: &[[F; 2]; 2]) -> Result<[[F; 2]; 2], String> {
     ])
 }
 
+/// Convert shape-function gradients from `(\xi, \eta)` to `(r, z)`.
 pub fn grad_phys<F: Real>(
     grad_reference: &[[F; 2]; NODES_PER_ELEMENT],
     inv_jac: &[[F; 2]; 2],
@@ -82,6 +105,14 @@ pub fn grad_phys<F: Real>(
     out
 }
 
+/// Map a 1D reference coordinate `s in [-1, 1]` onto a local element face.
+///
+/// Returns `(xi, eta, d[xi,eta]/ds)`.  The face numbering follows the usual counterclockwise
+/// ordering:
+/// - `0`: bottom edge from node 0 to node 1
+/// - `1`: right edge from node 1 to node 2
+/// - `2`: top edge from node 2 to node 3
+/// - `3`: left edge from node 3 to node 0
 pub fn face_reference<F: Real>(local_face: u8, s: F) -> Result<(F, F, [F; 2]), String> {
     match local_face {
         0 => Ok((s, -F::one(), [F::one(), F::zero()])),

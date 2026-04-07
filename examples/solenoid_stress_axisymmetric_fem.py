@@ -31,6 +31,7 @@ TESTING = bool(os.getenv("CFSEM_TESTING"))
 SOLENOID_INNER_RADIUS = 0.5  # [m]
 DEFAULT_QUADRATURE = "2x2"
 DEFAULT_MATERIAL_MODEL = "isotropic"
+DEFAULT_INCLUDE_AXIAL_BODY_FORCE = True
 
 DEFAULT_WIDTH = 0.18  # [m]
 DEFAULT_HEIGHT = 0.24  # [m]
@@ -56,7 +57,7 @@ SOURCE_Z_RANGE = (-0.60, 0.60)
 SOURCE_CURRENT_RANGE_MA = (-5.0, 5.0)
 YOUNGS_MODULUS_RANGE_GPA = (20.0, 400.0)
 POISSON_RATIO_RANGE = (0.0, 0.45)
-SHEAR_MODULUS_RANGE_GPA = (5.0, 200.0)
+SHEAR_MODULUS_RANGE_GPA = (0.1, 200.0)
 
 SECTION_TARGET_FRACTIONS = (0.2, 0.5, 0.8)
 SECTION_LABELS = ("Lower", "Middle", "Upper")
@@ -65,9 +66,8 @@ SECTION_WIDTHS = (4.5, 3.25, 2.0)
 SECTION_MARKERS = ("circle", "square", "diamond")
 SECTION_DASHES = ("solid", "dashdot", "dot")
 
-MESH_LONG_SIDE_ELEMENTS = 14 if TESTING else 28
-MESH_MIN_SHORT_SIDE_ELEMENTS = 6
-FEM_RESOLUTION_RANGE = (8, 56)
+DEFAULT_FEM_SPATIAL_RESOLUTION_MM = 17.0 if TESTING else 8.5
+FEM_SPATIAL_RESOLUTION_RANGE_MM = (1.0, 20.0)
 FIELD_GRID_LONG_SIDE_POINTS = 141 if TESTING else 281
 FIELD_GRID_MIN_SHORT_SIDE_POINTS = 41 if TESTING else 81
 FD_REFERENCE_SPACING = 1.0e-3  # [m]
@@ -108,7 +108,7 @@ class CaseResult:
     width: float
     height: float
     quadrature: str
-    fem_resolution: int
+    fem_resolution: float
     material_model: str
     fem_material_label: str
     reference_material_label: str
@@ -116,6 +116,7 @@ class CaseResult:
     source_radius: float
     source_z: float
     source_current: float
+    include_axial_body_force: bool
     balance_axial_load: bool
     ri: float
     ro: float
@@ -273,16 +274,10 @@ def section_style(label: str) -> dict[str, object]:
     }
 
 
-def choose_mesh_counts(width: float, height: float, long_side_elements: int) -> tuple[int, int]:
+def choose_mesh_counts(width: float, height: float, target_size: float) -> tuple[int, int]:
     width = max(width, 1.0e-12)
     height = max(height, 1.0e-12)
-    long_side_elements = max(int(long_side_elements), 1)
-    long_side = max(width, height)
-    short_side = min(width, height)
-    target_size = min(
-        long_side / long_side_elements,
-        short_side / MESH_MIN_SHORT_SIDE_ELEMENTS,
-    )
+    target_size = max(float(target_size), 1.0e-12)
     nr = max(1, int(np.ceil(width / target_size)))
     nz = max(1, int(np.ceil(height / target_size)))
     return nr, nz
@@ -811,7 +806,7 @@ def solve_case(
     width: float,
     height: float,
     quadrature: str,
-    fem_resolution: int,
+    fem_resolution: float,
     material_model: str,
     iso_youngs_modulus_gpa: float,
     iso_poisson_ratio: float,
@@ -826,19 +821,21 @@ def solve_case(
     source_radius: float,
     source_z: float,
     source_current_ma: float,
+    include_axial_body_force: bool,
     balance_axial_load: bool,
 ) -> CaseResult:
     width = normalize_float(width, WIDTH_RANGE)
     height = normalize_float(height, HEIGHT_RANGE)
     if quadrature not in {"2x2", "3x3"}:
         raise ValueError(f"Unsupported quadrature {quadrature!r}.")
-    fem_resolution = int(np.clip(int(round(fem_resolution)), *FEM_RESOLUTION_RANGE))
+    fem_resolution = normalize_float(fem_resolution, FEM_SPATIAL_RESOLUTION_RANGE_MM)
     if material_model not in {"isotropic", "orthotropic"}:
         raise ValueError(f"Unsupported material model {material_model!r}.")
     current_density = 1.0e6 * normalize_float(current_density_ma, CURRENT_DENSITY_RANGE_MA)
     source_radius = normalize_float(source_radius, SOURCE_RADIUS_RANGE)
     source_z = normalize_float(source_z, SOURCE_Z_RANGE)
     source_current = 1.0e6 * normalize_float(source_current_ma, SOURCE_CURRENT_RANGE_MA)
+    include_axial_body_force = bool(include_axial_body_force)
     balance_axial_load = bool(balance_axial_load)
 
     iso_youngs_modulus = 1.0e9 * normalize_float(iso_youngs_modulus_gpa, YOUNGS_MODULUS_RANGE_GPA)
@@ -858,7 +855,7 @@ def solve_case(
     if source_intersects_solenoid(ri, ro, z_min, z_max, source_radius, source_z):
         raise ValueError("Move the source loop outside the solenoid conductor cross-section.")
 
-    nr, nz = choose_mesh_counts(width, height, fem_resolution)
+    nr, nz = choose_mesh_counts(width, height, 1.0e-3 * fem_resolution)
     nodes, elements, radii, zs = build_annulus_strip_mesh(ri, ro, height, nr, nz)
     elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
     elem_z_centers = 0.5 * (zs[:-1] + zs[1:])
@@ -927,7 +924,8 @@ def solve_case(
     bz_weighted = np.asarray(bz_loop_q + bz_self_q, dtype=np.float64).reshape(nelem, nq) * weights
     br_mean = np.sum(br_weighted, axis=1) / weights_sum
     bz_mean = np.sum(bz_weighted, axis=1) / weights_sum
-    body_force = np.column_stack((current_density * bz_mean, -current_density * br_mean))
+    axial_body_force = -current_density * br_mean if include_axial_body_force else np.zeros_like(br_mean)
+    body_force = np.column_stack((current_density * bz_mean, axial_body_force))
 
     measures = element_measures_axisymmetric(nodes, elements, quadrature=quadrature)
     net_body_force_z = float(np.sum(body_force[:, 1] * measures.swept_volumes))
@@ -1022,6 +1020,7 @@ def solve_case(
         source_radius=source_radius,
         source_z=source_z,
         source_current=source_current,
+        include_axial_body_force=include_axial_body_force,
         balance_axial_load=balance_axial_load,
         ri=ri,
         ro=ro,
@@ -1411,12 +1410,13 @@ def build_summary(case: CaseResult) -> str:
     return (
         f"Mesh {case.nr}x{case.nz} ({case.ndof} dof, K nnz={case.stiffness_nnz}) | "
         f"quadrature={case.quadrature} | "
-        f"resolution={case.fem_resolution} long-side elems | "
+        f"target cell size={case.fem_resolution:.1f} mm | "
         f"{case.fem_material_label} | "
         f"{case.reference_material_label} | "
         f"J_theta={case.current_density:.3e} A/m^2 | "
         f"source I={case.source_current:.3e} A-turn at "
         f"(r={case.source_radius:.3f} m, z={case.source_z:.3f} m) | "
+        f"FEM axial body force={'on' if case.include_axial_body_force else 'off'} | "
         f"net axial body force={case.net_body_force_z:.3e} N | "
         f"top/bottom pressure values=({case.pressure_top:.3e}, {case.pressure_bottom:.3e}) Pa | "
         f"net axial load after balance={case.net_total_force_z:.3e} N | "
@@ -1521,16 +1521,16 @@ def create_app():
                     html.Div(
                         [
                             html.P(
-                                "FEM resolution [long-side elements]",
+                                "FEM target cell size [mm]",
                                 style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
                             ),
                             dcc.Slider(
                                 id="fem-resolution",
-                                min=FEM_RESOLUTION_RANGE[0],
-                                max=FEM_RESOLUTION_RANGE[1],
-                                step=2,
-                                value=MESH_LONG_SIDE_ELEMENTS,
-                                marks={8: "8", 16: "16", 28: "28", 40: "40", 56: "56"},
+                                min=FEM_SPATIAL_RESOLUTION_RANGE_MM[0],
+                                max=FEM_SPATIAL_RESOLUTION_RANGE_MM[1],
+                                step=0.5,
+                                value=DEFAULT_FEM_SPATIAL_RESOLUTION_MM,
+                                marks={1: "1", 2: "2", 5: "5", 10: "10", 15: "15", 20: "20"},
                                 tooltip={"placement": "bottom", "always_visible": True},
                             ),
                         ]
@@ -1717,9 +1717,9 @@ def create_app():
                                 id="ortho-shear-rz",
                                 min=SHEAR_MODULUS_RANGE_GPA[0],
                                 max=SHEAR_MODULUS_RANGE_GPA[1],
-                                step=2.5,
+                                step=0.1,
                                 value=DEFAULT_ORTHO_SHEAR_RZ_GPA,
-                                marks={5: "5", 50: "50", 100: "100", 150: "150", 200: "200"},
+                                marks={0.1: "0.1", 1: "1", 10: "10", 50: "50", 100: "100", 200: "200"},
                                 tooltip={"placement": "bottom", "always_visible": True},
                             ),
                         ]
@@ -1777,6 +1777,21 @@ def create_app():
                     ),
                 ],
                 style={**material_grid_style, "display": "none"},
+            ),
+            html.Div(
+                [
+                    dcc.Checklist(
+                        id="include-axial-body-force",
+                        options=[
+                            {
+                                "label": "Include axial FEM body force f_z = -J_theta B_r",
+                                "value": "include",
+                            }
+                        ],
+                        value=["include"] if DEFAULT_INCLUDE_AXIAL_BODY_FORCE else [],
+                    )
+                ],
+                style={"marginTop": "0.5rem", "marginBottom": "0.25rem"},
             ),
             html.Div(
                 [
@@ -1916,13 +1931,14 @@ def create_app():
         Input("source-radius", "value"),
         Input("source-z", "value"),
         Input("source-current", "value"),
+        Input("include-axial-body-force", "value"),
         Input("balance-axial-load", "value"),
     )
     def update_figures(
         width: float,
         height: float,
         quadrature: str,
-        fem_resolution: int,
+        fem_resolution: float,
         material_model: str,
         iso_youngs_modulus: float,
         iso_poisson_ratio: float,
@@ -1937,6 +1953,7 @@ def create_app():
         source_radius: float,
         source_z: float,
         source_current: float,
+        include_axial_body_force: list[str],
         balance_axial_load: list[str],
     ):
         try:
@@ -1959,6 +1976,7 @@ def create_app():
                 source_radius,
                 source_z,
                 source_current,
+                "include" in include_axial_body_force,
                 "balance" in balance_axial_load,
             )
         except ValueError as exc:
@@ -2104,7 +2122,7 @@ def main() -> None:
         DEFAULT_WIDTH,
         DEFAULT_HEIGHT,
         DEFAULT_QUADRATURE,
-        MESH_LONG_SIDE_ELEMENTS,
+        DEFAULT_FEM_SPATIAL_RESOLUTION_MM,
         DEFAULT_MATERIAL_MODEL,
         DEFAULT_ISO_YOUNGS_MODULUS_GPA,
         DEFAULT_ISO_POISSON_RATIO,
@@ -2119,6 +2137,7 @@ def main() -> None:
         DEFAULT_SOURCE_RADIUS,
         DEFAULT_SOURCE_Z,
         DEFAULT_SOURCE_CURRENT_MA,
+        DEFAULT_INCLUDE_AXIAL_BODY_FORCE,
         True,
     )
     overview = build_heatmap_figure(

@@ -18,6 +18,7 @@ from cfsem.solenoid_stress.axisymmetric_fem import (
     cfsem_radial_material,
     element_measures_axisymmetric,
     element_quadrature_axisymmetric,
+    infer_quad9_mesh,
 )
 from cfsem.solenoid_stress.solenoid_1d import (
     SolenoidStress1D,
@@ -29,7 +30,8 @@ from cfsem.flux_solver import calc_flux_density_from_flux, solve_flux_axisymmetr
 TESTING = bool(os.getenv("CFSEM_TESTING"))
 
 SOLENOID_INNER_RADIUS = 0.5  # [m]
-DEFAULT_QUADRATURE = "2x2"
+DEFAULT_QUADRATURE = "3x3"
+DEFAULT_ELEMENT_TYPE = "quad4"
 DEFAULT_MATERIAL_MODEL = "isotropic"
 DEFAULT_INCLUDE_AXIAL_BODY_FORCE = True
 
@@ -108,6 +110,7 @@ class CaseResult:
     width: float
     height: float
     quadrature: str
+    element_type: str
     fem_resolution: float
     material_model: str
     fem_material_label: str
@@ -354,21 +357,66 @@ def source_intersects_solenoid(
     return ri <= source_r <= ro and z_min <= source_z <= z_max
 
 
-def quad4_center_point_strain_stress(
+def q2_lagrange_1d(x: float) -> np.ndarray:
+    return np.array([0.5 * x * (x - 1.0), 1.0 - x * x, 0.5 * x * (x + 1.0)], dtype=np.float64)
+
+
+def q2_lagrange_grad_1d(x: float) -> np.ndarray:
+    return np.array([x - 0.5, -2.0 * x, x + 0.5], dtype=np.float64)
+
+
+def element_center_point_strain_stress(
     coords: np.ndarray,
     displacement_local: np.ndarray,
     material: np.ndarray,
+    element_type: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    n = 0.25 * np.ones(4, dtype=np.float64)
-    grad_ref = 0.25 * np.array(
-        [
-            [-1.0, -1.0],
-            [1.0, -1.0],
-            [1.0, 1.0],
-            [-1.0, 1.0],
-        ],
-        dtype=np.float64,
-    )
+    if element_type == "quad4":
+        n = 0.25 * np.ones(4, dtype=np.float64)
+        grad_ref = 0.25 * np.array(
+            [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+            ],
+            dtype=np.float64,
+        )
+    elif element_type == "quad9":
+        lx = q2_lagrange_1d(0.0)
+        ly = q2_lagrange_1d(0.0)
+        dlx = q2_lagrange_grad_1d(0.0)
+        dly = q2_lagrange_grad_1d(0.0)
+        n = np.array(
+            [
+                lx[0] * ly[0],
+                lx[2] * ly[0],
+                lx[2] * ly[2],
+                lx[0] * ly[2],
+                lx[1] * ly[0],
+                lx[2] * ly[1],
+                lx[1] * ly[2],
+                lx[0] * ly[1],
+                lx[1] * ly[1],
+            ],
+            dtype=np.float64,
+        )
+        grad_ref = np.array(
+            [
+                [dlx[0] * ly[0], lx[0] * dly[0]],
+                [dlx[2] * ly[0], lx[2] * dly[0]],
+                [dlx[2] * ly[2], lx[2] * dly[2]],
+                [dlx[0] * ly[2], lx[0] * dly[2]],
+                [dlx[1] * ly[0], lx[1] * dly[0]],
+                [dlx[2] * ly[1], lx[2] * dly[1]],
+                [dlx[1] * ly[2], lx[1] * dly[2]],
+                [dlx[0] * ly[1], lx[0] * dly[1]],
+                [dlx[1] * ly[1], lx[1] * dly[1]],
+            ],
+            dtype=np.float64,
+        )
+    else:
+        raise ValueError(f"Unsupported element type {element_type!r}.")
     jac = np.array(
         [
             [coords[:, 0] @ grad_ref[:, 0], coords[:, 0] @ grad_ref[:, 1]],
@@ -389,8 +437,8 @@ def quad4_center_point_strain_stress(
     if radius <= np.finfo(np.float64).eps:
         raise ValueError(f"section sample radius {radius} is too close to zero")
 
-    b = np.zeros((4, 8), dtype=np.float64)
-    for i in range(4):
+    b = np.zeros((4, 2 * coords.shape[0]), dtype=np.float64)
+    for i in range(coords.shape[0]):
         col_r = 2 * i
         col_z = col_r + 1
         b[0, col_r] = grad_phys[i, 0]
@@ -400,7 +448,7 @@ def quad4_center_point_strain_stress(
         b[3, col_z] = grad_phys[i, 0]
 
     u_center = np.sum(n[:, None] * displacement_local, axis=0)
-    eps_center = b @ displacement_local.reshape(8)
+    eps_center = b @ displacement_local.reshape(-1)
     sig_center = material @ eps_center
     return point, u_center, eps_center, sig_center
 
@@ -666,6 +714,7 @@ def build_section_comparisons(
     nz: int,
     displacement: np.ndarray,
     material: np.ndarray,
+    element_type: str,
     self_field: SmoothSelfField,
     source_radius: float,
     source_z: float,
@@ -693,10 +742,11 @@ def build_section_comparisons(
             conn = elements[element_index]
             coords = nodes[conn]
             displacement_local = displacement[conn]
-            point, u_center, eps_center, sig_center = quad4_center_point_strain_stress(
+            point, u_center, eps_center, sig_center = element_center_point_strain_stress(
                 coords,
                 displacement_local,
                 material,
+                element_type,
             )
             radius[i_local] = point[0]
             u_r_fe[i_local] = u_center[0]
@@ -756,6 +806,7 @@ def build_vm_stress_grids(
     nz: int,
     displacement: np.ndarray,
     material: np.ndarray,
+    element_type: str,
     self_field: SmoothSelfField,
     source_radius: float,
     source_z: float,
@@ -774,10 +825,11 @@ def build_vm_stress_grids(
             conn = elements[element_index]
             coords = nodes[conn]
             displacement_local = displacement[conn]
-            _point, _u_center, _eps_center, sig_center = quad4_center_point_strain_stress(
+            _point, _u_center, _eps_center, sig_center = element_center_point_strain_stress(
                 coords,
                 displacement_local,
                 material,
+                element_type,
             )
             vm_fem[row, col] = von_mises_stress(sig_center[0], sig_center[1], sig_center[2], sig_center[3])
 
@@ -806,6 +858,7 @@ def solve_case(
     width: float,
     height: float,
     quadrature: str,
+    element_type: str,
     fem_resolution: float,
     material_model: str,
     iso_youngs_modulus_gpa: float,
@@ -826,8 +879,10 @@ def solve_case(
 ) -> CaseResult:
     width = normalize_float(width, WIDTH_RANGE)
     height = normalize_float(height, HEIGHT_RANGE)
-    if quadrature not in {"2x2", "3x3"}:
+    if quadrature not in {"3x3", "4x4"}:
         raise ValueError(f"Unsupported quadrature {quadrature!r}.")
+    if element_type not in {"quad4", "quad9"}:
+        raise ValueError(f"Unsupported element type {element_type!r}.")
     fem_resolution = normalize_float(fem_resolution, FEM_SPATIAL_RESOLUTION_RANGE_MM)
     if material_model not in {"isotropic", "orthotropic"}:
         raise ValueError(f"Unsupported material model {material_model!r}.")
@@ -857,6 +912,13 @@ def solve_case(
 
     nr, nz = choose_mesh_counts(width, height, 1.0e-3 * fem_resolution)
     nodes, elements, radii, zs = build_annulus_strip_mesh(ri, ro, height, nr, nz)
+    if element_type == "quad9":
+        elevated_mesh = infer_quad9_mesh(nodes, elements)
+        analysis_nodes = elevated_mesh.analysis_nodes
+        analysis_elements = elevated_mesh.analysis_elements
+    else:
+        analysis_nodes = nodes
+        analysis_elements = elements
     elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
     elem_z_centers = 0.5 * (zs[:-1] + zs[1:])
     self_field = build_smooth_self_field(elem_r_centers, elem_z_centers, current_density)
@@ -902,7 +964,12 @@ def solve_case(
     material_table = np.asarray([material], dtype=np.float64)
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
 
-    quadrature_data = element_quadrature_axisymmetric(nodes, elements, quadrature=quadrature)
+    quadrature_data = element_quadrature_axisymmetric(
+        nodes,
+        elements,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
     quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
     br_loop_q, bz_loop_q = sample_loop_field(
         quadrature_points[:, 0],
@@ -927,7 +994,12 @@ def solve_case(
     axial_body_force = -current_density * br_mean if include_axial_body_force else np.zeros_like(br_mean)
     body_force = np.column_stack((current_density * bz_mean, axial_body_force))
 
-    measures = element_measures_axisymmetric(nodes, elements, quadrature=quadrature)
+    measures = element_measures_axisymmetric(
+        nodes,
+        elements,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
     net_body_force_z = float(np.sum(body_force[:, 1] * measures.swept_volumes))
     top_area = np.pi * (ro**2 - ri**2)
     pressure_top = net_body_force_z / (2.0 * top_area) if balance_axial_load else 0.0
@@ -954,23 +1026,27 @@ def solve_case(
         pressure_faces=pressure_faces,
         pressure_values=pressure_values,
         quadrature=quadrature,
+        element_type=element_type,
     )
     stiffness = assembly.to_csr()
     reduced = apply_dirichlet(stiffness, assembly.rhs, prescribed={1: 0.0})
-    displacement = reduced.recover(factorized(reduced.matrix.tocsc())(reduced.rhs)).reshape(nodes.shape[0], 2)
+    displacement = reduced.recover(factorized(reduced.matrix.tocsc())(reduced.rhs)).reshape(
+        analysis_nodes.shape[0], 2
+    )
 
     body_force_r = body_force[:, 0].reshape(nz, nr)
     body_force_z = body_force[:, 1].reshape(nz, nr)
     outline_r, outline_z = solenoid_outline(ri, ro, z_min, z_max)
     sections = build_section_comparisons(
-        nodes=nodes,
-        elements=elements,
+        nodes=analysis_nodes,
+        elements=analysis_elements,
         radii=radii,
         zs=zs,
         nr=nr,
         nz=nz,
         displacement=displacement,
         material=material,
+        element_type=element_type,
         self_field=self_field,
         source_radius=source_radius,
         source_z=source_z,
@@ -981,14 +1057,15 @@ def solve_case(
         reference_poisson_ratio=reference_poisson_ratio,
     )
     vm_stress_fem, vm_stress_1d = build_vm_stress_grids(
-        nodes=nodes,
-        elements=elements,
+        nodes=analysis_nodes,
+        elements=analysis_elements,
         radii=radii,
         zs=zs,
         nr=nr,
         nz=nz,
         displacement=displacement,
         material=material,
+        element_type=element_type,
         self_field=self_field,
         source_radius=source_radius,
         source_z=source_z,
@@ -1012,6 +1089,7 @@ def solve_case(
         width=width,
         height=height,
         quadrature=quadrature,
+        element_type=element_type,
         fem_resolution=fem_resolution,
         material_model=material_model,
         fem_material_label=fem_material_label,
@@ -1409,6 +1487,7 @@ def build_summary(case: CaseResult) -> str:
     section_text = ", ".join(f"{section.label}: z={section.z_value:.3f} m" for section in case.sections)
     return (
         f"Mesh {case.nr}x{case.nz} ({case.ndof} dof, K nnz={case.stiffness_nnz}) | "
+        f"element={case.element_type} | "
         f"quadrature={case.quadrature} | "
         f"target cell size={case.fem_resolution:.1f} mm | "
         f"{case.fem_material_label} | "
@@ -1504,14 +1583,31 @@ def create_app():
                     html.Div(
                         [
                             html.P(
+                                "FEM element type",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Dropdown(
+                                id="fem-element-type",
+                                options=[
+                                    {"label": "Quad4 bilinear", "value": "quad4"},
+                                    {"label": "Quad9 inferred quadratic", "value": "quad9"},
+                                ],
+                                value=DEFAULT_ELEMENT_TYPE,
+                                clearable=False,
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
                                 "FEM quadrature",
                                 style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
                             ),
                             dcc.Dropdown(
                                 id="fem-quadrature",
                                 options=[
-                                    {"label": "2x2 Gauss", "value": "2x2"},
                                     {"label": "3x3 Gauss", "value": "3x3"},
+                                    {"label": "4x4 Gauss", "value": "4x4"},
                                 ],
                                 value=DEFAULT_QUADRATURE,
                                 clearable=False,
@@ -1916,6 +2012,7 @@ def create_app():
         Input("solenoid-width", "value"),
         Input("solenoid-height", "value"),
         Input("fem-quadrature", "value"),
+        Input("fem-element-type", "value"),
         Input("fem-resolution", "value"),
         Input("material-model", "value"),
         Input("iso-youngs-modulus", "value"),
@@ -1938,6 +2035,7 @@ def create_app():
         width: float,
         height: float,
         quadrature: str,
+        element_type: str,
         fem_resolution: float,
         material_model: str,
         iso_youngs_modulus: float,
@@ -1961,6 +2059,7 @@ def create_app():
                 width,
                 height,
                 quadrature,
+                element_type,
                 fem_resolution,
                 material_model,
                 iso_youngs_modulus,
@@ -2122,6 +2221,7 @@ def main() -> None:
         DEFAULT_WIDTH,
         DEFAULT_HEIGHT,
         DEFAULT_QUADRATURE,
+        DEFAULT_ELEMENT_TYPE,
         DEFAULT_FEM_SPATIAL_RESOLUTION_MM,
         DEFAULT_MATERIAL_MODEL,
         DEFAULT_ISO_YOUNGS_MODULUS_GPA,

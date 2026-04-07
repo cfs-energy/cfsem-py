@@ -61,6 +61,7 @@ _element_quadrature_axisymmetric_quad4_f32 = solenoid_stress_fem_element_quadrat
 _element_quadrature_axisymmetric_quad4_f64 = solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64
 
 ArrayLike = npt.ArrayLike
+ElementType = str
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,19 @@ class ElementQuadrature:
 
 
 @dataclass(frozen=True, slots=True)
+class ElevatedQuad9Mesh:
+    """Explicit 9-node analysis mesh inferred from a corner-only quad mesh."""
+
+    input_nodes: npt.NDArray[np.floating[Any]]
+    input_elements: npt.NDArray[np.uint64]
+    analysis_nodes: npt.NDArray[np.floating[Any]]
+    analysis_elements: npt.NDArray[np.uint64]
+    corner_node_indices: npt.NDArray[np.int64]
+    midside_node_indices: npt.NDArray[np.int64]
+    center_node_indices: npt.NDArray[np.int64]
+
+
+@dataclass(frozen=True, slots=True)
 class ReducedSystem:
     """Linear system after eliminating prescribed Dirichlet dofs."""
 
@@ -131,6 +145,9 @@ class AxisymmetricFEMModel:
     body_force_to_rhs: sp.csr_matrix
     pressure_to_rhs: sp.csr_matrix
     pressure_faces: npt.NDArray[np.uint64]
+    analysis_nodes: npt.NDArray[np.floating[Any]]
+    analysis_elements: npt.NDArray[np.uint64]
+    element_type: str
     ndof: int
     nelem: int
     dtype: np.dtype[Any]
@@ -167,6 +184,9 @@ class AxisymmetricFEMModel:
             pressure_to_rhs=self.pressure_to_rhs[reduced.free_dofs].tocsr(),
             constant_rhs=reduced.rhs,
             pressure_faces=self.pressure_faces,
+            analysis_nodes=self.analysis_nodes,
+            analysis_elements=self.analysis_elements,
+            element_type=self.element_type,
             free_dofs=reduced.free_dofs,
             fixed_dofs=reduced.fixed_dofs,
             fixed_values=reduced.fixed_values,
@@ -204,6 +224,9 @@ class ReducedAxisymmetricFEMModel:
     pressure_to_rhs: sp.csr_matrix
     constant_rhs: npt.NDArray[np.floating[Any]]
     pressure_faces: npt.NDArray[np.uint64]
+    analysis_nodes: npt.NDArray[np.floating[Any]]
+    analysis_elements: npt.NDArray[np.uint64]
+    element_type: str
     free_dofs: npt.NDArray[np.int64]
     fixed_dofs: npt.NDArray[np.int64]
     fixed_values: npt.NDArray[np.floating[Any]]
@@ -284,11 +307,24 @@ class QuadratureFieldSamples:
 
 
 def _quadrature_code(quadrature: str | int) -> int:
-    if quadrature in (2, "2", "2x2", "gauss2x2", "Gauss2x2"):
-        return 2
     if quadrature in (3, "3", "3x3", "gauss3x3", "Gauss3x3"):
         return 3
-    raise ValueError(f"unsupported quadrature {quadrature!r}; use '2x2' or '3x3'")
+    if quadrature in (4, "4", "4x4", "gauss4x4", "Gauss4x4"):
+        return 4
+    raise ValueError(f"unsupported quadrature {quadrature!r}; use '3x3' or '4x4'")
+
+
+def _normalize_element_type(element_type: str) -> str:
+    normalized = str(element_type).strip().lower()
+    if normalized not in {"quad4", "quad9"}:
+        raise ValueError(f"unsupported element_type {element_type!r}; use 'quad4' or 'quad9'")
+    return normalized
+
+
+def _validate_element_quadrature_combo(element_type: str, quadrature_code: int) -> None:
+    if quadrature_code not in {3, 4}:
+        raise ValueError(f"unsupported quadrature code {quadrature_code}; use 3 or 4")
+    _normalize_element_type(element_type)
 
 
 def _resolve_float_dtype(*values: object) -> np.dtype[np.float32] | np.dtype[np.float64]:
@@ -311,6 +347,73 @@ def _normalize_elements(elements: ArrayLike) -> npt.NDArray[np.uint64]:
     if arr.ndim != 2 or arr.shape[1] != 4:
         raise ValueError(f"elements must have shape (nelem, 4); got {arr.shape}")
     return np.ascontiguousarray(arr)
+
+
+def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh:
+    """Elevate a corner-only quad mesh to an explicit 9-node Lagrange mesh."""
+
+    dtype = _resolve_float_dtype(nodes)
+    nodes_arr = _normalize_nodes(nodes, dtype)
+    elements_arr = _normalize_elements(elements)
+    node_list = [nodes_arr[i].copy() for i in range(nodes_arr.shape[0])]
+    analysis_elements = np.zeros((elements_arr.shape[0], 9), dtype=np.uint64)
+    analysis_elements[:, :4] = elements_arr
+
+    edge_to_midpoint: dict[tuple[int, int], int] = {}
+    midside_indices: list[int] = []
+    center_indices = np.zeros((elements_arr.shape[0],), dtype=np.int64)
+    next_node_index = nodes_arr.shape[0]
+
+    midside_parametric_points = ((0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0))
+    edge_nodes = ((0, 1), (1, 2), (2, 3), (3, 0))
+
+    for element_index, conn in enumerate(elements_arr):
+        coords = nodes_arr[conn]
+        for local_edge, ((local_a, local_b), (xi, eta)) in enumerate(
+            zip(edge_nodes, midside_parametric_points, strict=True)
+        ):
+            edge_key = tuple(sorted((int(conn[local_a]), int(conn[local_b]))))
+            midpoint_index = edge_to_midpoint.get(edge_key)
+            if midpoint_index is None:
+                midpoint = (_quad4_shape(xi, eta).astype(dtype, copy=False) @ coords).astype(
+                    dtype,
+                    copy=False,
+                )
+                midpoint_index = next_node_index
+                next_node_index += 1
+                edge_to_midpoint[edge_key] = midpoint_index
+                midside_indices.append(midpoint_index)
+                node_list.append(np.asarray(midpoint, dtype=dtype))
+            analysis_elements[element_index, 4 + local_edge] = midpoint_index
+
+        center = (_quad4_shape(0.0, 0.0).astype(dtype, copy=False) @ coords).astype(dtype, copy=False)
+        center_index = next_node_index
+        next_node_index += 1
+        node_list.append(np.asarray(center, dtype=dtype))
+        center_indices[element_index] = center_index
+        analysis_elements[element_index, 8] = center_index
+
+    return ElevatedQuad9Mesh(
+        input_nodes=nodes_arr,
+        input_elements=elements_arr,
+        analysis_nodes=np.asarray(node_list, dtype=dtype),
+        analysis_elements=analysis_elements,
+        corner_node_indices=np.arange(nodes_arr.shape[0], dtype=np.int64),
+        midside_node_indices=np.asarray(midside_indices, dtype=np.int64),
+        center_node_indices=center_indices,
+    )
+
+
+def _analysis_mesh_for_element_type(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    element_type: str,
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.uint64], ElevatedQuad9Mesh | None]:
+    normalized_type = _normalize_element_type(element_type)
+    if normalized_type == "quad4":
+        return nodes, elements, None
+    elevated = infer_quad9_mesh(nodes, elements)
+    return elevated.analysis_nodes, elevated.analysis_elements, elevated
 
 
 def _normalize_materials(
@@ -419,7 +522,7 @@ def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     return f64
 
 
-def _quad4_jacobian(
+def _element_jacobian(
     coords: npt.NDArray[np.floating[Any]],
     grad_ref: npt.NDArray[np.floating[Any]],
     dtype: np.dtype[Any],
@@ -433,7 +536,7 @@ def _quad4_jacobian(
     )
 
 
-def _quad4_face_reference(local_face: int, s: float) -> tuple[float, float, tuple[float, float]]:
+def _quad_face_reference(local_face: int, s: float) -> tuple[float, float, tuple[float, float]]:
     if local_face == 0:
         return s, -1.0, (1.0, 0.0)
     if local_face == 1:
@@ -445,15 +548,236 @@ def _quad4_face_reference(local_face: int, s: float) -> tuple[float, float, tupl
     raise ValueError(f"invalid local face {local_face}; expected 0, 1, 2, or 3")
 
 
+def _q2_lagrange_1d(x: float) -> npt.NDArray[np.float64]:
+    return np.array([0.5 * x * (x - 1.0), 1.0 - x * x, 0.5 * x * (x + 1.0)], dtype=np.float64)
+
+
+def _q2_lagrange_grad_1d(x: float) -> npt.NDArray[np.float64]:
+    return np.array([x - 0.5, -2.0 * x, x + 0.5], dtype=np.float64)
+
+
+def _quad9_shape(xi: float, eta: float) -> npt.NDArray[np.float64]:
+    lx = _q2_lagrange_1d(xi)
+    ly = _q2_lagrange_1d(eta)
+    return np.array(
+        [
+            lx[0] * ly[0],
+            lx[2] * ly[0],
+            lx[2] * ly[2],
+            lx[0] * ly[2],
+            lx[1] * ly[0],
+            lx[2] * ly[1],
+            lx[1] * ly[2],
+            lx[0] * ly[1],
+            lx[1] * ly[1],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _quad9_grad_ref(xi: float, eta: float) -> npt.NDArray[np.float64]:
+    lx = _q2_lagrange_1d(xi)
+    ly = _q2_lagrange_1d(eta)
+    dlx = _q2_lagrange_grad_1d(xi)
+    dly = _q2_lagrange_grad_1d(eta)
+    return np.array(
+        [
+            [dlx[0] * ly[0], lx[0] * dly[0]],
+            [dlx[2] * ly[0], lx[2] * dly[0]],
+            [dlx[2] * ly[2], lx[2] * dly[2]],
+            [dlx[0] * ly[2], lx[0] * dly[2]],
+            [dlx[1] * ly[0], lx[1] * dly[0]],
+            [dlx[2] * ly[1], lx[2] * dly[1]],
+            [dlx[1] * ly[2], lx[1] * dly[2]],
+            [dlx[0] * ly[1], lx[0] * dly[1]],
+            [dlx[1] * ly[1], lx[1] * dly[1]],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _element_shape(element_type: str, xi: float, eta: float) -> npt.NDArray[np.float64]:
+    normalized_type = _normalize_element_type(element_type)
+    if normalized_type == "quad4":
+        return _quad4_shape(xi, eta)
+    return _quad9_shape(xi, eta)
+
+
+def _element_grad_ref(element_type: str, xi: float, eta: float) -> npt.NDArray[np.float64]:
+    normalized_type = _normalize_element_type(element_type)
+    if normalized_type == "quad4":
+        return _quad4_grad_ref(xi, eta)
+    return _quad9_grad_ref(xi, eta)
+
+
+def _axisymmetric_b_matrix(
+    n: npt.NDArray[np.floating[Any]],
+    grad_phys: npt.NDArray[np.floating[Any]],
+    radius: float,
+    dtype: np.dtype[Any],
+) -> npt.NDArray[np.floating[Any]]:
+    if radius <= np.finfo(dtype).eps:
+        raise ValueError(f"quadrature radius {radius} is too close to zero")
+    nnodes = int(n.shape[0])
+    b = np.zeros((4, 2 * nnodes), dtype=dtype)
+    for i in range(nnodes):
+        col_r = 2 * i
+        col_z = col_r + 1
+        b[0, col_r] = grad_phys[i, 0]
+        b[1, col_z] = grad_phys[i, 1]
+        b[2, col_r] = n[i] / dtype.type(radius)
+        b[3, col_r] = grad_phys[i, 1]
+        b[3, col_z] = grad_phys[i, 0]
+    return b
+
+
+def _volume_samples(
+    coords: npt.NDArray[np.floating[Any]],
+    element_type: str,
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+):
+    for xi, wx in _gauss_1d(quadrature_code):
+        for eta, wy in _gauss_1d(quadrature_code):
+            n = _element_shape(element_type, xi, eta).astype(dtype, copy=False)
+            grad_ref = _element_grad_ref(element_type, xi, eta).astype(dtype, copy=False)
+            jac = _element_jacobian(coords, grad_ref, dtype)
+            det_j = jac[0, 0] * jac[1, 1] - jac[0, 1] * jac[1, 0]
+            if det_j <= 0.0:
+                raise ValueError(f"encountered non-positive element Jacobian determinant {float(det_j)!r}")
+            point = n @ coords
+            if point[0] < 0.0:
+                raise ValueError(f"quadrature point has negative radius {float(point[0])!r}")
+            inv_j = np.linalg.inv(jac)
+            grad_phys = np.column_stack(
+                [
+                    inv_j[0, 0] * grad_ref[:, 0] + inv_j[1, 0] * grad_ref[:, 1],
+                    inv_j[0, 1] * grad_ref[:, 0] + inv_j[1, 1] * grad_ref[:, 1],
+                ]
+            )
+            yield n, grad_phys, det_j, np.asarray(point, dtype=dtype), dtype.type(wx * wy)
+
+
+def _face_samples(
+    coords: npt.NDArray[np.floating[Any]],
+    element_type: str,
+    local_face: int,
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+):
+    for s, weight in _gauss_1d(quadrature_code):
+        xi, eta, ds_reference = _quad_face_reference(local_face, s)
+        n = _element_shape(element_type, xi, eta).astype(dtype, copy=False)
+        grad_ref = _element_grad_ref(element_type, xi, eta).astype(dtype, copy=False)
+        jac = _element_jacobian(coords, grad_ref, dtype)
+        point = n @ coords
+        if point[0] < 0.0:
+            raise ValueError(f"face quadrature point has negative radius {float(point[0])!r}")
+        tangent = np.array(
+            [
+                jac[0, 0] * ds_reference[0] + jac[0, 1] * ds_reference[1],
+                jac[1, 0] * ds_reference[0] + jac[1, 1] * ds_reference[1],
+            ],
+            dtype=dtype,
+        )
+        tangent_norm_sq = tangent[0] * tangent[0] + tangent[1] * tangent[1]
+        if tangent_norm_sq <= 0.0:
+            raise ValueError(
+                f"degenerate face tangent on local face {local_face}; "
+                f"tangent squared norm is {float(tangent_norm_sq)!r}"
+            )
+        yield n, tangent, np.asarray(point, dtype=dtype), dtype.type(weight)
+
+
+def _assemble_axisymmetric_python(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    material_ids: npt.NDArray[np.uint64],
+    material_table: npt.NDArray[np.floating[Any]],
+    body_force: npt.NDArray[np.floating[Any]],
+    pressure_faces: npt.NDArray[np.uint64],
+    pressure_values: npt.NDArray[np.floating[Any]],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> AssemblyResult:
+    nelem = elements.shape[0]
+    ndof = nodes.shape[0] * 2
+    nnodes_per_element = elements.shape[1]
+    dof_per_element = 2 * nnodes_per_element
+    rows: list[int] = []
+    cols: list[int] = []
+    vals: list[Any] = []
+    rhs = np.zeros((ndof,), dtype=dtype)
+    two_pi = dtype.type(2.0 * np.pi)
+
+    for element_index, conn in enumerate(elements):
+        coords = nodes[conn]
+        material = material_table[int(material_ids[element_index])]
+        ke = np.zeros((dof_per_element, dof_per_element), dtype=dtype)
+        fe = np.zeros((dof_per_element,), dtype=dtype)
+        for n, grad_phys, det_j, point, weight in _volume_samples(
+            coords, element_type, quadrature_code, dtype
+        ):
+            b = _axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype)
+            scale = two_pi * point[0] * det_j * weight
+            ke += scale * (b.T @ material @ b)
+            for local_node in range(nnodes_per_element):
+                fe[2 * local_node] += scale * n[local_node] * body_force[element_index, 0]
+                fe[2 * local_node + 1] += scale * n[local_node] * body_force[element_index, 1]
+
+        local_dofs = np.empty((dof_per_element,), dtype=np.int64)
+        for local_node, global_node in enumerate(conn):
+            local_dofs[2 * local_node] = 2 * int(global_node)
+            local_dofs[2 * local_node + 1] = 2 * int(global_node) + 1
+        rhs[local_dofs] += fe
+        for row_local, row_dof in enumerate(local_dofs):
+            for col_local, col_dof in enumerate(local_dofs):
+                rows.append(int(row_dof))
+                cols.append(int(col_dof))
+                vals.append(ke[row_local, col_local])
+
+    for load_index, (element_index_u64, local_face_u64) in enumerate(pressure_faces):
+        element_index = int(element_index_u64)
+        if element_index < 0 or element_index >= nelem:
+            raise ValueError(
+                f"pressure_faces references element {element_index}, "
+                f"but mesh has {elements.shape[0]} elements"
+            )
+        local_face = int(local_face_u64)
+        conn = elements[element_index]
+        coords = nodes[conn]
+        fe = np.zeros((dof_per_element,), dtype=dtype)
+        for n, tangent, point, weight in _face_samples(
+            coords, element_type, local_face, quadrature_code, dtype
+        ):
+            normal_area = np.array([tangent[1], -tangent[0]], dtype=dtype)
+            scale = -pressure_values[load_index] * two_pi * point[0] * weight
+            for local_node in range(nnodes_per_element):
+                fe[2 * local_node] += scale * n[local_node] * normal_area[0]
+                fe[2 * local_node + 1] += scale * n[local_node] * normal_area[1]
+        for local_node, global_node in enumerate(conn):
+            rhs[2 * int(global_node)] += fe[2 * local_node]
+            rhs[2 * int(global_node) + 1] += fe[2 * local_node + 1]
+
+    return AssemblyResult(
+        rows=np.asarray(rows, dtype=np.int64),
+        cols=np.asarray(cols, dtype=np.int64),
+        vals=np.asarray(vals, dtype=dtype),
+        rhs=rhs,
+        ndof=ndof,
+    )
+
+
 def _assemble_body_force_operator(
     nodes: npt.NDArray[np.floating[Any]],
     elements: npt.NDArray[np.uint64],
     quadrature_code: int,
     dtype: np.dtype[Any],
+    element_type: str,
 ) -> sp.csr_matrix:
     nelem = elements.shape[0]
     ndof = nodes.shape[0] * 2
-    q1d = _gauss_1d(quadrature_code)
     rows: list[int] = []
     cols: list[int] = []
     vals: list[Any] = []
@@ -461,22 +785,11 @@ def _assemble_body_force_operator(
 
     for element_index, conn in enumerate(elements):
         coords = nodes[conn]
-        nodal_weights = np.zeros((4,), dtype=dtype)
-        for xi, wx in q1d:
-            for eta, wy in q1d:
-                n = _quad4_shape(xi, eta).astype(dtype, copy=False)
-                grad_ref = _quad4_grad_ref(xi, eta).astype(dtype, copy=False)
-                jac = _quad4_jacobian(coords, grad_ref, dtype)
-                det_j = jac[0, 0] * jac[1, 1] - jac[0, 1] * jac[1, 0]
-                if det_j <= 0.0:
-                    raise ValueError(
-                        f"encountered non-positive element Jacobian determinant {float(det_j)!r}"
-                    )
-                point = n @ coords
-                if point[0] < 0.0:
-                    raise ValueError(f"quadrature point has negative radius {float(point[0])!r}")
-                scale = two_pi * point[0] * det_j * dtype.type(wx * wy)
-                nodal_weights += scale * n
+        nodal_weights = np.zeros((conn.shape[0],), dtype=dtype)
+        for n, _grad_phys, det_j, point, weight in _volume_samples(
+            coords, element_type, quadrature_code, dtype
+        ):
+            nodal_weights += two_pi * point[0] * det_j * weight * n
         body_col = 2 * element_index
         for local_node, global_node in enumerate(conn):
             weight = nodal_weights[local_node]
@@ -496,13 +809,13 @@ def _assemble_pressure_operator(
     pressure_faces: npt.NDArray[np.uint64],
     quadrature_code: int,
     dtype: np.dtype[Any],
+    element_type: str,
 ) -> sp.csr_matrix:
     ndof = nodes.shape[0] * 2
     nload = pressure_faces.shape[0]
     if nload == 0:
         return sp.csr_matrix((ndof, 0), dtype=dtype)
 
-    q1d = _gauss_1d(quadrature_code)
     rows: list[int] = []
     cols: list[int] = []
     vals: list[Any] = []
@@ -518,35 +831,15 @@ def _assemble_pressure_operator(
         local_face = int(local_face_u64)
         conn = elements[element_index]
         coords = nodes[conn]
-        local_load = np.zeros((8,), dtype=dtype)
-
-        for s, weight in q1d:
-            xi, eta, ds_reference = _quad4_face_reference(local_face, s)
-            n = _quad4_shape(xi, eta).astype(dtype, copy=False)
-            grad_ref = _quad4_grad_ref(xi, eta).astype(dtype, copy=False)
-            jac = _quad4_jacobian(coords, grad_ref, dtype)
-            point = n @ coords
-            if point[0] < 0.0:
-                raise ValueError(f"face quadrature point has negative radius {float(point[0])!r}")
-            tangent = np.array(
-                [
-                    jac[0, 0] * ds_reference[0] + jac[0, 1] * ds_reference[1],
-                    jac[1, 0] * ds_reference[0] + jac[1, 1] * ds_reference[1],
-                ],
-                dtype=dtype,
-            )
-            tangent_norm_sq = tangent[0] * tangent[0] + tangent[1] * tangent[1]
-            if tangent_norm_sq <= 0.0:
-                raise ValueError(
-                    f"degenerate face tangent on local face {local_face}; "
-                    f"tangent squared norm is {float(tangent_norm_sq)!r}"
-                )
+        local_load = np.zeros((2 * conn.shape[0],), dtype=dtype)
+        for n, tangent, point, weight in _face_samples(
+            coords, element_type, local_face, quadrature_code, dtype
+        ):
             normal_area = np.array([tangent[1], -tangent[0]], dtype=dtype)
-            scale = -two_pi * point[0] * dtype.type(weight)
-            for local_node in range(4):
+            scale = -two_pi * point[0] * weight
+            for local_node in range(conn.shape[0]):
                 local_load[2 * local_node] += scale * n[local_node] * normal_area[0]
                 local_load[2 * local_node + 1] += scale * n[local_node] * normal_area[1]
-
         for local_node, global_node in enumerate(conn):
             rows.extend((2 * int(global_node), 2 * int(global_node) + 1))
             cols.extend((load_index, load_index))
@@ -556,8 +849,6 @@ def _assemble_pressure_operator(
         (np.asarray(vals, dtype=dtype), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))),
         shape=(ndof, nload),
     ).tocsr()
-
-
 def assemble_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
@@ -566,7 +857,8 @@ def assemble_axisymmetric(
     body_force: ArrayLike,
     pressure_faces: ArrayLike | None = None,
     pressure_values: ArrayLike | None = None,
-    quadrature: str | int = "2x2",
+    quadrature: str | int = "3x3",
+    element_type: str = "quad4",
 ) -> AssemblyResult:
     """
     Assemble the global axisymmetric elasticity system in COO form.
@@ -589,23 +881,41 @@ def assemble_axisymmetric(
         pressure_faces, pressure_values, dtype
     )
     quadrature_code = _quadrature_code(quadrature)
-    low_level = _dispatch_pair(dtype, _assemble_axisymmetric_quad4_f32, _assemble_axisymmetric_quad4_f64)
-    rows, cols, vals, rhs, ndof = low_level(
-        nodes_arr,
-        elements_arr,
+    normalized_element_type = _normalize_element_type(element_type)
+    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
+    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+        nodes_arr, elements_arr, normalized_element_type
+    )
+    if normalized_element_type == "quad4" and quadrature_code == 3:
+        low_level = _dispatch_pair(dtype, _assemble_axisymmetric_quad4_f32, _assemble_axisymmetric_quad4_f64)
+        rows, cols, vals, rhs, ndof = low_level(
+            analysis_nodes,
+            analysis_elements[:, :4],
+            material_ids_arr,
+            material_table_arr,
+            body_force_arr,
+            pressure_faces_arr,
+            pressure_values_arr,
+            quadrature_code,
+        )
+        return AssemblyResult(
+            rows=np.asarray(rows, dtype=np.int64),
+            cols=np.asarray(cols, dtype=np.int64),
+            vals=np.asarray(vals, dtype=dtype),
+            rhs=np.asarray(rhs, dtype=dtype),
+            ndof=int(ndof),
+        )
+    return _assemble_axisymmetric_python(
+        analysis_nodes,
+        analysis_elements,
         material_ids_arr,
         material_table_arr,
         body_force_arr,
         pressure_faces_arr,
         pressure_values_arr,
         quadrature_code,
-    )
-    return AssemblyResult(
-        rows=np.asarray(rows, dtype=np.int64),
-        cols=np.asarray(cols, dtype=np.int64),
-        vals=np.asarray(vals, dtype=dtype),
-        rhs=np.asarray(rhs, dtype=dtype),
-        ndof=int(ndof),
+        dtype,
+        normalized_element_type,
     )
 
 
@@ -615,7 +925,8 @@ def assemble_axisymmetric_model(
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
     pressure_faces: ArrayLike | None = None,
-    quadrature: str | int = "2x2",
+    quadrature: str | int = "3x3",
+    element_type: str = "quad4",
 ) -> AxisymmetricFEMModel:
     """
     Assemble a reusable axisymmetric FEM model for repeated load cases.
@@ -641,19 +952,32 @@ def assemble_axisymmetric_model(
         pressure_faces=None,
         pressure_values=None,
         quadrature=quadrature,
+        element_type=element_type,
     )
     stiffness = stiffness_assembly.to_csr()
     dtype = np.dtype(stiffness.dtype)
     nodes_arr = _normalize_nodes(nodes, dtype)
     pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
     quadrature_code = _quadrature_code(quadrature)
-    body_force_to_rhs = _assemble_body_force_operator(nodes_arr, elements_arr, quadrature_code, dtype)
+    normalized_element_type = _normalize_element_type(element_type)
+    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
+    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+        nodes_arr, elements_arr, normalized_element_type
+    )
+    body_force_to_rhs = _assemble_body_force_operator(
+        analysis_nodes,
+        analysis_elements,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
     pressure_to_rhs = _assemble_pressure_operator(
-        nodes_arr,
-        elements_arr,
+        analysis_nodes,
+        analysis_elements,
         pressure_faces_arr,
         quadrature_code,
         dtype,
+        normalized_element_type,
     )
 
     return AxisymmetricFEMModel(
@@ -661,6 +985,9 @@ def assemble_axisymmetric_model(
         body_force_to_rhs=body_force_to_rhs,
         pressure_to_rhs=pressure_to_rhs,
         pressure_faces=pressure_faces_arr,
+        analysis_nodes=analysis_nodes,
+        analysis_elements=analysis_elements,
+        element_type=normalized_element_type,
         ndof=stiffness_assembly.ndof,
         nelem=elements_arr.shape[0],
         dtype=dtype,
@@ -670,19 +997,38 @@ def assemble_axisymmetric_model(
 def element_measures_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
-    quadrature: str | int = "2x2",
+    quadrature: str | int = "3x3",
+    element_type: str = "quad4",
 ) -> ElementMeasures:
     """Return per-element meridian areas and swept axisymmetric volumes."""
 
     dtype = _resolve_float_dtype(nodes)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
-    low_level = _dispatch_pair(
-        dtype,
-        _element_measures_axisymmetric_quad4_f32,
-        _element_measures_axisymmetric_quad4_f64,
+    quadrature_code = _quadrature_code(quadrature)
+    normalized_element_type = _normalize_element_type(element_type)
+    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
+    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+        nodes_arr, elements_arr, normalized_element_type
     )
-    areas, swept_volumes = low_level(nodes_arr, elements_arr, _quadrature_code(quadrature))
+    if normalized_element_type == "quad4" and quadrature_code == 3:
+        low_level = _dispatch_pair(
+            dtype,
+            _element_measures_axisymmetric_quad4_f32,
+            _element_measures_axisymmetric_quad4_f64,
+        )
+        areas, swept_volumes = low_level(analysis_nodes, analysis_elements[:, :4], quadrature_code)
+    else:
+        areas = np.zeros((analysis_elements.shape[0],), dtype=dtype)
+        swept_volumes = np.zeros((analysis_elements.shape[0],), dtype=dtype)
+        two_pi = dtype.type(2.0 * np.pi)
+        for element_index, conn in enumerate(analysis_elements):
+            coords = analysis_nodes[conn]
+            for _n, _grad_phys, det_j, point, weight in _volume_samples(
+                coords, normalized_element_type, quadrature_code, dtype
+            ):
+                areas[element_index] += det_j * weight
+                swept_volumes[element_index] += two_pi * point[0] * det_j * weight
     return ElementMeasures(
         areas=np.asarray(areas, dtype=dtype),
         swept_volumes=np.asarray(swept_volumes, dtype=dtype),
@@ -692,28 +1038,55 @@ def element_measures_axisymmetric(
 def element_quadrature_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
-    quadrature: str | int = "2x2",
+    quadrature: str | int = "3x3",
+    element_type: str = "quad4",
 ) -> ElementQuadrature:
     """Return physical quadrature points and mapped area/volume weights per element."""
 
     dtype = _resolve_float_dtype(nodes)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
-    low_level = _dispatch_pair(
-        dtype,
-        _element_quadrature_axisymmetric_quad4_f32,
-        _element_quadrature_axisymmetric_quad4_f64,
+    quadrature_code = _quadrature_code(quadrature)
+    normalized_element_type = _normalize_element_type(element_type)
+    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
+    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+        nodes_arr, elements_arr, normalized_element_type
     )
-    points_flat, weights_area, weights_volume, nq_per_element = low_level(
-        nodes_arr,
-        elements_arr,
-        _quadrature_code(quadrature),
-    )
-    nelem = elements_arr.shape[0]
+    if normalized_element_type == "quad4" and quadrature_code == 3:
+        low_level = _dispatch_pair(
+            dtype,
+            _element_quadrature_axisymmetric_quad4_f32,
+            _element_quadrature_axisymmetric_quad4_f64,
+        )
+        points_flat, weights_area, weights_volume, nq_per_element = low_level(
+            analysis_nodes,
+            analysis_elements[:, :4],
+            quadrature_code,
+        )
+        nelem = analysis_elements.shape[0]
+        points_rz = np.asarray(points_flat, dtype=dtype).reshape(nelem, nq_per_element, 2)
+        weights_area_arr = np.asarray(weights_area, dtype=dtype).reshape(nelem, nq_per_element)
+        weights_volume_arr = np.asarray(weights_volume, dtype=dtype).reshape(nelem, nq_per_element)
+    else:
+        q1d = _gauss_1d(quadrature_code)
+        nq_per_element = len(q1d) ** 2
+        nelem = analysis_elements.shape[0]
+        points_rz = np.zeros((nelem, nq_per_element, 2), dtype=dtype)
+        weights_area_arr = np.zeros((nelem, nq_per_element), dtype=dtype)
+        weights_volume_arr = np.zeros((nelem, nq_per_element), dtype=dtype)
+        two_pi = dtype.type(2.0 * np.pi)
+        for element_index, conn in enumerate(analysis_elements):
+            coords = analysis_nodes[conn]
+            for local_q, (_n, _grad_phys, det_j, point, weight) in enumerate(
+                _volume_samples(coords, normalized_element_type, quadrature_code, dtype)
+            ):
+                points_rz[element_index, local_q] = point
+                weights_area_arr[element_index, local_q] = det_j * weight
+                weights_volume_arr[element_index, local_q] = two_pi * point[0] * det_j * weight
     return ElementQuadrature(
-        points_rz=np.asarray(points_flat, dtype=dtype).reshape(nelem, nq_per_element, 2),
-        weights_area=np.asarray(weights_area, dtype=dtype).reshape(nelem, nq_per_element),
-        weights_volume=np.asarray(weights_volume, dtype=dtype).reshape(nelem, nq_per_element),
+        points_rz=points_rz,
+        weights_area=weights_area_arr,
+        weights_volume=weights_volume_arr,
         nq_per_element=int(nq_per_element),
     )
 
@@ -829,12 +1202,15 @@ def solve_dirichlet(
 
 
 def _gauss_1d(code: int) -> list[tuple[float, float]]:
-    if code == 2:
-        a = 1.0 / np.sqrt(3.0)
-        return [(-a, 1.0), (a, 1.0)]
     if code == 3:
         a = np.sqrt(3.0 / 5.0)
         return [(-a, 5.0 / 9.0), (0.0, 8.0 / 9.0), (a, 5.0 / 9.0)]
+    if code == 4:
+        a = np.sqrt((3.0 + 2.0 * np.sqrt(6.0 / 5.0)) / 7.0)
+        b = np.sqrt((3.0 - 2.0 * np.sqrt(6.0 / 5.0)) / 7.0)
+        w_a = (18.0 - np.sqrt(30.0)) / 36.0
+        w_b = (18.0 + np.sqrt(30.0)) / 36.0
+        return [(-a, w_a), (-b, w_b), (b, w_b), (a, w_a)]
     raise ValueError(f"unsupported quadrature code {code}")
 
 
@@ -879,72 +1255,48 @@ def evaluate_axisymmetric_strain_stress_at_quadrature(
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
     displacements: ArrayLike,
-    quadrature: str | int = "2x2",
+    quadrature: str | int = "3x3",
+    element_type: str = "quad4",
 ) -> QuadratureFieldSamples:
     """
     Recover strain and stress at element quadrature points from nodal displacements.
 
-    The recovery uses the same `Quad4` shape functions, Jacobian map, and axisymmetric
-    `B` matrix used by the assembler, so the samples align directly with the discrete
-    formulation from [1]-[3].
+    The recovery uses the same family-specific shape functions, Jacobian map, and
+    axisymmetric `B` matrix used by the assembler, so the samples align directly
+    with the discrete formulation from [1]-[3].
     """
 
     dtype = _resolve_float_dtype(nodes, material_table, displacements)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
+    normalized_element_type = _normalize_element_type(element_type)
+    quadrature_code = _quadrature_code(quadrature)
+    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
+    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+        nodes_arr, elements_arr, normalized_element_type
+    )
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    displacements_arr = _normalize_displacements(displacements, nodes_arr.shape[0], dtype)
+    displacements_arr = _normalize_displacements(displacements, analysis_nodes.shape[0], dtype)
     if material_ids_arr.shape[0] != elements_arr.shape[0]:
         raise ValueError(
             f"material_ids has length {material_ids_arr.shape[0]}, "
             f"but elements has {elements_arr.shape[0]} rows"
         )
 
-    q1d = _gauss_1d(_quadrature_code(quadrature))
+    q1d = _gauss_1d(quadrature_code)
     nq = len(q1d) ** 2
-    points = np.zeros((elements_arr.shape[0], nq, 2), dtype=dtype)
-    strain = np.zeros((elements_arr.shape[0], nq, 4), dtype=dtype)
-    stress = np.zeros((elements_arr.shape[0], nq, 4), dtype=dtype)
+    points = np.zeros((analysis_elements.shape[0], nq, 2), dtype=dtype)
+    strain = np.zeros((analysis_elements.shape[0], nq, 4), dtype=dtype)
+    stress = np.zeros((analysis_elements.shape[0], nq, 4), dtype=dtype)
 
-    q_data = []
-    for xi, wx in q1d:
-        for eta, wy in q1d:
-            q_data.append((xi, eta, wx * wy))
-
-    for element_index, conn in enumerate(elements_arr):
-        coords = nodes_arr[conn]
-        u_local = displacements_arr[conn].reshape(8)
+    for element_index, conn in enumerate(analysis_elements):
+        coords = analysis_nodes[conn]
+        u_local = displacements_arr[conn].reshape(2 * conn.shape[0])
         material = material_table_arr[int(material_ids_arr[element_index])]
-        for q_local, (xi, eta, _) in enumerate(q_data):
-            n = _quad4_shape(xi, eta).astype(dtype, copy=False)
-            grad_ref = _quad4_grad_ref(xi, eta).astype(dtype, copy=False)
-            jac = np.array(
-                [
-                    [np.dot(coords[:, 0], grad_ref[:, 0]), np.dot(coords[:, 0], grad_ref[:, 1])],
-                    [np.dot(coords[:, 1], grad_ref[:, 0]), np.dot(coords[:, 1], grad_ref[:, 1])],
-                ],
-                dtype=dtype,
-            )
-            inv_j = np.linalg.inv(jac)
-            grad_phys = np.column_stack(
-                [
-                    inv_j[0, 0] * grad_ref[:, 0] + inv_j[1, 0] * grad_ref[:, 1],
-                    inv_j[0, 1] * grad_ref[:, 0] + inv_j[1, 1] * grad_ref[:, 1],
-                ]
-            )
-            point = n @ coords
-            radius = float(point[0])
-            if radius <= np.finfo(dtype).eps:
-                raise ValueError(f"quadrature radius {radius} is too close to zero")
-            b = np.zeros((4, 8), dtype=dtype)
-            for i in range(4):
-                col_r = 2 * i
-                col_z = col_r + 1
-                b[0, col_r] = grad_phys[i, 0]
-                b[1, col_z] = grad_phys[i, 1]
-                b[2, col_r] = n[i] / radius
-                b[3, col_r] = grad_phys[i, 1]
-                b[3, col_z] = grad_phys[i, 0]
+        for q_local, (n, grad_phys, _det_j, point, _weight) in enumerate(
+            _volume_samples(coords, normalized_element_type, quadrature_code, dtype)
+        ):
+            b = _axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype)
             eps_q = b @ u_local
             sig_q = material @ eps_q
             points[element_index, q_local] = point
@@ -957,6 +1309,7 @@ def evaluate_axisymmetric_strain_stress_at_quadrature(
 __all__ = [
     "AssemblyResult",
     "AxisymmetricFEMModel",
+    "ElevatedQuad9Mesh",
     "ElementMeasures",
     "ElementQuadrature",
     "QuadratureFieldSamples",
@@ -969,6 +1322,7 @@ __all__ = [
     "element_measures_axisymmetric",
     "element_quadrature_axisymmetric",
     "evaluate_axisymmetric_strain_stress_at_quadrature",
+    "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
     "solve_dirichlet",
 ]

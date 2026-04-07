@@ -57,6 +57,8 @@ CURRENT_DENSITY = 0.2 * 390.0e6  # [A/m^2]
 BZ_INNER = 27.0  # [T]
 QUADRATURE = "3x3"
 NUDGE = 1.0e-6  # [m]
+REPRESENTATIVE_DISCRETIZATION_NZ = 1
+REPRESENTATIVE_DISCRETIZATION_NR = max(3, int(round((RO - RI) / HEIGHT)))
 TARGET_DR_SWEEP_MM = np.array(
     [50.0, 25.0, 12.5, 6.25]
     if TESTING
@@ -364,8 +366,60 @@ def run_study() -> list[SweepResult]:
     return results
 
 
+def plot_discretization_panel(ax, nr: int, nz: int) -> None:
+    nodes, elements = build_annulus_strip_mesh(RI, RO, HEIGHT, nr=nr, nz=nz)
+    quadrature_data = element_quadrature_axisymmetric(nodes, elements, quadrature=QUADRATURE)
+    quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
+    fd_grid = build_1d_grid((RO - RI) / nr)[1:-1]
+    node_r = np.unique(nodes[:, 0])
+    node_z = np.unique(nodes[:, 1])
+
+    if quadrature_points.shape[0] <= 1_000:
+        quadrature_marker_size = 10.0
+    elif quadrature_points.shape[0] <= 20_000:
+        quadrature_marker_size = 4.0
+    else:
+        quadrature_marker_size = 1.5
+    fd_marker_size = 28.0 if fd_grid.size <= 200 else 10.0 if fd_grid.size <= 2_000 else 4.0
+
+    ax.vlines(node_r, node_z[0], node_z[-1], color="0.78", linewidth=0.6, alpha=0.9, label="FEM mesh")
+    ax.hlines(node_z, node_r[0], node_r[-1], color="0.78", linewidth=0.9, alpha=0.9)
+    ax.scatter(
+        quadrature_points[:, 0],
+        quadrature_points[:, 1],
+        s=quadrature_marker_size,
+        color="tab:red",
+        alpha=0.85,
+        label=f"FEM quadrature points ({QUADRATURE})",
+        rasterized=quadrature_points.shape[0] > 5_000,
+    )
+    ax.scatter(
+        fd_grid,
+        np.full_like(fd_grid, 0.5 * HEIGHT),
+        s=fd_marker_size,
+        facecolors="none",
+        edgecolors="tab:blue",
+        linewidths=0.7,
+        marker="o",
+        label="1D FD physical grid",
+        rasterized=fd_grid.size > 5_000,
+    )
+    ax.set_title(f"Representative matched-grid discretization (nr={nr}, nz={nz})")
+    ax.set_xlabel("r [m]")
+    ax.set_ylabel("z [m]")
+    ax.set_xlim(RI - 0.01 * (RO - RI), RO + 0.01 * (RO - RI))
+    ax.set_ylim(-0.05 * HEIGHT, 1.05 * HEIGHT)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(False)
+    ax.legend(loc="upper right", frameon=True)
+
+
 def build_figure(results: list[SweepResult]):
-    fig, axes = plt.subplots(2, 2, figsize=(13.5, 8.5))
+    fig = plt.figure(figsize=(14.5, 10.0))
+    grid = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 0.8])
+    profile_axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1])]
+    error_axes = [fig.add_subplot(grid[1, 0]), fig.add_subplot(grid[1, 1])]
+    discretization_ax = fig.add_subplot(grid[2, :])
     finest = results[-1]
     xconv = np.array([result.dr_mm for result in results], dtype=np.float64)
 
@@ -373,7 +427,7 @@ def build_figure(results: list[SweepResult]):
         ("s_rr", "Radial stress $s_{rr}$ [Pa]"),
         ("s_tt", "Hoop stress $s_{tt}$ [Pa]"),
     ]
-    for ax, (field_name, title) in zip(axes[0], profile_specs, strict=True):
+    for ax, (field_name, title) in zip(profile_axes, profile_specs, strict=True):
         ax.plot(
             finest.analytic_profile.radius,
             getattr(finest.analytic_profile, field_name),
@@ -406,7 +460,7 @@ def build_figure(results: list[SweepResult]):
         ("s_rr", "Max normalized error in $s_{rr}$ vs. analytic [%]"),
         ("s_tt", "Max normalized error in $s_{tt}$ vs. analytic [%]"),
     ]
-    for ax, (field_name, title) in zip(axes[1], error_specs, strict=True):
+    for ax, (field_name, title) in zip(error_axes, error_specs, strict=True):
         ax.loglog(
             xconv,
             [result.fd_errors_pct[field_name] for result in results],
@@ -428,12 +482,18 @@ def build_figure(results: list[SweepResult]):
         ax.grid(True, which="both", linestyle=":", linewidth=0.7)
         ax.invert_xaxis()
 
-    handles, labels = axes[0, 0].get_legend_handles_labels()
+    plot_discretization_panel(
+        discretization_ax,
+        REPRESENTATIVE_DISCRETIZATION_NR,
+        REPRESENTATIVE_DISCRETIZATION_NZ,
+    )
+
+    handles, labels = profile_axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="center left",
-        bbox_to_anchor=(0.83, 0.5),
+        bbox_to_anchor=(0.86, 0.70),
         ncol=1,
         frameon=True,
     )
@@ -443,7 +503,7 @@ def build_figure(results: list[SweepResult]):
         "z-DOFs fixed, radial body force only, QUAD4 + 3x3 Gauss",
         y=0.98,
     )
-    fig.tight_layout(rect=[0.0, 0.0, 0.8, 0.92])
+    fig.tight_layout(rect=[0.0, 0.0, 0.86, 0.94])
     return fig
 
 

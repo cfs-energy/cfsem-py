@@ -45,7 +45,7 @@ HEIGHT_RANGE = (0.05, 0.50)
 CURRENT_DENSITY_RANGE_MA = (0.0, 200.0)
 SOURCE_RADIUS_RANGE = (0.05, 1.20)
 SOURCE_Z_RANGE = (-0.60, 0.60)
-SOURCE_CURRENT_RANGE_MA = (0.0, 5.0)
+SOURCE_CURRENT_RANGE_MA = (-5.0, 5.0)
 
 SECTION_TARGET_FRACTIONS = (0.2, 0.5, 0.8)
 SECTION_LABELS = ("Lower", "Middle", "Upper")
@@ -61,7 +61,6 @@ FIELD_GRID_MIN_SHORT_SIDE_POINTS = 41 if TESTING else 81
 FD_REFERENCE_SPACING = 1.0e-3  # [m]
 GRID_NUDGE = 1.0e-6  # [m]
 SELF_FIELD_PAD_CELLS = 7
-LOG10_FLOOR = -16.0
 
 DOCS_EXAMPLE_HTML = (
     Path(__file__).resolve().parents[1] / "docs/python/example_outputs/solenoid_stress_axisymmetric_fem.html"
@@ -945,6 +944,9 @@ def build_heatmap_figure(
     outline_color: str = "black",
     source_color: str = "black",
     source_line_color: str = "white",
+    show_contours: bool = False,
+    contour_count: int = 8,
+    contour_color: str = "black",
 ):
     import plotly.graph_objects as go
 
@@ -961,6 +963,34 @@ def build_heatmap_figure(
             colorbar={"title": colorbar_title, "thickness": 14},
         )
     )
+    if show_contours:
+        contour_field = np.asarray(z, dtype=np.float64)
+        contour_finite = contour_field[np.isfinite(contour_field)]
+        contour_start = float(zmin) if zmin is not None else float(np.nanmin(contour_finite))
+        contour_end = float(zmax) if zmax is not None else float(np.nanmax(contour_finite))
+        contour_field = np.clip(contour_field, contour_start, contour_end)
+        contour_size = (
+            (contour_end - contour_start) / float(contour_count - 1) if contour_count > 1 else 1.0
+        )
+        if contour_end > contour_start:
+            fig.add_trace(
+                go.Contour(
+                    x=x,
+                    y=y,
+                    z=contour_field,
+                    autocontour=False,
+                    contours={
+                        "coloring": "none",
+                        "start": contour_start,
+                        "end": contour_end,
+                        "size": contour_size,
+                    },
+                    line={"color": contour_color, "width": 1},
+                    showscale=False,
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
     fig.add_trace(
         go.Scatter(
             x=case.outline_r,
@@ -1355,7 +1385,7 @@ def create_app():
                                 max=SOURCE_CURRENT_RANGE_MA[1],
                                 step=0.05,
                                 value=DEFAULT_SOURCE_CURRENT_MA,
-                                marks={0: "0", 1: "1", 2: "2", 3: "3", 5: "5"},
+                                marks={-5: "-5", -3: "-3", -1: "-1", 0: "0", 1: "1", 3: "3", 5: "5"},
                                 tooltip={"placement": "bottom", "always_visible": True},
                             ),
                         ]
@@ -1511,10 +1541,10 @@ def create_app():
             fig = message_figure("Invalid source placement", message)
             return message, fig, fig, fig, fig, fig, fig, fig, fig
 
-        bmag_log = np.maximum(np.log10(np.asarray(case.bmag_field, dtype=np.float64) + 1.0e-30), LOG10_FLOOR)
-        bmag_finite = bmag_log[np.isfinite(bmag_log)]
-        bmag_zmin = float(np.nanmin(bmag_finite)) if bmag_finite.size else LOG10_FLOOR
+        bmag = np.asarray(case.bmag_field, dtype=np.float64)
+        bmag_finite = bmag[np.isfinite(bmag)]
         bmag_zmax = float(np.nanpercentile(bmag_finite, 99.0)) if bmag_finite.size else 0.0
+        bmag_zmax = bmag_zmax if bmag_zmax > 0.0 else 1.0
         bz_clip = (
             float(np.nanpercentile(np.abs(case.bz_field), 99.0))
             if np.isfinite(case.bz_field).any()
@@ -1537,15 +1567,17 @@ def create_app():
                 case,
                 case.field_r,
                 case.field_z,
-                bmag_log,
-                title="Total |B| [T] with smooth self-field patch (log10)",
-                colorbar_title="log10(|B|)",
+                bmag,
+                title="Total |B| [T] with smooth self-field patch",
+                colorbar_title="|B| [T]",
                 colorscale="Magma",
-                zmin=bmag_zmin,
+                zmin=0.0,
                 zmax=bmag_zmax,
                 outline_color="white",
                 source_color="cyan",
                 source_line_color="black",
+                show_contours=True,
+                contour_color="black",
             ),
             build_heatmap_figure(
                 case,
@@ -1561,6 +1593,8 @@ def create_app():
                 outline_color="white",
                 source_color="cyan",
                 source_line_color="black",
+                show_contours=True,
+                contour_color="black",
             ),
             build_heatmap_figure(
                 case,
@@ -1576,6 +1610,8 @@ def create_app():
                 outline_color="black",
                 source_color="black",
                 source_line_color="white",
+                show_contours=True,
+                contour_color="black",
             ),
             build_heatmap_figure(
                 case,
@@ -1591,6 +1627,8 @@ def create_app():
                 outline_color="black",
                 source_color="black",
                 source_line_color="white",
+                show_contours=True,
+                contour_color="black",
             ),
             build_heatmap_figure(
                 case,
@@ -1605,6 +1643,8 @@ def create_app():
                 outline_color="black",
                 source_color="black",
                 source_line_color="white",
+                show_contours=True,
+                contour_color="black",
             ),
             build_heatmap_figure(
                 case,
@@ -1619,6 +1659,8 @@ def create_app():
                 outline_color="black",
                 source_color="black",
                 source_line_color="white",
+                show_contours=True,
+                contour_color="black",
             ),
             build_profile_figure(case),
             build_error_figure(case),
@@ -1646,13 +1688,17 @@ def main() -> None:
         case,
         case.field_r,
         case.field_z,
-        np.maximum(np.log10(np.asarray(case.bmag_field, dtype=np.float64) + 1.0e-30), LOG10_FLOOR),
-        title="Total |B| [T] with smooth self-field patch (log10)",
-        colorbar_title="log10(|B|)",
+        np.asarray(case.bmag_field, dtype=np.float64),
+        title="Total |B| [T] with smooth self-field patch",
+        colorbar_title="|B| [T]",
         colorscale="Magma",
+        zmin=0.0,
+        zmax=max(float(np.nanpercentile(case.bmag_field, 99.0)), 1.0),
         outline_color="white",
         source_color="cyan",
         source_line_color="black",
+        show_contours=True,
+        contour_color="black",
     )
     export_docs_example_figure(overview)
     build_profile_figure(case)

@@ -38,6 +38,7 @@ from cfsem.solenoid_stress.axisymmetric_fem import (
     assemble_axisymmetric,
     cfsem_radial_material,
     element_quadrature_axisymmetric,
+    infer_quad9_mesh,
 )
 from cfsem.solenoid_stress.solenoid_handcalc import s_long_solenoid
 from cfsem.solenoid_stress.solenoid_1d import (
@@ -56,15 +57,12 @@ POISSON_RATIO = 0.27  # [-]
 CURRENT_DENSITY = 0.2 * 390.0e6  # [A/m^2]
 BZ_INNER = 27.0  # [T]
 QUADRATURE = "3x3"
+ELEMENT_TYPE = "quad9"
 NUDGE = 1.0e-6  # [m]
+LEGEND_RIGHT_PAD_POINTS = 50.0
 REPRESENTATIVE_DISCRETIZATION_NZ = 1
 REPRESENTATIVE_DISCRETIZATION_NR = max(3, int(round((RO - RI) / HEIGHT)))
-TARGET_DR_SWEEP_MM = np.array(
-    [50.0, 25.0, 12.5, 6.25]
-    if TESTING
-    else [50.0, 25.0, 12.5, 6.25, 3.125, 1.5625, 0.78125, 0.390625, 0.1953125, 0.1],
-    dtype=np.float64,
-)
+TARGET_DR_SWEEP_MM = np.array([50.0, 25.0, 12.5, 6.25, 3.125, 1.5625, 1.0], dtype=np.float64)
 NR_SWEEP = np.asarray(np.ceil(1.0e3 * (RO - RI) / TARGET_DR_SWEEP_MM), dtype=int)
 
 
@@ -165,21 +163,65 @@ def analytic_stress_profile(sample_r: np.ndarray) -> Profile:
     )
 
 
-def quad4_center_point_strain_stress(
+def q2_lagrange_1d(x: float) -> np.ndarray:
+    return np.array([0.5 * x * (x - 1.0), 1.0 - x * x, 0.5 * x * (x + 1.0)], dtype=np.float64)
+
+
+def q2_lagrange_grad_1d(x: float) -> np.ndarray:
+    return np.array([x - 0.5, -2.0 * x, x + 0.5], dtype=np.float64)
+
+
+def element_center_point_strain_stress(
     coords: np.ndarray,
     displacement_local: np.ndarray,
     material: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    n = 0.25 * np.ones(4, dtype=np.float64)
-    grad_ref = 0.25 * np.array(
-        [
-            [-1.0, -1.0],
-            [1.0, -1.0],
-            [1.0, 1.0],
-            [-1.0, 1.0],
-        ],
-        dtype=np.float64,
-    )
+    if coords.shape[0] == 4:
+        n = 0.25 * np.ones(4, dtype=np.float64)
+        grad_ref = 0.25 * np.array(
+            [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+            ],
+            dtype=np.float64,
+        )
+    elif coords.shape[0] == 9:
+        lx = q2_lagrange_1d(0.0)
+        ly = q2_lagrange_1d(0.0)
+        dlx = q2_lagrange_grad_1d(0.0)
+        dly = q2_lagrange_grad_1d(0.0)
+        n = np.array(
+            [
+                lx[0] * ly[0],
+                lx[2] * ly[0],
+                lx[2] * ly[2],
+                lx[0] * ly[2],
+                lx[1] * ly[0],
+                lx[2] * ly[1],
+                lx[1] * ly[2],
+                lx[0] * ly[1],
+                lx[1] * ly[1],
+            ],
+            dtype=np.float64,
+        )
+        grad_ref = np.array(
+            [
+                [dlx[0] * ly[0], lx[0] * dly[0]],
+                [dlx[2] * ly[0], lx[2] * dly[0]],
+                [dlx[2] * ly[2], lx[2] * dly[2]],
+                [dlx[0] * ly[2], lx[0] * dly[2]],
+                [dlx[1] * ly[0], lx[1] * dly[0]],
+                [dlx[2] * ly[1], lx[2] * dly[1]],
+                [dlx[1] * ly[2], lx[1] * dly[2]],
+                [dlx[0] * ly[1], lx[0] * dly[1]],
+                [dlx[1] * ly[1], lx[1] * dly[1]],
+            ],
+            dtype=np.float64,
+        )
+    else:
+        raise ValueError(f"Unsupported element with {coords.shape[0]} nodes")
     jac = np.array(
         [
             [coords[:, 0] @ grad_ref[:, 0], coords[:, 0] @ grad_ref[:, 1]],
@@ -196,8 +238,8 @@ def quad4_center_point_strain_stress(
     )
     point = n @ coords
     radius = float(point[0])
-    b = np.zeros((4, 8), dtype=np.float64)
-    for i in range(4):
+    b = np.zeros((4, 2 * coords.shape[0]), dtype=np.float64)
+    for i in range(coords.shape[0]):
         col_r = 2 * i
         col_z = col_r + 1
         b[0, col_r] = grad_phys[i, 0]
@@ -206,7 +248,7 @@ def quad4_center_point_strain_stress(
         b[3, col_r] = grad_phys[i, 1]
         b[3, col_z] = grad_phys[i, 0]
     u_center = np.sum(n[:, None] * displacement_local, axis=0)
-    stress = material @ (b @ displacement_local.reshape(8))
+    stress = material @ (b @ displacement_local.reshape(-1))
     return (
         np.asarray(point, dtype=np.float64),
         np.asarray(u_center, dtype=np.float64),
@@ -267,8 +309,16 @@ def max_normalized_error_percent(values: np.ndarray, reference: np.ndarray) -> f
 def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, float]:
     build_start = perf_counter()
     nodes, elements = build_annulus_strip_mesh(RI, RO, HEIGHT, nr=nr, nz=1)
+    elevated = infer_quad9_mesh(nodes, elements) if ELEMENT_TYPE == "quad9" else None
+    analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
+    analysis_elements = elevated.analysis_elements if elevated is not None else elements
     material = cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO, dtype=np.float64)
-    quadrature_data = element_quadrature_axisymmetric(nodes, elements, quadrature=QUADRATURE)
+    quadrature_data = element_quadrature_axisymmetric(
+        nodes,
+        elements,
+        quadrature=QUADRATURE,
+        element_type=ELEMENT_TYPE,
+    )
     points = quadrature_data.points_rz.reshape(-1, 2)
     nelem = elements.shape[0]
     nq = quadrature_data.nq_per_element
@@ -284,11 +334,12 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
         material_table=np.asarray([material]),
         body_force=body_force,
         quadrature=QUADRATURE,
+        element_type=ELEMENT_TYPE,
     )
     reduced = apply_dirichlet(
         assembly.to_csr(),
         assembly.rhs,
-        prescribed=prescribed_z_dofs(nodes.shape[0]),
+        prescribed=prescribed_z_dofs(analysis_nodes.shape[0]),
     )
     fem_build_seconds = perf_counter() - build_start
 
@@ -297,7 +348,7 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
     fem_factorize_seconds = perf_counter() - factorize_start
 
     solve_start = perf_counter()
-    displacement = reduced.recover(solve_reduced(reduced.rhs)).reshape(nodes.shape[0], 2)
+    displacement = reduced.recover(solve_reduced(reduced.rhs)).reshape(analysis_nodes.shape[0], 2)
     fem_solve_seconds = perf_counter() - solve_start
 
     radius = np.zeros(nr, dtype=np.float64)
@@ -305,8 +356,12 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
     s_rr = np.zeros(nr, dtype=np.float64)
     s_tt = np.zeros(nr, dtype=np.float64)
     for i_local, element_index in enumerate(range(nr)):
-        conn = elements[element_index]
-        point, u_center, stress = quad4_center_point_strain_stress(nodes[conn], displacement[conn], material)
+        analysis_conn = analysis_elements[element_index]
+        point, u_center, stress = element_center_point_strain_stress(
+            analysis_nodes[analysis_conn],
+            displacement[analysis_conn],
+            material,
+        )
         radius[i_local] = point[0]
         u_r[i_local] = u_center[0]
         s_rr[i_local] = stress[0]
@@ -368,11 +423,17 @@ def run_study() -> list[SweepResult]:
 
 def plot_discretization_panel(ax, nr: int, nz: int) -> None:
     nodes, elements = build_annulus_strip_mesh(RI, RO, HEIGHT, nr=nr, nz=nz)
-    quadrature_data = element_quadrature_axisymmetric(nodes, elements, quadrature=QUADRATURE)
+    elevated = infer_quad9_mesh(nodes, elements) if ELEMENT_TYPE == "quad9" else None
+    analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
+    analysis_elements = elevated.analysis_elements if elevated is not None else elements
+    quadrature_data = element_quadrature_axisymmetric(
+        nodes,
+        elements,
+        quadrature=QUADRATURE,
+        element_type=ELEMENT_TYPE,
+    )
     quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
     fd_grid = build_1d_grid((RO - RI) / nr)[1:-1]
-    node_r = np.unique(nodes[:, 0])
-    node_z = np.unique(nodes[:, 1])
 
     if quadrature_points.shape[0] <= 1_000:
         quadrature_marker_size = 10.0
@@ -382,15 +443,25 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
         quadrature_marker_size = 1.5
     fd_marker_size = 28.0 if fd_grid.size <= 200 else 10.0 if fd_grid.size <= 2_000 else 4.0
 
-    ax.vlines(node_r, node_z[0], node_z[-1], color="0.78", linewidth=0.6, alpha=0.9, label="FEM mesh")
-    ax.hlines(node_z, node_r[0], node_r[-1], color="0.78", linewidth=0.9, alpha=0.9)
+    for conn in analysis_elements:
+        coords = analysis_nodes[conn]
+        edge_cycles = ((0, 4, 1), (1, 5, 2), (2, 6, 3), (3, 7, 0))
+        for i0, im, i1 in edge_cycles:
+            ax.plot(
+                coords[[i0, im, i1], 0],
+                coords[[i0, im, i1], 1],
+                color="0.78",
+                linewidth=0.9,
+                alpha=0.9,
+            )
+    ax.plot([], [], color="0.78", linewidth=0.9, label=f"FEM mesh ({ELEMENT_TYPE})")
     ax.scatter(
         quadrature_points[:, 0],
         quadrature_points[:, 1],
         s=quadrature_marker_size,
         color="tab:red",
         alpha=0.85,
-        label=f"FEM quadrature points ({QUADRATURE})",
+        label=f"FEM quadrature points ({ELEMENT_TYPE}, {QUADRATURE})",
         rasterized=quadrature_points.shape[0] > 5_000,
     )
     ax.scatter(
@@ -404,7 +475,7 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
         label="1D FD physical grid",
         rasterized=fd_grid.size > 5_000,
     )
-    ax.set_title(f"Representative matched-grid discretization (nr={nr}, nz={nz})")
+    ax.set_title(f"Representative matched-grid discretization ({ELEMENT_TYPE}, nr={nr}, nz={nz})")
     ax.set_xlabel("r [m]")
     ax.set_ylabel("z [m]")
     ax.set_xlim(RI - 0.01 * (RO - RI), RO + 0.01 * (RO - RI))
@@ -416,6 +487,8 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
 
 def build_figure(results: list[SweepResult]):
     fig = plt.figure(figsize=(14.5, 10.0))
+    right_pad_fraction = LEGEND_RIGHT_PAD_POINTS / (72.0 * fig.get_size_inches()[0])
+    layout_right = max(0.0, 0.86 - right_pad_fraction)
     grid = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 0.8])
     profile_axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1])]
     error_axes = [fig.add_subplot(grid[1, 0]), fig.add_subplot(grid[1, 1])]
@@ -492,18 +565,19 @@ def build_figure(results: list[SweepResult]):
     fig.legend(
         handles,
         labels,
-        loc="center left",
-        bbox_to_anchor=(0.86, 0.70),
+        loc="center right",
+        bbox_to_anchor=(0.985, 0.70),
+        bbox_transform=fig.transFigure,
         ncol=1,
         frameon=True,
     )
     fig.suptitle(
         "Axisymmetric FEM vs. 1D FD convergence study\n"
         "Analytic truth: linear-$B_z$ long-solenoid stress; parity setup: reduced radial material, "
-        "z-DOFs fixed, radial body force only, QUAD4 + 3x3 Gauss",
+        f"z-DOFs fixed, radial body force only, {ELEMENT_TYPE.upper()} + {QUADRATURE} Gauss",
         y=0.98,
     )
-    fig.tight_layout(rect=[0.0, 0.0, 0.86, 0.94])
+    fig.tight_layout(rect=[0.0, 0.0, layout_right, 0.94])
     return fig
 
 
@@ -513,7 +587,7 @@ def print_results(results: list[SweepResult]) -> None:
         f"ri={RI:.3f} m, ro={RO:.3f} m, height={HEIGHT:.3f} m, "
         f"E={ELASTICITY_MODULUS / 1.0e9:.1f} GPa, nu={POISSON_RATIO:.3f}, "
         f"J_theta={CURRENT_DENSITY:.3e} A/m^2, "
-        f"Bz(ri)={BZ_INNER:.1f} T, Bz(ro)=0.0 T, quadrature={QUADRATURE}"
+        f"Bz(ri)={BZ_INNER:.1f} T, Bz(ro)=0.0 T, element_type={ELEMENT_TYPE}, quadrature={QUADRATURE}"
     )
     print(
         "Columns: nr, dr_mm, ndof, fem_build_ms, fem_factorize_ms, fem_solve_ms, "

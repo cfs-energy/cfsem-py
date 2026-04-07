@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
 from scipy.sparse.linalg import factorized
 
 import cfsem
@@ -23,6 +24,7 @@ from cfsem.solenoid_stress.solenoid_1d import (
     solenoid_1d_structural_factor,
     solenoid_1d_structural_rhs,
 )
+from cfsem.flux_solver import calc_flux_density_from_flux, solve_flux_axisymmetric
 
 TESTING = bool(os.getenv("CFSEM_TESTING"))
 
@@ -58,6 +60,7 @@ FIELD_GRID_LONG_SIDE_POINTS = 141 if TESTING else 281
 FIELD_GRID_MIN_SHORT_SIDE_POINTS = 41 if TESTING else 81
 FD_REFERENCE_SPACING = 1.0e-3  # [m]
 GRID_NUDGE = 1.0e-6  # [m]
+SELF_FIELD_PAD_CELLS = 7
 LOG10_FLOOR = -16.0
 
 DOCS_EXAMPLE_HTML = (
@@ -137,6 +140,15 @@ class Reference1DProfile:
     s_zz: np.ndarray
     s_tt: np.ndarray
     s_vm: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class SmoothSelfField:
+    filament_current: np.ndarray
+    filament_r: np.ndarray
+    filament_z: np.ndarray
+    br_interpolator: RegularGridInterpolator
+    bz_interpolator: RegularGridInterpolator
 
 
 def export_docs_example_figure(fig) -> None:
@@ -241,6 +253,18 @@ def build_uniform_interval_grid(start: float, stop: float, spacing: float) -> np
     return np.linspace(start, stop, n, dtype=np.float64)
 
 
+def build_regular_padded_grid(centers: np.ndarray, pad_cells: int) -> np.ndarray:
+    if centers.size < 2:
+        raise ValueError("smooth self-field solve requires at least two cell centers per axis")
+    step = float(np.mean(np.diff(centers)))
+    return np.linspace(
+        float(centers[0]) - pad_cells * step,
+        float(centers[-1]) + pad_cells * step,
+        centers.size + 2 * pad_cells,
+        dtype=np.float64,
+    )
+
+
 def top_bottom_pressure_faces(nr: int, nz: int) -> tuple[np.ndarray, np.ndarray]:
     bottom = np.asarray([[i, 0] for i in range(nr)], dtype=np.uint64)
     top = np.asarray([[(nz - 1) * nr + i, 2] for i in range(nr)], dtype=np.uint64)
@@ -332,35 +356,161 @@ def quad4_center_point_strain_stress(
 def field_grid(
     source_r: float,
     source_z: float,
-    source_current: float,
     ro: float,
     height: float,
-) -> tuple[np.ndarray, ...]:
+) -> tuple[np.ndarray, np.ndarray]:
     r_max = max(1.1 * ro, 1.3 * source_r, ro + 0.25)
     z_extent = max(0.8 * height, abs(source_z) + 0.6 * height, 0.25)
     nr_field, nz_field = choose_field_grid_counts(r_max, 2.0 * z_extent)
     r = np.linspace(0.0, r_max, nr_field, dtype=np.float64)
     z = np.linspace(-z_extent, z_extent, nz_field, dtype=np.float64)
-    rr, zz = np.meshgrid(r, z, indexing="xy")
+    return r, z
+
+
+def sample_loop_field(
+    sample_r: np.ndarray,
+    sample_z: np.ndarray,
+    source_radius: float,
+    source_z: float,
+    source_current: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    sample_r_arr = np.asarray(sample_r, dtype=np.float64)
+    sample_z_arr = np.asarray(sample_z, dtype=np.float64)
+    shape = sample_r_arr.shape
     br, bz = cfsem.flux_density_circular_filament(
         [source_current],
-        [source_r],
+        [source_radius],
         [source_z],
-        rr.ravel(),
-        zz.ravel(),
+        sample_r_arr.reshape(-1),
+        sample_z_arr.reshape(-1),
         par=True,
     )
-    bmag = np.sqrt(br * br + bz * bz).reshape(rr.shape)
-    bz_grid = np.asarray(bz, dtype=np.float64).reshape(rr.shape)
+    return (
+        np.asarray(br, dtype=np.float64).reshape(shape),
+        np.asarray(bz, dtype=np.float64).reshape(shape),
+    )
+
+
+def sample_distributed_filament_field(
+    filament_current: np.ndarray,
+    filament_r: np.ndarray,
+    filament_z: np.ndarray,
+    sample_r: np.ndarray,
+    sample_z: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    sample_r_arr = np.asarray(sample_r, dtype=np.float64)
+    sample_z_arr = np.asarray(sample_z, dtype=np.float64)
+    shape = sample_r_arr.shape
+    if filament_current.size == 0:
+        return np.zeros(shape, dtype=np.float64), np.zeros(shape, dtype=np.float64)
+
+    br, bz = cfsem.flux_density_circular_filament(
+        filament_current,
+        filament_r,
+        filament_z,
+        sample_r_arr.reshape(-1),
+        sample_z_arr.reshape(-1),
+        par=True,
+    )
+    return (
+        np.asarray(br, dtype=np.float64).reshape(shape),
+        np.asarray(bz, dtype=np.float64).reshape(shape),
+    )
+
+
+def build_smooth_self_field(
+    elem_r_centers: np.ndarray,
+    elem_z_centers: np.ndarray,
+    current_density: float,
+) -> SmoothSelfField:
+    rgrid = build_regular_padded_grid(elem_r_centers, SELF_FIELD_PAD_CELLS)
+    zgrid = build_regular_padded_grid(elem_z_centers, SELF_FIELD_PAD_CELLS)
+    rmesh, zmesh = np.meshgrid(rgrid, zgrid, indexing="ij")
+    jtor = np.zeros((rgrid.size, zgrid.size), dtype=np.float64)
+    jtor[
+        SELF_FIELD_PAD_CELLS : SELF_FIELD_PAD_CELLS + elem_r_centers.size,
+        SELF_FIELD_PAD_CELLS : SELF_FIELD_PAD_CELLS + elem_z_centers.size,
+    ] = current_density
+
+    if current_density == 0.0:
+        br = np.zeros_like(jtor)
+        bz = np.zeros_like(jtor)
+        filament_current = np.zeros(0, dtype=np.float64)
+        filament_r = np.zeros(0, dtype=np.float64)
+        filament_z = np.zeros(0, dtype=np.float64)
+    else:
+        psi = solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), jtor)
+        br, bz = calc_flux_density_from_flux(psi, rmesh, zmesh)
+        dr = float(rgrid[1] - rgrid[0])
+        dz = float(zgrid[1] - zgrid[0])
+        nonzero = np.where(jtor != 0.0)
+        filament_current = np.ascontiguousarray((dr * dz * jtor[nonzero]).reshape(-1))
+        filament_r = np.ascontiguousarray(rmesh[nonzero].reshape(-1))
+        filament_z = np.ascontiguousarray(zmesh[nonzero].reshape(-1))
+
+    br_interpolator = RegularGridInterpolator((rgrid, zgrid), br, bounds_error=False, fill_value=0.0)
+    bz_interpolator = RegularGridInterpolator((rgrid, zgrid), bz, bounds_error=False, fill_value=0.0)
+    return SmoothSelfField(
+        filament_current=filament_current,
+        filament_r=filament_r,
+        filament_z=filament_z,
+        br_interpolator=br_interpolator,
+        bz_interpolator=bz_interpolator,
+    )
+
+
+def sample_smooth_self_field(
+    self_field: SmoothSelfField,
+    sample_r: np.ndarray,
+    sample_z: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    sample_r_arr = np.asarray(sample_r, dtype=np.float64)
+    sample_z_arr = np.asarray(sample_z, dtype=np.float64)
+    shape = sample_r_arr.shape
+    points = np.column_stack([sample_r_arr.reshape(-1), sample_z_arr.reshape(-1)])
+    br = np.asarray(self_field.br_interpolator(points), dtype=np.float64).reshape(shape)
+    bz = np.asarray(self_field.bz_interpolator(points), dtype=np.float64).reshape(shape)
+    return br, bz
+
+
+def total_field_grid(
+    self_field: SmoothSelfField,
+    source_radius: float,
+    source_z: float,
+    source_current: float,
+    ri: float,
+    ro: float,
+    z_min: float,
+    z_max: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    r, z = field_grid(source_radius, source_z, ro, z_max - z_min)
+    rr, zz = np.meshgrid(r, z, indexing="xy")
+    br_loop, bz_loop = sample_loop_field(rr, zz, source_radius, source_z, source_current)
+    br_self, bz_self = sample_distributed_filament_field(
+        self_field.filament_current,
+        self_field.filament_r,
+        self_field.filament_z,
+        rr,
+        zz,
+    )
+    patch_mask = (rr >= ri) & (rr <= ro) & (zz >= z_min) & (zz <= z_max)
+    if np.any(patch_mask):
+        br_patch, bz_patch = sample_smooth_self_field(self_field, rr[patch_mask], zz[patch_mask])
+        br_self[patch_mask] = br_patch
+        bz_self[patch_mask] = bz_patch
+
+    br_total = br_loop + br_self
+    bz_total = bz_loop + bz_self
+    bmag_total = np.sqrt(br_total * br_total + bz_total * bz_total)
 
     if r.size > 1 and z.size > 1:
         dr = r[1] - r[0]
         dz = z[1] - z[0]
-        near_source = (np.abs(rr - source_r) <= 0.55 * dr) & (np.abs(zz - source_z) <= 0.55 * dz)
-        bmag = np.where(near_source, np.nan, bmag)
-        bz_grid = np.where(near_source, np.nan, bz_grid)
+        near_source = (np.abs(rr - source_radius) <= 0.55 * dr) & (np.abs(zz - source_z) <= 0.55 * dz)
+        bmag_total = np.where(near_source, np.nan, bmag_total)
+        bz_total = np.where(near_source, np.nan, bz_total)
 
-    return r, z, bmag, bz_grid
+    return r, z, bmag_total, bz_total
 
 
 def normalized_error_percent(fe_values: np.ndarray, ref_values: np.ndarray) -> np.ndarray:
@@ -382,15 +532,14 @@ def sample_loop_bz(
     source_z: float,
     source_current: float,
 ) -> np.ndarray:
-    _br, bz = cfsem.flux_density_circular_filament(
-        [source_current],
-        [source_radius],
-        [source_z],
+    _br, bz = sample_loop_field(
         sample_r,
         np.full_like(sample_r, z_value),
-        par=True,
+        source_radius,
+        source_z,
+        source_current,
     )
-    return np.asarray(bz, dtype=np.float64)
+    return bz
 
 
 def solve_reference_profile_1d(
@@ -463,6 +612,7 @@ def build_section_comparisons(
     nz: int,
     displacement: np.ndarray,
     material: np.ndarray,
+    self_field: SmoothSelfField,
     source_radius: float,
     source_z: float,
     source_current: float,
@@ -503,7 +653,8 @@ def build_section_comparisons(
 
         z_value = float(row_centers[row])
         b_z_fe = body_force_r[row] / current_density if current_density > 0.0 else np.zeros_like(radius)
-        b_z_section = sample_loop_bz(radius, z_value, source_radius, source_z, source_current)
+        _br_self, bz_self = sample_smooth_self_field(self_field, radius, np.full_like(radius, z_value))
+        b_z_section = sample_loop_bz(radius, z_value, source_radius, source_z, source_current) + bz_self
         reference = solve_reference_profile_1d(radius, b_z_section, current_density)
 
         section_list.append(
@@ -543,6 +694,7 @@ def build_vm_stress_grids(
     nz: int,
     displacement: np.ndarray,
     material: np.ndarray,
+    self_field: SmoothSelfField,
     source_radius: float,
     source_z: float,
     source_current: float,
@@ -567,7 +719,12 @@ def build_vm_stress_grids(
 
     vm_1d = np.zeros((nz, nr), dtype=np.float64)
     for row, z_value in enumerate(row_centers):
-        b_z_row = sample_loop_bz(elem_r_centers, z_value, source_radius, source_z, source_current)
+        _br_self, bz_self = sample_smooth_self_field(
+            self_field,
+            elem_r_centers,
+            np.full_like(elem_r_centers, z_value),
+        )
+        b_z_row = sample_loop_bz(elem_r_centers, z_value, source_radius, source_z, source_current) + bz_self
         reference = solve_reference_profile_1d(elem_r_centers, b_z_row, current_density)
         vm_1d[row, :] = reference.s_vm
 
@@ -601,26 +758,35 @@ def solve_case(
 
     nr, nz = choose_mesh_counts(width, height)
     nodes, elements, radii, zs = build_annulus_strip_mesh(ri, ro, height, nr, nz)
+    elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
+    elem_z_centers = 0.5 * (zs[:-1] + zs[1:])
+    self_field = build_smooth_self_field(elem_r_centers, elem_z_centers, current_density)
     material = cfsem_radial_material(YOUNGS_MODULUS, POISSON_RATIO)
     material_table = np.asarray([material], dtype=np.float64)
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
 
     quadrature_data = element_quadrature_axisymmetric(nodes, elements, quadrature=QUADRATURE)
     quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
-    br_q, bz_q = cfsem.flux_density_circular_filament(
-        [source_current],
-        [source_radius],
-        [source_z],
+    br_loop_q, bz_loop_q = sample_loop_field(
         quadrature_points[:, 0],
         quadrature_points[:, 1],
-        par=True,
+        source_radius,
+        source_z,
+        source_current,
+    )
+    br_self_q, bz_self_q = sample_smooth_self_field(
+        self_field,
+        quadrature_points[:, 0],
+        quadrature_points[:, 1],
     )
     nelem = elements.shape[0]
     nq = quadrature_data.nq_per_element
     weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64)
     weights_sum = np.sum(weights, axis=1)
-    br_mean = np.sum(np.asarray(br_q, dtype=np.float64).reshape(nelem, nq) * weights, axis=1) / weights_sum
-    bz_mean = np.sum(np.asarray(bz_q, dtype=np.float64).reshape(nelem, nq) * weights, axis=1) / weights_sum
+    br_weighted = np.asarray(br_loop_q + br_self_q, dtype=np.float64).reshape(nelem, nq) * weights
+    bz_weighted = np.asarray(bz_loop_q + bz_self_q, dtype=np.float64).reshape(nelem, nq) * weights
+    br_mean = np.sum(br_weighted, axis=1) / weights_sum
+    bz_mean = np.sum(bz_weighted, axis=1) / weights_sum
     body_force = np.column_stack((current_density * bz_mean, -current_density * br_mean))
 
     measures = element_measures_axisymmetric(nodes, elements, quadrature=QUADRATURE)
@@ -657,8 +823,6 @@ def solve_case(
 
     body_force_r = body_force[:, 0].reshape(nz, nr)
     body_force_z = body_force[:, 1].reshape(nz, nr)
-    elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
-    elem_z_centers = 0.5 * (zs[:-1] + zs[1:])
     outline_r, outline_z = solenoid_outline(ri, ro, z_min, z_max)
     sections = build_section_comparisons(
         nodes=nodes,
@@ -669,6 +833,7 @@ def solve_case(
         nz=nz,
         displacement=displacement,
         material=material,
+        self_field=self_field,
         source_radius=source_radius,
         source_z=source_z,
         source_current=source_current,
@@ -684,12 +849,22 @@ def solve_case(
         nz=nz,
         displacement=displacement,
         material=material,
+        self_field=self_field,
         source_radius=source_radius,
         source_z=source_z,
         source_current=source_current,
         current_density=current_density,
     )
-    field_r, field_z, bmag_field, bz_field = field_grid(source_radius, source_z, source_current, ro, height)
+    field_r, field_z, bmag_field, bz_field = total_field_grid(
+        self_field,
+        source_radius,
+        source_z,
+        source_current,
+        ri,
+        ro,
+        z_min,
+        z_max,
+    )
 
     return CaseResult(
         width=width,
@@ -920,7 +1095,8 @@ def build_profile_figure(case: CaseResult):
         height=1380,
         title=(
             "Radial section comparison | "
-            "FEM uses the full axisymmetric body force; 1D uses local B_z(r, z_section)"
+            "FEM uses loop-source + smooth self-field loading; "
+            "1D uses local total B_z(r, z_section)"
         ),
         margin={"l": 55, "r": 20, "t": 110, "b": 50},
         plot_bgcolor="white",
@@ -1076,8 +1252,9 @@ def create_app():
                 "Move the source loop outside the conductor cross-section to avoid singular loading."
             ),
             html.P(
-                "The 1D reference uses the local B_z(r, z_section) on each radial section and ignores "
-                "axial/shear coupling."
+                "The FEM loading uses the external loop plus a smooth winding-pack self-field. "
+                "The 1D reference uses the local total B_z(r, z_section) on each radial section and "
+                "still ignores axial/shear coupling."
             ),
             html.Div(
                 [
@@ -1359,7 +1536,7 @@ def create_app():
                 case.field_r,
                 case.field_z,
                 bmag_log,
-                title="Loop-source |B| [T] (log10)",
+                title="Total |B| [T] with smooth self-field patch (log10)",
                 colorbar_title="log10(|B|)",
                 colorscale="Magma",
                 zmin=bmag_zmin,
@@ -1373,7 +1550,7 @@ def create_app():
                 case.field_r,
                 case.field_z,
                 case.bz_field,
-                title="Loop-source B_z [T]",
+                title="Total B_z [T] with smooth self-field patch",
                 colorbar_title="B_z [T]",
                 colorscale="RdBu",
                 zmin=-bz_clip,
@@ -1468,7 +1645,7 @@ def main() -> None:
         case.field_r,
         case.field_z,
         np.maximum(np.log10(np.asarray(case.bmag_field, dtype=np.float64) + 1.0e-30), LOG10_FLOOR),
-        title="Loop-source |B| [T] (log10)",
+        title="Total |B| [T] with smooth self-field patch (log10)",
         colorbar_title="log10(|B|)",
         colorscale="Magma",
         outline_color="white",

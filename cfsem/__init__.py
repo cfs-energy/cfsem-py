@@ -42,6 +42,12 @@ from cfsem.bindings import (
     vector_potential_point_segment,
     vector_potential_dipole,
 )
+from cfsem.flux_solver import (
+    calc_flux_density_from_flux,
+    flux_solver,
+    gradient_order4,
+    solve_flux_axisymmetric,
+)
 from cfsem.types import Array3xN
 
 from .cfsem import ellipe, ellipk
@@ -72,6 +78,10 @@ __all__ = [
     "flux_density_circular_filament",
     "gs_operator_order2",
     "gs_operator_order4",
+    "gradient_order4",
+    "calc_flux_density_from_flux",
+    "flux_solver",
+    "solve_flux_axisymmetric",
     "filament_helix_path",
     "inductance_linear_filaments",
     "inductance_piecewise_linear_filaments",

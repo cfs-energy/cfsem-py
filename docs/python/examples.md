@@ -48,16 +48,18 @@ as thin helical filaments.
 --8<-- "examples/inductance.py"
 ```
 
-## Axisymmetric FEM Solenoid Stress
+## Axisymmetric FEM Solenoid Stress Explorer
 
 Explore the axisymmetric FEM stress solver in a Plotly Dash app. The example
 varies the solenoid cross-section, current density, and loop-source position,
 assembles the sparse FEM system, solves it with `scipy.sparse.linalg.factorized`,
 and compares radial sections against the 1D finite-difference reference model.
 
-``` py title="examples/solenoid_stress_axisymmetric_fem.py"
---8<-- "examples/solenoid_stress_axisymmetric_fem.py"
-```
+## Axisymmetric FEM Solenoid Stress Convergence Study
+
+Run an explicit radial-refinement study that configures the 2D FEM model to
+match the 1D solver assumptions as closely as possible, then compares both
+against a fine 1D reference on the midplane.
 
 ## Loop Inductance
 

@@ -1528,6 +1528,8 @@ def create_app():
         force_z_clip = force_z_clip if force_z_clip > 0.0 else 1.0
         vm_fem_clip = vm_fem_clip if vm_fem_clip > 0.0 else 1.0
         vm_1d_clip = vm_1d_clip if vm_1d_clip > 0.0 else 1.0
+        force_clip = max(force_r_clip, force_z_clip)
+        vm_clip = max(vm_fem_clip, vm_1d_clip)
 
         return (
             build_summary(case),
@@ -1568,8 +1570,8 @@ def create_app():
                 title="Element body force f_r = J_theta B_z [N/m^3]",
                 colorbar_title="f_r [N/m^3]",
                 colorscale="RdBu",
-                zmin=-force_r_clip,
-                zmax=force_r_clip,
+                zmin=-force_clip,
+                zmax=force_clip,
                 zmid=0.0,
                 outline_color="black",
                 source_color="black",
@@ -1583,8 +1585,8 @@ def create_app():
                 title="Element body force f_z = -J_theta B_r [N/m^3]",
                 colorbar_title="f_z [N/m^3]",
                 colorscale="RdBu",
-                zmin=-force_z_clip,
-                zmax=force_z_clip,
+                zmin=-force_clip,
+                zmax=force_clip,
                 zmid=0.0,
                 outline_color="black",
                 source_color="black",
@@ -1599,7 +1601,7 @@ def create_app():
                 colorbar_title="VM FEM [Pa]",
                 colorscale="Cividis",
                 zmin=0.0,
-                zmax=vm_fem_clip,
+                zmax=vm_clip,
                 outline_color="black",
                 source_color="black",
                 source_line_color="white",
@@ -1613,7 +1615,7 @@ def create_app():
                 colorbar_title="VM 1D [Pa]",
                 colorscale="Cividis",
                 zmin=0.0,
-                zmax=vm_1d_clip,
+                zmax=vm_clip,
                 outline_color="black",
                 source_color="black",
                 source_line_color="white",

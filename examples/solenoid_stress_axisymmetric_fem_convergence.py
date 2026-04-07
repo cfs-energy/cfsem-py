@@ -456,15 +456,15 @@ def print_results(results: list[SweepResult]) -> None:
         f"Bz(ri)={BZ_INNER:.1f} T, Bz(ro)=0.0 T, quadrature={QUADRATURE}"
     )
     print(
-        "Columns: nr, dr_mm, ndof, fem_build_s, fem_factorize_s, fem_solve_s, "
+        "Columns: nr, dr_mm, ndof, fem_build_ms, fem_factorize_ms, fem_solve_ms, "
         "1D-vs-analytic[s_rr,s_tt] %, FEM-vs-analytic[s_rr,s_tt] %, FEM-vs-1D[u_r,s_rr,s_tt] %"
     )
     for result in results:
         print(
             f"nr={result.nr:5d}, dr={result.dr_mm:8.4f} mm, ndof={result.ndof:6d}, "
-            f"build={result.fem_build_seconds:8.4f} s, "
-            f"factorize={result.fem_factorize_seconds:8.4f} s, "
-            f"solve={result.fem_solve_seconds:8.4f} s | "
+            f"build={1.0e3 * result.fem_build_seconds:8.4f} ms, "
+            f"factorize={1.0e3 * result.fem_factorize_seconds:8.4f} ms, "
+            f"solve={1.0e3 * result.fem_solve_seconds:8.4f} ms | "
             f"1D=({result.fd_errors_pct['s_rr']:8.4f}, "
             f"{result.fd_errors_pct['s_tt']:8.4f}) | "
             f"FEM=({result.fem_errors_pct['s_rr']:8.4f}, "
@@ -490,9 +490,9 @@ def print_results(results: list[SweepResult]) -> None:
         f"Finest matched-grid parity max normalized midplane error "
         f"(FEM vs. 1D) = {parity_fom:.6f} %"
     )
-    print(f"Finest FEM system build time = {finest.fem_build_seconds:.6f} s")
-    print(f"Finest FEM factorization time = {finest.fem_factorize_seconds:.6f} s")
-    print(f"Finest FEM linear solve time = {finest.fem_solve_seconds:.6f} s")
+    print(f"Finest FEM system build time = {1.0e3 * finest.fem_build_seconds:.4f} ms")
+    print(f"Finest FEM factorization time = {1.0e3 * finest.fem_factorize_seconds:.4f} ms")
+    print(f"Finest FEM linear solve time = {1.0e3 * finest.fem_solve_seconds:.4f} ms")
 
 
 def main() -> None:

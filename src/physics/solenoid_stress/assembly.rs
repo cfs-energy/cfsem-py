@@ -26,6 +26,11 @@ use crate::physics::solenoid_stress::types::{Real, two_pi};
 ///
 /// The constitutive matrices in `material_table` are expected to act on the axisymmetric strain
 /// vector `[e_rr, e_zz, e_tt, g_rz]`, where `g_rz` is the engineering shear strain.
+///
+/// # References
+/// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
+/// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
+/// - I. Fried, "Notes on the finite element analysis of the axisymmetric elastic solid," *International Journal of Solids and Structures*, 10(3), 1974.
 pub fn assemble_axisymmetric_quad4<F: Real>(
     mesh: MeshView<'_, F>,
     material_ids: &[usize],

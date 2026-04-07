@@ -16,6 +16,10 @@ use crate::physics::solenoid_stress::types::Real;
 /// Multiplying this matrix by the element displacement vector
 /// `[u_r1, u_z1, u_r2, u_z2, ...]^T` gives the strain vector
 /// `[e_rr, e_zz, e_tt, g_rz]^T` at that point.
+///
+/// # References
+/// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
+/// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
 pub fn build_b_matrix<F: Real>(
     n: &[F; NODES_PER_ELEMENT],
     grad_phys: &[[F; 2]; NODES_PER_ELEMENT],
@@ -49,6 +53,11 @@ pub fn build_b_matrix<F: Real>(
 ///
 /// The caller supplies `scale = 2*pi*r*det(J)*w`, so this routine is purely the dense local
 /// linear-algebra kernel for one quadrature point.
+///
+/// # References
+/// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
+/// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
+/// - I. Fried, "Notes on the finite element analysis of the axisymmetric elastic solid," *International Journal of Solids and Structures*, 10(3), 1974.
 pub fn accumulate_stiffness<F: Real>(
     ke: &mut [[F; DOF_PER_ELEMENT]; DOF_PER_ELEMENT],
     d: &[[F; 4]; 4],

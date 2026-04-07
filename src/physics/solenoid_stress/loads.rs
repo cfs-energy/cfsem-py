@@ -32,6 +32,10 @@ pub fn accumulate_body_force<F: Real>(
 ///
 /// The local face numbering follows [`crate::physics::solenoid_stress::quad4::face_reference`].
 /// Pressure acts opposite the outward normal, which is why the final scale carries a minus sign.
+///
+/// # References
+/// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
+/// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
 pub fn pressure_element_load<F: Real>(
     coords: &[[F; 2]; 4],
     local_face: u8,

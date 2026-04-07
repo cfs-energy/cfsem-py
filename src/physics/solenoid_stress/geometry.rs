@@ -61,6 +61,10 @@ pub struct FaceSample<F: Real> {
 ///
 /// This converts the reference Gauss rule into physical-space samples suitable for both
 /// stiffness integration and body-force integration.
+///
+/// # References
+/// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
+/// - I. Fried, "Notes on the finite element analysis of the axisymmetric elastic solid," *International Journal of Solids and Structures*, 10(3), 1974.
 pub fn volume_samples<F: Real>(
     coords: &[[F; 2]; NODES_PER_ELEMENT],
     quadrature: QuadratureRule,
@@ -98,6 +102,10 @@ pub fn volume_samples<F: Real>(
 /// The returned tangent vector already includes the Jacobian mapping from the reference edge.
 /// Rotating that tangent by 90 degrees yields the signed area-normal vector used for pressure
 /// loads.
+///
+/// # References
+/// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
+/// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
 pub fn face_samples<F: Real>(
     coords: &[[F; 2]; NODES_PER_ELEMENT],
     local_face: u8,

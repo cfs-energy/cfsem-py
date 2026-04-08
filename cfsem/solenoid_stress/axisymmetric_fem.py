@@ -42,23 +42,71 @@ import numpy.typing as npt
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from cfsem.cfsem import (
-    solenoid_stress_fem_assemble_axisymmetric_quad4_f32 as _assemble_axisymmetric_quad4_f32,
+import cfsem.cfsem as _cfsem_bindings
+_assemble_axisymmetric_quad4_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f32
+_assemble_axisymmetric_quad4_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f64
+_assemble_axisymmetric_quad9_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f32
+_assemble_axisymmetric_quad9_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f64
+_element_measures_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad4_f32
 )
-from cfsem.cfsem import (
-    solenoid_stress_fem_assemble_axisymmetric_quad4_f64 as _assemble_axisymmetric_quad4_f64,
+_element_measures_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad4_f64
 )
-from cfsem.cfsem import (
-    solenoid_stress_fem_element_measures_axisymmetric_quad4_f32 as _element_measures_axisymmetric_quad4_f32,
+_element_measures_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad9_f32
 )
-from cfsem.cfsem import (
-    solenoid_stress_fem_element_measures_axisymmetric_quad4_f64 as _element_measures_axisymmetric_quad4_f64,
+_element_measures_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad9_f64
 )
-from cfsem.cfsem import solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32
-from cfsem.cfsem import solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64
-
-_element_quadrature_axisymmetric_quad4_f32 = solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32
-_element_quadrature_axisymmetric_quad4_f64 = solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64
+_element_quadrature_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32
+)
+_element_quadrature_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64
+)
+_element_quadrature_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f32
+)
+_element_quadrature_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f64
+)
+_quadrature_field_operators_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f32
+)
+_quadrature_field_operators_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f64
+)
+_quadrature_field_operators_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f32
+)
+_quadrature_field_operators_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f64
+)
+_body_force_operator_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f32
+)
+_body_force_operator_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f64
+)
+_body_force_operator_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f32
+)
+_body_force_operator_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f64
+)
+_pressure_operator_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f32
+)
+_pressure_operator_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f64
+)
+_pressure_operator_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32
+)
+_pressure_operator_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f64
+)
 
 ArrayLike = npt.ArrayLike
 ElementType = str
@@ -97,6 +145,17 @@ class ElementQuadrature:
     weights_area: npt.NDArray[np.floating[Any]]
     weights_volume: npt.NDArray[np.floating[Any]]
     nq_per_element: int
+
+
+@dataclass(frozen=True, slots=True)
+class QuadratureFieldOperators:
+    """Sparse operators that map nodal displacements to quadrature-point strain/stress."""
+
+    points_rz: npt.NDArray[np.floating[Any]]
+    strain_operator: sp.csr_matrix
+    stress_operator: sp.csr_matrix
+    nq_per_element: int
+    ndof: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,6 +581,17 @@ def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     return f64
 
 
+def _dispatch_by_element_type(
+    element_type: str,
+    quad4_impl: Any,
+    quad9_impl: Any,
+) -> Any:
+    normalized_type = _normalize_element_type(element_type)
+    if normalized_type == "quad4":
+        return quad4_impl
+    return quad9_impl
+
+
 def _element_jacobian(
     coords: npt.NDArray[np.floating[Any]],
     grad_ref: npt.NDArray[np.floating[Any]],
@@ -776,31 +846,7 @@ def _assemble_body_force_operator(
     dtype: np.dtype[Any],
     element_type: str,
 ) -> sp.csr_matrix:
-    nelem = elements.shape[0]
-    ndof = nodes.shape[0] * 2
-    rows: list[int] = []
-    cols: list[int] = []
-    vals: list[Any] = []
-    two_pi = dtype.type(2.0 * np.pi)
-
-    for element_index, conn in enumerate(elements):
-        coords = nodes[conn]
-        nodal_weights = np.zeros((conn.shape[0],), dtype=dtype)
-        for n, _grad_phys, det_j, point, weight in _volume_samples(
-            coords, element_type, quadrature_code, dtype
-        ):
-            nodal_weights += two_pi * point[0] * det_j * weight * n
-        body_col = 2 * element_index
-        for local_node, global_node in enumerate(conn):
-            weight = nodal_weights[local_node]
-            rows.extend((2 * int(global_node), 2 * int(global_node) + 1))
-            cols.extend((body_col, body_col + 1))
-            vals.extend((weight, weight))
-
-    return sp.coo_matrix(
-        (np.asarray(vals, dtype=dtype), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))),
-        shape=(ndof, 2 * nelem),
-    ).tocsr()
+    return _assemble_body_force_operator_rust(nodes, elements, quadrature_code, dtype, element_type)
 
 
 def _assemble_pressure_operator(
@@ -811,44 +857,213 @@ def _assemble_pressure_operator(
     dtype: np.dtype[Any],
     element_type: str,
 ) -> sp.csr_matrix:
-    ndof = nodes.shape[0] * 2
-    nload = pressure_faces.shape[0]
-    if nload == 0:
-        return sp.csr_matrix((ndof, 0), dtype=dtype)
+    return _assemble_pressure_operator_rust(
+        nodes,
+        elements,
+        pressure_faces,
+        quadrature_code,
+        dtype,
+        element_type,
+    )
 
-    rows: list[int] = []
-    cols: list[int] = []
-    vals: list[Any] = []
-    two_pi = dtype.type(2.0 * np.pi)
 
-    for load_index, (element_index_u64, local_face_u64) in enumerate(pressure_faces):
-        element_index = int(element_index_u64)
-        if element_index < 0 or element_index >= elements.shape[0]:
-            raise ValueError(
-                f"pressure_faces references element {element_index}, "
-                f"but mesh has {elements.shape[0]} elements"
-            )
-        local_face = int(local_face_u64)
-        conn = elements[element_index]
-        coords = nodes[conn]
-        local_load = np.zeros((2 * conn.shape[0],), dtype=dtype)
-        for n, tangent, point, weight in _face_samples(
-            coords, element_type, local_face, quadrature_code, dtype
-        ):
-            normal_area = np.array([tangent[1], -tangent[0]], dtype=dtype)
-            scale = -two_pi * point[0] * weight
-            for local_node in range(conn.shape[0]):
-                local_load[2 * local_node] += scale * n[local_node] * normal_area[0]
-                local_load[2 * local_node + 1] += scale * n[local_node] * normal_area[1]
-        for local_node, global_node in enumerate(conn):
-            rows.extend((2 * int(global_node), 2 * int(global_node) + 1))
-            cols.extend((load_index, load_index))
-            vals.extend((local_load[2 * local_node], local_load[2 * local_node + 1]))
-
+def _coo_operator_from_triplets(
+    rows: ArrayLike,
+    cols: ArrayLike,
+    vals: ArrayLike,
+    shape: tuple[int, int],
+    dtype: np.dtype[Any],
+) -> sp.csr_matrix:
     return sp.coo_matrix(
-        (np.asarray(vals, dtype=dtype), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))),
-        shape=(ndof, nload),
+        (
+            np.asarray(vals, dtype=dtype),
+            (
+                np.asarray(rows, dtype=np.int64),
+                np.asarray(cols, dtype=np.int64),
+            ),
+        ),
+        shape=shape,
     ).tocsr()
+
+
+def _assemble_body_force_operator_rust(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> sp.csr_matrix:
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            element_type,
+            _body_force_operator_axisymmetric_quad4_f32,
+            _body_force_operator_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            element_type,
+            _body_force_operator_axisymmetric_quad4_f64,
+            _body_force_operator_axisymmetric_quad9_f64,
+        ),
+    )
+    rows, cols, vals, nrow, ncol = low_level(nodes, elements, quadrature_code)
+    return _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype)
+
+
+def _assemble_pressure_operator_rust(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    pressure_faces: npt.NDArray[np.uint64],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> sp.csr_matrix:
+    if pressure_faces.shape[0] == 0:
+        return sp.csr_matrix((2 * nodes.shape[0], 0), dtype=dtype)
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            element_type,
+            _pressure_operator_axisymmetric_quad4_f32,
+            _pressure_operator_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            element_type,
+            _pressure_operator_axisymmetric_quad4_f64,
+            _pressure_operator_axisymmetric_quad9_f64,
+        ),
+    )
+    rows, cols, vals, nrow, ncol = low_level(nodes, elements, pressure_faces, quadrature_code)
+    return _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype)
+
+
+def _quadrature_field_operators_rust(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    material_ids: npt.NDArray[np.uint64],
+    material_table: npt.NDArray[np.floating[Any]],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> QuadratureFieldOperators:
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            element_type,
+            _quadrature_field_operators_axisymmetric_quad4_f32,
+            _quadrature_field_operators_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            element_type,
+            _quadrature_field_operators_axisymmetric_quad4_f64,
+            _quadrature_field_operators_axisymmetric_quad9_f64,
+        ),
+    )
+    (
+        points_flat,
+        strain_rows,
+        strain_cols,
+        strain_vals,
+        stress_rows,
+        stress_cols,
+        stress_vals,
+        nq_per_element,
+        ndof,
+    ) = low_level(nodes, elements, material_ids, material_table, quadrature_code)
+    nelem = elements.shape[0]
+    nrow = nelem * int(nq_per_element) * 4
+    return QuadratureFieldOperators(
+        points_rz=np.asarray(points_flat, dtype=dtype).reshape(nelem, int(nq_per_element), 2),
+        strain_operator=_coo_operator_from_triplets(
+            strain_rows,
+            strain_cols,
+            strain_vals,
+            shape=(nrow, int(ndof)),
+            dtype=dtype,
+        ),
+        stress_operator=_coo_operator_from_triplets(
+            stress_rows,
+            stress_cols,
+            stress_vals,
+            shape=(nrow, int(ndof)),
+            dtype=dtype,
+        ),
+        nq_per_element=int(nq_per_element),
+        ndof=int(ndof),
+    )
+
+
+def _assemble_quadrature_field_operators_python(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    material_ids: npt.NDArray[np.uint64],
+    material_table: npt.NDArray[np.floating[Any]],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> QuadratureFieldOperators:
+    nelem = elements.shape[0]
+    ndof = 2 * nodes.shape[0]
+    q1d = _gauss_1d(quadrature_code)
+    nq = len(q1d) ** 2
+    points = np.zeros((nelem, nq, 2), dtype=dtype)
+    strain_rows: list[int] = []
+    strain_cols: list[int] = []
+    strain_vals: list[Any] = []
+    stress_rows: list[int] = []
+    stress_cols: list[int] = []
+    stress_vals: list[Any] = []
+
+    for element_index, conn in enumerate(elements):
+        coords = nodes[conn]
+        material = material_table[int(material_ids[element_index])]
+        local_dofs = np.empty((2 * conn.shape[0],), dtype=np.int64)
+        for local_node, global_node in enumerate(conn):
+            global_node_int = int(global_node)
+            local_dofs[2 * local_node] = 2 * global_node_int
+            local_dofs[2 * local_node + 1] = 2 * global_node_int + 1
+
+        for q_local, (n, grad_phys, _det_j, point, _weight) in enumerate(
+            _volume_samples(coords, element_type, quadrature_code, dtype)
+        ):
+            b = _axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype)
+            db = np.asarray(material @ b, dtype=dtype)
+            points[element_index, q_local] = point
+            row_base = 4 * (element_index * nq + q_local)
+            for component in range(4):
+                global_row = row_base + component
+                for local_dof, global_col in enumerate(local_dofs):
+                    strain_value = b[component, local_dof]
+                    if strain_value != 0.0:
+                        strain_rows.append(global_row)
+                        strain_cols.append(int(global_col))
+                        strain_vals.append(strain_value)
+                    stress_value = db[component, local_dof]
+                    if stress_value != 0.0:
+                        stress_rows.append(global_row)
+                        stress_cols.append(int(global_col))
+                        stress_vals.append(stress_value)
+
+    nrow = nelem * nq * 4
+    return QuadratureFieldOperators(
+        points_rz=points,
+        strain_operator=_coo_operator_from_triplets(
+            strain_rows,
+            strain_cols,
+            strain_vals,
+            shape=(nrow, ndof),
+            dtype=dtype,
+        ),
+        stress_operator=_coo_operator_from_triplets(
+            stress_rows,
+            stress_cols,
+            stress_vals,
+            shape=(nrow, ndof),
+            dtype=dtype,
+        ),
+        nq_per_element=nq,
+        ndof=ndof,
+    )
 def assemble_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
@@ -886,26 +1101,20 @@ def assemble_axisymmetric(
     analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
         nodes_arr, elements_arr, normalized_element_type
     )
-    if normalized_element_type == "quad4" and quadrature_code == 3:
-        low_level = _dispatch_pair(dtype, _assemble_axisymmetric_quad4_f32, _assemble_axisymmetric_quad4_f64)
-        rows, cols, vals, rhs, ndof = low_level(
-            analysis_nodes,
-            analysis_elements[:, :4],
-            material_ids_arr,
-            material_table_arr,
-            body_force_arr,
-            pressure_faces_arr,
-            pressure_values_arr,
-            quadrature_code,
-        )
-        return AssemblyResult(
-            rows=np.asarray(rows, dtype=np.int64),
-            cols=np.asarray(cols, dtype=np.int64),
-            vals=np.asarray(vals, dtype=dtype),
-            rhs=np.asarray(rhs, dtype=dtype),
-            ndof=int(ndof),
-        )
-    return _assemble_axisymmetric_python(
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            normalized_element_type,
+            _assemble_axisymmetric_quad4_f32,
+            _assemble_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            normalized_element_type,
+            _assemble_axisymmetric_quad4_f64,
+            _assemble_axisymmetric_quad9_f64,
+        ),
+    )
+    rows, cols, vals, rhs, ndof = low_level(
         analysis_nodes,
         analysis_elements,
         material_ids_arr,
@@ -914,8 +1123,13 @@ def assemble_axisymmetric(
         pressure_faces_arr,
         pressure_values_arr,
         quadrature_code,
-        dtype,
-        normalized_element_type,
+    )
+    return AssemblyResult(
+        rows=np.asarray(rows, dtype=np.int64),
+        cols=np.asarray(cols, dtype=np.int64),
+        vals=np.asarray(vals, dtype=dtype),
+        rhs=np.asarray(rhs, dtype=dtype),
+        ndof=int(ndof),
     )
 
 
@@ -931,10 +1145,10 @@ def assemble_axisymmetric_model(
     """
     Assemble a reusable axisymmetric FEM model for repeated load cases.
 
-    The stiffness matrix is assembled once through the Rust backend. The returned
-    load operators map per-element body-force data and reusable pressure-load
-    amplitudes to the global right-hand side using sparse matrix-vector products
-    in Python only.
+    The stiffness matrix and linear load operators are assembled once through the
+    Rust backend. The returned load operators map per-element body-force data and
+    reusable pressure-load amplitudes to the global right-hand side through sparse
+    matrix-vector products on the Python side.
 
     Notes:
         `pressure_faces` defines the ordering of the reusable pressure load vector.
@@ -994,6 +1208,51 @@ def assemble_axisymmetric_model(
     )
 
 
+def quadrature_field_operators_axisymmetric(
+    nodes: ArrayLike,
+    elements: ArrayLike,
+    material_ids: ArrayLike,
+    material_table: ArrayLike | Mapping[int, ArrayLike],
+    quadrature: str | int = "3x3",
+    element_type: str = "quad4",
+) -> QuadratureFieldOperators:
+    """
+    Build sparse operators that map nodal displacements to quadrature strain/stress samples.
+
+    The returned operators act on the global displacement vector ordered as
+    `[u_r(0), u_z(0), u_r(1), u_z(1), ...]` and produce quadrature samples stacked in
+    element-major order with four consecutive rows per sample:
+    `[e_rr, e_zz, e_tt, g_rz]` for `strain_operator` and
+    `[s_rr, s_zz, s_tt, t_rz]` for `stress_operator`.
+    """
+
+    dtype = _resolve_float_dtype(nodes, material_table)
+    nodes_arr = _normalize_nodes(nodes, dtype)
+    elements_arr = _normalize_elements(elements)
+    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    if material_ids_arr.shape[0] != elements_arr.shape[0]:
+        raise ValueError(
+            f"material_ids has length {material_ids_arr.shape[0]}, "
+            f"but elements has {elements_arr.shape[0]} rows"
+        )
+
+    quadrature_code = _quadrature_code(quadrature)
+    normalized_element_type = _normalize_element_type(element_type)
+    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
+    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+        nodes_arr, elements_arr, normalized_element_type
+    )
+    return _quadrature_field_operators_rust(
+        analysis_nodes,
+        analysis_elements,
+        material_ids_arr,
+        material_table_arr,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+
+
 def element_measures_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
@@ -1011,24 +1270,20 @@ def element_measures_axisymmetric(
     analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
         nodes_arr, elements_arr, normalized_element_type
     )
-    if normalized_element_type == "quad4" and quadrature_code == 3:
-        low_level = _dispatch_pair(
-            dtype,
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            normalized_element_type,
             _element_measures_axisymmetric_quad4_f32,
+            _element_measures_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            normalized_element_type,
             _element_measures_axisymmetric_quad4_f64,
-        )
-        areas, swept_volumes = low_level(analysis_nodes, analysis_elements[:, :4], quadrature_code)
-    else:
-        areas = np.zeros((analysis_elements.shape[0],), dtype=dtype)
-        swept_volumes = np.zeros((analysis_elements.shape[0],), dtype=dtype)
-        two_pi = dtype.type(2.0 * np.pi)
-        for element_index, conn in enumerate(analysis_elements):
-            coords = analysis_nodes[conn]
-            for _n, _grad_phys, det_j, point, weight in _volume_samples(
-                coords, normalized_element_type, quadrature_code, dtype
-            ):
-                areas[element_index] += det_j * weight
-                swept_volumes[element_index] += two_pi * point[0] * det_j * weight
+            _element_measures_axisymmetric_quad9_f64,
+        ),
+    )
+    areas, swept_volumes = low_level(analysis_nodes, analysis_elements, quadrature_code)
     return ElementMeasures(
         areas=np.asarray(areas, dtype=dtype),
         swept_volumes=np.asarray(swept_volumes, dtype=dtype),
@@ -1052,37 +1307,28 @@ def element_quadrature_axisymmetric(
     analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
         nodes_arr, elements_arr, normalized_element_type
     )
-    if normalized_element_type == "quad4" and quadrature_code == 3:
-        low_level = _dispatch_pair(
-            dtype,
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            normalized_element_type,
             _element_quadrature_axisymmetric_quad4_f32,
+            _element_quadrature_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            normalized_element_type,
             _element_quadrature_axisymmetric_quad4_f64,
-        )
-        points_flat, weights_area, weights_volume, nq_per_element = low_level(
-            analysis_nodes,
-            analysis_elements[:, :4],
-            quadrature_code,
-        )
-        nelem = analysis_elements.shape[0]
-        points_rz = np.asarray(points_flat, dtype=dtype).reshape(nelem, nq_per_element, 2)
-        weights_area_arr = np.asarray(weights_area, dtype=dtype).reshape(nelem, nq_per_element)
-        weights_volume_arr = np.asarray(weights_volume, dtype=dtype).reshape(nelem, nq_per_element)
-    else:
-        q1d = _gauss_1d(quadrature_code)
-        nq_per_element = len(q1d) ** 2
-        nelem = analysis_elements.shape[0]
-        points_rz = np.zeros((nelem, nq_per_element, 2), dtype=dtype)
-        weights_area_arr = np.zeros((nelem, nq_per_element), dtype=dtype)
-        weights_volume_arr = np.zeros((nelem, nq_per_element), dtype=dtype)
-        two_pi = dtype.type(2.0 * np.pi)
-        for element_index, conn in enumerate(analysis_elements):
-            coords = analysis_nodes[conn]
-            for local_q, (_n, _grad_phys, det_j, point, weight) in enumerate(
-                _volume_samples(coords, normalized_element_type, quadrature_code, dtype)
-            ):
-                points_rz[element_index, local_q] = point
-                weights_area_arr[element_index, local_q] = det_j * weight
-                weights_volume_arr[element_index, local_q] = two_pi * point[0] * det_j * weight
+            _element_quadrature_axisymmetric_quad9_f64,
+        ),
+    )
+    points_flat, weights_area, weights_volume, nq_per_element = low_level(
+        analysis_nodes,
+        analysis_elements,
+        quadrature_code,
+    )
+    nelem = analysis_elements.shape[0]
+    points_rz = np.asarray(points_flat, dtype=dtype).reshape(nelem, nq_per_element, 2)
+    weights_area_arr = np.asarray(weights_area, dtype=dtype).reshape(nelem, nq_per_element)
+    weights_volume_arr = np.asarray(weights_volume, dtype=dtype).reshape(nelem, nq_per_element)
     return ElementQuadrature(
         points_rz=points_rz,
         weights_area=weights_area_arr,
@@ -1267,43 +1513,21 @@ def evaluate_axisymmetric_strain_stress_at_quadrature(
     """
 
     dtype = _resolve_float_dtype(nodes, material_table, displacements)
-    nodes_arr = _normalize_nodes(nodes, dtype)
-    elements_arr = _normalize_elements(elements)
-    normalized_element_type = _normalize_element_type(element_type)
-    quadrature_code = _quadrature_code(quadrature)
-    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
-        nodes_arr, elements_arr, normalized_element_type
+    operators = quadrature_field_operators_axisymmetric(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        quadrature=quadrature,
+        element_type=element_type,
     )
-    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    displacements_arr = _normalize_displacements(displacements, analysis_nodes.shape[0], dtype)
-    if material_ids_arr.shape[0] != elements_arr.shape[0]:
-        raise ValueError(
-            f"material_ids has length {material_ids_arr.shape[0]}, "
-            f"but elements has {elements_arr.shape[0]} rows"
-        )
-
-    q1d = _gauss_1d(quadrature_code)
-    nq = len(q1d) ** 2
-    points = np.zeros((analysis_elements.shape[0], nq, 2), dtype=dtype)
-    strain = np.zeros((analysis_elements.shape[0], nq, 4), dtype=dtype)
-    stress = np.zeros((analysis_elements.shape[0], nq, 4), dtype=dtype)
-
-    for element_index, conn in enumerate(analysis_elements):
-        coords = analysis_nodes[conn]
-        u_local = displacements_arr[conn].reshape(2 * conn.shape[0])
-        material = material_table_arr[int(material_ids_arr[element_index])]
-        for q_local, (n, grad_phys, _det_j, point, _weight) in enumerate(
-            _volume_samples(coords, normalized_element_type, quadrature_code, dtype)
-        ):
-            b = _axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype)
-            eps_q = b @ u_local
-            sig_q = material @ eps_q
-            points[element_index, q_local] = point
-            strain[element_index, q_local] = eps_q
-            stress[element_index, q_local] = sig_q
-
-    return QuadratureFieldSamples(points_rz=points, strain=strain, stress=stress)
+    displacements_arr = _normalize_displacements(displacements, operators.ndof // 2, dtype)
+    u_flat = displacements_arr.reshape(-1)
+    nelem = operators.points_rz.shape[0]
+    nq = operators.nq_per_element
+    strain = np.asarray(operators.strain_operator @ u_flat, dtype=dtype).reshape(nelem, nq, 4)
+    stress = np.asarray(operators.stress_operator @ u_flat, dtype=dtype).reshape(nelem, nq, 4)
+    return QuadratureFieldSamples(points_rz=operators.points_rz, strain=strain, stress=stress)
 
 
 __all__ = [
@@ -1312,6 +1536,7 @@ __all__ = [
     "ElevatedQuad9Mesh",
     "ElementMeasures",
     "ElementQuadrature",
+    "QuadratureFieldOperators",
     "QuadratureFieldSamples",
     "ReducedAxisymmetricFEMModel",
     "ReducedSystem",
@@ -1324,5 +1549,6 @@ __all__ = [
     "evaluate_axisymmetric_strain_stress_at_quadrature",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
+    "quadrature_field_operators_axisymmetric",
     "solve_dirichlet",
 ]

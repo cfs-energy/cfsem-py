@@ -558,6 +558,60 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
         )
 
 
+@pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
+def test_quad4_quadrature_field_operators_match_manual_recovery(dtype: DType) -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
+    displacement = np.linspace(-2.0e-4, 3.0e-4, 2 * nodes.shape[0], dtype=dtype)
+    operators = fem.quadrature_field_operators_axisymmetric(
+        nodes,
+        elements,
+        material_ids,
+        np.asarray([material]),
+        quadrature="3x3",
+        element_type="quad4",
+    )
+
+    dtype_res = np.dtype(dtype)
+    nodes_arr = fem._normalize_nodes(nodes, dtype_res)
+    elements_arr = fem._normalize_elements(elements)
+    material_ids_arr, material_table_arr = fem._normalize_materials(
+        material_ids,
+        np.asarray([material]),
+        dtype_res,
+    )
+    displacements_arr = fem._normalize_displacements(displacement, nodes.shape[0], dtype_res)
+    manual_points: list[np.ndarray] = []
+    manual_strain: list[np.ndarray] = []
+    manual_stress: list[np.ndarray] = []
+    for element_index, conn in enumerate(elements_arr):
+        coords = nodes_arr[conn]
+        u_local = displacements_arr[conn].reshape(-1)
+        material_local = material_table_arr[int(material_ids_arr[element_index])]
+        for n, grad_phys, _det_j, point, _weight in fem._volume_samples(coords, "quad4", 3, dtype_res):
+            b = fem._axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype_res)
+            eps = b @ u_local
+            sig = material_local @ eps
+            manual_points.append(np.asarray(point, dtype=dtype_res))
+            manual_strain.append(np.asarray(eps, dtype=dtype_res))
+            manual_stress.append(np.asarray(sig, dtype=dtype_res))
+
+    actual_strain = np.asarray(operators.strain_operator @ displacement, dtype=dtype_res).reshape(-1, 4)
+    actual_stress = np.asarray(operators.stress_operator @ displacement, dtype=dtype_res).reshape(-1, 4)
+    expected_points = np.asarray(manual_points, dtype=dtype_res).reshape(elements.shape[0], 9, 2)
+    expected_strain = np.asarray(manual_strain, dtype=dtype_res)
+    expected_stress = np.asarray(manual_stress, dtype=dtype_res)
+    rtol, atol = tolerance(dtype)
+
+    assert operators.points_rz.shape == (elements.shape[0], 9, 2)
+    assert operators.strain_operator.shape == (elements.shape[0] * 9 * 4, displacement.size)
+    assert operators.stress_operator.shape == (elements.shape[0] * 9 * 4, displacement.size)
+    assert np.allclose(operators.points_rz, expected_points, rtol=rtol, atol=atol)
+    assert np.allclose(actual_strain, expected_strain, rtol=rtol, atol=max(atol, 1.0e-9))
+    assert np.allclose(actual_stress, expected_stress, rtol=max(rtol, 2.0e-6), atol=max(atol, 1.0e-2))
+
+
 def test_infer_quad9_mesh_preserves_corner_nodes_and_shares_edge_midpoints() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float64)
     elevated = fem.infer_quad9_mesh(nodes, elements)
@@ -677,3 +731,24 @@ def test_quad9_quadrature_recovery_shapes(quadrature: str) -> None:
     assert samples.points_rz.shape == (elements.shape[0], nq, 2)
     assert samples.strain.shape == (elements.shape[0], nq, 4)
     assert samples.stress.shape == (elements.shape[0], nq, 4)
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+def test_quad9_quadrature_field_operator_shapes(quadrature: str) -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float64)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
+    elevated = fem.infer_quad9_mesh(nodes, elements)
+    operators = fem.quadrature_field_operators_axisymmetric(
+        nodes,
+        elements,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        quadrature=quadrature,
+        element_type="quad9",
+    )
+
+    nq = 9 if quadrature == "3x3" else 16
+    assert operators.points_rz.shape == (elements.shape[0], nq, 2)
+    assert operators.ndof == 2 * elevated.analysis_nodes.shape[0]
+    assert operators.strain_operator.shape == (elements.shape[0] * nq * 4, operators.ndof)
+    assert operators.stress_operator.shape == (elements.shape[0] * nq * 4, operators.ndof)

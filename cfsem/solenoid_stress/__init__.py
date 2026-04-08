@@ -4,6 +4,7 @@ from .axisymmetric_fem import (
     ElevatedQuad9Mesh,
     ElementMeasures,
     ElementQuadrature,
+    QuadratureFieldOperators,
     QuadratureFieldSamples,
     ReducedAxisymmetricFEMModel,
     ReducedSystem,
@@ -16,6 +17,7 @@ from .axisymmetric_fem import (
     evaluate_axisymmetric_strain_stress_at_quadrature,
     infer_quad9_mesh,
     isotropic_axisymmetric_material,
+    quadrature_field_operators_axisymmetric,
     solve_dirichlet,
 )
 
@@ -25,6 +27,7 @@ __all__ = [
     "ElevatedQuad9Mesh",
     "ElementMeasures",
     "ElementQuadrature",
+    "QuadratureFieldOperators",
     "QuadratureFieldSamples",
     "ReducedAxisymmetricFEMModel",
     "ReducedSystem",
@@ -37,5 +40,6 @@ __all__ = [
     "evaluate_axisymmetric_strain_stress_at_quadrature",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
+    "quadrature_field_operators_axisymmetric",
     "solve_dirichlet",
 ]

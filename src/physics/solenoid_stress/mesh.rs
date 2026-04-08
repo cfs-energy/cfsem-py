@@ -1,13 +1,12 @@
-//! Lightweight validated views of the axisymmetric Quad4 mesh and assembled outputs.
+//! Lightweight validated views of the axisymmetric element meshes and assembled outputs.
 
-use crate::physics::solenoid_stress::quad4::NODES_PER_ELEMENT;
 use crate::physics::solenoid_stress::types::Real;
 
 #[derive(Clone, Copy)]
-pub struct MeshView<'a, F: Real> {
+pub struct MeshView<'a, F: Real, const NODES_PER_ELEMENT: usize> {
     /// Node coordinates stored as `(r, z)`.
     pub nodes_rz: &'a [[F; 2]],
-    /// Element connectivity, one `[n0, n1, n2, n3]` tuple per Quad4 element.
+    /// Element connectivity in family-specific local-node order.
     pub elements: &'a [[usize; NODES_PER_ELEMENT]],
 }
 
@@ -15,7 +14,7 @@ pub struct MeshView<'a, F: Real> {
 pub struct PressureLoad<F: Real> {
     /// Element index receiving the load.
     pub element: usize,
-    /// Local face index in the Quad4 numbering used by `face_reference`.
+    /// Local face index in the element-family numbering used by `face_reference`.
     pub local_face: u8,
     /// Pressure magnitude, taken positive in the inward normal direction.
     pub value: F,
@@ -35,13 +34,13 @@ pub struct AssemblyResult<F: Real> {
     pub ndof: usize,
 }
 
-impl<'a, F: Real> MeshView<'a, F> {
+impl<'a, F: Real, const NODES_PER_ELEMENT: usize> MeshView<'a, F, NODES_PER_ELEMENT> {
     /// Number of mesh nodes.
     pub fn num_nodes(&self) -> usize {
         self.nodes_rz.len()
     }
 
-    /// Number of Quad4 elements.
+    /// Number of elements.
     pub fn num_elements(&self) -> usize {
         self.elements.len()
     }

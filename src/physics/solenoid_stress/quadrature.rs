@@ -11,6 +11,8 @@ pub enum QuadratureRule {
     Gauss2x2,
     /// Tensor-product 3-point rule in each parametric direction.
     Gauss3x3,
+    /// Tensor-product 4-point rule in each parametric direction.
+    Gauss4x4,
 }
 
 impl QuadratureRule {
@@ -19,8 +21,9 @@ impl QuadratureRule {
         match code {
             2 => Ok(Self::Gauss2x2),
             3 => Ok(Self::Gauss3x3),
+            4 => Ok(Self::Gauss4x4),
             _ => Err(format!(
-                "unsupported quadrature code {code}; use 2 for 2x2 or 3 for 3x3"
+                "unsupported quadrature code {code}; use 2 for 2x2, 3 for 3x3, or 4 for 4x4"
             )),
         }
     }
@@ -30,6 +33,7 @@ impl QuadratureRule {
         match self {
             Self::Gauss2x2 => 4,
             Self::Gauss3x3 => 9,
+            Self::Gauss4x4 => 16,
         }
     }
 }
@@ -48,6 +52,13 @@ pub fn gauss_1d<F: Real>(rule: QuadratureRule) -> Vec<(F, F)> {
                 (F::zero(), cast(8.0 / 9.0)),
                 (a, cast(5.0 / 9.0)),
             ]
+        }
+        QuadratureRule::Gauss4x4 => {
+            let a1 = cast::<F>(0.861_136_311_594_052_6);
+            let a2 = cast::<F>(0.339_981_043_584_856_26);
+            let w1 = cast::<F>(0.347_854_845_137_453_85);
+            let w2 = cast::<F>(0.652_145_154_862_546_1);
+            vec![(-a1, w1), (-a2, w2), (a2, w2), (a1, w1)]
         }
     }
 }
@@ -89,5 +100,24 @@ mod tests {
             .map(|([xi, eta], w)| (xi * xi + eta * eta) * w)
             .sum();
         assert!((integral - (8.0 / 3.0)).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn gauss_4x4_integrates_constant_to_four() {
+        let weight_sum: f64 = gauss_volume::<f64>(QuadratureRule::Gauss4x4)
+            .into_iter()
+            .map(|(_, w)| w)
+            .sum();
+        assert!((weight_sum - 4.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn gauss_4x4_integrates_degree_six_polynomial_exactly() {
+        let integral: f64 = gauss_volume::<f64>(QuadratureRule::Gauss4x4)
+            .into_iter()
+            .map(|([xi, eta], w)| (xi.powi(6) + eta.powi(6)) * w)
+            .sum();
+        let exact = 8.0 / 7.0;
+        assert!((integral - exact).abs() < 1.0e-12);
     }
 }

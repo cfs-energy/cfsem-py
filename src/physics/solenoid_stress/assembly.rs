@@ -2,43 +2,44 @@
 //!
 //! The element system matrix is assembled in the standard Galerkin form
 //! `K_e = integral(B^T D B 2*pi*r dA)` and the consistent load vectors are assembled from the
-//! same weak form.  This follows the conventional displacement-based finite-element construction
-//! described in Hughes (1987), Bathe (1996), and Reddy (2005).
-//!
-//! For readers coming from linear algebra rather than FEM: each element produces a small dense
-//! matrix `K_e` and load vector `f_e`.  The loops in this module simply evaluate those local
-//! objects by quadrature, then scatter-add them into a global sparse matrix represented as row,
-//! column, value triplets.
+//! same weak form.
 
 use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
-use crate::physics::solenoid_stress::geometry::volume_samples;
-use crate::physics::solenoid_stress::loads::{accumulate_body_force, pressure_element_load};
+use crate::physics::solenoid_stress::geometry::{
+    VolumeSample, volume_samples_quad4, volume_samples_quad9,
+};
+use crate::physics::solenoid_stress::loads::{
+    accumulate_body_force, pressure_element_load_quad4, pressure_element_load_quad9,
+};
 use crate::physics::solenoid_stress::mesh::{AssemblyResult, MeshView, PressureLoad};
-use crate::physics::solenoid_stress::quad4::DOF_PER_ELEMENT;
+use crate::physics::solenoid_stress::quad4;
+use crate::physics::solenoid_stress::quad9;
 use crate::physics::solenoid_stress::quadrature::QuadratureRule;
 use crate::physics::solenoid_stress::types::{Real, two_pi};
 
-/// Assemble the global axisymmetric Quad4 stiffness matrix and right-hand side.
-///
-/// Inputs are element-major material and body-force data, plus optional pressure loads applied
-/// to element faces.  The output uses sparse triplets `(rows, cols, vals)` rather than building
-/// a dense matrix in Rust; the Python layer converts those triplets to SciPy sparse matrices.
-///
-/// The constitutive matrices in `material_table` are expected to act on the axisymmetric strain
-/// vector `[e_rr, e_zz, e_tt, g_rz]`, where `g_rz` is the engineering shear strain.
-///
-/// # References
-/// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
-/// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
-/// - I. Fried, "Notes on the finite element analysis of the axisymmetric elastic solid," *International Journal of Solids and Structures*, 10(3), 1974.
-pub fn assemble_axisymmetric_quad4<F: Real>(
-    mesh: MeshView<'_, F>,
+fn assemble_axisymmetric_impl<
+    F: Real,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     body_force: &[[F; 2]],
     pressure_loads: &[PressureLoad<F>],
     quadrature: QuadratureRule,
+    volume_samples_fn: fn(
+        &[[F; 2]; NODES_PER_ELEMENT],
+        QuadratureRule,
+    ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
+    pressure_element_load_fn: fn(
+        &[[F; 2]; NODES_PER_ELEMENT],
+        u8,
+        F,
+        QuadratureRule,
+    ) -> Result<[F; DOF_PER_ELEMENT], String>,
 ) -> Result<AssemblyResult<F>, String> {
+    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
     mesh.validate_nodes()?;
     mesh.validate_connectivity()?;
     if material_ids.len() != mesh.num_elements() {
@@ -73,10 +74,12 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
         let mut ke = [[F::zero(); DOF_PER_ELEMENT]; DOF_PER_ELEMENT];
         let mut fe = [F::zero(); DOF_PER_ELEMENT];
 
-        for sample in volume_samples(&coords, quadrature)? {
-            // Axisymmetric element contribution:
-            // K_e += B^T D B (2*pi*r det(J) w), f_e += N^T b (2*pi*r det(J) w)
-            let b = build_b_matrix(&sample.n, &sample.grad_phys, sample.point[0])?;
+        for sample in volume_samples_fn(&coords, quadrature)? {
+            let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                &sample.n,
+                &sample.grad_phys,
+                sample.point[0],
+            )?;
             let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
             accumulate_stiffness(&mut ke, material, &b, scale);
             accumulate_body_force(&mut fe, element_body_force, &sample.n, scale);
@@ -84,7 +87,6 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
 
         let mut local_dofs = [0usize; DOF_PER_ELEMENT];
         for (local_node, global_node) in nodes.into_iter().enumerate() {
-            // Node i contributes radial and axial displacement unknowns in adjacent columns.
             local_dofs[2 * local_node] = 2 * global_node;
             local_dofs[2 * local_node + 1] = 2 * global_node + 1;
         }
@@ -109,9 +111,7 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
-        // Face pressure contributes only to the global right-hand side because it is an external
-        // traction, not part of the material stiffness.
-        let fe = pressure_element_load(&coords, load.local_face, load.value, quadrature)?;
+        let fe = pressure_element_load_fn(&coords, load.local_face, load.value, quadrature)?;
         for (local_node, global_node) in nodes.into_iter().enumerate() {
             rhs[2 * global_node] = rhs[2 * global_node] + fe[2 * local_node];
             rhs[2 * global_node + 1] = rhs[2 * global_node + 1] + fe[2 * local_node + 1];
@@ -125,6 +125,48 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
         rhs,
         ndof,
     })
+}
+
+/// Assemble the global axisymmetric Quad4 stiffness matrix and right-hand side.
+pub fn assemble_axisymmetric_quad4<F: Real>(
+    mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
+    material_ids: &[usize],
+    material_table: &[[[F; 4]; 4]],
+    body_force: &[[F; 2]],
+    pressure_loads: &[PressureLoad<F>],
+    quadrature: QuadratureRule,
+) -> Result<AssemblyResult<F>, String> {
+    assemble_axisymmetric_impl(
+        mesh,
+        material_ids,
+        material_table,
+        body_force,
+        pressure_loads,
+        quadrature,
+        volume_samples_quad4::<F>,
+        pressure_element_load_quad4::<F>,
+    )
+}
+
+/// Assemble the global axisymmetric Quad9 stiffness matrix and right-hand side.
+pub fn assemble_axisymmetric_quad9<F: Real>(
+    mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
+    material_ids: &[usize],
+    material_table: &[[[F; 4]; 4]],
+    body_force: &[[F; 2]],
+    pressure_loads: &[PressureLoad<F>],
+    quadrature: QuadratureRule,
+) -> Result<AssemblyResult<F>, String> {
+    assemble_axisymmetric_impl(
+        mesh,
+        material_ids,
+        material_table,
+        body_force,
+        pressure_loads,
+        quadrature,
+        volume_samples_quad9::<F>,
+        pressure_element_load_quad9::<F>,
+    )
 }
 
 #[cfg(test)]
@@ -161,7 +203,7 @@ mod tests {
             &material_table,
             &body_force,
             &[],
-            QuadratureRule::Gauss2x2,
+            QuadratureRule::Gauss3x3,
         )
         .expect("assembly should succeed");
 

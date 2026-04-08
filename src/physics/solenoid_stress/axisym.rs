@@ -8,7 +8,6 @@
 //! `u_z`.  Circumferential displacement is omitted by the axisymmetric assumption, but the hoop
 //! normal strain `e_tt` still appears because moving a ring outward changes its circumference.
 
-use crate::physics::solenoid_stress::quad4::{DOF_PER_ELEMENT, NODES_PER_ELEMENT};
 use crate::physics::solenoid_stress::types::Real;
 
 /// Build the axisymmetric strain-displacement matrix `B` at one quadrature point.
@@ -20,11 +19,12 @@ use crate::physics::solenoid_stress::types::Real;
 /// # References
 /// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
 /// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
-pub fn build_b_matrix<F: Real>(
+pub fn build_b_matrix<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     n: &[F; NODES_PER_ELEMENT],
     grad_phys: &[[F; 2]; NODES_PER_ELEMENT],
     radius: F,
 ) -> Result<[[F; DOF_PER_ELEMENT]; 4], String> {
+    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
     if radius <= F::epsilon() {
         return Err(format!(
             "quadrature radius {radius:?} is too close to zero for the axisymmetric hoop-strain term"
@@ -58,22 +58,13 @@ pub fn build_b_matrix<F: Real>(
 /// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
 /// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
 /// - I. Fried, "Notes on the finite element analysis of the axisymmetric elastic solid," *International Journal of Solids and Structures*, 10(3), 1974.
-pub fn accumulate_stiffness<F: Real>(
+pub fn accumulate_stiffness<F: Real, const DOF_PER_ELEMENT: usize>(
     ke: &mut [[F; DOF_PER_ELEMENT]; DOF_PER_ELEMENT],
     d: &[[F; 4]; 4],
     b: &[[F; DOF_PER_ELEMENT]; 4],
     scale: F,
 ) {
-    let mut db = [[F::zero(); DOF_PER_ELEMENT]; 4];
-    for row in 0..4 {
-        for col in 0..DOF_PER_ELEMENT {
-            let mut value = F::zero();
-            for k in 0..4 {
-                value = value + d[row][k] * b[k][col];
-            }
-            db[row][col] = value;
-        }
-    }
+    let db = constitutive_times_b(d, b);
 
     for row in 0..DOF_PER_ELEMENT {
         for col in 0..DOF_PER_ELEMENT {
@@ -84,4 +75,25 @@ pub fn accumulate_stiffness<F: Real>(
             ke[row][col] = ke[row][col] + scale * value;
         }
     }
+}
+
+/// Multiply the constitutive matrix `D` by the axisymmetric strain operator `B`.
+///
+/// The returned matrix maps element displacement DOFs directly to stresses:
+/// `sigma = (D B) u_e`.
+pub fn constitutive_times_b<F: Real, const DOF_PER_ELEMENT: usize>(
+    d: &[[F; 4]; 4],
+    b: &[[F; DOF_PER_ELEMENT]; 4],
+) -> [[F; DOF_PER_ELEMENT]; 4] {
+    let mut db = [[F::zero(); DOF_PER_ELEMENT]; 4];
+    for row in 0..4 {
+        for col in 0..DOF_PER_ELEMENT {
+            let mut value = F::zero();
+            for k in 0..4 {
+                value = value + d[row][k] * b[k][col];
+            }
+            db[row][col] = value;
+        }
+    }
+    db
 }

@@ -30,14 +30,27 @@
 mod assembly;
 mod axisym;
 mod geometry;
+mod load_operators;
 mod loads;
 mod mesh;
 mod quad4;
+mod quad9;
 mod quadrature;
+mod recovery;
 mod types;
 
-pub use assembly::assemble_axisymmetric_quad4;
-pub use geometry::{ElementMeasures, ElementQuadrature, element_measures, element_quadrature};
+pub use assembly::{assemble_axisymmetric_quad4, assemble_axisymmetric_quad9};
+pub use geometry::{
+    ElementMeasures, ElementQuadrature, element_measures_quad4, element_measures_quad9,
+    element_quadrature_quad4, element_quadrature_quad9,
+};
+pub use load_operators::{
+    SparseOperator, body_force_operator_quad4, body_force_operator_quad9, pressure_operator_quad4,
+    pressure_operator_quad9,
+};
 pub use mesh::{AssemblyResult, MeshView, PressureLoad};
 pub use quadrature::QuadratureRule;
+pub use recovery::{
+    QuadratureFieldOperators, quadrature_field_operators_quad4, quadrature_field_operators_quad9,
+};
 pub use types::Real;

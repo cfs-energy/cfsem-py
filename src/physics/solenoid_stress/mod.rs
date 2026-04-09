@@ -18,6 +18,9 @@
 //! - `u` is the interpolated displacement field inside the element at one point,
 //! - `N` is the shape-function interpolation matrix that maps nodal displacements to pointwise
 //!   displacement through `u = N u_e`,
+//! - `J` is the element Jacobian of the mapping from reference coordinates `(\xi, \eta)` to
+//!   physical coordinates `(r, z)`, so it converts reference-space gradients and differential area
+//!   into physical-space gradients and area through `dA = det(J) d\xi d\eta`,
 //! - `B` maps nodal displacements to the axisymmetric strain vector,
 //! - `D` maps strain to stress through the material law,
 //! - `epsilon` is the strain vector at a point,
@@ -43,6 +46,13 @@
 //! nodes, which guarantees that the interpolated field reproduces the nodal values exactly at the
 //! nodes.  The strain-displacement matrix `B` is obtained by differentiating this interpolation, so
 //! strains are computed from the spatial gradients of the same shape functions.
+//!
+//! The Jacobian `J` describes how the element mapping stretches, skews, and scales the reference
+//! square when it is carried into physical `(r, z)` space.  Its determinant `det(J)` is the local
+//! area-scaling factor between the reference element and the physical element, which is why the
+//! quadrature weights later appear as `det(J) w`.  The inverse Jacobian is also what converts
+//! reference-coordinate shape-function gradients into physical gradients, which are then used to
+//! build the strain-displacement matrix `B`.
 //!
 //! One useful interpretation of a single matrix entry `K_e[i, j]` is: apply a unit displacement in
 //! local degree of freedom `j`, hold all other local degrees of freedom fixed, and `K_e[i, j]`
@@ -118,7 +128,7 @@
 //! reference square `(\xi, \eta) in [-1, 1]^2` into physical `(r, z)` space.  At each
 //! quadrature point the solver:
 //! - evaluates the shape functions `N_i(\xi, \eta)`,
-//! - maps their reference gradients into physical gradients with the element Jacobian,
+//! - maps their reference gradients into physical gradients with the element Jacobian `J`,
 //! - builds the axisymmetric strain-displacement matrix `B`,
 //! - forms `B^T D B` for the local stiffness contribution, and
 //! - scales the contribution by the usual area weight `det(J) w` and by the additional

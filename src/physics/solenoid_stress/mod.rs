@@ -27,6 +27,23 @@
 //! - `2*pi*r` is the axisymmetric revolution factor that converts cross-sectional area into the
 //!   volume of the corresponding ring in 3D.
 //!
+//! The interpolation statement `u = N u_e` means that the displacement field inside one element is
+//! reconstructed from the element nodal displacement values.  At any point in the element,
+//! `u(r, z) = [u_r(r, z), u_z(r, z)]^T`, while `u_e` stores the nodal radial and axial
+//! displacements.  If the element has nodes `1..n`, then the interpolation matrix has the block
+//! form
+//! - `[ N_1  0    N_2  0   ...  N_n  0 ]`,
+//! - `[ 0    N_1  0    N_2 ...  0    N_n ]`,
+//! where the scalar shape functions `N_i(r, z)` are evaluated at the point of interest.
+//! Multiplying by `u_e` gives
+//! - `u_r(r, z) = N_1 u_r1 + N_2 u_r2 + ... + N_n u_rn`,
+//! - `u_z(r, z) = N_1 u_z1 + N_2 u_z2 + ... + N_n u_zn`.
+//! In other words, the element displacement field is an interpolation of the nodal displacements.
+//! The shape functions are chosen so that `N_i = 1` at node `i` and `N_i = 0` at the other element
+//! nodes, which guarantees that the interpolated field reproduces the nodal values exactly at the
+//! nodes.  The strain-displacement matrix `B` is obtained by differentiating this interpolation, so
+//! strains are computed from the spatial gradients of the same shape functions.
+//!
 //! One useful interpretation of a single matrix entry `K_e[i, j]` is: apply a unit displacement in
 //! local degree of freedom `j`, hold all other local degrees of freedom fixed, and `K_e[i, j]`
 //! gives the internal generalized force induced in local degree of freedom `i`.  That is why the

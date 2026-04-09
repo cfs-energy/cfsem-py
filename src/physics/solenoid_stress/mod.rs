@@ -148,6 +148,27 @@
 //! `sigma = D (epsilon - epsilon_th)`, so the `D epsilon_th` contribution is moved to the load
 //! vector as an equivalent nodal force.
 //!
+//! Face integrals for pressure and traction are evaluated by parameterizing each loaded element
+//! edge with a 1D reference coordinate `s in [-1, 1]` and applying a 1D Gauss rule along that
+//! edge.  At each face quadrature point the solver:
+//! - maps `s` to a face point `(\xi, \eta)` on the reference element,
+//! - evaluates the shape functions there,
+//! - uses the element Jacobian `J` to map the reference edge direction `d[\xi,\eta]/ds` into the
+//!   physical tangent `dx/ds`,
+//! - evaluates the physical face point `(r, z)`, and
+//! - multiplies by the axisymmetric surface measure `2*pi*r`.
+//! The same quadrature setting that selects the tensor-product volume rule also selects the 1D face
+//! rule: `3x3` and `4x4` correspond to 3-point and 4-point Gauss-Legendre quadrature along each
+//! loaded face, respectively.
+//!
+//! The physical line element is `dS = 2*pi*r |dx/ds| ds`, so traction loads contribute
+//! `integral(N^T t 2*pi*r |dx/ds| ds)`.  Pressure uses the face normal rather than a prescribed
+//! global direction.  In the implementation the tangent is rotated to
+//! `normal_area = [t_z, -t_r]`, which bundles the outward normal direction together with the line
+//! Jacobian `|dx/ds|`.  The pressure integral is therefore evaluated as
+//! `integral(N^T (-p normal_area) 2*pi*r ds)` without separately normalizing the face normal.
+//! This is why face orientation and consistent element node ordering matter for pressure loads.
+//!
 //! The code is organized so that each module owns one step of that pipeline:
 //! - [`quad4`] defines the bilinear shape functions and geometric mapping.
 //! - [`quad9`] defines the quadratic shape functions and geometric mapping.

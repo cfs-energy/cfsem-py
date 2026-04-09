@@ -1,10 +1,12 @@
 //! Sparse strain/stress recovery operators at element quadrature points.
 
-use crate::physics::solenoid_stress::axisym::{build_b_matrix, constitutive_times_b};
+use crate::physics::solenoid_stress::axisym::{
+    build_b_matrix, constitutive_times_b, constitutive_times_strain,
+};
 use crate::physics::solenoid_stress::geometry::{
     VolumeSample, volume_samples_quad4, volume_samples_quad9,
 };
-use crate::physics::solenoid_stress::mesh::MeshView;
+use crate::physics::solenoid_stress::mesh::{MeshView, ThermalMaterial};
 use crate::physics::solenoid_stress::quadrature::QuadratureRule;
 use crate::physics::solenoid_stress::types::Real;
 use crate::physics::solenoid_stress::{quad4, quad9};
@@ -25,10 +27,28 @@ pub struct QuadratureFieldOperators<F: Real> {
     pub stress_cols: Vec<usize>,
     /// Sparse values for the stress operator triplets.
     pub stress_vals: Vec<F>,
+    /// Sparse row indices for the thermal-strain operator triplets.
+    pub thermal_strain_rows: Vec<usize>,
+    /// Sparse column indices for the thermal-strain operator triplets.
+    pub thermal_strain_cols: Vec<usize>,
+    /// Sparse values for the thermal-strain operator triplets.
+    pub thermal_strain_vals: Vec<F>,
+    /// Sparse row indices for the thermal-stress operator triplets.
+    pub thermal_stress_rows: Vec<usize>,
+    /// Sparse column indices for the thermal-stress operator triplets.
+    pub thermal_stress_cols: Vec<usize>,
+    /// Sparse values for the thermal-stress operator triplets.
+    pub thermal_stress_vals: Vec<F>,
+    /// Constant quadrature-point thermal strain contribution from per-material reference temperature.
+    pub thermal_strain_constant: Vec<F>,
+    /// Constant quadrature-point thermal stress contribution from per-material reference temperature.
+    pub thermal_stress_constant: Vec<F>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
     /// Number of global displacement DOFs the operators act on.
     pub ndof: usize,
+    /// Number of nodal temperatures the thermal operators act on.
+    pub ntemp: usize,
 }
 
 fn quadrature_field_operators_impl<
@@ -39,6 +59,7 @@ fn quadrature_field_operators_impl<
     mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial<F>]>,
     quadrature: QuadratureRule,
     volume_samples_fn: fn(
         &[[F; 2]; NODES_PER_ELEMENT],
@@ -66,6 +87,14 @@ fn quadrature_field_operators_impl<
     let mut stress_rows = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
     let mut stress_cols = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
     let mut stress_vals = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
+    let mut thermal_strain_rows = Vec::new();
+    let mut thermal_strain_cols = Vec::new();
+    let mut thermal_strain_vals = Vec::new();
+    let mut thermal_stress_rows = Vec::new();
+    let mut thermal_stress_cols = Vec::new();
+    let mut thermal_stress_vals = Vec::new();
+    let mut thermal_strain_constant = vec![F::zero(); nsamples * 4];
+    let mut thermal_stress_constant = vec![F::zero(); nsamples * 4];
 
     for element_index in 0..mesh.num_elements() {
         let coords = mesh.element_coords(element_index)?;
@@ -74,8 +103,17 @@ fn quadrature_field_operators_impl<
         let material = material_table.get(material_id).ok_or_else(|| {
             format!("material_id {material_id} on element {element_index} is out of range")
         })?;
+        let thermal_material = thermal_material_table
+            .map(|table| {
+                table.get(material_id).ok_or_else(|| {
+                    format!(
+                        "thermal material_id {material_id} on element {element_index} is out of range"
+                    )
+                })
+            })
+            .transpose()?;
         let mut local_dofs = [0usize; DOF_PER_ELEMENT];
-        for (local_node, global_node) in nodes.into_iter().enumerate() {
+        for (local_node, global_node) in nodes.iter().copied().enumerate() {
             local_dofs[2 * local_node] = 2 * global_node;
             local_dofs[2 * local_node + 1] = 2 * global_node + 1;
         }
@@ -92,6 +130,8 @@ fn quadrature_field_operators_impl<
             let db = constitutive_times_b(material, &b);
             let row_base = 4 * (element_index * nq_per_element + q_local);
             points_rz.push(sample.point);
+            let thermal_stress_unit =
+                thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
 
             for component in 0..4 {
                 let global_row = row_base + component;
@@ -110,6 +150,30 @@ fn quadrature_field_operators_impl<
                         stress_vals.push(stress_value);
                     }
                 }
+                if let Some(thermal) = thermal_material {
+                    for (local_temp_node, global_temp_node) in nodes.iter().copied().enumerate() {
+                        let thermal_strain_value =
+                            thermal.alpha[component] * sample.n[local_temp_node];
+                        if thermal_strain_value != F::zero() {
+                            thermal_strain_rows.push(global_row);
+                            thermal_strain_cols.push(global_temp_node);
+                            thermal_strain_vals.push(thermal_strain_value);
+                        }
+                        let thermal_stress_value = thermal_stress_unit
+                            .expect("thermal stress unit")[component]
+                            * sample.n[local_temp_node];
+                        if thermal_stress_value != F::zero() {
+                            thermal_stress_rows.push(global_row);
+                            thermal_stress_cols.push(global_temp_node);
+                            thermal_stress_vals.push(thermal_stress_value);
+                        }
+                    }
+                    thermal_strain_constant[global_row] =
+                        -thermal.alpha[component] * thermal.reference_temperature;
+                    thermal_stress_constant[global_row] = -thermal_stress_unit
+                        .expect("thermal stress unit")[component]
+                        * thermal.reference_temperature;
+                }
             }
         }
     }
@@ -122,8 +186,17 @@ fn quadrature_field_operators_impl<
         stress_rows,
         stress_cols,
         stress_vals,
+        thermal_strain_rows,
+        thermal_strain_cols,
+        thermal_strain_vals,
+        thermal_stress_rows,
+        thermal_stress_cols,
+        thermal_stress_vals,
+        thermal_strain_constant,
+        thermal_stress_constant,
         nq_per_element,
         ndof,
+        ntemp: thermal_material_table.map_or(0, |_| mesh.num_nodes()),
     })
 }
 
@@ -132,12 +205,14 @@ pub fn quadrature_field_operators_quad4<F: Real>(
     mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial<F>]>,
     quadrature: QuadratureRule,
 ) -> Result<QuadratureFieldOperators<F>, String> {
     quadrature_field_operators_impl::<F, { quad4::NODES_PER_ELEMENT }, { quad4::DOF_PER_ELEMENT }>(
         mesh,
         material_ids,
         material_table,
+        thermal_material_table,
         quadrature,
         volume_samples_quad4::<F>,
     )
@@ -148,12 +223,14 @@ pub fn quadrature_field_operators_quad9<F: Real>(
     mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial<F>]>,
     quadrature: QuadratureRule,
 ) -> Result<QuadratureFieldOperators<F>, String> {
     quadrature_field_operators_impl::<F, { quad9::NODES_PER_ELEMENT }, { quad9::DOF_PER_ELEMENT }>(
         mesh,
         material_ids,
         material_table,
+        thermal_material_table,
         quadrature,
         volume_samples_quad9::<F>,
     )
@@ -206,6 +283,7 @@ mod tests {
             mesh,
             &material_ids,
             &material_table,
+            None,
             QuadratureRule::Gauss3x3,
         )
         .expect("operator assembly should succeed");

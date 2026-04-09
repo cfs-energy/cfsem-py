@@ -191,6 +191,43 @@ fn read_axisym_material_table<F: physics::solenoid_stress::Real + NumpyElement>(
     Ok(out)
 }
 
+fn read_axisym_thermal_material_table<F: physics::solenoid_stress::Real + NumpyElement>(
+    name: &str,
+    thermal_material_table: PyReadonlyArray2<'_, F>,
+) -> PyResult<Vec<physics::solenoid_stress::ThermalMaterial<F>>> {
+    let view = thermal_material_table.as_array();
+    let shape = view.shape();
+    if shape.len() != 2 || shape[1] != 5 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (nmat, 5)"),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(shape[0]);
+    for row in view.rows() {
+        out.push(physics::solenoid_stress::ThermalMaterial {
+            alpha: [row[0], row[1], row[2], row[3]],
+            reference_temperature: row[4],
+        });
+    }
+    Ok(out)
+}
+
+fn read_axisym_nodal_temperature<F: physics::solenoid_stress::Real + NumpyElement>(
+    name: &str,
+    nodal_temperature: PyReadonlyArray1<'_, F>,
+) -> PyResult<Vec<F>> {
+    let view = nodal_temperature.as_array();
+    let shape = view.shape();
+    if shape.len() != 1 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!("{name} must have shape (nnode,)"),
+        }
+        .into());
+    }
+    Ok(view.iter().copied().collect())
+}
+
 fn read_axisym_body_force<F: physics::solenoid_stress::Real + NumpyElement>(
     name: &str,
     body_force: PyReadonlyArray2<'_, F>,
@@ -305,6 +342,8 @@ fn assemble_axisymmetric_low_level<
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, F>,
+    thermal_material_table: PyReadonlyArray2<'_, F>,
+    nodal_temperature: PyReadonlyArray1<'_, F>,
     body_force: PyReadonlyArray2<'_, F>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, F>,
@@ -315,6 +354,8 @@ fn assemble_axisymmetric_low_level<
         &[[[F; 4]; 4]],
         &[[F; 2]],
         &[physics::solenoid_stress::PressureLoad<F>],
+        Option<&[physics::solenoid_stress::ThermalMaterial<F>]>,
+        Option<&[F]>,
         physics::solenoid_stress::QuadratureRule,
     ) -> Result<physics::solenoid_stress::AssemblyResult<F>, String>,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, Vec<F>, usize)> {
@@ -323,6 +364,9 @@ fn assemble_axisymmetric_low_level<
     let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
     let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
     let material_table = read_axisym_material_table("material_table", material_table)?;
+    let thermal_material_table =
+        read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
+    let nodal_temperature = read_axisym_nodal_temperature("nodal_temperature", nodal_temperature)?;
     let body_force = read_axisym_body_force("body_force", body_force)?;
     let pressure_loads = read_axisym_pressure_loads(pressure_faces, pressure_values)?;
     let mesh = physics::solenoid_stress::MeshView {
@@ -335,6 +379,8 @@ fn assemble_axisymmetric_low_level<
         &material_table,
         &body_force,
         &pressure_loads,
+        (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice()),
+        (!nodal_temperature.is_empty()).then_some(nodal_temperature.as_slice()),
         quadrature,
     )
     .map_err(|msg| PyInteropError::ValueError { msg })?;
@@ -409,46 +455,71 @@ fn quadrature_field_operators_axisymmetric_low_level<
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, F>,
+    thermal_material_table: PyReadonlyArray2<'_, F>,
     quadrature: u8,
     operators_fn: fn(
         physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
         &[usize],
         &[[[F; 4]; 4]],
+        Option<&[physics::solenoid_stress::ThermalMaterial<F>]>,
         physics::solenoid_stress::QuadratureRule,
     ) -> Result<physics::solenoid_stress::QuadratureFieldOperators<F>, String>,
 ) -> PyResult<(
     Vec<F>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<F>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<F>,
-    usize,
-    usize,
+    (Vec<usize>, Vec<usize>, Vec<F>),
+    (Vec<usize>, Vec<usize>, Vec<F>),
+    (Vec<usize>, Vec<usize>, Vec<F>),
+    (Vec<usize>, Vec<usize>, Vec<F>),
+    (Vec<F>, Vec<F>),
+    (usize, usize, usize),
 )> {
     let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
     let nodes = read_axisym_nodes("nodes", nodes)?;
     let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
     let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
     let material_table = read_axisym_material_table("material_table", material_table)?;
+    let thermal_material_table =
+        read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
     let mesh = physics::solenoid_stress::MeshView {
         nodes_rz: &nodes,
         elements: &elements,
     };
-    let operators = operators_fn(mesh, &material_ids, &material_table, quadrature)
-        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let operators = operators_fn(
+        mesh,
+        &material_ids,
+        &material_table,
+        (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice()),
+        quadrature,
+    )
+    .map_err(|msg| PyInteropError::ValueError { msg })?;
     let points_flat = flatten_axisym_points(operators.points_rz);
     Ok((
         points_flat,
-        operators.strain_rows,
-        operators.strain_cols,
-        operators.strain_vals,
-        operators.stress_rows,
-        operators.stress_cols,
-        operators.stress_vals,
-        operators.nq_per_element,
-        operators.ndof,
+        (
+            operators.strain_rows,
+            operators.strain_cols,
+            operators.strain_vals,
+        ),
+        (
+            operators.stress_rows,
+            operators.stress_cols,
+            operators.stress_vals,
+        ),
+        (
+            operators.thermal_strain_rows,
+            operators.thermal_strain_cols,
+            operators.thermal_strain_vals,
+        ),
+        (
+            operators.thermal_stress_rows,
+            operators.thermal_stress_cols,
+            operators.thermal_stress_vals,
+        ),
+        (
+            operators.thermal_strain_constant,
+            operators.thermal_stress_constant,
+        ),
+        (operators.nq_per_element, operators.ndof, operators.ntemp),
     ))
 }
 
@@ -515,12 +586,61 @@ fn pressure_operator_axisymmetric_low_level<
     ))
 }
 
+fn temperature_operator_axisymmetric_low_level<
+    F: physics::solenoid_stress::Real + NumpyElement,
+    const NODES_PER_ELEMENT: usize,
+>(
+    nodes: PyReadonlyArray2<'_, F>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, F>,
+    thermal_material_table: PyReadonlyArray2<'_, F>,
+    quadrature: u8,
+    operator_fn: fn(
+        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
+        &[usize],
+        &[[[F; 4]; 4]],
+        &[physics::solenoid_stress::ThermalMaterial<F>],
+        physics::solenoid_stress::QuadratureRule,
+    ) -> Result<physics::solenoid_stress::ThermalLoadOperator<F>, String>,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, Vec<F>, usize, usize)> {
+    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
+    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
+    let material_table = read_axisym_material_table("material_table", material_table)?;
+    let thermal_material_table =
+        read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
+    let mesh = physics::solenoid_stress::MeshView {
+        nodes_rz: &nodes,
+        elements: &elements,
+    };
+    let operator = operator_fn(
+        mesh,
+        &material_ids,
+        &material_table,
+        &thermal_material_table,
+        quadrature,
+    )
+    .map_err(|msg| PyInteropError::ValueError { msg })?;
+    Ok((
+        operator.temperature_to_rhs.rows,
+        operator.temperature_to_rhs.cols,
+        operator.temperature_to_rhs.vals,
+        operator.reference_rhs,
+        operator.temperature_to_rhs.nrow,
+        operator.temperature_to_rhs.ncol,
+    ))
+}
+
 #[pyfunction]
 fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
     nodes: PyReadonlyArray2<'_, f64>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
+    nodal_temperature: PyReadonlyArray1<'_, f64>,
     body_force: PyReadonlyArray2<'_, f64>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f64>,
@@ -531,6 +651,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
+        nodal_temperature,
         body_force,
         pressure_faces,
         pressure_values,
@@ -545,6 +667,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
+    thermal_material_table: PyReadonlyArray2<'_, f32>,
+    nodal_temperature: PyReadonlyArray1<'_, f32>,
     body_force: PyReadonlyArray2<'_, f32>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f32>,
@@ -555,6 +679,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
+        nodal_temperature,
         body_force,
         pressure_faces,
         pressure_values,
@@ -569,6 +695,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f64(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
+    nodal_temperature: PyReadonlyArray1<'_, f64>,
     body_force: PyReadonlyArray2<'_, f64>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f64>,
@@ -579,6 +707,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f64(
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
+        nodal_temperature,
         body_force,
         pressure_faces,
         pressure_values,
@@ -593,6 +723,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f32(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
+    thermal_material_table: PyReadonlyArray2<'_, f32>,
+    nodal_temperature: PyReadonlyArray1<'_, f32>,
     body_force: PyReadonlyArray2<'_, f32>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f32>,
@@ -603,6 +735,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f32(
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
+        nodal_temperature,
         body_force,
         pressure_faces,
         pressure_values,
@@ -729,23 +863,23 @@ fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f64(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
     quadrature: u8,
 ) -> PyResult<(
     Vec<f64>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f64>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f64>,
-    usize,
-    usize,
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<f64>, Vec<f64>),
+    (usize, usize, usize),
 )> {
     quadrature_field_operators_axisymmetric_low_level::<f64, 4>(
         nodes,
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
         quadrature,
         physics::solenoid_stress::quadrature_field_operators_quad4,
     )
@@ -757,23 +891,23 @@ fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f32(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
+    thermal_material_table: PyReadonlyArray2<'_, f32>,
     quadrature: u8,
 ) -> PyResult<(
     Vec<f32>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f32>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f32>,
-    usize,
-    usize,
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<f32>, Vec<f32>),
+    (usize, usize, usize),
 )> {
     quadrature_field_operators_axisymmetric_low_level::<f32, 4>(
         nodes,
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
         quadrature,
         physics::solenoid_stress::quadrature_field_operators_quad4,
     )
@@ -785,23 +919,23 @@ fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f64(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
     quadrature: u8,
 ) -> PyResult<(
     Vec<f64>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f64>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f64>,
-    usize,
-    usize,
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<usize>, Vec<usize>, Vec<f64>),
+    (Vec<f64>, Vec<f64>),
+    (usize, usize, usize),
 )> {
     quadrature_field_operators_axisymmetric_low_level::<f64, 9>(
         nodes,
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
         quadrature,
         physics::solenoid_stress::quadrature_field_operators_quad9,
     )
@@ -813,23 +947,23 @@ fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f32(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
+    thermal_material_table: PyReadonlyArray2<'_, f32>,
     quadrature: u8,
 ) -> PyResult<(
     Vec<f32>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f32>,
-    Vec<usize>,
-    Vec<usize>,
-    Vec<f32>,
-    usize,
-    usize,
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<usize>, Vec<usize>, Vec<f32>),
+    (Vec<f32>, Vec<f32>),
+    (usize, usize, usize),
 )> {
     quadrature_field_operators_axisymmetric_low_level::<f32, 9>(
         nodes,
         elements,
         material_ids,
         material_table,
+        thermal_material_table,
         quadrature,
         physics::solenoid_stress::quadrature_field_operators_quad9,
     )
@@ -952,6 +1086,86 @@ fn solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32(
         pressure_faces,
         quadrature,
         physics::solenoid_stress::pressure_operator_quad9,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f64(
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f64>,
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize, usize)> {
+    temperature_operator_axisymmetric_low_level::<f64, 4>(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        thermal_material_table,
+        quadrature,
+        physics::solenoid_stress::temperature_operator_quad4,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f32(
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f32>,
+    thermal_material_table: PyReadonlyArray2<'_, f32>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize, usize)> {
+    temperature_operator_axisymmetric_low_level::<f32, 4>(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        thermal_material_table,
+        quadrature,
+        physics::solenoid_stress::temperature_operator_quad4,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f64(
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f64>,
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize, usize)> {
+    temperature_operator_axisymmetric_low_level::<f64, 9>(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        thermal_material_table,
+        quadrature,
+        physics::solenoid_stress::temperature_operator_quad9,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f32(
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f32>,
+    thermal_material_table: PyReadonlyArray2<'_, f32>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize, usize)> {
+    temperature_operator_axisymmetric_low_level::<f32, 9>(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        thermal_material_table,
+        quadrature,
+        physics::solenoid_stress::temperature_operator_quad9,
     )
 }
 
@@ -2885,6 +3099,22 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f32,
         m.clone()
     )?)?;
 

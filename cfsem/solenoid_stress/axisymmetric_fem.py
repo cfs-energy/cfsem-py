@@ -107,6 +107,18 @@ _pressure_operator_axisymmetric_quad9_f32 = (
 _pressure_operator_axisymmetric_quad9_f64 = (
     _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f64
 )
+_temperature_operator_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f32
+)
+_temperature_operator_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f64
+)
+_temperature_operator_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f32
+)
+_temperature_operator_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f64
+)
 
 ArrayLike = npt.ArrayLike
 ElementType = str
@@ -154,8 +166,13 @@ class QuadratureFieldOperators:
     points_rz: npt.NDArray[np.floating[Any]]
     strain_operator: sp.csr_matrix
     stress_operator: sp.csr_matrix
+    thermal_strain_operator: sp.csr_matrix
+    thermal_stress_operator: sp.csr_matrix
+    thermal_strain_constant: npt.NDArray[np.floating[Any]]
+    thermal_stress_constant: npt.NDArray[np.floating[Any]]
     nq_per_element: int
     ndof: int
+    ntemp: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,12 +220,15 @@ class AxisymmetricFEMModel:
     stiffness: sp.csr_matrix
     body_force_to_rhs: sp.csr_matrix
     pressure_to_rhs: sp.csr_matrix
+    temperature_to_rhs: sp.csr_matrix
+    thermal_reference_rhs: npt.NDArray[np.floating[Any]]
     pressure_faces: npt.NDArray[np.uint64]
     analysis_nodes: npt.NDArray[np.floating[Any]]
     analysis_elements: npt.NDArray[np.uint64]
     element_type: str
     ndof: int
     nelem: int
+    n_temperature_nodes: int
     dtype: np.dtype[Any]
 
     def body_force_rhs(self, body_force: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
@@ -221,12 +241,33 @@ class AxisymmetricFEMModel:
             return np.zeros((self.ndof,), dtype=self.dtype)
         return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
 
+    def temperature_rhs(
+        self,
+        nodal_temperature: ArrayLike | None = None,
+    ) -> npt.NDArray[np.floating[Any]]:
+        if self.temperature_to_rhs.shape[1] == 0:
+            return np.zeros((self.ndof,), dtype=self.dtype)
+        if nodal_temperature is None:
+            raise ValueError("nodal_temperature is required because this model includes thermal materials")
+        temperature_arr = _normalize_nodal_temperature(
+            nodal_temperature,
+            self.n_temperature_nodes,
+            self.dtype,
+        )
+        return np.asarray(self.temperature_to_rhs @ temperature_arr, dtype=self.dtype)
+
     def rhs(
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        return self.body_force_rhs(body_force) + self.pressure_rhs(pressure_values)
+        return (
+            self.thermal_reference_rhs
+            + self.body_force_rhs(body_force)
+            + self.pressure_rhs(pressure_values)
+            + self.temperature_rhs(nodal_temperature)
+        )
 
     def apply_dirichlet(
         self,
@@ -241,6 +282,15 @@ class AxisymmetricFEMModel:
             matrix=reduced.matrix,
             body_force_to_rhs=self.body_force_to_rhs[reduced.free_dofs].tocsr(),
             pressure_to_rhs=self.pressure_to_rhs[reduced.free_dofs].tocsr(),
+            temperature_to_rhs=self.temperature_to_rhs[reduced.free_dofs].tocsr(),
+            thermal_reference_rhs=(
+                apply_dirichlet(
+                    self.stiffness,
+                    self.thermal_reference_rhs,
+                    prescribed=prescribed,
+                ).rhs
+                - reduced.rhs
+            ),
             constant_rhs=reduced.rhs,
             pressure_faces=self.pressure_faces,
             analysis_nodes=self.analysis_nodes,
@@ -251,6 +301,7 @@ class AxisymmetricFEMModel:
             fixed_values=reduced.fixed_values,
             ndof=self.ndof,
             nelem=self.nelem,
+            n_temperature_nodes=self.n_temperature_nodes,
             dtype=self.dtype,
         )
 
@@ -258,19 +309,21 @@ class AxisymmetricFEMModel:
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        nodal_temperature: ArrayLike | None = None,
         prescribed: Mapping[int, float] | None = None,
         solver: Any | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
         return self.apply_dirichlet(prescribed).solve(
             body_force=body_force,
             pressure_values=pressure_values,
+            nodal_temperature=nodal_temperature,
             solver=solver,
         )
 
     def factorized_solver(
         self,
         prescribed: Mapping[int, float] | None = None,
-    ) -> Callable[[ArrayLike | None, ArrayLike | None], npt.NDArray[np.floating[Any]]]:
+    ) -> Callable[[ArrayLike | None, ArrayLike | None, ArrayLike | None], npt.NDArray[np.floating[Any]]]:
         return self.apply_dirichlet(prescribed).factorized_solver()
 
 
@@ -281,6 +334,8 @@ class ReducedAxisymmetricFEMModel:
     matrix: sp.csr_matrix
     body_force_to_rhs: sp.csr_matrix
     pressure_to_rhs: sp.csr_matrix
+    temperature_to_rhs: sp.csr_matrix
+    thermal_reference_rhs: npt.NDArray[np.floating[Any]]
     constant_rhs: npt.NDArray[np.floating[Any]]
     pressure_faces: npt.NDArray[np.uint64]
     analysis_nodes: npt.NDArray[np.floating[Any]]
@@ -291,6 +346,7 @@ class ReducedAxisymmetricFEMModel:
     fixed_values: npt.NDArray[np.floating[Any]]
     ndof: int
     nelem: int
+    n_temperature_nodes: int
     dtype: np.dtype[Any]
 
     def recover(self, free_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
@@ -309,20 +365,47 @@ class ReducedAxisymmetricFEMModel:
             return np.zeros((self.matrix.shape[0],), dtype=self.dtype)
         return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
 
+    def temperature_rhs(
+        self,
+        nodal_temperature: ArrayLike | None = None,
+    ) -> npt.NDArray[np.floating[Any]]:
+        if self.temperature_to_rhs.shape[1] == 0:
+            return np.zeros((self.matrix.shape[0],), dtype=self.dtype)
+        if nodal_temperature is None:
+            raise ValueError("nodal_temperature is required because this model includes thermal materials")
+        temperature_arr = _normalize_nodal_temperature(
+            nodal_temperature,
+            self.n_temperature_nodes,
+            self.dtype,
+        )
+        return np.asarray(self.temperature_to_rhs @ temperature_arr, dtype=self.dtype)
+
     def rhs(
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        return self.constant_rhs + self.body_force_rhs(body_force) + self.pressure_rhs(pressure_values)
+        return (
+            self.constant_rhs
+            + self.thermal_reference_rhs
+            + self.body_force_rhs(body_force)
+            + self.pressure_rhs(pressure_values)
+            + self.temperature_rhs(nodal_temperature)
+        )
 
     def solve(
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        nodal_temperature: ArrayLike | None = None,
         solver: Any | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        rhs = self.rhs(body_force=body_force, pressure_values=pressure_values)
+        rhs = self.rhs(
+            body_force=body_force,
+            pressure_values=pressure_values,
+            nodal_temperature=nodal_temperature,
+        )
         if self.matrix.shape[0] == 0:
             return self.recover(np.zeros((0,), dtype=self.dtype))
         if solver is None:
@@ -333,14 +416,15 @@ class ReducedAxisymmetricFEMModel:
 
     def factorized_solver(
         self,
-    ) -> Callable[[ArrayLike | None, ArrayLike | None], npt.NDArray[np.floating[Any]]]:
+    ) -> Callable[[ArrayLike | None, ArrayLike | None, ArrayLike | None], npt.NDArray[np.floating[Any]]]:
         if self.matrix.shape[0] == 0:
 
             def solve_empty(
                 body_force: ArrayLike | None = None,
                 pressure_values: ArrayLike | None = None,
+                nodal_temperature: ArrayLike | None = None,
             ) -> npt.NDArray[np.floating[Any]]:
-                del body_force, pressure_values
+                del body_force, pressure_values, nodal_temperature
                 return self.recover(np.zeros((0,), dtype=self.dtype))
 
             return solve_empty
@@ -350,8 +434,17 @@ class ReducedAxisymmetricFEMModel:
         def solve_case(
             body_force: ArrayLike | None = None,
             pressure_values: ArrayLike | None = None,
+            nodal_temperature: ArrayLike | None = None,
         ) -> npt.NDArray[np.floating[Any]]:
-            return self.recover(solve_free(self.rhs(body_force=body_force, pressure_values=pressure_values)))
+            return self.recover(
+                solve_free(
+                    self.rhs(
+                        body_force=body_force,
+                        pressure_values=pressure_values,
+                        nodal_temperature=nodal_temperature,
+                    )
+                )
+            )
 
         return solve_case
 
@@ -362,7 +455,13 @@ class QuadratureFieldSamples:
 
     points_rz: npt.NDArray[np.floating[Any]]
     strain: npt.NDArray[np.floating[Any]]
+    thermal_strain: npt.NDArray[np.floating[Any]]
+    elastic_strain: npt.NDArray[np.floating[Any]]
     stress: npt.NDArray[np.floating[Any]]
+
+    @property
+    def total_strain(self) -> npt.NDArray[np.floating[Any]]:
+        return self.strain
 
 
 def _quadrature_code(quadrature: str | int) -> int:
@@ -475,6 +574,66 @@ def _analysis_mesh_for_element_type(
     return elevated.analysis_nodes, elevated.analysis_elements, elevated
 
 
+def _temperature_elevation_operator(
+    elevated: ElevatedQuad9Mesh | None,
+    dtype: np.dtype[Any],
+) -> sp.csr_matrix:
+    if elevated is None:
+        nnode = 0
+        return sp.csr_matrix((nnode, nnode), dtype=dtype)
+    n_input_nodes = elevated.input_nodes.shape[0]
+    n_analysis_nodes = elevated.analysis_nodes.shape[0]
+    rows: list[int] = []
+    cols: list[int] = []
+    vals: list[float] = []
+
+    for node in range(n_input_nodes):
+        rows.append(node)
+        cols.append(node)
+        vals.append(1.0)
+
+    edge_to_midpoint: dict[tuple[int, int], int] = {}
+    edge_nodes = ((0, 1), (1, 2), (2, 3), (3, 0))
+    for element_index, conn in enumerate(elevated.input_elements):
+        for local_edge, (local_a, local_b) in enumerate(edge_nodes):
+            edge_key = tuple(sorted((int(conn[local_a]), int(conn[local_b]))))
+            if edge_key in edge_to_midpoint:
+                continue
+            midpoint_index = int(elevated.analysis_elements[element_index, 4 + local_edge])
+            edge_to_midpoint[edge_key] = midpoint_index
+            rows.extend([midpoint_index, midpoint_index])
+            cols.extend([edge_key[0], edge_key[1]])
+            vals.extend([0.5, 0.5])
+        center_index = int(elevated.analysis_elements[element_index, 8])
+        rows.extend([center_index] * 4)
+        cols.extend([int(node) for node in conn])
+        vals.extend([0.25] * 4)
+
+    return sp.coo_matrix(
+        (np.asarray(vals, dtype=dtype), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))),
+        shape=(n_analysis_nodes, n_input_nodes),
+    ).tocsr()
+
+
+def _analysis_temperature_for_element_type(
+    nodal_temperature: ArrayLike,
+    n_input_nodes: int,
+    element_type: str,
+    elevated: ElevatedQuad9Mesh | None,
+    dtype: np.dtype[Any],
+) -> npt.NDArray[np.floating[Any]]:
+    del element_type
+    if elevated is None:
+        return _normalize_nodal_temperature(nodal_temperature, n_input_nodes, dtype)
+    input_temperature = _normalize_nodal_temperature(
+        nodal_temperature,
+        n_input_nodes,
+        dtype,
+    )
+    elevation = _temperature_elevation_operator(elevated, dtype)
+    return np.asarray(elevation @ input_temperature, dtype=dtype)
+
+
 def _normalize_materials(
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
@@ -506,6 +665,70 @@ def _normalize_materials(
     if table.ndim != 3 or table.shape[1:] != (4, 4):
         raise ValueError(f"material_table must have shape (nmat, 4, 4); got {table.shape}")
     return np.ascontiguousarray(ids), np.ascontiguousarray(table)
+
+
+def _normalize_thermal_material_table(
+    material_ids: ArrayLike,
+    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None,
+    dtype: np.dtype[Any],
+    *,
+    require_mapping: bool | None = None,
+) -> tuple[npt.NDArray[np.uint64] | None, npt.NDArray[np.floating[Any]] | None]:
+    if thermal_material_table is None:
+        return None, None
+    ids = np.asarray(material_ids, dtype=np.uint64)
+    if ids.ndim != 1:
+        raise ValueError(f"material_ids must have shape (nelem,); got {ids.shape}")
+    is_mapping = isinstance(thermal_material_table, Mapping)
+    if require_mapping is not None and is_mapping != require_mapping:
+        raise ValueError(
+            "thermal_material_table must use the same mapping/dense convention as material_table"
+        )
+    if is_mapping:
+        mapping = thermal_material_table
+        if not mapping:
+            raise ValueError("thermal_material_table mapping cannot be empty")
+        keys = sorted(int(key) for key in mapping)
+        dense_table = []
+        tag_to_index = {key: index for index, key in enumerate(keys)}
+        for key in keys:
+            row = np.asarray(mapping[key], dtype=dtype)
+            if row.shape != (5,):
+                raise ValueError(
+                    f"thermal_material_table[{key}] must have shape (5,); got {row.shape}"
+                )
+            dense_table.append(row)
+        try:
+            normalized_ids = np.asarray([tag_to_index[int(tag)] for tag in ids], dtype=np.uint64)
+        except KeyError as exc:
+            raise ValueError(
+                f"material_ids contains tag {exc.args[0]} that is missing from thermal_material_table"
+            ) from exc
+        table = np.ascontiguousarray(np.stack(dense_table, axis=0), dtype=dtype)
+    else:
+        table = np.asarray(thermal_material_table, dtype=dtype)
+        if table.ndim != 2 or table.shape[1] != 5:
+            raise ValueError(f"thermal_material_table must have shape (nmat, 5); got {table.shape}")
+        normalized_ids = np.ascontiguousarray(ids)
+        table = np.ascontiguousarray(table)
+    if not np.allclose(table[:, 3], 0.0):
+        raise ValueError("thermal_material_table shear thermal expansion must be zero in phase 1")
+    return normalized_ids, table
+
+
+def _empty_thermal_material_table(dtype: np.dtype[Any]) -> npt.NDArray[np.floating[Any]]:
+    return np.zeros((0, 5), dtype=dtype)
+
+
+def _normalize_nodal_temperature(
+    nodal_temperature: ArrayLike,
+    nnode: int,
+    dtype: np.dtype[Any],
+) -> npt.NDArray[np.floating[Any]]:
+    arr = np.asarray(nodal_temperature, dtype=dtype)
+    if arr.ndim != 1 or arr.shape[0] != nnode:
+        raise ValueError(f"nodal_temperature must have shape ({nnode},); got {arr.shape}")
+    return np.ascontiguousarray(arr)
 
 
 def _normalize_body_force(
@@ -867,6 +1090,33 @@ def _assemble_pressure_operator(
     )
 
 
+def _assemble_temperature_operator(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    material_ids: npt.NDArray[np.uint64],
+    material_table: npt.NDArray[np.floating[Any]],
+    thermal_material_table: npt.NDArray[np.floating[Any]] | None,
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> tuple[sp.csr_matrix, npt.NDArray[np.floating[Any]]]:
+    if thermal_material_table is None:
+        return (
+            sp.csr_matrix((2 * nodes.shape[0], 0), dtype=dtype),
+            np.zeros((2 * nodes.shape[0],), dtype=dtype),
+        )
+    return _assemble_temperature_operator_rust(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        thermal_material_table,
+        quadrature_code,
+        dtype,
+        element_type,
+    )
+
+
 def _coo_operator_from_triplets(
     rows: ArrayLike,
     cols: ArrayLike,
@@ -937,11 +1187,49 @@ def _assemble_pressure_operator_rust(
     return _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype)
 
 
+def _assemble_temperature_operator_rust(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    material_ids: npt.NDArray[np.uint64],
+    material_table: npt.NDArray[np.floating[Any]],
+    thermal_material_table: npt.NDArray[np.floating[Any]],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> tuple[sp.csr_matrix, npt.NDArray[np.floating[Any]]]:
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            element_type,
+            _temperature_operator_axisymmetric_quad4_f32,
+            _temperature_operator_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            element_type,
+            _temperature_operator_axisymmetric_quad4_f64,
+            _temperature_operator_axisymmetric_quad9_f64,
+        ),
+    )
+    rows, cols, vals, reference_rhs, nrow, ncol = low_level(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        thermal_material_table,
+        quadrature_code,
+    )
+    return (
+        _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype),
+        np.asarray(reference_rhs, dtype=dtype),
+    )
+
+
 def _quadrature_field_operators_rust(
     nodes: npt.NDArray[np.floating[Any]],
     elements: npt.NDArray[np.uint64],
     material_ids: npt.NDArray[np.uint64],
     material_table: npt.NDArray[np.floating[Any]],
+    thermal_material_table: npt.NDArray[np.floating[Any]] | None,
     quadrature_code: int,
     dtype: np.dtype[Any],
     element_type: str,
@@ -959,17 +1247,27 @@ def _quadrature_field_operators_rust(
             _quadrature_field_operators_axisymmetric_quad9_f64,
         ),
     )
+    thermal_table_arr = (
+        _empty_thermal_material_table(dtype)
+        if thermal_material_table is None
+        else thermal_material_table
+    )
     (
         points_flat,
-        strain_rows,
-        strain_cols,
-        strain_vals,
-        stress_rows,
-        stress_cols,
-        stress_vals,
-        nq_per_element,
-        ndof,
-    ) = low_level(nodes, elements, material_ids, material_table, quadrature_code)
+        (strain_rows, strain_cols, strain_vals),
+        (stress_rows, stress_cols, stress_vals),
+        (thermal_strain_rows, thermal_strain_cols, thermal_strain_vals),
+        (thermal_stress_rows, thermal_stress_cols, thermal_stress_vals),
+        (thermal_strain_constant, thermal_stress_constant),
+        (nq_per_element, ndof, ntemp),
+    ) = low_level(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        thermal_table_arr,
+        quadrature_code,
+    )
     nelem = elements.shape[0]
     nrow = nelem * int(nq_per_element) * 4
     return QuadratureFieldOperators(
@@ -988,8 +1286,25 @@ def _quadrature_field_operators_rust(
             shape=(nrow, int(ndof)),
             dtype=dtype,
         ),
+        thermal_strain_operator=_coo_operator_from_triplets(
+            thermal_strain_rows,
+            thermal_strain_cols,
+            thermal_strain_vals,
+            shape=(nrow, int(ntemp)),
+            dtype=dtype,
+        ),
+        thermal_stress_operator=_coo_operator_from_triplets(
+            thermal_stress_rows,
+            thermal_stress_cols,
+            thermal_stress_vals,
+            shape=(nrow, int(ntemp)),
+            dtype=dtype,
+        ),
+        thermal_strain_constant=np.asarray(thermal_strain_constant, dtype=dtype),
+        thermal_stress_constant=np.asarray(thermal_stress_constant, dtype=dtype),
         nq_per_element=int(nq_per_element),
         ndof=int(ndof),
+        ntemp=int(ntemp),
     )
 
 
@@ -1061,8 +1376,13 @@ def _assemble_quadrature_field_operators_python(
             shape=(nrow, ndof),
             dtype=dtype,
         ),
+        thermal_strain_operator=sp.csr_matrix((nrow, 0), dtype=dtype),
+        thermal_stress_operator=sp.csr_matrix((nrow, 0), dtype=dtype),
+        thermal_strain_constant=np.zeros((nrow,), dtype=dtype),
+        thermal_stress_constant=np.zeros((nrow,), dtype=dtype),
         nq_per_element=nq,
         ndof=ndof,
+        ntemp=0,
     )
 def assemble_axisymmetric(
     nodes: ArrayLike,
@@ -1072,6 +1392,8 @@ def assemble_axisymmetric(
     body_force: ArrayLike,
     pressure_faces: ArrayLike | None = None,
     pressure_values: ArrayLike | None = None,
+    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
+    nodal_temperature: ArrayLike | None = None,
     quadrature: str | int = "3x3",
     element_type: str = "quad4",
 ) -> AssemblyResult:
@@ -1082,15 +1404,28 @@ def assemble_axisymmetric(
     `K_e = integral(B^T D B 2*pi*r dA)`; see [1]-[3] in the module references.
     """
 
-    dtype = _resolve_float_dtype(nodes, body_force, pressure_values)
+    dtype = _resolve_float_dtype(nodes, body_force, pressure_values, nodal_temperature)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+        material_ids,
+        thermal_material_table,
+        dtype,
+        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
+    )
     if material_ids_arr.shape[0] != elements_arr.shape[0]:
         raise ValueError(
             f"material_ids has length {material_ids_arr.shape[0]}, "
             f"but elements has {elements_arr.shape[0]} rows"
         )
+    if thermal_material_table_arr is not None:
+        if nodal_temperature is None:
+            raise ValueError("nodal_temperature must be provided when thermal_material_table is provided")
+        if not np.array_equal(thermal_ids_arr, material_ids_arr):
+            raise ValueError("thermal_material_table must align with material_table material IDs")
+    elif nodal_temperature is not None:
+        raise ValueError("thermal_material_table must be provided when nodal_temperature is provided")
     body_force_arr = _normalize_body_force(body_force, elements_arr.shape[0], dtype)
     pressure_faces_arr, pressure_values_arr = _normalize_pressure_loads(
         pressure_faces, pressure_values, dtype
@@ -1098,8 +1433,24 @@ def assemble_axisymmetric(
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
     _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+    analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
         nodes_arr, elements_arr, normalized_element_type
+    )
+    analysis_temperature = (
+        np.zeros((0,), dtype=dtype)
+        if thermal_material_table_arr is None
+        else _analysis_temperature_for_element_type(
+            nodal_temperature,
+            nodes_arr.shape[0],
+            normalized_element_type,
+            elevated,
+            dtype,
+        )
+    )
+    thermal_table_for_low_level = (
+        _empty_thermal_material_table(dtype)
+        if thermal_material_table_arr is None
+        else thermal_material_table_arr
     )
     low_level = _dispatch_pair(
         dtype,
@@ -1119,6 +1470,8 @@ def assemble_axisymmetric(
         analysis_elements,
         material_ids_arr,
         material_table_arr,
+        thermal_table_for_low_level,
+        analysis_temperature,
         body_force_arr,
         pressure_faces_arr,
         pressure_values_arr,
@@ -1139,6 +1492,7 @@ def assemble_axisymmetric_model(
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
     pressure_faces: ArrayLike | None = None,
+    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
     quadrature: str | int = "3x3",
     element_type: str = "quad4",
 ) -> AxisymmetricFEMModel:
@@ -1165,17 +1519,28 @@ def assemble_axisymmetric_model(
         body_force=zero_body_force,
         pressure_faces=None,
         pressure_values=None,
+        thermal_material_table=None,
+        nodal_temperature=None,
         quadrature=quadrature,
         element_type=element_type,
     )
     stiffness = stiffness_assembly.to_csr()
     dtype = np.dtype(stiffness.dtype)
     nodes_arr = _normalize_nodes(nodes, dtype)
+    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+        material_ids,
+        thermal_material_table,
+        dtype,
+        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
+    )
+    if thermal_material_table_arr is not None and not np.array_equal(thermal_ids_arr, material_ids_arr):
+        raise ValueError("thermal_material_table must align with material_table material IDs")
     pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
     _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
+    analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
         nodes_arr, elements_arr, normalized_element_type
     )
     body_force_to_rhs = _assemble_body_force_operator(
@@ -1193,17 +1558,42 @@ def assemble_axisymmetric_model(
         dtype,
         normalized_element_type,
     )
+    analysis_temperature_to_rhs, thermal_reference_rhs = _assemble_temperature_operator(
+        analysis_nodes,
+        analysis_elements,
+        material_ids_arr,
+        material_table_arr,
+        thermal_material_table_arr,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+    if thermal_material_table_arr is None:
+        temperature_to_rhs = sp.csr_matrix((stiffness_assembly.ndof, 0), dtype=dtype)
+        thermal_reference_rhs = np.zeros((stiffness_assembly.ndof,), dtype=dtype)
+        n_temperature_nodes = 0
+    else:
+        if elevated is None:
+            temperature_to_rhs = analysis_temperature_to_rhs
+        else:
+            temperature_to_rhs = analysis_temperature_to_rhs @ _temperature_elevation_operator(
+                elevated, dtype
+            )
+        n_temperature_nodes = nodes_arr.shape[0]
 
     return AxisymmetricFEMModel(
         stiffness=stiffness,
         body_force_to_rhs=body_force_to_rhs,
         pressure_to_rhs=pressure_to_rhs,
+        temperature_to_rhs=temperature_to_rhs.tocsr(),
+        thermal_reference_rhs=np.asarray(thermal_reference_rhs, dtype=dtype),
         pressure_faces=pressure_faces_arr,
         analysis_nodes=analysis_nodes,
         analysis_elements=analysis_elements,
         element_type=normalized_element_type,
         ndof=stiffness_assembly.ndof,
         nelem=elements_arr.shape[0],
+        n_temperature_nodes=n_temperature_nodes,
         dtype=dtype,
     )
 
@@ -1213,6 +1603,7 @@ def quadrature_field_operators_axisymmetric(
     elements: ArrayLike,
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
+    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
     quadrature: str | int = "3x3",
     element_type: str = "quad4",
 ) -> QuadratureFieldOperators:
@@ -1226,15 +1617,23 @@ def quadrature_field_operators_axisymmetric(
     `[s_rr, s_zz, s_tt, t_rz]` for `stress_operator`.
     """
 
-    dtype = _resolve_float_dtype(nodes, material_table)
+    dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+        material_ids,
+        thermal_material_table,
+        dtype,
+        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
+    )
     if material_ids_arr.shape[0] != elements_arr.shape[0]:
         raise ValueError(
             f"material_ids has length {material_ids_arr.shape[0]}, "
             f"but elements has {elements_arr.shape[0]} rows"
         )
+    if thermal_material_table_arr is not None and not np.array_equal(thermal_ids_arr, material_ids_arr):
+        raise ValueError("thermal_material_table must align with material_table material IDs")
 
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
@@ -1247,6 +1646,7 @@ def quadrature_field_operators_axisymmetric(
         analysis_elements,
         material_ids_arr,
         material_table_arr,
+        thermal_material_table_arr,
         quadrature_code,
         dtype,
         normalized_element_type,
@@ -1360,6 +1760,30 @@ def isotropic_axisymmetric_material(
             [lam, lam, lam + 2.0 * mu, 0.0],
             [0.0, 0.0, 0.0, mu],
         ],
+        dtype=dtype,
+    )
+
+
+def isotropic_axisymmetric_thermal_material(
+    alpha: float,
+    reference_temperature: float = 0.0,
+    dtype: npt.DTypeLike = np.float64,
+) -> npt.NDArray[np.floating[Any]]:
+    return np.array(
+        [alpha, alpha, alpha, 0.0, reference_temperature],
+        dtype=dtype,
+    )
+
+
+def orthotropic_axisymmetric_thermal_material(
+    alpha_r: float,
+    alpha_z: float,
+    alpha_t: float,
+    reference_temperature: float = 0.0,
+    dtype: npt.DTypeLike = np.float64,
+) -> npt.NDArray[np.floating[Any]]:
+    return np.array(
+        [alpha_r, alpha_z, alpha_t, 0.0, reference_temperature],
         dtype=dtype,
     )
 
@@ -1501,6 +1925,8 @@ def evaluate_axisymmetric_strain_stress_at_quadrature(
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
     displacements: ArrayLike,
+    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
+    nodal_temperature: ArrayLike | None = None,
     quadrature: str | int = "3x3",
     element_type: str = "quad4",
 ) -> QuadratureFieldSamples:
@@ -1512,22 +1938,60 @@ def evaluate_axisymmetric_strain_stress_at_quadrature(
     with the discrete formulation from [1]-[3].
     """
 
-    dtype = _resolve_float_dtype(nodes, material_table, displacements)
+    dtype = _resolve_float_dtype(nodes, material_table, displacements, nodal_temperature)
     operators = quadrature_field_operators_axisymmetric(
         nodes,
         elements,
         material_ids,
         material_table,
+        thermal_material_table=thermal_material_table,
         quadrature=quadrature,
         element_type=element_type,
     )
     displacements_arr = _normalize_displacements(displacements, operators.ndof // 2, dtype)
     u_flat = displacements_arr.reshape(-1)
+    if operators.ntemp == 0:
+        temperature_flat = np.zeros((0,), dtype=dtype)
+    else:
+        if nodal_temperature is None:
+            raise ValueError("nodal_temperature is required because thermal_material_table was provided")
+        nodes_arr = _normalize_nodes(nodes, dtype)
+        elements_arr = _normalize_elements(elements)
+        normalized_element_type = _normalize_element_type(element_type)
+        _analysis_nodes, _analysis_elements, elevated = _analysis_mesh_for_element_type(
+            nodes_arr,
+            elements_arr,
+            normalized_element_type,
+        )
+        temperature_flat = _analysis_temperature_for_element_type(
+            nodal_temperature,
+            nodes_arr.shape[0],
+            normalized_element_type,
+            elevated,
+            dtype,
+        )
     nelem = operators.points_rz.shape[0]
     nq = operators.nq_per_element
     strain = np.asarray(operators.strain_operator @ u_flat, dtype=dtype).reshape(nelem, nq, 4)
-    stress = np.asarray(operators.stress_operator @ u_flat, dtype=dtype).reshape(nelem, nq, 4)
-    return QuadratureFieldSamples(points_rz=operators.points_rz, strain=strain, stress=stress)
+    thermal_strain = (
+        np.asarray(operators.thermal_strain_operator @ temperature_flat, dtype=dtype)
+        + operators.thermal_strain_constant
+    ).reshape(nelem, nq, 4)
+    stress = (
+        np.asarray(operators.stress_operator @ u_flat, dtype=dtype)
+        - (
+            np.asarray(operators.thermal_stress_operator @ temperature_flat, dtype=dtype)
+            + operators.thermal_stress_constant
+        )
+    ).reshape(nelem, nq, 4)
+    elastic_strain = strain - thermal_strain
+    return QuadratureFieldSamples(
+        points_rz=operators.points_rz,
+        strain=strain,
+        thermal_strain=thermal_strain,
+        elastic_strain=elastic_strain,
+        stress=stress,
+    )
 
 
 __all__ = [
@@ -1549,6 +2013,8 @@ __all__ = [
     "evaluate_axisymmetric_strain_stress_at_quadrature",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
+    "isotropic_axisymmetric_thermal_material",
+    "orthotropic_axisymmetric_thermal_material",
     "quadrature_field_operators_axisymmetric",
     "solve_dirichlet",
 ]

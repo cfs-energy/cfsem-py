@@ -17,6 +17,8 @@ from .axisymmetric_fem import (
     evaluate_axisymmetric_strain_stress_at_quadrature,
     infer_quad9_mesh,
     isotropic_axisymmetric_material,
+    isotropic_axisymmetric_thermal_material,
+    orthotropic_axisymmetric_thermal_material,
     quadrature_field_operators_axisymmetric,
     solve_dirichlet,
 )
@@ -40,6 +42,8 @@ __all__ = [
     "evaluate_axisymmetric_strain_stress_at_quadrature",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
+    "isotropic_axisymmetric_thermal_material",
+    "orthotropic_axisymmetric_thermal_material",
     "quadrature_field_operators_axisymmetric",
     "solve_dirichlet",
 ]

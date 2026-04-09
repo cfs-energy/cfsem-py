@@ -4,14 +4,18 @@
 //! `K_e = integral(B^T D B 2*pi*r dA)` and the consistent load vectors are assembled from the
 //! same weak form.
 
-use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
+use crate::physics::solenoid_stress::axisym::{
+    accumulate_b_transpose_vector, accumulate_stiffness, build_b_matrix, constitutive_times_strain,
+};
 use crate::physics::solenoid_stress::geometry::{
     VolumeSample, volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::loads::{
     accumulate_body_force, pressure_element_load_quad4, pressure_element_load_quad9,
 };
-use crate::physics::solenoid_stress::mesh::{AssemblyResult, MeshView, PressureLoad};
+use crate::physics::solenoid_stress::mesh::{
+    AssemblyResult, MeshView, PressureLoad, ThermalMaterial,
+};
 use crate::physics::solenoid_stress::quad4;
 use crate::physics::solenoid_stress::quad9;
 use crate::physics::solenoid_stress::quadrature::QuadratureRule;
@@ -27,6 +31,8 @@ fn assemble_axisymmetric_impl<
     material_table: &[[[F; 4]; 4]],
     body_force: &[[F; 2]],
     pressure_loads: &[PressureLoad<F>],
+    thermal_material_table: Option<&[ThermalMaterial<F>]>,
+    nodal_temperature: Option<&[F]>,
     quadrature: QuadratureRule,
     volume_samples_fn: fn(
         &[[F; 2]; NODES_PER_ELEMENT],
@@ -56,6 +62,21 @@ fn assemble_axisymmetric_impl<
             mesh.num_elements()
         ));
     }
+    if thermal_material_table.is_some() != nodal_temperature.is_some() {
+        return Err(
+            "thermal_material_table and nodal_temperature must either both be provided or both be omitted"
+                .to_string(),
+        );
+    }
+    if let Some(temperature) = nodal_temperature
+        && temperature.len() != mesh.num_nodes()
+    {
+        return Err(format!(
+            "nodal_temperature has length {}, but mesh has {} nodes",
+            temperature.len(),
+            mesh.num_nodes()
+        ));
+    }
     let ndof = mesh.num_nodes() * 2;
     let mut rows = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
     let mut cols = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
@@ -70,9 +91,24 @@ fn assemble_axisymmetric_impl<
         let material = material_table.get(material_id).ok_or_else(|| {
             format!("material_id {material_id} on element {element_index} is out of range")
         })?;
+        let thermal_material = thermal_material_table
+            .map(|table| {
+                table.get(material_id).ok_or_else(|| {
+                    format!(
+                        "thermal material_id {material_id} on element {element_index} is out of range"
+                    )
+                })
+            })
+            .transpose()?;
         let element_body_force = body_force[element_index];
         let mut ke = [[F::zero(); DOF_PER_ELEMENT]; DOF_PER_ELEMENT];
         let mut fe = [F::zero(); DOF_PER_ELEMENT];
+        let mut element_temperature = [F::zero(); NODES_PER_ELEMENT];
+        if let Some(temperature) = nodal_temperature {
+            for (local_node, global_node) in nodes.iter().copied().enumerate() {
+                element_temperature[local_node] = temperature[global_node];
+            }
+        }
 
         for sample in volume_samples_fn(&coords, quadrature)? {
             let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
@@ -83,10 +119,26 @@ fn assemble_axisymmetric_impl<
             let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
             accumulate_stiffness(&mut ke, material, &b, scale);
             accumulate_body_force(&mut fe, element_body_force, &sample.n, scale);
+            if let Some(thermal) = thermal_material {
+                let mut temperature = F::zero();
+                for local_node in 0..NODES_PER_ELEMENT {
+                    temperature =
+                        temperature + sample.n[local_node] * element_temperature[local_node];
+                }
+                let delta_temperature = temperature - thermal.reference_temperature;
+                let thermal_strain = [
+                    thermal.alpha[0] * delta_temperature,
+                    thermal.alpha[1] * delta_temperature,
+                    thermal.alpha[2] * delta_temperature,
+                    thermal.alpha[3] * delta_temperature,
+                ];
+                let thermal_stress = constitutive_times_strain(material, &thermal_strain);
+                accumulate_b_transpose_vector(&mut fe, &b, &thermal_stress, scale);
+            }
         }
 
         let mut local_dofs = [0usize; DOF_PER_ELEMENT];
-        for (local_node, global_node) in nodes.into_iter().enumerate() {
+        for (local_node, global_node) in nodes.iter().copied().enumerate() {
             local_dofs[2 * local_node] = 2 * global_node;
             local_dofs[2 * local_node + 1] = 2 * global_node + 1;
         }
@@ -112,7 +164,7 @@ fn assemble_axisymmetric_impl<
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
         let fe = pressure_element_load_fn(&coords, load.local_face, load.value, quadrature)?;
-        for (local_node, global_node) in nodes.into_iter().enumerate() {
+        for (local_node, global_node) in nodes.iter().copied().enumerate() {
             rhs[2 * global_node] = rhs[2 * global_node] + fe[2 * local_node];
             rhs[2 * global_node + 1] = rhs[2 * global_node + 1] + fe[2 * local_node + 1];
         }
@@ -134,6 +186,8 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
     material_table: &[[[F; 4]; 4]],
     body_force: &[[F; 2]],
     pressure_loads: &[PressureLoad<F>],
+    thermal_material_table: Option<&[ThermalMaterial<F>]>,
+    nodal_temperature: Option<&[F]>,
     quadrature: QuadratureRule,
 ) -> Result<AssemblyResult<F>, String> {
     assemble_axisymmetric_impl(
@@ -142,6 +196,8 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
         material_table,
         body_force,
         pressure_loads,
+        thermal_material_table,
+        nodal_temperature,
         quadrature,
         volume_samples_quad4::<F>,
         pressure_element_load_quad4::<F>,
@@ -155,6 +211,8 @@ pub fn assemble_axisymmetric_quad9<F: Real>(
     material_table: &[[[F; 4]; 4]],
     body_force: &[[F; 2]],
     pressure_loads: &[PressureLoad<F>],
+    thermal_material_table: Option<&[ThermalMaterial<F>]>,
+    nodal_temperature: Option<&[F]>,
     quadrature: QuadratureRule,
 ) -> Result<AssemblyResult<F>, String> {
     assemble_axisymmetric_impl(
@@ -163,6 +221,8 @@ pub fn assemble_axisymmetric_quad9<F: Real>(
         material_table,
         body_force,
         pressure_loads,
+        thermal_material_table,
+        nodal_temperature,
         quadrature,
         volume_samples_quad9::<F>,
         pressure_element_load_quad9::<F>,
@@ -203,6 +263,8 @@ mod tests {
             &material_table,
             &body_force,
             &[],
+            None,
+            None,
             QuadratureRule::Gauss3x3,
         )
         .expect("assembly should succeed");

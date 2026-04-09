@@ -20,6 +20,14 @@ pub struct PressureLoad<F: Real> {
     pub value: F,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ThermalMaterial<F: Real> {
+    /// Thermal strain coefficients in axisymmetric strain order `[rr, zz, tt, rz]`.
+    pub alpha: [F; 4],
+    /// Stress-free reference temperature for this material.
+    pub reference_temperature: F,
+}
+
 #[derive(Debug, Clone)]
 pub struct AssemblyResult<F: Real> {
     /// Sparse row indices for the assembled stiffness matrix triplets.
@@ -91,7 +99,7 @@ impl<'a, F: Real, const NODES_PER_ELEMENT: usize> MeshView<'a, F, NODES_PER_ELEM
     ) -> Result<[[F; 2]; NODES_PER_ELEMENT], String> {
         let nodes = self.element_nodes(element_index)?;
         let mut coords = [[F::zero(); 2]; NODES_PER_ELEMENT];
-        for (local_index, global_index) in nodes.into_iter().enumerate() {
+        for (local_index, global_index) in nodes.iter().copied().enumerate() {
             coords[local_index] = self.nodes_rz[global_index];
         }
         Ok(coords)

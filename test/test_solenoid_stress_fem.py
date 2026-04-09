@@ -31,6 +31,7 @@ DTYPES: list[DType] = [np.float32, np.float64]
 AREA_VOLUME_MESHES = [(1, 1), (3, 2)]
 BODY_FORCE_MESHES = [(2, 1), (4, 2)]
 PRESSURE_NR_CASES = [24, 48]
+ELEMENT_TYPES = ["quad4", "quad9"]
 
 
 def build_annulus_strip_mesh(
@@ -253,6 +254,175 @@ def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType,
         )
         actual = solve_case(body_force, pressure_values)
         assert np.allclose(actual, expected, rtol=rtol, atol=max(atol, 1.0e-6))
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_thermal_model_rhs_matches_direct_assembly(
+    quadrature: str,
+    element_type: str,
+) -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
+    pressure_faces = np.vstack([inner_faces, outer_faces])
+    pressure_values = np.linspace(1.0e5, 6.0e5, pressure_faces.shape[0], dtype=dtype)
+    body_force = np.column_stack(
+        [
+            np.linspace(-3.0e4, 7.0e4, elements.shape[0], dtype=dtype),
+            np.linspace(4.0e4, -5.0e4, elements.shape[0], dtype=dtype),
+        ]
+    )
+    material_table = np.asarray(
+        [
+            isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype),
+            isotropic_axisymmetric_material(180.0e9, 0.24, dtype=dtype),
+        ]
+    )
+    thermal_material_table = np.asarray(
+        [
+            fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15, dtype=dtype),
+            fem.isotropic_axisymmetric_thermal_material(0.8e-5, reference_temperature=301.15, dtype=dtype),
+        ]
+    )
+    material_ids = np.asarray([0, 1, 0, 1, 0, 1], dtype=np.uint64)
+    radial_span = np.ptp(nodes[:, 0])
+    axial_span = np.ptp(nodes[:, 1])
+    nodal_temperature = np.asarray(
+        296.15
+        + 12.0 * (nodes[:, 0] - nodes[:, 0].min()) / radial_span
+        + 4.0 * (nodes[:, 1] - nodes[:, 1].min()) / max(axial_span, 1.0e-12),
+        dtype=dtype,
+    )
+
+    model = fem.assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
+        pressure_faces=pressure_faces,
+        thermal_material_table=thermal_material_table,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    assembly = fem.assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
+        body_force=body_force,
+        pressure_faces=pressure_faces,
+        pressure_values=pressure_values,
+        thermal_material_table=thermal_material_table,
+        nodal_temperature=nodal_temperature,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+
+    assert np.allclose(model.stiffness.toarray(), assembly.to_csr().toarray())
+    assert np.allclose(
+        model.rhs(
+            body_force=body_force,
+            pressure_values=pressure_values,
+            nodal_temperature=nodal_temperature,
+        ),
+        assembly.rhs,
+    )
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
+    quadrature: str,
+    element_type: str,
+) -> None:
+    dtype = np.float64
+    alpha = 1.1e-5
+    reference_temperature = 293.15
+    delta_temperature = 40.0
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    thermal_material = fem.isotropic_axisymmetric_thermal_material(
+        alpha,
+        reference_temperature=reference_temperature,
+        dtype=dtype,
+    )
+    nodal_temperature = np.full(nodes.shape[0], reference_temperature + delta_temperature, dtype=dtype)
+    assembly = fem.assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=np.array([0.0, 0.0], dtype=dtype),
+        thermal_material_table=np.asarray([thermal_material]),
+        nodal_temperature=nodal_temperature,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    displacement = fem.solve_dirichlet(
+        assembly.to_csr(),
+        assembly.rhs,
+        prescribed={dof: 0.0 for dof in range(assembly.ndof)},
+    )
+    samples = fem.evaluate_axisymmetric_strain_stress_at_quadrature(
+        nodes,
+        elements,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        displacement,
+        thermal_material_table=np.asarray([thermal_material]),
+        nodal_temperature=nodal_temperature,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+
+    expected_thermal_strain = np.asarray([alpha, alpha, alpha, 0.0], dtype=dtype) * delta_temperature
+    expected_stress = -(material @ expected_thermal_strain)
+    expected_thermal_strain_grid = np.broadcast_to(expected_thermal_strain, samples.total_strain.shape)
+    expected_stress_grid = np.broadcast_to(expected_stress, samples.stress.shape)
+
+    assert np.allclose(displacement, 0.0)
+    assert np.allclose(samples.total_strain, 0.0)
+    assert np.allclose(samples.thermal_strain, expected_thermal_strain_grid)
+    assert np.allclose(samples.elastic_strain, -expected_thermal_strain_grid)
+    assert np.allclose(samples.stress, expected_stress_grid)
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_quadrature_recovery_splits_total_elastic_and_thermal_strain_consistently(
+    quadrature: str,
+    element_type: str,
+) -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    thermal_material = fem.isotropic_axisymmetric_thermal_material(
+        9.0e-6,
+        reference_temperature=290.0,
+        dtype=dtype,
+    )
+    analysis_nnode = (
+        nodes.shape[0]
+        if element_type == "quad4"
+        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
+    )
+    displacement = np.linspace(-2.0e-4, 3.0e-4, 2 * analysis_nnode, dtype=dtype)
+    nodal_temperature = np.linspace(292.0, 307.0, nodes.shape[0], dtype=dtype)
+
+    samples = fem.evaluate_axisymmetric_strain_stress_at_quadrature(
+        nodes,
+        elements,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        displacement,
+        thermal_material_table=np.asarray([thermal_material]),
+        nodal_temperature=nodal_temperature,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+
+    assert np.allclose(samples.total_strain, samples.elastic_strain + samples.thermal_strain)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)

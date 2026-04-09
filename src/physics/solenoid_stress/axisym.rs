@@ -97,3 +97,32 @@ pub fn constitutive_times_b<F: Real, const DOF_PER_ELEMENT: usize>(
     }
     db
 }
+
+/// Multiply the constitutive matrix `D` by one strain vector.
+pub fn constitutive_times_strain<F: Real>(d: &[[F; 4]; 4], strain: &[F; 4]) -> [F; 4] {
+    let mut out = [F::zero(); 4];
+    for row in 0..4 {
+        let mut value = F::zero();
+        for k in 0..4 {
+            value = value + d[row][k] * strain[k];
+        }
+        out[row] = value;
+    }
+    out
+}
+
+/// Accumulate `scale * B^T sigma` into one element load vector.
+pub fn accumulate_b_transpose_vector<F: Real, const DOF_PER_ELEMENT: usize>(
+    fe: &mut [F; DOF_PER_ELEMENT],
+    b: &[[F; DOF_PER_ELEMENT]; 4],
+    sigma: &[F; 4],
+    scale: F,
+) {
+    for dof in 0..DOF_PER_ELEMENT {
+        let mut value = F::zero();
+        for component in 0..4 {
+            value = value + b[component][dof] * sigma[component];
+        }
+        fe[dof] = fe[dof] + scale * value;
+    }
+}

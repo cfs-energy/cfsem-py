@@ -12,9 +12,16 @@
 //! So `K_e` is the element stiffness matrix: it maps one element displacement pattern to the
 //! internal restoring forces associated with that same element's nodal degrees of freedom.
 //!
-//! Each factor has a distinct role:
+//! Each symbol has a distinct role:
+//! - `u_e` is the vector of element nodal displacement degrees of freedom
+//!   `[u_r1, u_z1, u_r2, u_z2, ...]^T`,
+//! - `u` is the interpolated displacement field inside the element at one point,
+//! - `N` is the shape-function interpolation matrix that maps nodal displacements to pointwise
+//!   displacement through `u = N u_e`,
 //! - `B` maps nodal displacements to the axisymmetric strain vector,
 //! - `D` maps strain to stress through the material law,
+//! - `epsilon` is the strain vector at a point,
+//! - `sigma` is the stress vector at a point,
 //! - `B^T` maps stress back to equivalent nodal forces,
 //! - `dA` is the differential area in the `(r, z)` cross-section, and
 //! - `2*pi*r` is the axisymmetric revolution factor that converts cross-sectional area into the
@@ -25,6 +32,57 @@
 //! gives the internal generalized force induced in local degree of freedom `i`.  That is why the
 //! matrix has stiffness units and why material farther from the axis contributes more strongly
 //! through the `2*pi*r` weight.
+//!
+//! The variational statement behind all of this is the principle of virtual work.  Rather than
+//! enforcing equilibrium pointwise in strong form, the finite-element method enforces
+//! `delta W_int = delta W_ext` for every admissible virtual displacement field `delta u`.  A
+//! virtual displacement is not an actual motion in time; it is an imagined infinitesimal kinematic
+//! perturbation used to probe whether the current stress state is in equilibrium.  If the body is
+//! in equilibrium, then the internal stresses and the applied loads must do equal virtual work
+//! against every such perturbation.
+//!
+//! In axisymmetric small-strain elasticity, the virtual-work statement can be written schematically
+//! as
+//! - `delta W_int = integral((delta epsilon)^T sigma 2*pi*r dA)`,
+//! - `delta W_ext = integral((delta u)^T b 2*pi*r dA) + integral((delta u)^T t 2*pi*r ds)`,
+//! where `b` is body-force density and `t` is an applied surface traction.  Thermal strain enters
+//! through the constitutive law `sigma = D (epsilon - epsilon_th)` and can therefore be moved to
+//! the right-hand side as an equivalent load.
+//!
+//! After approximating the displacement field with element shape functions, one writes
+//! - `u = N u_e`,
+//! - `delta u = N delta u_e`,
+//! - `epsilon = B u_e`,
+//! - `delta epsilon = B delta u_e`,
+//! where `u_e` collects the element nodal displacement degrees of freedom.  Substituting these
+//! into the virtual-work statement gives
+//! - `delta W_int = delta u_e^T [integral(B^T D B 2*pi*r dA)] u_e`,
+//! - `delta W_ext = delta u_e^T f_e`.
+//! Since `delta u_e` is arbitrary, the bracketed quantity defines the element equations
+//! `K_e u_e = f_e`.  After assembling the element contributions over the whole mesh, this becomes
+//! the global linear system `K u = f`.
+//!
+//! This is the origin of the generalized-force interpretation used throughout the implementation.
+//! A generalized force is simply the quantity that is work-conjugate to a generalized displacement
+//! coordinate.  Here the generalized coordinates are the nodal radial and axial displacements, so
+//! the load-vector entries are the corresponding radial and axial generalized nodal forces.
+//! Distributed loads are therefore converted into equivalent nodal loads by asking: which nodal
+//! force vector would produce the same virtual work as the original distributed loading for every
+//! virtual displacement field representable by the element basis?
+//!
+//! This is why the right-hand side is assembled with `N^T` for direct force-like loads and `B^T`
+//! for stress-like loads:
+//! - body forces, pressures, and tractions act through virtual displacements and contribute
+//!   `integral(N^T (...) 2*pi*r dA)` or `integral(N^T (...) 2*pi*r ds)`,
+//! - thermal strain first produces stress through `D epsilon_th`, then contributes through
+//!   `integral(B^T D epsilon_th 2*pi*r dA)`.
+//!
+//! From this viewpoint, each row of the global system corresponds to one test displacement pattern,
+//! typically "activate one nodal degree of freedom and set all other virtual degrees of freedom to
+//! zero."  The row equation states that the internal restoring force associated with that test
+//! pattern balances the applied generalized force associated with the same test pattern.  It is
+//! therefore better interpreted as a weak equilibrium statement than as a literal free-body-diagram
+//! force balance at a node.
 //!
 //! Each node carries two displacement unknowns: radial `u_r` and axial `u_z`.  The global
 //! linear system therefore has the form `K u = f`, where `u = [u_r(0), u_z(0), u_r(1), u_z(1), ...]^T`.

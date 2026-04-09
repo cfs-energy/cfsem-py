@@ -61,6 +61,15 @@ Run an explicit radial-refinement study that configures the 2D FEM model to
 match the 1D solver assumptions as closely as possible, then compares both
 against a fine 1D reference on the midplane.
 
+## Axisymmetric FEM Surface Traction Example
+
+Run a small non-GUI example that applies constant surface traction vectors in
+global `(r, z)` components. The script demonstrates:
+
+- axial traction on the top surface
+- radial traction on the outer wall
+- combined pressure plus shear-like top traction
+
 ## Loop Inductance
 
 Estimate the (low-frequency) self-inductance of a finite-radius wire loop by different methods.

@@ -19,7 +19,7 @@
 //! - [`quadrature`] provides the Gauss rules on the reference square and its edges.
 //! - [`geometry`] evaluates quadrature-point locations, weights, and gradients in physical space.
 //! - [`axisym`] constructs the axisymmetric strain operator and local stiffness kernel.
-//! - [`loads`] assembles consistent nodal loads from body forces and face pressures.
+//! - [`loads`] assembles consistent nodal loads from body forces and face tractions.
 //! - [`assembly`] ties the pieces together into sparse triplets plus the global right-hand side.
 //!
 //! References:
@@ -47,9 +47,9 @@ pub use geometry::{
 pub use load_operators::{
     SparseOperator, ThermalLoadOperator, body_force_operator_quad4, body_force_operator_quad9,
     pressure_operator_quad4, pressure_operator_quad9, temperature_operator_quad4,
-    temperature_operator_quad9,
+    temperature_operator_quad9, traction_operator_quad4, traction_operator_quad9,
 };
-pub use mesh::{AssemblyResult, MeshView, PressureLoad, ThermalMaterial};
+pub use mesh::{AssemblyResult, MeshView, PressureLoad, ThermalMaterial, TractionLoad};
 pub use quadrature::QuadratureRule;
 pub use recovery::{
     QuadratureFieldOperators, quadrature_field_operators_quad4, quadrature_field_operators_quad9,

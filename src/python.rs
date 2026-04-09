@@ -318,6 +318,76 @@ fn read_axisym_pressure_faces<F: physics::solenoid_stress::Real + NumpyElement>(
     Ok(out)
 }
 
+fn read_axisym_traction_loads<F: physics::solenoid_stress::Real + NumpyElement>(
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    traction_values: PyReadonlyArray2<'_, F>,
+) -> PyResult<Vec<physics::solenoid_stress::TractionLoad<F>>> {
+    let faces_view = traction_faces.as_array();
+    let values_view = traction_values.as_array();
+    let faces_shape = faces_view.shape();
+    let values_shape = values_view.shape();
+    if faces_shape.len() != 2 || faces_shape[1] != 2 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "traction_faces must have shape (nload, 2)".to_string(),
+        }
+        .into());
+    }
+    if values_shape.len() != 2 || values_shape[1] != 2 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "traction_values must have shape (nload, 2)".to_string(),
+        }
+        .into());
+    }
+    if faces_shape[0] != values_shape[0] {
+        return Err(PyInteropError::DimensionalityError {
+            msg: format!(
+                "traction_faces has {} rows, but traction_values has shape {:?}",
+                faces_shape[0], values_shape
+            ),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(values_shape[0]);
+    for (index, row) in faces_view.rows().into_iter().enumerate() {
+        out.push(physics::solenoid_stress::TractionLoad {
+            element: usize::try_from(row[0]).map_err(|_| PyInteropError::ValueError {
+                msg: "traction_faces element index overflowed usize".to_string(),
+            })?,
+            local_face: u8::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
+                msg: "traction_faces local face overflowed u8".to_string(),
+            })?,
+            value: [values_view[[index, 0]], values_view[[index, 1]]],
+        });
+    }
+    Ok(out)
+}
+
+fn read_axisym_traction_faces<F: physics::solenoid_stress::Real + NumpyElement>(
+    traction_faces: PyReadonlyArray2<'_, u64>,
+) -> PyResult<Vec<physics::solenoid_stress::TractionLoad<F>>> {
+    let faces_view = traction_faces.as_array();
+    let faces_shape = faces_view.shape();
+    if faces_shape.len() != 2 || faces_shape[1] != 2 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "traction_faces must have shape (nload, 2)".to_string(),
+        }
+        .into());
+    }
+    let mut out = Vec::with_capacity(faces_shape[0]);
+    for row in faces_view.rows() {
+        out.push(physics::solenoid_stress::TractionLoad {
+            element: usize::try_from(row[0]).map_err(|_| PyInteropError::ValueError {
+                msg: "traction_faces element index overflowed usize".to_string(),
+            })?,
+            local_face: u8::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
+                msg: "traction_faces local face overflowed u8".to_string(),
+            })?,
+            value: [F::zero(), F::zero()],
+        });
+    }
+    Ok(out)
+}
+
 fn parse_solenoid_fem_quadrature(
     quadrature: u8,
 ) -> PyResult<physics::solenoid_stress::QuadratureRule> {
@@ -347,6 +417,8 @@ fn assemble_axisymmetric_low_level<
     body_force: PyReadonlyArray2<'_, F>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, F>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    traction_values: PyReadonlyArray2<'_, F>,
     quadrature: u8,
     assemble_fn: fn(
         physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
@@ -354,6 +426,7 @@ fn assemble_axisymmetric_low_level<
         &[[[F; 4]; 4]],
         &[[F; 2]],
         &[physics::solenoid_stress::PressureLoad<F>],
+        &[physics::solenoid_stress::TractionLoad<F>],
         Option<&[physics::solenoid_stress::ThermalMaterial<F>]>,
         Option<&[F]>,
         physics::solenoid_stress::QuadratureRule,
@@ -369,6 +442,7 @@ fn assemble_axisymmetric_low_level<
     let nodal_temperature = read_axisym_nodal_temperature("nodal_temperature", nodal_temperature)?;
     let body_force = read_axisym_body_force("body_force", body_force)?;
     let pressure_loads = read_axisym_pressure_loads(pressure_faces, pressure_values)?;
+    let traction_loads = read_axisym_traction_loads(traction_faces, traction_values)?;
     let mesh = physics::solenoid_stress::MeshView {
         nodes_rz: &nodes,
         elements: &elements,
@@ -379,6 +453,7 @@ fn assemble_axisymmetric_low_level<
         &material_table,
         &body_force,
         &pressure_loads,
+        &traction_loads,
         (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice()),
         (!nodal_temperature.is_empty()).then_some(nodal_temperature.as_slice()),
         quadrature,
@@ -633,6 +708,39 @@ fn temperature_operator_axisymmetric_low_level<
     ))
 }
 
+fn traction_operator_axisymmetric_low_level<
+    F: physics::solenoid_stress::Real + NumpyElement,
+    const NODES_PER_ELEMENT: usize,
+>(
+    nodes: PyReadonlyArray2<'_, F>,
+    elements: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+    operator_fn: fn(
+        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
+        &[physics::solenoid_stress::TractionLoad<F>],
+        physics::solenoid_stress::QuadratureRule,
+    ) -> Result<physics::solenoid_stress::SparseOperator<F>, String>,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, usize, usize)> {
+    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
+    let traction_faces = read_axisym_traction_faces::<F>(traction_faces)?;
+    let mesh = physics::solenoid_stress::MeshView {
+        nodes_rz: &nodes,
+        elements: &elements,
+    };
+    let operator = operator_fn(mesh, &traction_faces, quadrature)
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    Ok((
+        operator.rows,
+        operator.cols,
+        operator.vals,
+        operator.nrow,
+        operator.ncol,
+    ))
+}
+
 #[pyfunction]
 fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
     nodes: PyReadonlyArray2<'_, f64>,
@@ -644,6 +752,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
     body_force: PyReadonlyArray2<'_, f64>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    traction_values: PyReadonlyArray2<'_, f64>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize)> {
     assemble_axisymmetric_low_level::<f64, 4>(
@@ -656,6 +766,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
         body_force,
         pressure_faces,
         pressure_values,
+        traction_faces,
+        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad4,
     )
@@ -672,6 +784,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
     body_force: PyReadonlyArray2<'_, f32>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f32>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    traction_values: PyReadonlyArray2<'_, f32>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize)> {
     assemble_axisymmetric_low_level::<f32, 4>(
@@ -684,6 +798,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
         body_force,
         pressure_faces,
         pressure_values,
+        traction_faces,
+        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad4,
     )
@@ -700,6 +816,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f64(
     body_force: PyReadonlyArray2<'_, f64>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    traction_values: PyReadonlyArray2<'_, f64>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize)> {
     assemble_axisymmetric_low_level::<f64, 9>(
@@ -712,6 +830,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f64(
         body_force,
         pressure_faces,
         pressure_values,
+        traction_faces,
+        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad9,
     )
@@ -728,6 +848,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f32(
     body_force: PyReadonlyArray2<'_, f32>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     pressure_values: PyReadonlyArray1<'_, f32>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    traction_values: PyReadonlyArray2<'_, f32>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize)> {
     assemble_axisymmetric_low_level::<f32, 9>(
@@ -740,6 +862,8 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f32(
         body_force,
         pressure_faces,
         pressure_values,
+        traction_faces,
+        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad9,
     )
@@ -1086,6 +1210,70 @@ fn solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32(
         pressure_faces,
         quadrature,
         physics::solenoid_stress::pressure_operator_quad9,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_traction_operator_axisymmetric_quad4_f64(
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
+    traction_operator_axisymmetric_low_level::<f64, 4>(
+        nodes,
+        elements,
+        traction_faces,
+        quadrature,
+        physics::solenoid_stress::traction_operator_quad4,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_traction_operator_axisymmetric_quad4_f32(
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
+    traction_operator_axisymmetric_low_level::<f32, 4>(
+        nodes,
+        elements,
+        traction_faces,
+        quadrature,
+        physics::solenoid_stress::traction_operator_quad4,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_traction_operator_axisymmetric_quad9_f64(
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
+    traction_operator_axisymmetric_low_level::<f64, 9>(
+        nodes,
+        elements,
+        traction_faces,
+        quadrature,
+        physics::solenoid_stress::traction_operator_quad9,
+    )
+}
+
+#[pyfunction]
+fn solenoid_stress_fem_traction_operator_axisymmetric_quad9_f32(
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    quadrature: u8,
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
+    traction_operator_axisymmetric_low_level::<f32, 9>(
+        nodes,
+        elements,
+        traction_faces,
+        quadrature,
+        physics::solenoid_stress::traction_operator_quad9,
     )
 }
 
@@ -3099,6 +3287,22 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_traction_operator_axisymmetric_quad4_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_traction_operator_axisymmetric_quad4_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_traction_operator_axisymmetric_quad9_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_traction_operator_axisymmetric_quad9_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

@@ -2,7 +2,7 @@
 2D-axisymmetric elasticity finite-element assembly for solenoid stress problems.
 
 This module provides a small displacement-based axisymmetric finite-element solver
-for the `(r, z)` meridian plane.  The Rust backend assembles the global COO stiffness
+for the `(r, z)` meridian plane. The Rust backend assembles the global COO stiffness
 matrix and load vector, while Python handles sparse linear algebra, postprocessing,
 and validation workflows.
 
@@ -10,7 +10,7 @@ The element formulation follows the standard small-strain Galerkin construction
 
 `K_e = integral(B^T D B 2*pi*r dA)`
 
-with consistent body-force and surface-pressure load vectors.  The axisymmetric
+with consistent body-force, surface-pressure, and surface-traction load vectors. The axisymmetric
 engineering-strain vector is ordered as `[e_rr, e_zz, e_tt, g_rz]`.
 
 References:
@@ -106,6 +106,18 @@ _pressure_operator_axisymmetric_quad9_f32 = (
 )
 _pressure_operator_axisymmetric_quad9_f64 = (
     _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f64
+)
+_traction_operator_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad4_f32
+)
+_traction_operator_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad4_f64
+)
+_traction_operator_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad9_f32
+)
+_traction_operator_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad9_f64
 )
 _temperature_operator_axisymmetric_quad4_f32 = (
     _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f32
@@ -214,15 +226,19 @@ class AxisymmetricFEMModel:
     `body_force_to_rhs` maps flattened per-element body-force data
     `[f_r(0), f_z(0), f_r(1), f_z(1), ...]` onto the global load vector.
     `pressure_to_rhs` maps the reusable `pressure_values` vector associated with
-    `pressure_faces` onto the global load vector.
+    `pressure_faces` onto the global load vector. `traction_to_rhs` maps flattened
+    per-face traction vectors `[t_r(0), t_z(0), ...]` associated with `traction_faces`
+    onto the same load vector.
     """
 
     stiffness: sp.csr_matrix
     body_force_to_rhs: sp.csr_matrix
     pressure_to_rhs: sp.csr_matrix
+    traction_to_rhs: sp.csr_matrix
     temperature_to_rhs: sp.csr_matrix
     thermal_reference_rhs: npt.NDArray[np.floating[Any]]
     pressure_faces: npt.NDArray[np.uint64]
+    traction_faces: npt.NDArray[np.uint64]
     analysis_nodes: npt.NDArray[np.floating[Any]]
     analysis_elements: npt.NDArray[np.uint64]
     element_type: str
@@ -240,6 +256,16 @@ class AxisymmetricFEMModel:
         if pressure_arr.size == 0:
             return np.zeros((self.ndof,), dtype=self.dtype)
         return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
+
+    def traction_rhs(self, traction_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
+        traction_arr = _normalize_traction_values(
+            traction_values,
+            self.traction_to_rhs.shape[1] // 2,
+            self.dtype,
+        )
+        if traction_arr.size == 0:
+            return np.zeros((self.ndof,), dtype=self.dtype)
+        return np.asarray(self.traction_to_rhs @ traction_arr.reshape(-1), dtype=self.dtype)
 
     def temperature_rhs(
         self,
@@ -260,12 +286,14 @@ class AxisymmetricFEMModel:
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
         return (
             self.thermal_reference_rhs
             + self.body_force_rhs(body_force)
             + self.pressure_rhs(pressure_values)
+            + self.traction_rhs(traction_values)
             + self.temperature_rhs(nodal_temperature)
         )
 
@@ -282,6 +310,7 @@ class AxisymmetricFEMModel:
             matrix=reduced.matrix,
             body_force_to_rhs=self.body_force_to_rhs[reduced.free_dofs].tocsr(),
             pressure_to_rhs=self.pressure_to_rhs[reduced.free_dofs].tocsr(),
+            traction_to_rhs=self.traction_to_rhs[reduced.free_dofs].tocsr(),
             temperature_to_rhs=self.temperature_to_rhs[reduced.free_dofs].tocsr(),
             thermal_reference_rhs=(
                 apply_dirichlet(
@@ -293,6 +322,7 @@ class AxisymmetricFEMModel:
             ),
             constant_rhs=reduced.rhs,
             pressure_faces=self.pressure_faces,
+            traction_faces=self.traction_faces,
             analysis_nodes=self.analysis_nodes,
             analysis_elements=self.analysis_elements,
             element_type=self.element_type,
@@ -309,6 +339,7 @@ class AxisymmetricFEMModel:
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
         prescribed: Mapping[int, float] | None = None,
         solver: Any | None = None,
@@ -316,6 +347,7 @@ class AxisymmetricFEMModel:
         return self.apply_dirichlet(prescribed).solve(
             body_force=body_force,
             pressure_values=pressure_values,
+            traction_values=traction_values,
             nodal_temperature=nodal_temperature,
             solver=solver,
         )
@@ -323,7 +355,10 @@ class AxisymmetricFEMModel:
     def factorized_solver(
         self,
         prescribed: Mapping[int, float] | None = None,
-    ) -> Callable[[ArrayLike | None, ArrayLike | None, ArrayLike | None], npt.NDArray[np.floating[Any]]]:
+    ) -> Callable[
+        [ArrayLike | None, ArrayLike | None, ArrayLike | None, ArrayLike | None],
+        npt.NDArray[np.floating[Any]],
+    ]:
         return self.apply_dirichlet(prescribed).factorized_solver()
 
 
@@ -334,10 +369,12 @@ class ReducedAxisymmetricFEMModel:
     matrix: sp.csr_matrix
     body_force_to_rhs: sp.csr_matrix
     pressure_to_rhs: sp.csr_matrix
+    traction_to_rhs: sp.csr_matrix
     temperature_to_rhs: sp.csr_matrix
     thermal_reference_rhs: npt.NDArray[np.floating[Any]]
     constant_rhs: npt.NDArray[np.floating[Any]]
     pressure_faces: npt.NDArray[np.uint64]
+    traction_faces: npt.NDArray[np.uint64]
     analysis_nodes: npt.NDArray[np.floating[Any]]
     analysis_elements: npt.NDArray[np.uint64]
     element_type: str
@@ -365,6 +402,16 @@ class ReducedAxisymmetricFEMModel:
             return np.zeros((self.matrix.shape[0],), dtype=self.dtype)
         return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
 
+    def traction_rhs(self, traction_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
+        traction_arr = _normalize_traction_values(
+            traction_values,
+            self.traction_to_rhs.shape[1] // 2,
+            self.dtype,
+        )
+        if traction_arr.size == 0:
+            return np.zeros((self.matrix.shape[0],), dtype=self.dtype)
+        return np.asarray(self.traction_to_rhs @ traction_arr.reshape(-1), dtype=self.dtype)
+
     def temperature_rhs(
         self,
         nodal_temperature: ArrayLike | None = None,
@@ -384,6 +431,7 @@ class ReducedAxisymmetricFEMModel:
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
         return (
@@ -391,6 +439,7 @@ class ReducedAxisymmetricFEMModel:
             + self.thermal_reference_rhs
             + self.body_force_rhs(body_force)
             + self.pressure_rhs(pressure_values)
+            + self.traction_rhs(traction_values)
             + self.temperature_rhs(nodal_temperature)
         )
 
@@ -398,12 +447,14 @@ class ReducedAxisymmetricFEMModel:
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
+        traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
         solver: Any | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
         rhs = self.rhs(
             body_force=body_force,
             pressure_values=pressure_values,
+            traction_values=traction_values,
             nodal_temperature=nodal_temperature,
         )
         if self.matrix.shape[0] == 0:
@@ -416,15 +467,19 @@ class ReducedAxisymmetricFEMModel:
 
     def factorized_solver(
         self,
-    ) -> Callable[[ArrayLike | None, ArrayLike | None, ArrayLike | None], npt.NDArray[np.floating[Any]]]:
+    ) -> Callable[
+        [ArrayLike | None, ArrayLike | None, ArrayLike | None, ArrayLike | None],
+        npt.NDArray[np.floating[Any]],
+    ]:
         if self.matrix.shape[0] == 0:
 
             def solve_empty(
                 body_force: ArrayLike | None = None,
                 pressure_values: ArrayLike | None = None,
+                traction_values: ArrayLike | None = None,
                 nodal_temperature: ArrayLike | None = None,
             ) -> npt.NDArray[np.floating[Any]]:
-                del body_force, pressure_values, nodal_temperature
+                del body_force, pressure_values, traction_values, nodal_temperature
                 return self.recover(np.zeros((0,), dtype=self.dtype))
 
             return solve_empty
@@ -434,6 +489,7 @@ class ReducedAxisymmetricFEMModel:
         def solve_case(
             body_force: ArrayLike | None = None,
             pressure_values: ArrayLike | None = None,
+            traction_values: ArrayLike | None = None,
             nodal_temperature: ArrayLike | None = None,
         ) -> npt.NDArray[np.floating[Any]]:
             return self.recover(
@@ -441,6 +497,7 @@ class ReducedAxisymmetricFEMModel:
                     self.rhs(
                         body_force=body_force,
                         pressure_values=pressure_values,
+                        traction_values=traction_values,
                         nodal_temperature=nodal_temperature,
                     )
                 )
@@ -798,6 +855,44 @@ def _normalize_pressure_loads(
     return faces, np.ascontiguousarray(values)
 
 
+def _normalize_traction_faces(traction_faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
+    if traction_faces is None:
+        return np.zeros((0, 2), dtype=np.uint64)
+    faces = np.asarray(traction_faces, dtype=np.uint64)
+    if faces.ndim != 2 or faces.shape[1] != 2:
+        raise ValueError(f"traction_faces must have shape (nload, 2); got {faces.shape}")
+    return np.ascontiguousarray(faces)
+
+
+def _normalize_traction_values(
+    traction_values: ArrayLike | None,
+    nload: int,
+    dtype: np.dtype[Any],
+) -> npt.NDArray[np.floating[Any]]:
+    if traction_values is None:
+        return np.zeros((nload, 2), dtype=dtype)
+    values = np.asarray(traction_values, dtype=dtype)
+    if values.ndim == 1 and values.shape == (2,):
+        values = np.broadcast_to(values, (nload, 2)).copy()
+    if values.ndim != 2 or values.shape != (nload, 2):
+        raise ValueError(f"traction_values must have shape (2,) or ({nload}, 2); got {values.shape}")
+    return np.ascontiguousarray(values)
+
+
+def _normalize_traction_loads(
+    traction_faces: ArrayLike | None,
+    traction_values: ArrayLike | None,
+    dtype: np.dtype[Any],
+) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
+    if traction_faces is None and traction_values is None:
+        return _normalize_traction_faces(None), _normalize_traction_values(None, 0, dtype)
+    if traction_faces is None or traction_values is None:
+        raise ValueError("traction_faces and traction_values must either both be provided or both be omitted")
+    faces = _normalize_traction_faces(traction_faces)
+    values = _normalize_traction_values(traction_values, faces.shape[0], dtype)
+    return faces, values
+
+
 def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     if dtype == np.float32:
         return f32
@@ -990,6 +1085,8 @@ def _assemble_axisymmetric_python(
     body_force: npt.NDArray[np.floating[Any]],
     pressure_faces: npt.NDArray[np.uint64],
     pressure_values: npt.NDArray[np.floating[Any]],
+    traction_faces: npt.NDArray[np.uint64],
+    traction_values: npt.NDArray[np.floating[Any]],
     quadrature_code: int,
     dtype: np.dtype[Any],
     element_type: str,
@@ -1053,6 +1150,29 @@ def _assemble_axisymmetric_python(
             rhs[2 * int(global_node)] += fe[2 * local_node]
             rhs[2 * int(global_node) + 1] += fe[2 * local_node + 1]
 
+    for load_index, (element_index_u64, local_face_u64) in enumerate(traction_faces):
+        element_index = int(element_index_u64)
+        if element_index < 0 or element_index >= nelem:
+            raise ValueError(
+                f"traction_faces references element {element_index}, "
+                f"but mesh has {elements.shape[0]} elements"
+            )
+        local_face = int(local_face_u64)
+        conn = elements[element_index]
+        coords = nodes[conn]
+        fe = np.zeros((dof_per_element,), dtype=dtype)
+        for n, tangent, point, weight in _face_samples(
+            coords, element_type, local_face, quadrature_code, dtype
+        ):
+            tangent_norm = dtype.type(np.sqrt(tangent[0] * tangent[0] + tangent[1] * tangent[1]))
+            scale = two_pi * point[0] * tangent_norm * weight
+            for local_node in range(nnodes_per_element):
+                fe[2 * local_node] += scale * n[local_node] * traction_values[load_index, 0]
+                fe[2 * local_node + 1] += scale * n[local_node] * traction_values[load_index, 1]
+        for local_node, global_node in enumerate(conn):
+            rhs[2 * int(global_node)] += fe[2 * local_node]
+            rhs[2 * int(global_node) + 1] += fe[2 * local_node + 1]
+
     return AssemblyResult(
         rows=np.asarray(rows, dtype=np.int64),
         cols=np.asarray(cols, dtype=np.int64),
@@ -1084,6 +1204,24 @@ def _assemble_pressure_operator(
         nodes,
         elements,
         pressure_faces,
+        quadrature_code,
+        dtype,
+        element_type,
+    )
+
+
+def _assemble_traction_operator(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    traction_faces: npt.NDArray[np.uint64],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> sp.csr_matrix:
+    return _assemble_traction_operator_rust(
+        nodes,
+        elements,
+        traction_faces,
         quadrature_code,
         dtype,
         element_type,
@@ -1222,6 +1360,33 @@ def _assemble_temperature_operator_rust(
         _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype),
         np.asarray(reference_rhs, dtype=dtype),
     )
+
+
+def _assemble_traction_operator_rust(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    traction_faces: npt.NDArray[np.uint64],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> sp.csr_matrix:
+    if traction_faces.shape[0] == 0:
+        return sp.csr_matrix((2 * nodes.shape[0], 0), dtype=dtype)
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            element_type,
+            _traction_operator_axisymmetric_quad4_f32,
+            _traction_operator_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            element_type,
+            _traction_operator_axisymmetric_quad4_f64,
+            _traction_operator_axisymmetric_quad9_f64,
+        ),
+    )
+    rows, cols, vals, nrow, ncol = low_level(nodes, elements, traction_faces, quadrature_code)
+    return _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype)
 
 
 def _quadrature_field_operators_rust(
@@ -1392,6 +1557,8 @@ def assemble_axisymmetric(
     body_force: ArrayLike,
     pressure_faces: ArrayLike | None = None,
     pressure_values: ArrayLike | None = None,
+    traction_faces: ArrayLike | None = None,
+    traction_values: ArrayLike | None = None,
     thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
     nodal_temperature: ArrayLike | None = None,
     quadrature: str | int = "3x3",
@@ -1402,9 +1569,11 @@ def assemble_axisymmetric(
 
     The assembled element matrix uses the standard axisymmetric weak form
     `K_e = integral(B^T D B 2*pi*r dA)`; see [1]-[3] in the module references.
+    Surface pressure and traction loads add linearly to the same right-hand side.
+    Traction values are specified in global `(r, z)` components.
     """
 
-    dtype = _resolve_float_dtype(nodes, body_force, pressure_values, nodal_temperature)
+    dtype = _resolve_float_dtype(nodes, body_force, pressure_values, traction_values, nodal_temperature)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
@@ -1429,6 +1598,9 @@ def assemble_axisymmetric(
     body_force_arr = _normalize_body_force(body_force, elements_arr.shape[0], dtype)
     pressure_faces_arr, pressure_values_arr = _normalize_pressure_loads(
         pressure_faces, pressure_values, dtype
+    )
+    traction_faces_arr, traction_values_arr = _normalize_traction_loads(
+        traction_faces, traction_values, dtype
     )
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
@@ -1475,6 +1647,8 @@ def assemble_axisymmetric(
         body_force_arr,
         pressure_faces_arr,
         pressure_values_arr,
+        traction_faces_arr,
+        traction_values_arr,
         quadrature_code,
     )
     return AssemblyResult(
@@ -1492,6 +1666,7 @@ def assemble_axisymmetric_model(
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
     pressure_faces: ArrayLike | None = None,
+    traction_faces: ArrayLike | None = None,
     thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
     quadrature: str | int = "3x3",
     element_type: str = "quad4",
@@ -1506,7 +1681,9 @@ def assemble_axisymmetric_model(
 
     Notes:
         `pressure_faces` defines the ordering of the reusable pressure load vector.
-        Repeated solves may vary `pressure_values`, but not the face list itself.
+        `traction_faces` defines the ordering of the reusable traction vector list.
+        Repeated solves may vary `pressure_values` and `traction_values`, but not
+        the face lists themselves.
     """
 
     elements_arr = _normalize_elements(elements)
@@ -1519,6 +1696,8 @@ def assemble_axisymmetric_model(
         body_force=zero_body_force,
         pressure_faces=None,
         pressure_values=None,
+        traction_faces=None,
+        traction_values=None,
         thermal_material_table=None,
         nodal_temperature=None,
         quadrature=quadrature,
@@ -1537,6 +1716,7 @@ def assemble_axisymmetric_model(
     if thermal_material_table_arr is not None and not np.array_equal(thermal_ids_arr, material_ids_arr):
         raise ValueError("thermal_material_table must align with material_table material IDs")
     pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
+    traction_faces_arr = _normalize_traction_faces(traction_faces)
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
     _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
@@ -1554,6 +1734,14 @@ def assemble_axisymmetric_model(
         analysis_nodes,
         analysis_elements,
         pressure_faces_arr,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+    traction_to_rhs = _assemble_traction_operator(
+        analysis_nodes,
+        analysis_elements,
+        traction_faces_arr,
         quadrature_code,
         dtype,
         normalized_element_type,
@@ -1585,9 +1773,11 @@ def assemble_axisymmetric_model(
         stiffness=stiffness,
         body_force_to_rhs=body_force_to_rhs,
         pressure_to_rhs=pressure_to_rhs,
+        traction_to_rhs=traction_to_rhs,
         temperature_to_rhs=temperature_to_rhs.tocsr(),
         thermal_reference_rhs=np.asarray(thermal_reference_rhs, dtype=dtype),
         pressure_faces=pressure_faces_arr,
+        traction_faces=traction_faces_arr,
         analysis_nodes=analysis_nodes,
         analysis_elements=analysis_elements,
         element_type=normalized_element_type,

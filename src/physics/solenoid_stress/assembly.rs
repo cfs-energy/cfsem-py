@@ -12,9 +12,10 @@ use crate::physics::solenoid_stress::geometry::{
 };
 use crate::physics::solenoid_stress::loads::{
     accumulate_body_force, pressure_element_load_quad4, pressure_element_load_quad9,
+    traction_element_load_quad4, traction_element_load_quad9,
 };
 use crate::physics::solenoid_stress::mesh::{
-    AssemblyResult, MeshView, PressureLoad, ThermalMaterial,
+    AssemblyResult, MeshView, PressureLoad, ThermalMaterial, TractionLoad,
 };
 use crate::physics::solenoid_stress::quad4;
 use crate::physics::solenoid_stress::quad9;
@@ -31,6 +32,7 @@ fn assemble_axisymmetric_impl<
     material_table: &[[[F; 4]; 4]],
     body_force: &[[F; 2]],
     pressure_loads: &[PressureLoad<F>],
+    traction_loads: &[TractionLoad<F>],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
     nodal_temperature: Option<&[F]>,
     quadrature: QuadratureRule,
@@ -42,6 +44,12 @@ fn assemble_axisymmetric_impl<
         &[[F; 2]; NODES_PER_ELEMENT],
         u8,
         F,
+        QuadratureRule,
+    ) -> Result<[F; DOF_PER_ELEMENT], String>,
+    traction_element_load_fn: fn(
+        &[[F; 2]; NODES_PER_ELEMENT],
+        u8,
+        [F; 2],
         QuadratureRule,
     ) -> Result<[F; DOF_PER_ELEMENT], String>,
 ) -> Result<AssemblyResult<F>, String> {
@@ -170,6 +178,23 @@ fn assemble_axisymmetric_impl<
         }
     }
 
+    for load in traction_loads {
+        if load.element >= mesh.num_elements() {
+            return Err(format!(
+                "traction load references element {}, but mesh has only {} elements",
+                load.element,
+                mesh.num_elements()
+            ));
+        }
+        let coords = mesh.element_coords(load.element)?;
+        let nodes = mesh.element_nodes(load.element)?;
+        let fe = traction_element_load_fn(&coords, load.local_face, load.value, quadrature)?;
+        for (local_node, global_node) in nodes.iter().copied().enumerate() {
+            rhs[2 * global_node] = rhs[2 * global_node] + fe[2 * local_node];
+            rhs[2 * global_node + 1] = rhs[2 * global_node + 1] + fe[2 * local_node + 1];
+        }
+    }
+
     Ok(AssemblyResult {
         rows,
         cols,
@@ -186,6 +211,7 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
     material_table: &[[[F; 4]; 4]],
     body_force: &[[F; 2]],
     pressure_loads: &[PressureLoad<F>],
+    traction_loads: &[TractionLoad<F>],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
     nodal_temperature: Option<&[F]>,
     quadrature: QuadratureRule,
@@ -196,11 +222,13 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
         material_table,
         body_force,
         pressure_loads,
+        traction_loads,
         thermal_material_table,
         nodal_temperature,
         quadrature,
         volume_samples_quad4::<F>,
         pressure_element_load_quad4::<F>,
+        traction_element_load_quad4::<F>,
     )
 }
 
@@ -211,6 +239,7 @@ pub fn assemble_axisymmetric_quad9<F: Real>(
     material_table: &[[[F; 4]; 4]],
     body_force: &[[F; 2]],
     pressure_loads: &[PressureLoad<F>],
+    traction_loads: &[TractionLoad<F>],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
     nodal_temperature: Option<&[F]>,
     quadrature: QuadratureRule,
@@ -221,11 +250,13 @@ pub fn assemble_axisymmetric_quad9<F: Real>(
         material_table,
         body_force,
         pressure_loads,
+        traction_loads,
         thermal_material_table,
         nodal_temperature,
         quadrature,
         volume_samples_quad9::<F>,
         pressure_element_load_quad9::<F>,
+        traction_element_load_quad9::<F>,
     )
 }
 
@@ -262,6 +293,7 @@ mod tests {
             &material_ids,
             &material_table,
             &body_force,
+            &[],
             &[],
             None,
             None,

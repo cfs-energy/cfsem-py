@@ -21,6 +21,16 @@ pub struct PressureLoad<F: Real> {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct TractionLoad<F: Real> {
+    /// Element index receiving the load.
+    pub element: usize,
+    /// Local face index in the element-family numbering used by `face_reference`.
+    pub local_face: u8,
+    /// Constant traction vector in global meridian coordinates `[t_r, t_z]`.
+    pub value: [F; 2],
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct ThermalMaterial<F: Real> {
     /// Thermal strain coefficients in axisymmetric strain order `[rr, zz, tt, rz]`.
     pub alpha: [F; 4],

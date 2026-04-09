@@ -4,6 +4,28 @@
 //! displacement-based Galerkin finite-element construction
 //! `K_e = integral(B^T D B 2*pi*r dA)`.
 //!
+//! This formula is best read from right to left.  For one element with nodal displacement vector
+//! `u_e = [u_r1, u_z1, u_r2, u_z2, ...]^T`, the strain at a quadrature point is
+//! `epsilon = B u_e`, and the constitutive law gives `sigma = D epsilon = D B u_e`.  Converting
+//! that pointwise stress field back into equivalent nodal forces by virtual work gives
+//! `f_int,e = integral(B^T sigma 2*pi*r dA) = integral(B^T D B u_e 2*pi*r dA) = K_e u_e`.
+//! So `K_e` is the element stiffness matrix: it maps one element displacement pattern to the
+//! internal restoring forces associated with that same element's nodal degrees of freedom.
+//!
+//! Each factor has a distinct role:
+//! - `B` maps nodal displacements to the axisymmetric strain vector,
+//! - `D` maps strain to stress through the material law,
+//! - `B^T` maps stress back to equivalent nodal forces,
+//! - `dA` is the differential area in the `(r, z)` cross-section, and
+//! - `2*pi*r` is the axisymmetric revolution factor that converts cross-sectional area into the
+//!   volume of the corresponding ring in 3D.
+//!
+//! One useful interpretation of a single matrix entry `K_e[i, j]` is: apply a unit displacement in
+//! local degree of freedom `j`, hold all other local degrees of freedom fixed, and `K_e[i, j]`
+//! gives the internal generalized force induced in local degree of freedom `i`.  That is why the
+//! matrix has stiffness units and why material farther from the axis contributes more strongly
+//! through the `2*pi*r` weight.
+//!
 //! Each node carries two displacement unknowns: radial `u_r` and axial `u_z`.  The global
 //! linear system therefore has the form `K u = f`, where `u = [u_r(0), u_z(0), u_r(1), u_z(1), ...]^T`.
 //! The corresponding load-vector entries are generalized nodal forces, not usually literal point

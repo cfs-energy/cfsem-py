@@ -63,12 +63,14 @@ against a fine 1D reference on the midplane.
 
 ## Axisymmetric FEM Surface Traction Example
 
-Run a small non-GUI example that applies constant surface traction vectors in
-global `(r, z)` components. The script demonstrates:
+Run a small non-GUI example that assembles the reusable load operators once,
+then updates the load values to rebuild the right-hand side for multiple cases.
+The script applies all four supported load types:
 
-- axial traction on the top surface
-- radial traction on the outer wall
-- combined pressure plus shear-like top traction
+- body-force density
+- surface pressure
+- surface traction in global `(r, z)` components
+- nodal temperature with thermal strain
 
 ## Loop Inductance
 

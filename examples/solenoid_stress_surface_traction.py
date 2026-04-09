@@ -1,13 +1,37 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 from cfsem.solenoid_stress import (
+    apply_dirichlet,
     assemble_axisymmetric,
+    assemble_axisymmetric_model,
     evaluate_axisymmetric_strain_stress_at_quadrature,
     isotropic_axisymmetric_material,
-    solve_dirichlet,
+    isotropic_axisymmetric_thermal_material,
 )
+
+
+"""
+All-in-one repeated-load example for the axisymmetric FEM API.
+
+This script assembles a reusable model once, with fixed:
+- mesh
+- material stiffness
+- pressure face list
+- traction face list
+- thermal material data
+
+It then updates the load values only:
+- body-force density per element
+- pressure value per loaded face
+- traction vector per loaded face
+- nodal temperature
+
+and rebuilds the right-hand side entirely through the sparse load operators.
+"""
 
 
 def build_annulus_strip_mesh(
@@ -60,92 +84,264 @@ def prescribed_dofs(nodes: np.ndarray) -> dict[int, float]:
     return fixed
 
 
-def traction_case_summary(
-    name: str,
+def von_mises(stress: np.ndarray) -> np.ndarray:
+    return np.sqrt(
+        0.5
+        * (
+            (stress[..., 0] - stress[..., 1]) ** 2
+            + (stress[..., 1] - stress[..., 2]) ** 2
+            + (stress[..., 2] - stress[..., 0]) ** 2
+            + 6.0 * stress[..., 3] ** 2
+        )
+    )
+
+
+def make_body_force(nelem: int, radial_scale: float, axial_scale: float) -> np.ndarray:
+    return np.column_stack(
+        [
+            np.linspace(-1.0, 1.0, nelem, dtype=np.float64) * radial_scale,
+            np.linspace(1.0, -1.0, nelem, dtype=np.float64) * axial_scale,
+        ]
+    )
+
+
+def make_temperature_field(
     nodes: np.ndarray,
+    base_temperature: float,
+    radial_rise: float,
+    axial_rise: float,
+) -> np.ndarray:
+    radial_coord = nodes[:, 0]
+    axial_coord = nodes[:, 1]
+    radial_span = max(np.ptp(radial_coord), 1.0e-12)
+    axial_span = max(np.ptp(axial_coord), 1.0e-12)
+    return (
+        base_temperature
+        + radial_rise * (radial_coord - radial_coord.min()) / radial_span
+        + axial_rise * (axial_coord - axial_coord.min()) / axial_span
+    )
+
+
+def summarize_case(
+    name: str,
+    model,
+    reduced_model,
+    solve_case,
+    input_nodes: np.ndarray,
     elements: np.ndarray,
-    pressure_faces: np.ndarray | None,
-    pressure_values: np.ndarray | None,
-    traction_faces: np.ndarray | None,
-    traction_values: np.ndarray | None,
+    material: np.ndarray,
+    thermal_material: np.ndarray,
+    quadrature: str,
+    element_type: str,
+    prescribed: dict[int, float],
+    body_force: np.ndarray,
+    pressure_values: np.ndarray,
+    traction_values: np.ndarray,
+    nodal_temperature: np.ndarray,
 ) -> None:
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
-    assembly = assemble_axisymmetric(
-        nodes=nodes,
+    rhs_body = model.body_force_rhs(body_force)
+    rhs_pressure = model.pressure_rhs(pressure_values)
+    rhs_traction = model.traction_rhs(traction_values)
+    rhs_temperature = model.temperature_rhs(nodal_temperature)
+    rhs_manual = (
+        model.thermal_reference_rhs
+        + rhs_body
+        + rhs_pressure
+        + rhs_traction
+        + rhs_temperature
+    )
+    rhs_full = model.rhs(
+        body_force=body_force,
+        pressure_values=pressure_values,
+        traction_values=traction_values,
+        nodal_temperature=nodal_temperature,
+    )
+    reference = assemble_axisymmetric(
+        nodes=input_nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
         material_table=np.asarray([material]),
-        body_force=np.array([0.0, 0.0], dtype=np.float64),
-        pressure_faces=pressure_faces,
+        body_force=body_force,
+        pressure_faces=model.pressure_faces,
         pressure_values=pressure_values,
-        traction_faces=traction_faces,
+        traction_faces=model.traction_faces,
         traction_values=traction_values,
-        quadrature="4x4",
-        element_type="quad9",
+        thermal_material_table=np.asarray([thermal_material]),
+        nodal_temperature=nodal_temperature,
+        quadrature=quadrature,
+        element_type=element_type,
     )
-    displacement = solve_dirichlet(
-        assembly.to_csr(),
-        assembly.rhs,
-        prescribed=prescribed_dofs(nodes),
-    ).reshape(-1, 2)
+    reduced_reference = apply_dirichlet(reference.to_csr(), reference.rhs, prescribed=prescribed)
+    displacement = solve_case(
+        body_force=body_force,
+        pressure_values=pressure_values,
+        traction_values=traction_values,
+        nodal_temperature=nodal_temperature,
+    )
     samples = evaluate_axisymmetric_strain_stress_at_quadrature(
-        nodes,
+        input_nodes,
         elements,
         np.zeros(elements.shape[0], dtype=np.uint64),
         np.asarray([material]),
-        displacement.reshape(-1),
-        quadrature="4x4",
-        element_type="quad9",
+        displacement,
+        thermal_material_table=np.asarray([thermal_material]),
+        nodal_temperature=nodal_temperature,
+        quadrature=quadrature,
+        element_type=element_type,
     )
-    disp_mag = np.linalg.norm(displacement, axis=1)
-    vm = np.sqrt(
-        0.5
-        * (
-            (samples.stress[..., 0] - samples.stress[..., 1]) ** 2
-            + (samples.stress[..., 1] - samples.stress[..., 2]) ** 2
-            + (samples.stress[..., 2] - samples.stress[..., 0]) ** 2
-            + 6.0 * samples.stress[..., 3] ** 2
-        )
+    vm = von_mises(samples.stress)
+    displacement_2d = displacement.reshape(-1, 2)
+
+    if not np.allclose(rhs_manual, rhs_full):
+        raise AssertionError(f"{name}: operator sum did not match model.rhs(...)")
+    if not np.allclose(rhs_full, reference.rhs):
+        raise AssertionError(f"{name}: operator-built RHS did not match direct assembly")
+    if not np.allclose(
+        reduced_model.rhs(
+            body_force=body_force,
+            pressure_values=pressure_values,
+            traction_values=traction_values,
+            nodal_temperature=nodal_temperature,
+        ),
+        reduced_reference.rhs,
+    ):
+        raise AssertionError(f"{name}: reduced operator RHS did not match direct reduction")
+
+    print(name)
+    print(
+        "  rhs pieces:"
+        f" ||body||={np.linalg.norm(rhs_body):.3e},"
+        f" ||pressure||={np.linalg.norm(rhs_pressure):.3e},"
+        f" ||traction||={np.linalg.norm(rhs_traction):.3e},"
+        f" ||thermal||={np.linalg.norm(rhs_temperature):.3e},"
+        f" ||reference||={np.linalg.norm(model.thermal_reference_rhs):.3e}"
     )
     print(
-        f"{name}: max|u_r|={np.max(np.abs(displacement[:, 0])):.6e} m, "
-        f"max|u_z|={np.max(np.abs(displacement[:, 1])):.6e} m, "
-        f"max|u|={np.max(disp_mag):.6e} m, "
-        f"max VM={np.max(vm):.6e} Pa"
+        "  checks:"
+        f" manual-vs-model={np.linalg.norm(rhs_manual - rhs_full):.3e},"
+        f" model-vs-direct={np.linalg.norm(rhs_full - reference.rhs):.3e}"
+    )
+    print(
+        "  response:"
+        f" max|u_r|={np.max(np.abs(displacement_2d[:, 0])):.6e} m,"
+        f" max|u_z|={np.max(np.abs(displacement_2d[:, 1])):.6e} m,"
+        f" max VM={np.max(vm):.6e} Pa"
     )
 
 
 def main() -> None:
-    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=10, nz=4)
-    _inner_faces, outer_faces = pressure_faces_for_strip(nr=10, nz=4)
-    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=10, nz=4)
+    testing = os.environ.get("CFSEM_TESTING") == "True"
+    nr = 4 if testing else 10
+    nz = 2 if testing else 4
+    quadrature = "4x4"
+    element_type = "quad9"
 
-    traction_case_summary(
-        "Top axial traction",
-        nodes,
-        elements,
-        pressure_faces=None,
-        pressure_values=None,
-        traction_faces=top_faces,
-        traction_values=np.array([0.0, 2.0e5], dtype=np.float64),
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=nr, nz=nz)
+    _inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=nz)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=nr, nz=nz)
+
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
+    thermal_material = isotropic_axisymmetric_thermal_material(
+        1.1e-5,
+        reference_temperature=293.15,
+        dtype=np.float64,
     )
-    traction_case_summary(
-        "Outer radial traction",
-        nodes,
-        elements,
-        pressure_faces=None,
-        pressure_values=None,
-        traction_faces=outer_faces,
-        traction_values=np.array([1.5e5, 0.0], dtype=np.float64),
-    )
-    traction_case_summary(
-        "Outer pressure plus top shear-like traction",
-        nodes,
-        elements,
+
+    model = assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
         pressure_faces=outer_faces,
-        pressure_values=np.full(outer_faces.shape[0], 2.0e5, dtype=np.float64),
         traction_faces=top_faces,
-        traction_values=np.array([1.0e5, -5.0e4], dtype=np.float64),
+        thermal_material_table=np.asarray([thermal_material]),
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    prescribed = prescribed_dofs(model.analysis_nodes)
+    reduced_model = model.apply_dirichlet(prescribed)
+    solve_case = reduced_model.factorized_solver()
+
+    print("Reusable axisymmetric FEM model")
+    print(
+        "  mesh:"
+        f" nelem={model.nelem},"
+        f" ndof={model.ndof},"
+        f" element_type={model.element_type},"
+        f" quadrature={quadrature}"
+    )
+    print(
+        "  operators:"
+        f" body_force_to_rhs={model.body_force_to_rhs.shape},"
+        f" pressure_to_rhs={model.pressure_to_rhs.shape},"
+        f" traction_to_rhs={model.traction_to_rhs.shape},"
+        f" temperature_to_rhs={model.temperature_to_rhs.shape}"
+    )
+    print("  face lists are fixed once; only load values change between cases")
+
+    case_1_body_force = make_body_force(model.nelem, radial_scale=4.0e4, axial_scale=2.0e4)
+    case_1_pressure = np.linspace(1.2e5, 2.0e5, model.pressure_faces.shape[0], dtype=np.float64)
+    case_1_traction = np.column_stack(
+        [
+            np.linspace(0.0, 8.0e4, model.traction_faces.shape[0], dtype=np.float64),
+            np.linspace(-1.5e5, -8.0e4, model.traction_faces.shape[0], dtype=np.float64),
+        ]
+    )
+    case_1_temperature = make_temperature_field(
+        nodes,
+        base_temperature=298.15,
+        radial_rise=10.0,
+        axial_rise=4.0,
+    )
+
+    case_2_body_force = make_body_force(model.nelem, radial_scale=-2.5e4, axial_scale=5.0e4)
+    case_2_pressure = np.linspace(-5.0e4, 1.5e5, model.pressure_faces.shape[0], dtype=np.float64)
+    case_2_traction = np.column_stack(
+        [
+            np.linspace(6.0e4, -6.0e4, model.traction_faces.shape[0], dtype=np.float64),
+            np.linspace(1.2e5, -4.0e4, model.traction_faces.shape[0], dtype=np.float64),
+        ]
+    )
+    case_2_temperature = make_temperature_field(
+        nodes,
+        base_temperature=301.15,
+        radial_rise=6.0,
+        axial_rise=12.0,
+    )
+
+    summarize_case(
+        "Case 1: outward pressure, top traction, moderate thermal gradient",
+        model,
+        reduced_model,
+        solve_case,
+        nodes,
+        elements,
+        material,
+        thermal_material,
+        quadrature,
+        element_type,
+        prescribed,
+        case_1_body_force,
+        case_1_pressure,
+        case_1_traction,
+        case_1_temperature,
+    )
+    summarize_case(
+        "Case 2: updated load values reusing the same operators and factorization",
+        model,
+        reduced_model,
+        solve_case,
+        nodes,
+        elements,
+        material,
+        thermal_material,
+        quadrature,
+        element_type,
+        prescribed,
+        case_2_body_force,
+        case_2_pressure,
+        case_2_traction,
+        case_2_temperature,
     )
 
 

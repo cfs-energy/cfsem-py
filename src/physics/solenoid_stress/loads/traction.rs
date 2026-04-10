@@ -9,6 +9,16 @@ use crate::physics::solenoid_stress::types::{
 
 use super::{SparseOperator, scatter_local_matrix};
 
+/// Build the local dense traction operator for one loaded face.
+///
+/// The returned block has shape `(DOF_PER_ELEMENT, 2)`. Its two columns correspond to:
+/// - column `0`: unit radial traction `[force / area]`
+/// - column `1`: unit axial traction `[force / area]`
+///
+/// Multiplying this block by `[t_r, t_z]^T` gives the element's consistent nodal load vector
+/// `[energy / distance]`.
+///
+/// Each block entry therefore has units of area.
 fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     samples: &[FaceSample<F, NODES_PER_ELEMENT>],
 ) -> [[F; 2]; DOF_PER_ELEMENT] {
@@ -19,10 +29,13 @@ fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
     let two_pi = two_pi::<F>();
 
     for sample in samples {
+        // `|dx/ds|` is the physical line Jacobian for the face quadrature parameter.
         let tangent_norm =
             (sample.tangent[0] * sample.tangent[0] + sample.tangent[1] * sample.tangent[1]).sqrt();
         let scale = two_pi * sample.point[0] * tangent_norm * sample.weight;
         for local_node in 0..NODES_PER_ELEMENT {
+            // The two columns encode independent unit tractions in the global radial and axial
+            // directions, so the block is diagonal in those two traction components.
             local[2 * local_node][0] = local[2 * local_node][0] + scale * sample.n[local_node];
             local[2 * local_node + 1][1] =
                 local[2 * local_node + 1][1] + scale * sample.n[local_node];

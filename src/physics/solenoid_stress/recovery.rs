@@ -52,6 +52,14 @@ pub struct QuadratureFieldOperators<F: Real> {
     pub ntemp: usize,
 }
 
+/// Dense recovery operators for one quadrature point.
+///
+/// Units:
+/// - `strain`: `[strain / displacement] = [1 / length]`
+/// - `stress`: `[stress / displacement] = [pressure / length]`
+/// - `thermal_strain`: `[strain / temperature]`
+/// - `thermal_stress`: `[stress / temperature]`
+/// - `thermal_*_constant`: `strain` and `stress`, respectively
 struct LocalQuadratureSampleKernel<
     F: Real,
     const NODES_PER_ELEMENT: usize,
@@ -98,11 +106,13 @@ fn quadrature_sample_kernel<
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
+    // `B` maps nodal displacements `[length]` to strain `[dimensionless]`.
     let strain = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         &sample.n,
         &sample.grad_phys,
         sample.point[0],
     )?;
+    // `D B` maps nodal displacements `[length]` to stress `[pressure]`.
     let stress = constitutive_times_b(material, &strain);
     let mut local = LocalQuadratureSampleKernel {
         strain,
@@ -117,6 +127,8 @@ fn quadrature_sample_kernel<
         let thermal_stress_unit = thermal_stress_unit.expect("thermal stress unit");
         for component in 0..4 {
             for local_temp_node in 0..NODES_PER_ELEMENT {
+                // These blocks map the nodal temperature field directly to thermal strain/stress
+                // at this quadrature point.
                 local.thermal_strain[component][local_temp_node] =
                     thermal.alpha[component] * sample.n[local_temp_node];
                 local.thermal_stress[component][local_temp_node] =

@@ -9,6 +9,16 @@ use crate::physics::solenoid_stress::types::{
 
 use super::{SparseOperator, scatter_local_matrix};
 
+/// Build the local dense body-force operator for one element.
+///
+/// The returned block has shape `(DOF_PER_ELEMENT, 2)`. Its two columns correspond to:
+/// - column `0`: unit radial body-force density `[force / volume]`
+/// - column `1`: unit axial body-force density `[force / volume]`
+///
+/// Multiplying this block by `[b_r, b_z]^T` gives the element's consistent nodal load vector
+/// `[energy / distance]`, which is force-like in the virtual-work sense.
+///
+/// Each block entry therefore has units of volume.
 fn body_force_element_kernel<
     F: Real,
     const NODES_PER_ELEMENT: usize,
@@ -23,8 +33,10 @@ fn body_force_element_kernel<
     let two_pi = two_pi::<F>();
 
     for sample in samples {
+        // `2*pi*r*det(J)*w` is the physical swept volume represented by this quadrature point.
         let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
         for local_node in 0..NODES_PER_ELEMENT {
+            // Even-numbered rows act on radial DOFs and odd-numbered rows act on axial DOFs.
             local[2 * local_node][0] = local[2 * local_node][0] + scale * sample.n[local_node];
             local[2 * local_node + 1][1] =
                 local[2 * local_node + 1][1] + scale * sample.n[local_node];

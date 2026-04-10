@@ -12,11 +12,25 @@ use crate::physics::solenoid_stress::types::{
 
 use super::{SparseOperator, ThermalLoadOperator, scatter_local_matrix};
 
+/// Local thermal operator data for one element.
+///
+/// `temperature_to_rhs` maps element nodal temperatures `[temperature]` to the element's
+/// consistent nodal thermal load vector `[energy / distance]`, so its entries have units
+/// `[force / temperature]`.
+///
+/// `reference_rhs` is the constant offset contributed by the material's stress-free reference
+/// temperature and has units `[energy / distance]`.
 struct LocalThermalKernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize> {
     temperature_to_rhs: [[F; NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
     reference_rhs: [F; DOF_PER_ELEMENT],
 }
 
+/// Build the local dense thermal load operator for one element.
+///
+/// The thermal strain model is
+/// `epsilon_th = alpha * (T - T_ref)`,
+/// where `alpha` has units `[strain / temperature]`.  The returned block therefore maps nodal
+/// temperatures directly to generalized nodal loads.
 fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     samples: &[VolumeSample<F, NODES_PER_ELEMENT>],
     material: &[[F; 4]; 4],
@@ -33,6 +47,9 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
     let thermal_stress_unit = constitutive_times_strain(material, &thermal.alpha);
 
     for sample in samples {
+        // `B` has units `[1 / length]`, `D * alpha` has units `[stress / temperature]`, and the
+        // quadrature scale contributes a physical volume. The resulting local block has units
+        // `[force / temperature]`.
         let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             &sample.n,
             &sample.grad_phys,
@@ -43,6 +60,8 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         accumulate_b_transpose_vector(&mut local_unit_rhs, &b, &thermal_stress_unit, scale);
 
         for local_temp_node in 0..NODES_PER_ELEMENT {
+            // Interpolating the nodal temperature field with `N_i` converts the unit thermal load
+            // for a uniform `DeltaT` into one column per nodal temperature DOF.
             let scale_node = sample.n[local_temp_node];
             for dof in 0..DOF_PER_ELEMENT {
                 local.temperature_to_rhs[dof][local_temp_node] = local.temperature_to_rhs[dof]
@@ -50,6 +69,8 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
                     + local_unit_rhs[dof] * scale_node;
             }
         }
+        // The reference-temperature term is a constant RHS offset because `T_ref` is prescribed
+        // by the material model, not by a nodal unknown.
         for dof in 0..DOF_PER_ELEMENT {
             local.reference_rhs[dof] =
                 local.reference_rhs[dof] - local_unit_rhs[dof] * thermal.reference_temperature;

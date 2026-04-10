@@ -9,6 +9,13 @@ use crate::physics::solenoid_stress::types::{
 
 use super::{SparseOperator, scatter_local_vector};
 
+/// Build the local dense pressure-load vector for one loaded face.
+///
+/// The returned vector has length `DOF_PER_ELEMENT` and maps unit pressure
+/// `[force / area]` on the face to the element's consistent nodal load vector
+/// `[energy / distance]`.
+///
+/// Each vector entry therefore has units of area.
 fn pressure_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     samples: &[FaceSample<F, NODES_PER_ELEMENT>],
 ) -> [F; DOF_PER_ELEMENT] {
@@ -19,6 +26,8 @@ fn pressure_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
     let two_pi = two_pi::<F>();
 
     for sample in samples {
+        // Rotating the physical tangent gives `n * |dx/ds|`, so the line Jacobian is already
+        // embedded in `normal_area`.
         let normal_area = [sample.tangent[1], -sample.tangent[0]];
         let scale = -two_pi * sample.point[0] * sample.weight;
         for local_node in 0..NODES_PER_ELEMENT {

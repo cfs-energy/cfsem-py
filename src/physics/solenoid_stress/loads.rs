@@ -4,13 +4,12 @@
 //! weak form used for the stiffness matrix. The axisymmetric face contributions include the
 //! `2*pi*r` measure factor on the revolved face; see Hughes (1987), Bathe (1996), and Reddy (2005).
 
+use crate::mesh::QuadratureRule;
+use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::physics::solenoid_stress::geometry::{
     FaceSample, face_samples_quad4, face_samples_quad9,
 };
-use crate::physics::solenoid_stress::quad4;
-use crate::physics::solenoid_stress::quad9;
-use crate::physics::solenoid_stress::quadrature::QuadratureRule;
-use crate::physics::solenoid_stress::types::{Real, two_pi};
+use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, dof_per_element, two_pi};
 
 /// Accumulate the consistent nodal load vector for a uniform body-force density on one element.
 pub fn accumulate_body_force<
@@ -23,7 +22,7 @@ pub fn accumulate_body_force<
     shape: &[F; NODES_PER_ELEMENT],
     scale: F,
 ) {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
     for (i, n) in shape.iter().enumerate() {
         fe[2 * i] = fe[2 * i] + scale * *n * body_force[0];
         fe[2 * i + 1] = fe[2 * i + 1] + scale * *n * body_force[1];
@@ -45,7 +44,7 @@ fn pressure_element_load_generic<
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<[F; DOF_PER_ELEMENT], String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
     let mut fe = [F::zero(); DOF_PER_ELEMENT];
     let two_pi = two_pi::<F>();
     for sample in face_samples_fn(coords, local_face, quadrature)? {
@@ -74,7 +73,7 @@ fn traction_element_load_generic<
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<[F; DOF_PER_ELEMENT], String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
     let mut fe = [F::zero(); DOF_PER_ELEMENT];
     let two_pi = two_pi::<F>();
     for sample in face_samples_fn(coords, local_face, quadrature)? {
@@ -95,8 +94,12 @@ pub fn pressure_element_load_quad4<F: Real>(
     local_face: u8,
     pressure: F,
     quadrature: QuadratureRule,
-) -> Result<[F; quad4::DOF_PER_ELEMENT], String> {
-    pressure_element_load_generic(
+) -> Result<[F; dof_per_element(quad4::NODES_PER_ELEMENT)], String> {
+    pressure_element_load_generic::<
+        F,
+        { quad4::NODES_PER_ELEMENT },
+        { dof_per_element(quad4::NODES_PER_ELEMENT) },
+    >(
         coords,
         local_face,
         pressure,
@@ -111,8 +114,12 @@ pub fn pressure_element_load_quad9<F: Real>(
     local_face: u8,
     pressure: F,
     quadrature: QuadratureRule,
-) -> Result<[F; quad9::DOF_PER_ELEMENT], String> {
-    pressure_element_load_generic(
+) -> Result<[F; dof_per_element(quad9::NODES_PER_ELEMENT)], String> {
+    pressure_element_load_generic::<
+        F,
+        { quad9::NODES_PER_ELEMENT },
+        { dof_per_element(quad9::NODES_PER_ELEMENT) },
+    >(
         coords,
         local_face,
         pressure,
@@ -127,8 +134,12 @@ pub fn traction_element_load_quad4<F: Real>(
     local_face: u8,
     traction: [F; 2],
     quadrature: QuadratureRule,
-) -> Result<[F; quad4::DOF_PER_ELEMENT], String> {
-    traction_element_load_generic(
+) -> Result<[F; dof_per_element(quad4::NODES_PER_ELEMENT)], String> {
+    traction_element_load_generic::<
+        F,
+        { quad4::NODES_PER_ELEMENT },
+        { dof_per_element(quad4::NODES_PER_ELEMENT) },
+    >(
         coords,
         local_face,
         traction,
@@ -143,8 +154,12 @@ pub fn traction_element_load_quad9<F: Real>(
     local_face: u8,
     traction: [F; 2],
     quadrature: QuadratureRule,
-) -> Result<[F; quad9::DOF_PER_ELEMENT], String> {
-    traction_element_load_generic(
+) -> Result<[F; dof_per_element(quad9::NODES_PER_ELEMENT)], String> {
+    traction_element_load_generic::<
+        F,
+        { quad9::NODES_PER_ELEMENT },
+        { dof_per_element(quad9::NODES_PER_ELEMENT) },
+    >(
         coords,
         local_face,
         traction,

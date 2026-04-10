@@ -6,20 +6,18 @@
 //! - traction operator: `[t_r(0), t_z(0), ...] -> rhs`
 //! - temperature operator: `[T(node_0), T(node_1), ...] -> rhs`
 
+use crate::mesh::elements::quad2d::{quad4, quad9};
+use crate::mesh::{MeshView, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     accumulate_b_transpose_vector, build_b_matrix, constitutive_times_strain,
 };
 use crate::physics::solenoid_stress::geometry::{
-    FaceSample, VolumeSample, face_samples_quad4, face_samples_quad9, volume_samples_quad4,
-    volume_samples_quad9,
+    FaceSample, VolumeSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_nodes,
+    volume_samples_quad4, volume_samples_quad9,
 };
-use crate::physics::solenoid_stress::mesh::{
-    MeshView, PressureLoad, ThermalMaterial, TractionLoad,
+use crate::physics::solenoid_stress::types::{
+    DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element, two_pi,
 };
-use crate::physics::solenoid_stress::quad4;
-use crate::physics::solenoid_stress::quad9;
-use crate::physics::solenoid_stress::quadrature::QuadratureRule;
-use crate::physics::solenoid_stress::types::{Real, two_pi};
 
 #[derive(Debug, Clone)]
 pub struct SparseOperator<F: Real> {
@@ -48,8 +46,8 @@ fn body_force_operator_impl<
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<SparseOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
-    mesh.validate_nodes()?;
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     let ndof = mesh.num_nodes() * 2;
     let ncol = 2 * mesh.num_elements();
@@ -110,8 +108,8 @@ fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<SparseOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
-    mesh.validate_nodes()?;
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     let ndof = mesh.num_nodes() * 2;
     let ncol = pressure_faces.len();
@@ -180,8 +178,8 @@ fn traction_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<SparseOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
-    mesh.validate_nodes()?;
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     let ndof = mesh.num_nodes() * 2;
     let ncol = 2 * traction_faces.len();
@@ -246,22 +244,22 @@ pub fn body_force_operator_quad4<F: Real>(
     mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
-    body_force_operator_impl::<F, { quad4::NODES_PER_ELEMENT }, { quad4::DOF_PER_ELEMENT }>(
-        mesh,
-        quadrature,
-        volume_samples_quad4::<F>,
-    )
+    body_force_operator_impl::<
+        F,
+        { quad4::NODES_PER_ELEMENT },
+        { dof_per_element(quad4::NODES_PER_ELEMENT) },
+    >(mesh, quadrature, volume_samples_quad4::<F>)
 }
 
 pub fn body_force_operator_quad9<F: Real>(
     mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
-    body_force_operator_impl::<F, { quad9::NODES_PER_ELEMENT }, { quad9::DOF_PER_ELEMENT }>(
-        mesh,
-        quadrature,
-        volume_samples_quad9::<F>,
-    )
+    body_force_operator_impl::<
+        F,
+        { quad9::NODES_PER_ELEMENT },
+        { dof_per_element(quad9::NODES_PER_ELEMENT) },
+    >(mesh, quadrature, volume_samples_quad9::<F>)
 }
 
 pub fn pressure_operator_quad4<F: Real>(
@@ -269,12 +267,11 @@ pub fn pressure_operator_quad4<F: Real>(
     pressure_faces: &[PressureLoad<F>],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
-    pressure_operator_impl::<F, { quad4::NODES_PER_ELEMENT }, { quad4::DOF_PER_ELEMENT }>(
-        mesh,
-        pressure_faces,
-        quadrature,
-        face_samples_quad4::<F>,
-    )
+    pressure_operator_impl::<
+        F,
+        { quad4::NODES_PER_ELEMENT },
+        { dof_per_element(quad4::NODES_PER_ELEMENT) },
+    >(mesh, pressure_faces, quadrature, face_samples_quad4::<F>)
 }
 
 pub fn pressure_operator_quad9<F: Real>(
@@ -282,12 +279,11 @@ pub fn pressure_operator_quad9<F: Real>(
     pressure_faces: &[PressureLoad<F>],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
-    pressure_operator_impl::<F, { quad9::NODES_PER_ELEMENT }, { quad9::DOF_PER_ELEMENT }>(
-        mesh,
-        pressure_faces,
-        quadrature,
-        face_samples_quad9::<F>,
-    )
+    pressure_operator_impl::<
+        F,
+        { quad9::NODES_PER_ELEMENT },
+        { dof_per_element(quad9::NODES_PER_ELEMENT) },
+    >(mesh, pressure_faces, quadrature, face_samples_quad9::<F>)
 }
 
 pub fn traction_operator_quad4<F: Real>(
@@ -295,12 +291,11 @@ pub fn traction_operator_quad4<F: Real>(
     traction_faces: &[TractionLoad<F>],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
-    traction_operator_impl::<F, { quad4::NODES_PER_ELEMENT }, { quad4::DOF_PER_ELEMENT }>(
-        mesh,
-        traction_faces,
-        quadrature,
-        face_samples_quad4::<F>,
-    )
+    traction_operator_impl::<
+        F,
+        { quad4::NODES_PER_ELEMENT },
+        { dof_per_element(quad4::NODES_PER_ELEMENT) },
+    >(mesh, traction_faces, quadrature, face_samples_quad4::<F>)
 }
 
 pub fn traction_operator_quad9<F: Real>(
@@ -308,12 +303,11 @@ pub fn traction_operator_quad9<F: Real>(
     traction_faces: &[TractionLoad<F>],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
-    traction_operator_impl::<F, { quad9::NODES_PER_ELEMENT }, { quad9::DOF_PER_ELEMENT }>(
-        mesh,
-        traction_faces,
-        quadrature,
-        face_samples_quad9::<F>,
-    )
+    traction_operator_impl::<
+        F,
+        { quad9::NODES_PER_ELEMENT },
+        { dof_per_element(quad9::NODES_PER_ELEMENT) },
+    >(mesh, traction_faces, quadrature, face_samples_quad9::<F>)
 }
 
 fn temperature_operator_impl<
@@ -331,8 +325,8 @@ fn temperature_operator_impl<
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<ThermalLoadOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
-    mesh.validate_nodes()?;
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     if material_ids.len() != mesh.num_elements() {
         return Err(format!(
@@ -429,7 +423,11 @@ pub fn temperature_operator_quad4<F: Real>(
     thermal_material_table: &[ThermalMaterial<F>],
     quadrature: QuadratureRule,
 ) -> Result<ThermalLoadOperator<F>, String> {
-    temperature_operator_impl::<F, { quad4::NODES_PER_ELEMENT }, { quad4::DOF_PER_ELEMENT }>(
+    temperature_operator_impl::<
+        F,
+        { quad4::NODES_PER_ELEMENT },
+        { dof_per_element(quad4::NODES_PER_ELEMENT) },
+    >(
         mesh,
         material_ids,
         material_table,
@@ -446,7 +444,11 @@ pub fn temperature_operator_quad9<F: Real>(
     thermal_material_table: &[ThermalMaterial<F>],
     quadrature: QuadratureRule,
 ) -> Result<ThermalLoadOperator<F>, String> {
-    temperature_operator_impl::<F, { quad9::NODES_PER_ELEMENT }, { quad9::DOF_PER_ELEMENT }>(
+    temperature_operator_impl::<
+        F,
+        { quad9::NODES_PER_ELEMENT },
+        { dof_per_element(quad9::NODES_PER_ELEMENT) },
+    >(
         mesh,
         material_ids,
         material_table,

@@ -1,22 +1,12 @@
 //! Reference-element definitions for bilinear 4-node quadrilateral elements.
-//!
-//! This module contains the purely geometric pieces of the formulation:
-//! - scalar shape functions `N_i(\xi, \eta)`,
-//! - their gradients in reference coordinates,
-//! - the Jacobian that maps reference coordinates into physical `(r, z)` space, and
-//! - the local-face parameterization used by pressure loads.
 
-use crate::physics::solenoid_stress::types::{Real, cast};
+use crate::mesh::{Scalar, cast};
 
 /// Number of nodes in the bilinear quadrilateral element.
 pub const NODES_PER_ELEMENT: usize = 4;
-/// Number of displacement unknowns per node: radial and axial.
-pub const DOF_PER_NODE: usize = 2;
-/// Number of displacement unknowns per element.
-pub const DOF_PER_ELEMENT: usize = NODES_PER_ELEMENT * DOF_PER_NODE;
 
 /// Bilinear shape functions on the reference square `[-1, 1]^2`.
-pub fn shape<F: Real>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
+pub fn shape<F: Scalar>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
     let quarter = cast::<F>(0.25);
     [
         quarter * (F::one() - xi) * (F::one() - eta),
@@ -27,7 +17,7 @@ pub fn shape<F: Real>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
 }
 
 /// Shape-function gradients with respect to the reference coordinates `(\xi, \eta)`.
-pub fn grad_ref<F: Real>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
+pub fn grad_ref<F: Scalar>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
     let quarter = cast::<F>(0.25);
     [
         [-quarter * (F::one() - eta), -quarter * (F::one() - xi)],
@@ -38,14 +28,7 @@ pub fn grad_ref<F: Real>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
 }
 
 /// Map a 1D reference coordinate `s in [-1, 1]` onto a local element face.
-///
-/// Returns `(xi, eta, d[xi,eta]/ds)`.  The face numbering follows the usual counterclockwise
-/// ordering:
-/// - `0`: bottom edge from node 0 to node 1
-/// - `1`: right edge from node 1 to node 2
-/// - `2`: top edge from node 2 to node 3
-/// - `3`: left edge from node 3 to node 0
-pub fn face_reference<F: Real>(local_face: u8, s: F) -> Result<(F, F, [F; 2]), String> {
+pub fn face_reference<F: Scalar>(local_face: u8, s: F) -> Result<(F, F, [F; 2]), String> {
     match local_face {
         0 => Ok((s, -F::one(), [F::one(), F::zero()])),
         1 => Ok((F::one(), s, [F::zero(), F::one()])),

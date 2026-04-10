@@ -1,15 +1,16 @@
 //! Sparse strain/stress recovery operators at element quadrature points.
 
+use crate::mesh::elements::quad2d::{quad4, quad9};
+use crate::mesh::{MeshView, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     build_b_matrix, constitutive_times_b, constitutive_times_strain,
 };
 use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, volume_samples_quad4, volume_samples_quad9,
+    VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
 };
-use crate::physics::solenoid_stress::mesh::{MeshView, ThermalMaterial};
-use crate::physics::solenoid_stress::quadrature::QuadratureRule;
-use crate::physics::solenoid_stress::types::Real;
-use crate::physics::solenoid_stress::{quad4, quad9};
+use crate::physics::solenoid_stress::types::{
+    DOF_PER_NODE, Real, ThermalMaterial, dof_per_element,
+};
 
 #[derive(Debug, Clone)]
 pub struct QuadratureFieldOperators<F: Real> {
@@ -66,8 +67,8 @@ fn quadrature_field_operators_impl<
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<QuadratureFieldOperators<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
-    mesh.validate_nodes()?;
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     if material_ids.len() != mesh.num_elements() {
         return Err(format!(
@@ -208,7 +209,11 @@ pub fn quadrature_field_operators_quad4<F: Real>(
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
     quadrature: QuadratureRule,
 ) -> Result<QuadratureFieldOperators<F>, String> {
-    quadrature_field_operators_impl::<F, { quad4::NODES_PER_ELEMENT }, { quad4::DOF_PER_ELEMENT }>(
+    quadrature_field_operators_impl::<
+        F,
+        { quad4::NODES_PER_ELEMENT },
+        { dof_per_element(quad4::NODES_PER_ELEMENT) },
+    >(
         mesh,
         material_ids,
         material_table,
@@ -226,7 +231,11 @@ pub fn quadrature_field_operators_quad9<F: Real>(
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
     quadrature: QuadratureRule,
 ) -> Result<QuadratureFieldOperators<F>, String> {
-    quadrature_field_operators_impl::<F, { quad9::NODES_PER_ELEMENT }, { quad9::DOF_PER_ELEMENT }>(
+    quadrature_field_operators_impl::<
+        F,
+        { quad9::NODES_PER_ELEMENT },
+        { dof_per_element(quad9::NODES_PER_ELEMENT) },
+    >(
         mesh,
         material_ids,
         material_table,
@@ -239,10 +248,9 @@ pub fn quadrature_field_operators_quad9<F: Real>(
 #[cfg(test)]
 mod tests {
     use super::quadrature_field_operators_quad4;
+    use crate::mesh::{MeshView, QuadratureRule};
     use crate::physics::solenoid_stress::axisym::{build_b_matrix, constitutive_times_b};
     use crate::physics::solenoid_stress::geometry::volume_samples_quad4;
-    use crate::physics::solenoid_stress::mesh::MeshView;
-    use crate::physics::solenoid_stress::quadrature::QuadratureRule;
 
     fn isotropic_material(e: f64, nu: f64) -> [[f64; 4]; 4] {
         let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));

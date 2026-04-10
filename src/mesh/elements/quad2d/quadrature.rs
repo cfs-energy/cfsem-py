@@ -1,9 +1,6 @@
-//! Gauss quadrature rules used by the axisymmetric quadrilateral formulations.
-//!
-//! The volume rule is the tensor product of the 1D rule in `xi` and `eta`, while the face rule
-//! reuses the same 1D points along a reference edge.
+//! Gauss quadrature rules used by the 2D quadrilateral reference elements.
 
-use crate::physics::solenoid_stress::types::{Real, cast};
+use crate::mesh::{Scalar, cast};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QuadratureRule {
@@ -35,7 +32,7 @@ impl QuadratureRule {
 }
 
 /// 1D Gauss-Legendre points and weights on `[-1, 1]`.
-pub fn gauss_1d<F: Real>(rule: QuadratureRule) -> Vec<(F, F)> {
+pub fn gauss_1d<F: Scalar>(rule: QuadratureRule) -> Vec<(F, F)> {
     match rule {
         QuadratureRule::Gauss3x3 => {
             let a = cast::<F>((3.0_f64 / 5.0).sqrt());
@@ -56,7 +53,7 @@ pub fn gauss_1d<F: Real>(rule: QuadratureRule) -> Vec<(F, F)> {
 }
 
 /// Tensor-product Gauss rule on the reference square `[-1, 1]^2`.
-pub fn gauss_volume<F: Real>(rule: QuadratureRule) -> Vec<([F; 2], F)> {
+pub fn gauss_volume<F: Scalar>(rule: QuadratureRule) -> Vec<([F; 2], F)> {
     let line = gauss_1d::<F>(rule);
     let mut out = Vec::with_capacity(line.len() * line.len());
     for (xi, wx) in &line {
@@ -68,7 +65,7 @@ pub fn gauss_volume<F: Real>(rule: QuadratureRule) -> Vec<([F; 2], F)> {
 }
 
 /// 1D Gauss rule reused for integrating along a reference element face.
-pub fn gauss_face<F: Real>(rule: QuadratureRule) -> Vec<(F, F)> {
+pub fn gauss_face<F: Scalar>(rule: QuadratureRule) -> Vec<(F, F)> {
     gauss_1d::<F>(rule)
 }
 

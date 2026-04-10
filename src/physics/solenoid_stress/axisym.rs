@@ -8,7 +8,7 @@
 //! `u_z`.  Circumferential displacement is omitted by the axisymmetric assumption, but the hoop
 //! normal strain `e_tt` still appears because moving a ring outward changes its circumference.
 
-use crate::physics::solenoid_stress::types::Real;
+use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real};
 
 /// Build the axisymmetric strain-displacement matrix `B` at one quadrature point.
 ///
@@ -24,7 +24,7 @@ pub fn build_b_matrix<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELE
     grad_phys: &[[F; 2]; NODES_PER_ELEMENT],
     radius: F,
 ) -> Result<[[F; DOF_PER_ELEMENT]; 4], String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, 2 * NODES_PER_ELEMENT);
+    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
     if radius <= F::epsilon() {
         return Err(format!(
             "quadrature radius {radius:?} is too close to zero for the axisymmetric hoop-strain term"

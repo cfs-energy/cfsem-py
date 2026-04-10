@@ -170,10 +170,13 @@
 //! This is why face orientation and consistent element node ordering matter for pressure loads.
 //!
 //! The code is organized so that each module owns one step of that pipeline:
-//! - [`quad4`] defines the bilinear shape functions and geometric mapping.
-//! - [`quad9`] defines the quadratic shape functions and geometric mapping.
-//! - [`quadrature`] provides the Gauss rules on the reference square and its edges.
-//! - [`geometry`] evaluates quadrature-point locations, weights, and gradients in physical space.
+//! - [`crate::mesh::elements::quad4`] defines the bilinear shape functions and reference-element
+//!   geometry.
+//! - [`crate::mesh::elements::quad9`] defines the quadratic shape functions and reference-element
+//!   geometry.
+//! - [`crate::mesh::quadrature`] provides the Gauss rules on the reference square and its edges.
+//! - [`geometry`] adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
+//!   summaries needed by the structural solver.
 //! - [`axisym`] constructs the axisymmetric strain operator and local stiffness kernel.
 //! - [`loads`] assembles consistent nodal loads from body forces, pressures, and tractions.
 //! - [`load_operators`] builds sparse linear maps from load amplitudes or nodal temperatures to the
@@ -194,13 +197,11 @@ mod axisym;
 mod geometry;
 mod load_operators;
 mod loads;
-mod mesh;
-mod quad4;
-mod quad9;
-mod quadrature;
 mod recovery;
 mod types;
 
+pub use crate::mesh::elements::quad2d::{quad4, quad9};
+pub use crate::mesh::{MeshView, QuadratureRule};
 pub use assembly::{assemble_axisymmetric_quad4, assemble_axisymmetric_quad9};
 pub use geometry::{
     ElementMeasures, ElementQuadrature, element_measures_quad4, element_measures_quad9,
@@ -211,9 +212,10 @@ pub use load_operators::{
     pressure_operator_quad4, pressure_operator_quad9, temperature_operator_quad4,
     temperature_operator_quad9, traction_operator_quad4, traction_operator_quad9,
 };
-pub use mesh::{AssemblyResult, MeshView, PressureLoad, ThermalMaterial, TractionLoad};
-pub use quadrature::QuadratureRule;
 pub use recovery::{
     QuadratureFieldOperators, quadrature_field_operators_quad4, quadrature_field_operators_quad9,
 };
-pub use types::Real;
+pub use types::{
+    AssemblyResult, DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad,
+    dof_per_element,
+};

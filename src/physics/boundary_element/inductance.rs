@@ -5,7 +5,8 @@ use super::{
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::math::{cartesian_to_cylindrical, dot3, rss3};
-use crate::mesh::{TriangleMeshView, triangle_subdivide_about_point};
+use crate::mesh::TriangleMeshView;
+use crate::mesh::elements::tri::tri3::subdivide_about_point as triangle_subdivide_about_point;
 use crate::physics::circular_filament::vector_potential_circular_filament_scalar;
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::dipole::vector_potential_dipole_scalar;

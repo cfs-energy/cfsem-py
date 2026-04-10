@@ -1,19 +1,11 @@
 //! Reference-element definitions for 9-node biquadratic quadrilateral elements.
-//!
-//! The node ordering matches the Python-side inferred mesh:
-//! `[n0, n1, n2, n3, n01, n12, n23, n30, nc]`
-//! where `n01` is the midside node on the edge from corner 0 to 1 and `nc` is the center node.
 
-use crate::physics::solenoid_stress::types::{Real, cast};
+use crate::mesh::{Scalar, cast};
 
 /// Number of nodes in the biquadratic quadrilateral element.
 pub const NODES_PER_ELEMENT: usize = 9;
-/// Number of displacement unknowns per node: radial and axial.
-pub const DOF_PER_NODE: usize = 2;
-/// Number of displacement unknowns per element.
-pub const DOF_PER_ELEMENT: usize = NODES_PER_ELEMENT * DOF_PER_NODE;
 
-fn q2_lagrange_1d<F: Real>(x: F) -> [F; 3] {
+fn q2_lagrange_1d<F: Scalar>(x: F) -> [F; 3] {
     let half = cast::<F>(0.5);
     [
         half * x * (x - F::one()),
@@ -22,13 +14,13 @@ fn q2_lagrange_1d<F: Real>(x: F) -> [F; 3] {
     ]
 }
 
-fn q2_lagrange_grad_1d<F: Real>(x: F) -> [F; 3] {
+fn q2_lagrange_grad_1d<F: Scalar>(x: F) -> [F; 3] {
     let half = cast::<F>(0.5);
     [x - half, -cast::<F>(2.0) * x, x + half]
 }
 
 /// Biquadratic shape functions on the reference square `[-1, 1]^2`.
-pub fn shape<F: Real>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
+pub fn shape<F: Scalar>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
     let lx = q2_lagrange_1d(xi);
     let ly = q2_lagrange_1d(eta);
     [
@@ -45,7 +37,7 @@ pub fn shape<F: Real>(xi: F, eta: F) -> [F; NODES_PER_ELEMENT] {
 }
 
 /// Shape-function gradients with respect to the reference coordinates `(\xi, \eta)`.
-pub fn grad_ref<F: Real>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
+pub fn grad_ref<F: Scalar>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
     let lx = q2_lagrange_1d(xi);
     let ly = q2_lagrange_1d(eta);
     let dlx = q2_lagrange_grad_1d(xi);
@@ -64,7 +56,7 @@ pub fn grad_ref<F: Real>(xi: F, eta: F) -> [[F; 2]; NODES_PER_ELEMENT] {
 }
 
 /// Map a 1D reference coordinate `s in [-1, 1]` onto a local element face.
-pub fn face_reference<F: Real>(local_face: u8, s: F) -> Result<(F, F, [F; 2]), String> {
+pub fn face_reference<F: Scalar>(local_face: u8, s: F) -> Result<(F, F, [F; 2]), String> {
     match local_face {
         0 => Ok((s, -F::one(), [F::one(), F::zero()])),
         1 => Ok((F::one(), s, [F::zero(), F::one()])),

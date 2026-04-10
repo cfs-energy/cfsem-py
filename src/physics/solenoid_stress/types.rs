@@ -65,8 +65,6 @@ pub struct AssemblyResult<F: Real> {
     pub cols: Vec<usize>,
     /// Sparse values for the assembled stiffness matrix triplets.
     pub vals: Vec<F>,
-    /// Global right-hand side vector.
-    pub rhs: Vec<F>,
     /// Total number of displacement unknowns in the global system.
     pub ndof: usize,
 }

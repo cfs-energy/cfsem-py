@@ -3,8 +3,8 @@
 
 This module provides a small displacement-based axisymmetric finite-element solver
 for the `(r, z)` meridian plane. The Rust backend assembles the global COO stiffness
-matrix and load vector, while Python handles sparse linear algebra, postprocessing,
-and validation workflows.
+matrix and sparse load operators, while Python handles load-operator application,
+sparse linear algebra, postprocessing, and validation workflows.
 
 The element formulation follows the standard small-strain Galerkin construction
 
@@ -1362,6 +1362,43 @@ def _assemble_temperature_operator_rust(
     )
 
 
+def _assemble_stiffness_rust(
+    nodes: npt.NDArray[np.floating[Any]],
+    elements: npt.NDArray[np.uint64],
+    material_ids: npt.NDArray[np.uint64],
+    material_table: npt.NDArray[np.floating[Any]],
+    quadrature_code: int,
+    dtype: np.dtype[Any],
+    element_type: str,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.floating[Any]], int]:
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            element_type,
+            _assemble_axisymmetric_quad4_f32,
+            _assemble_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            element_type,
+            _assemble_axisymmetric_quad4_f64,
+            _assemble_axisymmetric_quad9_f64,
+        ),
+    )
+    rows, cols, vals, ndof = low_level(
+        nodes,
+        elements,
+        material_ids,
+        material_table,
+        quadrature_code,
+    )
+    return (
+        np.asarray(rows, dtype=np.int64),
+        np.asarray(cols, dtype=np.int64),
+        np.asarray(vals, dtype=dtype),
+        int(ndof),
+    )
+
+
 def _assemble_traction_operator_rust(
     nodes: npt.NDArray[np.floating[Any]],
     elements: npt.NDArray[np.uint64],
@@ -1569,8 +1606,9 @@ def assemble_axisymmetric(
 
     The assembled element matrix uses the standard axisymmetric weak form
     `K_e = integral(B^T D B 2*pi*r dA)`; see [1]-[3] in the module references.
-    Surface pressure and traction loads add linearly to the same right-hand side.
-    Traction values are specified in global `(r, z)` components.
+    The right-hand side is built by applying the sparse body-force, pressure,
+    traction, and thermal operators. Traction values are specified in global
+    `(r, z)` components.
     """
 
     dtype = _resolve_float_dtype(nodes, body_force, pressure_values, traction_values, nodal_temperature)
@@ -1608,120 +1646,14 @@ def assemble_axisymmetric(
     analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
         nodes_arr, elements_arr, normalized_element_type
     )
-    analysis_temperature = (
-        np.zeros((0,), dtype=dtype)
-        if thermal_material_table_arr is None
-        else _analysis_temperature_for_element_type(
-            nodal_temperature,
-            nodes_arr.shape[0],
-            normalized_element_type,
-            elevated,
-            dtype,
-        )
-    )
-    thermal_table_for_low_level = (
-        _empty_thermal_material_table(dtype)
-        if thermal_material_table_arr is None
-        else thermal_material_table_arr
-    )
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _assemble_axisymmetric_quad4_f32,
-            _assemble_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _assemble_axisymmetric_quad4_f64,
-            _assemble_axisymmetric_quad9_f64,
-        ),
-    )
-    rows, cols, vals, rhs, ndof = low_level(
+    rows, cols, vals, ndof = _assemble_stiffness_rust(
         analysis_nodes,
         analysis_elements,
         material_ids_arr,
         material_table_arr,
-        thermal_table_for_low_level,
-        analysis_temperature,
-        body_force_arr,
-        pressure_faces_arr,
-        pressure_values_arr,
-        traction_faces_arr,
-        traction_values_arr,
         quadrature_code,
-    )
-    return AssemblyResult(
-        rows=np.asarray(rows, dtype=np.int64),
-        cols=np.asarray(cols, dtype=np.int64),
-        vals=np.asarray(vals, dtype=dtype),
-        rhs=np.asarray(rhs, dtype=dtype),
-        ndof=int(ndof),
-    )
-
-
-def assemble_axisymmetric_model(
-    nodes: ArrayLike,
-    elements: ArrayLike,
-    material_ids: ArrayLike,
-    material_table: ArrayLike | Mapping[int, ArrayLike],
-    pressure_faces: ArrayLike | None = None,
-    traction_faces: ArrayLike | None = None,
-    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
-    quadrature: str | int = "gl3",
-    element_type: str = "quad4",
-) -> AxisymmetricFEMModel:
-    """
-    Assemble a reusable axisymmetric FEM model for repeated load cases.
-
-    The stiffness matrix and linear load operators are assembled once through the
-    Rust backend. The returned load operators map per-element body-force data and
-    reusable pressure-load amplitudes to the global right-hand side through sparse
-    matrix-vector products on the Python side.
-
-    Notes:
-        `pressure_faces` defines the ordering of the reusable pressure load vector.
-        `traction_faces` defines the ordering of the reusable traction vector list.
-        Repeated solves may vary `pressure_values` and `traction_values`, but not
-        the face lists themselves.
-    """
-
-    elements_arr = _normalize_elements(elements)
-    zero_body_force = np.zeros((elements_arr.shape[0], 2), dtype=np.float32)
-    stiffness_assembly = assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements_arr,
-        material_ids=material_ids,
-        material_table=material_table,
-        body_force=zero_body_force,
-        pressure_faces=None,
-        pressure_values=None,
-        traction_faces=None,
-        traction_values=None,
-        thermal_material_table=None,
-        nodal_temperature=None,
-        quadrature=quadrature,
-        element_type=element_type,
-    )
-    stiffness = stiffness_assembly.to_csr()
-    dtype = np.dtype(stiffness.dtype)
-    nodes_arr = _normalize_nodes(nodes, dtype)
-    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
-        material_ids,
-        thermal_material_table,
         dtype,
-        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
-    )
-    if thermal_material_table_arr is not None and not np.array_equal(thermal_ids_arr, material_ids_arr):
-        raise ValueError("thermal_material_table must align with material_table material IDs")
-    pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
-    traction_faces_arr = _normalize_traction_faces(traction_faces)
-    quadrature_code = _quadrature_code(quadrature)
-    normalized_element_type = _normalize_element_type(element_type)
-    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
-        nodes_arr, elements_arr, normalized_element_type
+        normalized_element_type,
     )
     body_force_to_rhs = _assemble_body_force_operator(
         analysis_nodes,
@@ -1757,8 +1689,126 @@ def assemble_axisymmetric_model(
         normalized_element_type,
     )
     if thermal_material_table_arr is None:
-        temperature_to_rhs = sp.csr_matrix((stiffness_assembly.ndof, 0), dtype=dtype)
-        thermal_reference_rhs = np.zeros((stiffness_assembly.ndof,), dtype=dtype)
+        temperature_to_rhs = sp.csr_matrix((ndof, 0), dtype=dtype)
+        thermal_reference_rhs = np.zeros((ndof,), dtype=dtype)
+        temperature_arr = None
+    else:
+        temperature_arr = _normalize_nodal_temperature(nodal_temperature, nodes_arr.shape[0], dtype)
+        if elevated is None:
+            temperature_to_rhs = analysis_temperature_to_rhs
+        else:
+            temperature_to_rhs = analysis_temperature_to_rhs @ _temperature_elevation_operator(
+                elevated, dtype
+            )
+    rhs = np.asarray(thermal_reference_rhs, dtype=dtype).copy()
+    rhs += np.asarray(body_force_to_rhs @ body_force_arr.reshape(-1), dtype=dtype)
+    if pressure_values_arr.size:
+        rhs += np.asarray(pressure_to_rhs @ pressure_values_arr, dtype=dtype)
+    if traction_values_arr.size:
+        rhs += np.asarray(traction_to_rhs @ traction_values_arr.reshape(-1), dtype=dtype)
+    if temperature_arr is not None:
+        rhs += np.asarray(temperature_to_rhs @ temperature_arr, dtype=dtype)
+    return AssemblyResult(
+        rows=rows,
+        cols=cols,
+        vals=vals,
+        rhs=rhs,
+        ndof=ndof,
+    )
+
+
+def assemble_axisymmetric_model(
+    nodes: ArrayLike,
+    elements: ArrayLike,
+    material_ids: ArrayLike,
+    material_table: ArrayLike | Mapping[int, ArrayLike],
+    pressure_faces: ArrayLike | None = None,
+    traction_faces: ArrayLike | None = None,
+    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
+    quadrature: str | int = "gl3",
+    element_type: str = "quad4",
+) -> AxisymmetricFEMModel:
+    """
+    Assemble a reusable axisymmetric FEM model for repeated load cases.
+
+    The stiffness matrix and linear load operators are assembled once through the
+    Rust backend. The returned load operators map per-element body-force data and
+    reusable pressure-load amplitudes to the global right-hand side through sparse
+    matrix-vector products on the Python side.
+
+    Notes:
+        `pressure_faces` defines the ordering of the reusable pressure load vector.
+        `traction_faces` defines the ordering of the reusable traction vector list.
+        Repeated solves may vary `pressure_values` and `traction_values`, but not
+        the face lists themselves.
+    """
+
+    elements_arr = _normalize_elements(elements)
+    dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
+    nodes_arr = _normalize_nodes(nodes, dtype)
+    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+        material_ids,
+        thermal_material_table,
+        dtype,
+        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
+    )
+    if thermal_material_table_arr is not None and not np.array_equal(thermal_ids_arr, material_ids_arr):
+        raise ValueError("thermal_material_table must align with material_table material IDs")
+    pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
+    traction_faces_arr = _normalize_traction_faces(traction_faces)
+    quadrature_code = _quadrature_code(quadrature)
+    normalized_element_type = _normalize_element_type(element_type)
+    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
+    analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
+        nodes_arr, elements_arr, normalized_element_type
+    )
+    rows, cols, vals, ndof = _assemble_stiffness_rust(
+        analysis_nodes,
+        analysis_elements,
+        material_ids_arr,
+        material_table_arr,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+    stiffness = _coo_operator_from_triplets(rows, cols, vals, shape=(ndof, ndof), dtype=dtype)
+    body_force_to_rhs = _assemble_body_force_operator(
+        analysis_nodes,
+        analysis_elements,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+    pressure_to_rhs = _assemble_pressure_operator(
+        analysis_nodes,
+        analysis_elements,
+        pressure_faces_arr,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+    traction_to_rhs = _assemble_traction_operator(
+        analysis_nodes,
+        analysis_elements,
+        traction_faces_arr,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+    analysis_temperature_to_rhs, thermal_reference_rhs = _assemble_temperature_operator(
+        analysis_nodes,
+        analysis_elements,
+        material_ids_arr,
+        material_table_arr,
+        thermal_material_table_arr,
+        quadrature_code,
+        dtype,
+        normalized_element_type,
+    )
+    if thermal_material_table_arr is None:
+        temperature_to_rhs = sp.csr_matrix((ndof, 0), dtype=dtype)
+        thermal_reference_rhs = np.zeros((ndof,), dtype=dtype)
         n_temperature_nodes = 0
     else:
         if elevated is None:
@@ -1781,7 +1831,7 @@ def assemble_axisymmetric_model(
         analysis_nodes=analysis_nodes,
         analysis_elements=analysis_elements,
         element_type=normalized_element_type,
-        ndof=stiffness_assembly.ndof,
+        ndof=ndof,
         nelem=elements_arr.shape[0],
         n_temperature_nodes=n_temperature_nodes,
         dtype=dtype,

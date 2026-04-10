@@ -412,60 +412,26 @@ fn assemble_axisymmetric_low_level<
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, F>,
-    thermal_material_table: PyReadonlyArray2<'_, F>,
-    nodal_temperature: PyReadonlyArray1<'_, F>,
-    body_force: PyReadonlyArray2<'_, F>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    pressure_values: PyReadonlyArray1<'_, F>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    traction_values: PyReadonlyArray2<'_, F>,
     quadrature: u8,
     assemble_fn: fn(
         physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
         &[usize],
         &[[[F; 4]; 4]],
-        &[[F; 2]],
-        &[physics::solenoid_stress::PressureLoad<F>],
-        &[physics::solenoid_stress::TractionLoad<F>],
-        Option<&[physics::solenoid_stress::ThermalMaterial<F>]>,
-        Option<&[F]>,
         physics::solenoid_stress::QuadratureRule,
     ) -> Result<physics::solenoid_stress::AssemblyResult<F>, String>,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, Vec<F>, usize)> {
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, usize)> {
     let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
     let nodes = read_axisym_nodes("nodes", nodes)?;
     let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
     let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
     let material_table = read_axisym_material_table("material_table", material_table)?;
-    let thermal_material_table =
-        read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
-    let nodal_temperature = read_axisym_nodal_temperature("nodal_temperature", nodal_temperature)?;
-    let body_force = read_axisym_body_force("body_force", body_force)?;
-    let pressure_loads = read_axisym_pressure_loads(pressure_faces, pressure_values)?;
-    let traction_loads = read_axisym_traction_loads(traction_faces, traction_values)?;
     let mesh = physics::solenoid_stress::MeshView {
         nodes_rz: &nodes,
         elements: &elements,
     };
-    let result = assemble_fn(
-        mesh,
-        &material_ids,
-        &material_table,
-        &body_force,
-        &pressure_loads,
-        &traction_loads,
-        (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice()),
-        (!nodal_temperature.is_empty()).then_some(nodal_temperature.as_slice()),
-        quadrature,
-    )
-    .map_err(|msg| PyInteropError::ValueError { msg })?;
-    Ok((
-        result.rows,
-        result.cols,
-        result.vals,
-        result.rhs,
-        result.ndof,
-    ))
+    let result = assemble_fn(mesh, &material_ids, &material_table, quadrature)
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    Ok((result.rows, result.cols, result.vals, result.ndof))
 }
 
 fn element_measures_axisymmetric_low_level<
@@ -747,27 +713,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
-    thermal_material_table: PyReadonlyArray2<'_, f64>,
-    nodal_temperature: PyReadonlyArray1<'_, f64>,
-    body_force: PyReadonlyArray2<'_, f64>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    pressure_values: PyReadonlyArray1<'_, f64>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    traction_values: PyReadonlyArray2<'_, f64>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize)> {
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize)> {
     assemble_axisymmetric_low_level::<f64, 4>(
         nodes,
         elements,
         material_ids,
         material_table,
-        thermal_material_table,
-        nodal_temperature,
-        body_force,
-        pressure_faces,
-        pressure_values,
-        traction_faces,
-        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad4,
     )
@@ -779,27 +731,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
-    thermal_material_table: PyReadonlyArray2<'_, f32>,
-    nodal_temperature: PyReadonlyArray1<'_, f32>,
-    body_force: PyReadonlyArray2<'_, f32>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    pressure_values: PyReadonlyArray1<'_, f32>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    traction_values: PyReadonlyArray2<'_, f32>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize)> {
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize)> {
     assemble_axisymmetric_low_level::<f32, 4>(
         nodes,
         elements,
         material_ids,
         material_table,
-        thermal_material_table,
-        nodal_temperature,
-        body_force,
-        pressure_faces,
-        pressure_values,
-        traction_faces,
-        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad4,
     )
@@ -811,27 +749,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f64(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
-    thermal_material_table: PyReadonlyArray2<'_, f64>,
-    nodal_temperature: PyReadonlyArray1<'_, f64>,
-    body_force: PyReadonlyArray2<'_, f64>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    pressure_values: PyReadonlyArray1<'_, f64>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    traction_values: PyReadonlyArray2<'_, f64>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize)> {
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize)> {
     assemble_axisymmetric_low_level::<f64, 9>(
         nodes,
         elements,
         material_ids,
         material_table,
-        thermal_material_table,
-        nodal_temperature,
-        body_force,
-        pressure_faces,
-        pressure_values,
-        traction_faces,
-        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad9,
     )
@@ -843,27 +767,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f32(
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
-    thermal_material_table: PyReadonlyArray2<'_, f32>,
-    nodal_temperature: PyReadonlyArray1<'_, f32>,
-    body_force: PyReadonlyArray2<'_, f32>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    pressure_values: PyReadonlyArray1<'_, f32>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    traction_values: PyReadonlyArray2<'_, f32>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize)> {
+) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize)> {
     assemble_axisymmetric_low_level::<f32, 9>(
         nodes,
         elements,
         material_ids,
         material_table,
-        thermal_material_table,
-        nodal_temperature,
-        body_force,
-        pressure_faces,
-        pressure_values,
-        traction_faces,
-        traction_values,
         quadrature,
         physics::solenoid_stress::assemble_axisymmetric_quad9,
     )

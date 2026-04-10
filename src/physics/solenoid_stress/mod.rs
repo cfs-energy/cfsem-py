@@ -344,35 +344,37 @@
 //! ### How the actual load-vector entries are assembled
 //!
 //! The integral formulas above explain the continuum meaning of each load.  In the code, those
-//! integrals are evaluated quadrature point by quadrature point to build a local element load
-//! vector `f_e`, and that local vector is then scattered into the global right-hand side.
+//! integrals are evaluated quadrature point by quadrature point to build sparse load operators.
+//! Applying one of those operators to a vector of load amplitudes produces the global right-hand
+//! side contribution for that load type.
 //!
-//! For body force, one assumes an elementwise-constant load `b = [b_r, b_z]`.  At one volume
-//! quadrature point `q`, the code forms the axisymmetric volume scale
+//! For body force, one assumes an elementwise-constant load `b = [b_r, b_z]`.  The operator has
+//! two columns per element: one for unit radial body force on that element and one for unit axial
+//! body force.  At one volume quadrature point `q`, the code forms the axisymmetric volume scale
 //! `scale_q = 2*pi*r_q det(J_q) w_q`.
 //! If node `i` has local radial degree of freedom `2i` and local axial degree of freedom
-//! `2i + 1`, then the contribution from that quadrature point is
-//! - `f_e[2i]     += scale_q N_i(q) b_r`,
-//! - `f_e[2i + 1] += scale_q N_i(q) b_z`.
-//! This is just the discrete form of `integral(N^T b 2*pi*r dA)`: each shape value `N_i(q)` tells
-//! how much of the local distributed force should be assigned to node `i`.
+//! `2i + 1`, then the corresponding operator column entries receive
+//! - `scale_q N_i(q)` in the radial row for the unit-radial-body-force column,
+//! - `scale_q N_i(q)` in the axial row for the unit-axial-body-force column.
+//! Multiplying those columns by the actual per-element `b_r` and `b_z` values reproduces
+//! `integral(N^T b 2*pi*r dA)`.
 //!
-//! For pressure, each loaded face carries one scalar value `p`.  At one face quadrature point the
-//! code computes the physical face tangent `dx/ds`, rotates it into
-//! `normal_area = [t_z, -t_r]`, and uses the scale `scale_q = 2*pi*r_q w_q`.  The local load
-//! entries then receive
-//! - `f_e[2i]     += scale_q N_i(q) (-p) normal_area_r`,
-//! - `f_e[2i + 1] += scale_q N_i(q) (-p) normal_area_z`.
-//! The line-Jacobian is already embedded in `normal_area`, so pressure is assembled as a normal
+//! For pressure, each loaded face contributes one column corresponding to unit pressure on that
+//! face.  At one face quadrature point the code computes the physical face tangent `dx/ds`,
+//! rotates it into `normal_area = [t_z, -t_r]`, and uses the scale `scale_q = 2*pi*r_q w_q`.
+//! The relevant operator column entries then receive
+//! - `scale_q N_i(q) (-normal_area_r)` in the radial row,
+//! - `scale_q N_i(q) (-normal_area_z)` in the axial row.
+//! The line-Jacobian is already embedded in `normal_area`, so pressure is represented as a normal
 //! traction without separately dividing by or multiplying by `|dx/ds|`.
 //!
-//! For traction, the supplied load is already a global vector `t = [t_r, t_z]`, so the code uses
-//! the physical line-element scale directly:
+//! For traction, the operator has two columns per loaded face: one for unit radial traction and
+//! one for unit axial traction.  The code uses the physical line-element scale
 //! `scale_q = 2*pi*r_q |dx/ds|_q w_q`.
-//! The local entries receive
-//! - `f_e[2i]     += scale_q N_i(q) t_r`,
-//! - `f_e[2i + 1] += scale_q N_i(q) t_z`.
-//! This is the face analogue of the body-force assembly: the shape functions distribute the
+//! The corresponding column entries receive
+//! - `scale_q N_i(q)` in the radial row for the unit-radial-traction column,
+//! - `scale_q N_i(q)` in the axial row for the unit-axial-traction column.
+//! This is the face analogue of the body-force operator: the shape functions distribute the
 //! continuous boundary load into equivalent nodal generalized forces.
 //!
 //! Thermal strain is slightly different because it enters through stress rather than directly
@@ -384,27 +386,17 @@
 //! `epsilon_th,q = alpha DeltaT_q`,
 //! and
 //! `sigma_th,q = D epsilon_th,q`.
-//! The local right-hand side then receives
-//! `f_e[a] += scale_q sum_m B[m, a] sigma_th,q[m]`,
-//! where again `scale_q = 2*pi*r_q det(J_q) w_q`.  In compact form this is exactly the quadrature
-//! expansion of
-//! `integral(B^T D epsilon_th 2*pi*r dA)`.
+//! The thermal operator has one column per temperature degree of freedom.  Column `j` represents
+//! unit temperature at node `j`, so the quadrature contribution to that column is
+//! `scale_q N_j(q) B^T sigma_th,unit`,
+//! where `sigma_th,unit = D alpha`.  The per-material reference temperature is an offset rather
+//! than a variable degree of freedom, so it contributes a separate constant right-hand-side vector
+//! instead of additional operator columns.
 //!
-//! After the local vector `f_e` has been accumulated, assembly is the scatter operation:
-//! if local node `i` corresponds to global node `g`, then `f_e[2i]` adds into global row `2g`
-//! and `f_e[2i + 1]` adds into global row `2g + 1`.  Contributions from neighboring elements sum
-//! into the same global rows, which is why the final right-hand side represents the combined
-//! generalized force seen by each global displacement degree of freedom.
-//!
-//! The reusable-load API in [`loads`] constructs the same objects in column form rather
-//! than summing them immediately.  A body-force operator column is the global RHS produced by unit
-//! radial or axial body force on one element.  A pressure operator column is the global RHS
-//! produced by unit pressure on one loaded face.  A traction operator contributes two columns per
-//! loaded face, for unit radial and unit axial traction.  A temperature operator column is the
-//! global RHS produced by unit temperature at one node, while the per-material reference
-//! temperature contributes a separate constant offset vector.  Multiplying those sparse operators
-//! by the current load amplitudes reproduces the same assembled right-hand side that direct
-//! quadrature assembly would have produced.
+//! For every load type, neighboring elements and faces add their quadrature contributions into the
+//! same global rows, so each operator column is already a fully assembled global load pattern.
+//! One-shot assembly in Python forms the final right-hand side by multiplying those operators by
+//! the requested load amplitudes and summing the resulting vectors.
 //!
 //! Face integrals for pressure and traction are evaluated by parameterizing each loaded element
 //! edge with a 1D reference coordinate `s in [-1, 1]` and applying a 1D Gauss rule along that
@@ -439,9 +431,9 @@
 //! - [`geometry`] adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
 //!   summaries needed by the structural solver.
 //! - [`axisym`] constructs the axisymmetric strain operator and local stiffness kernel.
-//! - [`loads`] assembles consistent nodal loads and builds sparse linear maps from load amplitudes
-//!   or nodal temperatures to the global right-hand side for repeated-load solves.
-//! - [`assembly`] ties the pieces together into sparse triplets plus the global right-hand side.
+//! - [`loads`] builds sparse linear maps from load amplitudes or nodal temperatures to the global
+//!   right-hand side.
+//! - [`assembly`] assembles the stiffness matrix into sparse triplets.
 //! - [`recovery`] builds sparse operators for quadrature-point strain and stress recovery.
 //!
 //! References:

@@ -7,26 +7,6 @@ use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, dof_per_element
 
 use super::SparseOperator;
 
-/// Accumulate the consistent nodal load vector for a uniform body-force density on one element.
-pub(crate) fn accumulate_body_force<
-    F: Real,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
-    fe: &mut [F; DOF_PER_ELEMENT],
-    body_force: [F; 2],
-    shape: &[F; NODES_PER_ELEMENT],
-    scale: F,
-) {
-    const {
-        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
-    }
-    for (i, n) in shape.iter().enumerate() {
-        fe[2 * i] = fe[2 * i] + scale * *n * body_force[0];
-        fe[2 * i + 1] = fe[2 * i + 1] + scale * *n * body_force[1];
-    }
-}
-
 fn body_force_operator_impl<
     F: Real,
     const NODES_PER_ELEMENT: usize,

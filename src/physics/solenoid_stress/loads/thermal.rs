@@ -12,37 +12,6 @@ use crate::physics::solenoid_stress::types::{
 
 use super::{SparseOperator, ThermalLoadOperator};
 
-pub(crate) fn accumulate_thermal_load<
-    F: Real,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
-    fe: &mut [F; DOF_PER_ELEMENT],
-    material: &[[F; 4]; 4],
-    thermal: &ThermalMaterial<F>,
-    element_temperature: &[F; NODES_PER_ELEMENT],
-    shape: &[F; NODES_PER_ELEMENT],
-    b: &[[F; DOF_PER_ELEMENT]; 4],
-    scale: F,
-) {
-    const {
-        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
-    }
-    let mut temperature = F::zero();
-    for local_node in 0..NODES_PER_ELEMENT {
-        temperature = temperature + shape[local_node] * element_temperature[local_node];
-    }
-    let delta_temperature = temperature - thermal.reference_temperature;
-    let thermal_strain = [
-        thermal.alpha[0] * delta_temperature,
-        thermal.alpha[1] * delta_temperature,
-        thermal.alpha[2] * delta_temperature,
-        thermal.alpha[3] * delta_temperature,
-    ];
-    let thermal_stress = constitutive_times_strain(material, &thermal_strain);
-    accumulate_b_transpose_vector(fe, b, &thermal_stress, scale);
-}
-
 fn temperature_operator_impl<
     F: Real,
     const NODES_PER_ELEMENT: usize,

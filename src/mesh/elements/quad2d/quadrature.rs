@@ -1,4 +1,16 @@
 //! Gauss quadrature rules used by the 2D quadrilateral reference elements.
+//!
+//! The 1D rules in this module are the standard Gauss-Legendre rules on `[-1, 1]`: the nodes
+//! are the roots of the degree-`n` Legendre polynomial and the weights are the corresponding
+//! Christoffel numbers. The 2D square rules are then formed as tensor products of that 1D rule.
+//!
+//! # References
+//!
+//! - NIST Digital Library of Mathematical Functions, §3.5(v) "Gauss Quadrature", especially
+//!   Eqs. 3.5.18-3.5.21 for the general Gauss quadrature formula and the Gauss-Legendre
+//!   specialization.
+//! - NIST Digital Library of Mathematical Functions, §18.3 "Definitions", for the Legendre
+//!   polynomial family used by the Gauss-Legendre rule.
 
 use crate::mesh::{Scalar, cast};
 
@@ -32,6 +44,14 @@ impl QuadratureRule {
 }
 
 /// 1D Gauss-Legendre points and weights on `[-1, 1]`.
+///
+/// The hard-coded `3`- and `4`-point values are the exact Gauss-Legendre abscissas and weights
+/// specialized from the general rule for the Legendre weight `w(x) = 1`.
+///
+/// # References
+///
+/// - NIST Digital Library of Mathematical Functions, §3.5(v), Eqs. 3.5.18-3.5.21.
+/// - NIST Digital Library of Mathematical Functions, §18.3, for the Legendre polynomial family.
 pub fn gauss_1d<F: Scalar>(rule: QuadratureRule) -> Vec<(F, F)> {
     match rule {
         QuadratureRule::Gauss3x3 => {
@@ -53,6 +73,8 @@ pub fn gauss_1d<F: Scalar>(rule: QuadratureRule) -> Vec<(F, F)> {
 }
 
 /// Tensor-product Gauss rule on the reference square `[-1, 1]^2`.
+///
+/// This is the Cartesian product of the selected 1D Gauss-Legendre rule in `\xi` and `\eta`.
 pub fn gauss_volume<F: Scalar>(rule: QuadratureRule) -> Vec<([F; 2], F)> {
     let line = gauss_1d::<F>(rule);
     let mut out = Vec::with_capacity(line.len() * line.len());
@@ -65,6 +87,8 @@ pub fn gauss_volume<F: Scalar>(rule: QuadratureRule) -> Vec<([F; 2], F)> {
 }
 
 /// 1D Gauss rule reused for integrating along a reference element face.
+///
+/// The face rule is exactly the same 1D Gauss-Legendre rule returned by [`gauss_1d()`].
 pub fn gauss_face<F: Scalar>(rule: QuadratureRule) -> Vec<(F, F)> {
     gauss_1d::<F>(rule)
 }

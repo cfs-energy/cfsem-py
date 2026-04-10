@@ -259,6 +259,71 @@
 //! `f_thermal` is not an external "push" in the same sense as pressure or body force; it is the
 //! nodal representation of the stress-free strain state that the structure would prefer to realize.
 //!
+//! ### How the actual load-vector entries are assembled
+//!
+//! The integral formulas above explain the continuum meaning of each load.  In the code, those
+//! integrals are evaluated quadrature point by quadrature point to build a local element load
+//! vector `f_e`, and that local vector is then scattered into the global right-hand side.
+//!
+//! For body force, one assumes an elementwise-constant load `b = [b_r, b_z]`.  At one volume
+//! quadrature point `q`, the code forms the usual axisymmetric volume scale
+//! `scale_q = 2*pi*r_q det(J_q) w_q`.
+//! If node `i` has local radial degree of freedom `2i` and local axial degree of freedom
+//! `2i + 1`, then the contribution from that quadrature point is
+//! - `f_e[2i]     += scale_q N_i(q) b_r`,
+//! - `f_e[2i + 1] += scale_q N_i(q) b_z`.
+//! This is just the discrete form of `integral(N^T b 2*pi*r dA)`: each shape value `N_i(q)` tells
+//! how much of the local distributed force should be assigned to node `i`.
+//!
+//! For pressure, each loaded face carries one scalar value `p`.  At one face quadrature point the
+//! code computes the physical face tangent `dx/ds`, rotates it into
+//! `normal_area = [t_z, -t_r]`, and uses the scale `scale_q = 2*pi*r_q w_q`.  The local load
+//! entries then receive
+//! - `f_e[2i]     += scale_q N_i(q) (-p) normal_area_r`,
+//! - `f_e[2i + 1] += scale_q N_i(q) (-p) normal_area_z`.
+//! The line-Jacobian is already embedded in `normal_area`, so pressure is assembled as a normal
+//! traction without separately dividing by or multiplying by `|dx/ds|`.
+//!
+//! For traction, the supplied load is already a global vector `t = [t_r, t_z]`, so the code uses
+//! the physical line-element scale directly:
+//! `scale_q = 2*pi*r_q |dx/ds|_q w_q`.
+//! The local entries receive
+//! - `f_e[2i]     += scale_q N_i(q) t_r`,
+//! - `f_e[2i + 1] += scale_q N_i(q) t_z`.
+//! This is the face analogue of the body-force assembly: the shape functions distribute the
+//! continuous boundary load into equivalent nodal generalized forces.
+//!
+//! Thermal strain is slightly different because it enters through stress rather than directly
+//! through a force density.  At one volume quadrature point, the code first interpolates the
+//! prescribed nodal temperatures,
+//! `T_q = sum_j N_j(q) T_j`,
+//! then forms
+//! `DeltaT_q = T_q - T_ref`,
+//! `epsilon_th,q = alpha DeltaT_q`,
+//! and
+//! `sigma_th,q = D epsilon_th,q`.
+//! The local right-hand side then receives
+//! `f_e[a] += scale_q sum_m B[m, a] sigma_th,q[m]`,
+//! where again `scale_q = 2*pi*r_q det(J_q) w_q`.  In compact form this is exactly the quadrature
+//! expansion of
+//! `integral(B^T D epsilon_th 2*pi*r dA)`.
+//!
+//! After the local vector `f_e` has been accumulated, assembly is the usual scatter operation:
+//! if local node `i` corresponds to global node `g`, then `f_e[2i]` adds into global row `2g`
+//! and `f_e[2i + 1]` adds into global row `2g + 1`.  Contributions from neighboring elements sum
+//! into the same global rows, which is why the final right-hand side represents the combined
+//! generalized force seen by each global displacement degree of freedom.
+//!
+//! The reusable-load API in [`load_operators`] constructs the same objects in column form rather
+//! than summing them immediately.  A body-force operator column is the global RHS produced by unit
+//! radial or axial body force on one element.  A pressure operator column is the global RHS
+//! produced by unit pressure on one loaded face.  A traction operator contributes two columns per
+//! loaded face, for unit radial and unit axial traction.  A temperature operator column is the
+//! global RHS produced by unit temperature at one node, while the per-material reference
+//! temperature contributes a separate constant offset vector.  Multiplying those sparse operators
+//! by the current load amplitudes reproduces the same assembled right-hand side that direct
+//! quadrature assembly would have produced.
+//!
 //! Face integrals for pressure and traction are evaluated by parameterizing each loaded element
 //! edge with a 1D reference coordinate `s in [-1, 1]` and applying a 1D Gauss rule along that
 //! edge.  At each face quadrature point the solver:

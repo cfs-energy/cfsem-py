@@ -303,7 +303,7 @@ mod tests {
             &[],
             None,
             None,
-            QuadratureRule::Gauss3x3,
+            QuadratureRule::GaussLegendre3,
         )
         .expect("assembly should succeed");
 

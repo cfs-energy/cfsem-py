@@ -522,11 +522,11 @@ class QuadratureFieldSamples:
 
 
 def _quadrature_code(quadrature: str | int) -> int:
-    if quadrature in (3, "3", "3x3", "gauss3x3", "Gauss3x3"):
+    if quadrature in (3, "3", "gl3", "GL3", "gausslegendre3", "GaussLegendre3", "3x3", "gauss3x3", "Gauss3x3"):
         return 3
-    if quadrature in (4, "4", "4x4", "gauss4x4", "Gauss4x4"):
+    if quadrature in (4, "4", "gl4", "GL4", "gausslegendre4", "GaussLegendre4", "4x4", "gauss4x4", "Gauss4x4"):
         return 4
-    raise ValueError(f"unsupported quadrature {quadrature!r}; use '3x3' or '4x4'")
+    raise ValueError(f"unsupported quadrature {quadrature!r}; use 'gl3' or 'gl4'")
 
 
 def _normalize_element_type(element_type: str) -> str:
@@ -1561,7 +1561,7 @@ def assemble_axisymmetric(
     traction_values: ArrayLike | None = None,
     thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
     nodal_temperature: ArrayLike | None = None,
-    quadrature: str | int = "3x3",
+    quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> AssemblyResult:
     """
@@ -1668,7 +1668,7 @@ def assemble_axisymmetric_model(
     pressure_faces: ArrayLike | None = None,
     traction_faces: ArrayLike | None = None,
     thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
-    quadrature: str | int = "3x3",
+    quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> AxisymmetricFEMModel:
     """
@@ -1794,7 +1794,7 @@ def quadrature_field_operators_axisymmetric(
     material_ids: ArrayLike,
     material_table: ArrayLike | Mapping[int, ArrayLike],
     thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
-    quadrature: str | int = "3x3",
+    quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> QuadratureFieldOperators:
     """
@@ -1846,7 +1846,7 @@ def quadrature_field_operators_axisymmetric(
 def element_measures_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
-    quadrature: str | int = "3x3",
+    quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> ElementMeasures:
     """Return per-element meridian areas and swept axisymmetric volumes."""
@@ -1883,7 +1883,7 @@ def element_measures_axisymmetric(
 def element_quadrature_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
-    quadrature: str | int = "3x3",
+    quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> ElementQuadrature:
     """Return physical quadrature points and mapped area/volume weights per element."""
@@ -2117,7 +2117,7 @@ def evaluate_axisymmetric_strain_stress_at_quadrature(
     displacements: ArrayLike,
     thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
     nodal_temperature: ArrayLike | None = None,
-    quadrature: str | int = "3x3",
+    quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> QuadratureFieldSamples:
     """

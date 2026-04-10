@@ -292,7 +292,7 @@ mod tests {
             &material_ids,
             &material_table,
             None,
-            QuadratureRule::Gauss3x3,
+            QuadratureRule::GaussLegendre3,
         )
         .expect("operator assembly should succeed");
 
@@ -313,7 +313,8 @@ mod tests {
         );
 
         let coords = mesh.element_coords(0).expect("element coords");
-        let samples = volume_samples_quad4(&coords, QuadratureRule::Gauss3x3).expect("samples");
+        let samples =
+            volume_samples_quad4(&coords, QuadratureRule::GaussLegendre3).expect("samples");
         for (q_local, sample) in samples.into_iter().enumerate() {
             let b = build_b_matrix::<f64, 4, 8>(&sample.n, &sample.grad_phys, sample.point[0])
                 .expect("B matrix");

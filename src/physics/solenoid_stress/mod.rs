@@ -158,7 +158,8 @@
 //! - evaluates the physical face point `(r, z)`, and
 //! - multiplies by the axisymmetric surface measure `2*pi*r`.
 //! The same quadrature setting that selects the tensor-product volume rule also selects the 1D face
-//! rule: `3x3` and `4x4` correspond to 3-point and 4-point Gauss-Legendre quadrature along each
+//! rule: `GaussLegendre3`/`gl3` and `GaussLegendre4`/`gl4` correspond to 3-point and 4-point
+//! Gauss-Legendre quadrature along each
 //! loaded face, respectively.
 //!
 //! The physical line element is `dS = 2*pi*r |dx/ds| ds`, so traction loads contribute
@@ -174,7 +175,9 @@
 //!   geometry.
 //! - [`crate::mesh::elements::quad9`] defines the quadratic shape functions and reference-element
 //!   geometry.
-//! - [`crate::mesh::quadrature`] provides the Gauss rules on the reference square and its edges.
+//! - [`crate::mesh::quadrature`] provides the shared 1D Gauss-Legendre rules on an interval.
+//! - [`crate::mesh::elements::quad2d::quadrature`] builds the quadrilateral tensor-product square
+//!   and face rules from that 1D basis.
 //! - [`geometry`] adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
 //!   summaries needed by the structural solver.
 //! - [`axisym`] constructs the axisymmetric strain operator and local stiffness kernel.

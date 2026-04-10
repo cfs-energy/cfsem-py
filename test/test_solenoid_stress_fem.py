@@ -26,7 +26,7 @@ from cfsem.solenoid_stress.thick_wall_cylinder_handcalc import (
 
 
 DType = type[np.float32] | type[np.float64]
-QUADRATURES = ["3x3", "4x4"]
+QUADRATURES = ["gl3", "gl4"]
 DTYPES: list[DType] = [np.float32, np.float64]
 AREA_VOLUME_MESHES = [(1, 1), (3, 2)]
 BODY_FORCE_MESHES = [(2, 1), (4, 2)]
@@ -853,8 +853,8 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
 def test_axisymmetric_fem_helper_validation_branches() -> None:
     material = isotropic_axisymmetric_material(200.0e9, 0.27)
 
-    assert fem._quadrature_code("3x3") == 3
-    assert fem._quadrature_code("4x4") == 4
+    assert fem._quadrature_code("gl3") == 3
+    assert fem._quadrature_code("gl4") == 4
     with pytest.raises(ValueError, match="unsupported quadrature"):
         fem._quadrature_code("2x2")
     with pytest.raises(ValueError, match="unsupported quadrature"):
@@ -1054,7 +1054,7 @@ def test_quad4_quadrature_field_operators_match_manual_recovery(dtype: DType) ->
         elements,
         material_ids,
         np.asarray([material]),
-        quadrature="3x3",
+        quadrature="gl3",
         element_type="quad4",
     )
 
@@ -1212,7 +1212,7 @@ def test_quad9_quadrature_recovery_shapes(quadrature: str) -> None:
         element_type="quad9",
     )
 
-    nq = 9 if quadrature == "3x3" else 16
+    nq = 9 if quadrature == "gl3" else 16
     assert samples.points_rz.shape == (elements.shape[0], nq, 2)
     assert samples.strain.shape == (elements.shape[0], nq, 4)
     assert samples.stress.shape == (elements.shape[0], nq, 4)
@@ -1232,7 +1232,7 @@ def test_quad9_quadrature_field_operator_shapes(quadrature: str) -> None:
         element_type="quad9",
     )
 
-    nq = 9 if quadrature == "3x3" else 16
+    nq = 9 if quadrature == "gl3" else 16
     assert operators.points_rz.shape == (elements.shape[0], nq, 2)
     assert operators.ndof == 2 * elevated.analysis_nodes.shape[0]
     assert operators.strain_operator.shape == (elements.shape[0] * nq * 4, operators.ndof)

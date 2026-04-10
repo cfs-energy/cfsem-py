@@ -12,24 +12,25 @@
 //! - NIST Digital Library of Mathematical Functions, §18.3 "Definitions", for the Legendre
 //!   polynomial family used by the Gauss-Legendre rule.
 
-use crate::mesh::{Scalar, cast};
+use crate::mesh::Scalar;
+use crate::mesh::quadrature::{GaussLegendreRule, gauss_legendre_interval};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QuadratureRule {
-    /// Tensor-product 3-point rule in each parametric direction.
-    Gauss3x3,
-    /// Tensor-product 4-point rule in each parametric direction.
-    Gauss4x4,
+    /// Tensor-product rule built from the 3-point 1D Gauss-Legendre rule.
+    GaussLegendre3,
+    /// Tensor-product rule built from the 4-point 1D Gauss-Legendre rule.
+    GaussLegendre4,
 }
 
 impl QuadratureRule {
     /// Parse the compact integer code exposed through the Python bindings.
     pub fn from_code(code: u8) -> Result<Self, String> {
         match code {
-            3 => Ok(Self::Gauss3x3),
-            4 => Ok(Self::Gauss4x4),
+            3 => Ok(Self::GaussLegendre3),
+            4 => Ok(Self::GaussLegendre4),
             _ => Err(format!(
-                "unsupported quadrature code {code}; use 3 for 3x3 or 4 for 4x4"
+                "unsupported quadrature code {code}; use 3 for GaussLegendre3 or 4 for GaussLegendre4"
             )),
         }
     }
@@ -37,8 +38,15 @@ impl QuadratureRule {
     /// Number of quadrature points contributed by one element volume integral.
     pub fn points_per_element(self) -> usize {
         match self {
-            Self::Gauss3x3 => 9,
-            Self::Gauss4x4 => 16,
+            Self::GaussLegendre3 => 9,
+            Self::GaussLegendre4 => 16,
+        }
+    }
+
+    const fn line_rule(self) -> GaussLegendreRule {
+        match self {
+            Self::GaussLegendre3 => GaussLegendreRule::Gauss3,
+            Self::GaussLegendre4 => GaussLegendreRule::Gauss4,
         }
     }
 }
@@ -53,23 +61,7 @@ impl QuadratureRule {
 /// - NIST Digital Library of Mathematical Functions, §3.5(v), Eqs. 3.5.18-3.5.21.
 /// - NIST Digital Library of Mathematical Functions, §18.3, for the Legendre polynomial family.
 pub fn gauss_1d<F: Scalar>(rule: QuadratureRule) -> Vec<(F, F)> {
-    match rule {
-        QuadratureRule::Gauss3x3 => {
-            let a = cast::<F>((3.0_f64 / 5.0).sqrt());
-            vec![
-                (-a, cast(5.0 / 9.0)),
-                (F::zero(), cast(8.0 / 9.0)),
-                (a, cast(5.0 / 9.0)),
-            ]
-        }
-        QuadratureRule::Gauss4x4 => {
-            let a1 = cast::<F>(0.861_136_311_594_052_6);
-            let a2 = cast::<F>(0.339_981_043_584_856_26);
-            let w1 = cast::<F>(0.347_854_845_137_453_85);
-            let w2 = cast::<F>(0.652_145_154_862_546_1);
-            vec![(-a1, w1), (-a2, w2), (a2, w2), (a1, w1)]
-        }
-    }
+    gauss_legendre_interval::<F>(rule.line_rule())
 }
 
 /// Tensor-product Gauss rule on the reference square `[-1, 1]^2`.
@@ -99,7 +91,7 @@ mod tests {
 
     #[test]
     fn gauss_3x3_integrates_quadratic_exactly() {
-        let integral: f64 = gauss_volume::<f64>(QuadratureRule::Gauss3x3)
+        let integral: f64 = gauss_volume::<f64>(QuadratureRule::GaussLegendre3)
             .into_iter()
             .map(|([xi, eta], w)| (xi * xi + eta * eta) * w)
             .sum();
@@ -108,7 +100,7 @@ mod tests {
 
     #[test]
     fn gauss_4x4_integrates_constant_to_four() {
-        let weight_sum: f64 = gauss_volume::<f64>(QuadratureRule::Gauss4x4)
+        let weight_sum: f64 = gauss_volume::<f64>(QuadratureRule::GaussLegendre4)
             .into_iter()
             .map(|(_, w)| w)
             .sum();
@@ -117,7 +109,7 @@ mod tests {
 
     #[test]
     fn gauss_4x4_integrates_degree_six_polynomial_exactly() {
-        let integral: f64 = gauss_volume::<f64>(QuadratureRule::Gauss4x4)
+        let integral: f64 = gauss_volume::<f64>(QuadratureRule::GaussLegendre4)
             .into_iter()
             .map(|([xi, eta], w)| (xi.powi(6) + eta.powi(6)) * w)
             .sum();

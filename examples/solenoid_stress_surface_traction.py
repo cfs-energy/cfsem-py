@@ -233,7 +233,7 @@ def main() -> None:
     testing = os.environ.get("CFSEM_TESTING") == "True"
     nr = 4 if testing else 10
     nz = 2 if testing else 4
-    quadrature = "4x4"
+    quadrature = "gl4"
     element_type = "quad9"
 
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=nr, nz=nz)

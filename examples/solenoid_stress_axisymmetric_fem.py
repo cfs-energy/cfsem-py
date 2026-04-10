@@ -30,7 +30,7 @@ from cfsem.flux_solver import calc_flux_density_from_flux, solve_flux_axisymmetr
 TESTING = bool(os.getenv("CFSEM_TESTING"))
 
 SOLENOID_INNER_RADIUS = 0.5  # [m]
-DEFAULT_QUADRATURE = "3x3"
+DEFAULT_QUADRATURE = "gl3"
 DEFAULT_ELEMENT_TYPE = "quad4"
 DEFAULT_MATERIAL_MODEL = "isotropic"
 DEFAULT_INCLUDE_AXIAL_BODY_FORCE = True
@@ -879,7 +879,7 @@ def solve_case(
 ) -> CaseResult:
     width = normalize_float(width, WIDTH_RANGE)
     height = normalize_float(height, HEIGHT_RANGE)
-    if quadrature not in {"3x3", "4x4"}:
+    if quadrature not in {"gl3", "gl4"}:
         raise ValueError(f"Unsupported quadrature {quadrature!r}.")
     if element_type not in {"quad4", "quad9"}:
         raise ValueError(f"Unsupported element type {element_type!r}.")
@@ -1606,8 +1606,8 @@ def create_app():
                             dcc.Dropdown(
                                 id="fem-quadrature",
                                 options=[
-                                    {"label": "3x3 Gauss", "value": "3x3"},
-                                    {"label": "4x4 Gauss", "value": "4x4"},
+                                    {"label": "Gauss-Legendre 3", "value": "gl3"},
+                                    {"label": "Gauss-Legendre 4", "value": "gl4"},
                                 ],
                                 value=DEFAULT_QUADRATURE,
                                 clearable=False,

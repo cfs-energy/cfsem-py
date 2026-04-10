@@ -5,20 +5,13 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
+use crate::mesh::quadrature::{GaussLegendreRule, gauss_legendre_unit_interval_table};
 use crate::{chunksize, math::cross3};
 
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.
 const MIN_WIRE_THICKNESS: f64 = 1e-10;
-
-/// 3-point Gauss-Legendre nodes on the unit interval [0, 1].
-/// https://en.wikipedia.org/wiki/Gaussian_quadrature
-const GL3_UNIT_NODES: [f64; 3] = [0.11270166537925831, 0.5, 0.8872983346207417];
-
-/// 3-point Gauss-Legendre weights on the unit interval [0, 1].
-/// https://en.wikipedia.org/wiki/Gaussian_quadrature
-const GL3_UNIT_WEIGHTS: [f64; 3] = [0.2777777777777778, 0.4444444444444444, 0.2777777777777778];
 
 /// Estimate the inductive coupling between two piecewise-linear current filaments.
 ///
@@ -72,14 +65,15 @@ pub fn inductance_piecewise_linear_filaments(
     let (xfil0, yfil0, zfil0) = xyzfil0;
     let (dlxfil0, dlyfil0, dlzfil0) = dlxyzfil0;
     let mut inductance = 0.0; // [H]
+    let gl3_unit = gauss_legendre_unit_interval_table(GaussLegendreRule::Gauss3);
 
     for j in 0..m {
         let dltgt = (dlxfil1[j], dlyfil1[j], dlzfil1[j]); // [m]
-        for (iq, tq) in GL3_UNIT_NODES.iter().enumerate() {
+        for &[tq, wq] in gl3_unit {
             let obs = (
-                dltgt.0.mul_add(*tq, xfil1[j]), // [m]
-                dltgt.1.mul_add(*tq, yfil1[j]), // [m]
-                dltgt.2.mul_add(*tq, zfil1[j]), // [m]
+                dltgt.0.mul_add(tq, xfil1[j]), // [m]
+                dltgt.1.mul_add(tq, yfil1[j]), // [m]
+                dltgt.2.mul_add(tq, zfil1[j]), // [m]
             );
             let mut ax = 0.0; // [V-s/m]
             let mut ay = 0.0; // [V-s/m]
@@ -99,7 +93,7 @@ pub fn inductance_piecewise_linear_filaments(
                 az += azc; // [V-s/m]
             }
 
-            inductance += GL3_UNIT_WEIGHTS[iq] * (ax * dltgt.0 + ay * dltgt.1 + az * dltgt.2); // [H]
+            inductance += wq * (ax * dltgt.0 + ay * dltgt.1 + az * dltgt.2); // [H]
         }
     }
 
@@ -2278,12 +2272,13 @@ mod test {
         let mut xquad2 = vec![0.0; 3 * (NFIL - 1)];
         let mut yquad2 = vec![0.0; 3 * (NFIL - 1)];
         let mut zquad2 = vec![0.0; 3 * (NFIL - 1)];
+        let gl3_unit = gauss_legendre_unit_interval_table(GaussLegendreRule::Gauss3);
         for i in 0..NFIL - 1 {
             let row = 3 * i;
-            for (iq, tq) in GL3_UNIT_NODES.iter().enumerate() {
-                xquad2[row + iq] = dlxfil2[i].mul_add(*tq, xfil2[i]);
-                yquad2[row + iq] = dlyfil2[i].mul_add(*tq, yfil2[i]);
-                zquad2[row + iq] = dlzfil2[i].mul_add(*tq, zfil2[i]);
+            for (iq, &[tq, _]) in gl3_unit.iter().enumerate() {
+                xquad2[row + iq] = dlxfil2[i].mul_add(tq, xfil2[i]);
+                yquad2[row + iq] = dlyfil2[i].mul_add(tq, yfil2[i]);
+                zquad2[row + iq] = dlzfil2[i].mul_add(tq, zfil2[i]);
             }
         }
 
@@ -2315,7 +2310,7 @@ mod test {
                 (0..3)
                     .map(|iq| {
                         let idx = row + iq;
-                        GL3_UNIT_WEIGHTS[iq]
+                        gl3_unit[iq][1]
                             * (outx[idx] * dlxfil2[i]
                                 + outy[idx] * dlyfil2[i]
                                 + outz[idx] * dlzfil2[i])

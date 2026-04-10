@@ -47,7 +47,7 @@ def gradient_order4(z: NDArray, xmesh: NDArray, ymesh: NDArray) -> tuple[NDArray
     ## Errors
 
         * If the input grids are not regular
-        * If any input grid dimensions have size less than 5
+        * If any input grid dimensions have size less than 6
 
     ## References
 
@@ -64,6 +64,8 @@ def gradient_order4(z: NDArray, xmesh: NDArray, ymesh: NDArray) -> tuple[NDArray
         (dzdx, dzdy) [<xunits>/m] 2D arrays of gradient components
     """
     nx, ny = z.shape
+    if nx < 6 or ny < 6:
+        raise ValueError("gradient_order4 requires each grid dimension to have at least 6 points")
     dx = xmesh[1][0] - xmesh[0][0]
     dy = ymesh[0][1] - ymesh[0][0]
 
@@ -80,26 +82,24 @@ def gradient_order4(z: NDArray, xmesh: NDArray, ymesh: NDArray) -> tuple[NDArray
         start = int(2 + offs)
         end = int(nx - 2 + offs)
         dzdx[2:-2, :] += w * z[start:end, :] / dx  # Central difference on interior points
+    left_rows = np.arange(2)
     for offs, w in _DDX_FWD_ORDER4:
-        offs = int(offs)
-        dzdx[0:2, :] += w * z[offs : offs + 2, :] / dx  # One-sided difference on left side
+        dzdx[0:2, :] += w * z[left_rows + int(offs), :] / dx  # One-sided difference on left side
+    right_rows = np.arange(nx - 2, nx)
     for offs, w in _DDX_BWD_ORDER4:
-        start = int(-2 + offs)
-        end = int(nx + offs)
-        dzdx[-2:, :] += w * z[start:end, :] / dx  # right side
+        dzdx[-2:, :] += w * z[right_rows + int(offs), :] / dx  # One-sided difference on right side
 
     dzdy = np.zeros_like(z)
     for offs, w in _DDX_CENTRAL_ORDER4:
         start = int(2 + offs)
         end = int(ny - 2 + offs)
         dzdy[:, 2:-2] += w * z[:, start:end] / dy  # Interior points
+    bottom_cols = np.arange(2)
     for offs, w in _DDX_FWD_ORDER4:
-        offs = int(offs)
-        dzdy[:, 0:2] += w * z[:, offs : offs + 2] / dy  # One-sided difference on bottom
+        dzdy[:, 0:2] += w * z[:, bottom_cols + int(offs)] / dy  # One-sided difference on bottom
+    top_cols = np.arange(ny - 2, ny)
     for offs, w in _DDX_BWD_ORDER4:
-        start = int(-2 + offs)
-        end = int(ny + offs)
-        dzdy[:, -2:] += w * z[:, start:end] / dy  # top
+        dzdy[:, -2:] += w * z[:, top_cols + int(offs)] / dy  # One-sided difference on top
 
     return dzdx, dzdy
 
@@ -114,7 +114,7 @@ def calc_flux_density_from_flux(psi: NDArray, rmesh: NDArray, zmesh: NDArray) ->
     # Errors
 
         * If the input grids are not regular
-        * If any input grid dimensions have size less than 5
+        * If any input grid dimensions have size less than 6
 
     # References
 
@@ -128,6 +128,8 @@ def calc_flux_density_from_flux(psi: NDArray, rmesh: NDArray, zmesh: NDArray) ->
     Returns:
         (br, bz) [T] 2D arrays of poloidal flux density
     """
+    if np.any(rmesh <= 0.0):
+        raise ValueError("rmesh must be strictly positive")
 
     dpsidr, dpsidz = gradient_order4(psi, rmesh, zmesh)
 
@@ -155,7 +157,7 @@ def flux_solver(grids: tuple[NDArray, NDArray]) -> Callable[[NDArray], NDArray]:
     """
     # Build Grad-Shafranov Delta* linear operator for finite difference
     # as a sparse matrix
-    _ = _check_regular(grids)
+    _ = _check_regular(grids, min_points=7)
     rgrid, zgrid = grids
     nr = rgrid.size
     nz = zgrid.size
@@ -192,7 +194,7 @@ def solve_flux_axisymmetric(
     solver = solver or flux_solver(grids)
 
     # Unpack and filter down to just useful inputs
-    dr, dz = _check_regular(grids)  # [m] grid spacing
+    dr, dz = _check_regular(grids, min_points=7)  # [m] grid spacing
     area = dr * dz  # [m^2]
     rmesh, zmesh = meshes  # [m]
     if (
@@ -225,9 +227,11 @@ def solve_flux_axisymmetric(
     return psi
 
 
-def _check_regular(grids: tuple[NDArray, NDArray], tol=1e-6) -> tuple[float, float]:
+def _check_regular(grids: tuple[NDArray, NDArray], tol=1e-6, min_points: int = 2) -> tuple[float, float]:
     """Check that grids are regular, strictly increasing, and at positive radius."""
     rgrid, zgrid = grids
+    if rgrid.size < min_points or zgrid.size < min_points:
+        raise ValueError(f"rgrid and zgrid must each have at least {min_points} points")
     if np.any(rgrid <= 0.0):
         raise ValueError("rgrid must be strictly positive")
     drs = np.diff(rgrid)

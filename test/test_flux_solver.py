@@ -37,6 +37,28 @@ def test_gradient_order4():
         assert np.allclose(grad1_order2, grad1_order4, rtol=0.005)
 
 
+def test_gradient_order4_supports_documented_minimum_grid_size():
+    xgrid = np.linspace(-2.0, 2.0, 6)
+    ygrid = np.linspace(-3.0, 3.0, 6)
+    xmesh, ymesh = np.meshgrid(xgrid, ygrid, indexing="ij")
+    z = 2.0 * xmesh - 3.0 * ymesh
+
+    dzdx, dzdy = gradient_order4(z, xmesh, ymesh)
+
+    assert np.allclose(dzdx, 2.0)
+    assert np.allclose(dzdy, -3.0)
+
+
+def test_gradient_order4_rejects_5x5_grid():
+    xgrid = np.linspace(-2.0, 2.0, 5)
+    ygrid = np.linspace(-3.0, 3.0, 5)
+    xmesh, ymesh = np.meshgrid(xgrid, ygrid, indexing="ij")
+    z = 2.0 * xmesh - 3.0 * ymesh
+
+    with raises(ValueError, match="at least 6 points"):
+        gradient_order4(z, xmesh, ymesh)
+
+
 def test_calc_flux_density_from_flux_matches_direct_filament_field():
     rgrid = np.linspace(0.5, 1.5, 141)
     zgrid = np.linspace(-0.8, 0.8, 161)
@@ -63,6 +85,16 @@ def test_calc_flux_density_from_flux_matches_direct_filament_field():
 
     assert np.allclose(br_from_psi[mask], br_ref[mask], rtol=2e-2, atol=1e-7)
     assert np.allclose(bz_from_psi[mask], bz_ref[mask], rtol=2e-2, atol=1e-7)
+
+
+def test_calc_flux_density_from_flux_rejects_axis_inclusive_mesh():
+    rgrid = np.linspace(0.0, 1.0, 11)
+    zgrid = np.linspace(-0.5, 0.5, 13)
+    rmesh, zmesh = np.meshgrid(rgrid, zgrid, indexing="ij")
+    psi = rmesh**2 + zmesh
+
+    with raises(ValueError, match="strictly positive"):
+        cfsem.calc_flux_density_from_flux(psi, rmesh, zmesh)
 
 
 def test_flux_solver_reuse_and_boundary_condition():
@@ -102,6 +134,14 @@ def test_flux_solver_rejects_non_increasing_and_axis_inclusive_grids():
 
     with raises(ValueError, match="strictly increasing"):
         cfsem.flux_solver((np.linspace(0.6, 1.4, 17), zgrid[::-1]))
+
+
+def test_flux_solver_rejects_grids_too_short_for_order4_gs_stencil():
+    with raises(ValueError, match="at least 7 points"):
+        cfsem.flux_solver((np.linspace(0.6, 1.4, 6), np.linspace(-0.4, 0.4, 19)))
+
+    with raises(ValueError, match="at least 7 points"):
+        cfsem.flux_solver((np.linspace(0.6, 1.4, 17), np.linspace(-0.4, 0.4, 6)))
 
 
 def test_flux_solver_rejects_source_current_on_boundary():

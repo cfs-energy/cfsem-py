@@ -46,7 +46,9 @@ fn body_force_operator_impl<
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<SparseOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     let ndof = mesh.num_nodes() * 2;
@@ -108,7 +110,9 @@ fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<SparseOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     let ndof = mesh.num_nodes() * 2;
@@ -178,7 +182,9 @@ fn traction_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<SparseOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     let ndof = mesh.num_nodes() * 2;
@@ -325,7 +331,9 @@ fn temperature_operator_impl<
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<ThermalLoadOperator<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     if material_ids.len() != mesh.num_elements() {

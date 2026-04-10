@@ -22,7 +22,9 @@ pub fn accumulate_body_force<
     shape: &[F; NODES_PER_ELEMENT],
     scale: F,
 ) {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     for (i, n) in shape.iter().enumerate() {
         fe[2 * i] = fe[2 * i] + scale * *n * body_force[0];
         fe[2 * i + 1] = fe[2 * i + 1] + scale * *n * body_force[1];
@@ -44,7 +46,9 @@ fn pressure_element_load_generic<
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<[F; DOF_PER_ELEMENT], String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     let mut fe = [F::zero(); DOF_PER_ELEMENT];
     let two_pi = two_pi::<F>();
     for sample in face_samples_fn(coords, local_face, quadrature)? {
@@ -73,7 +77,9 @@ fn traction_element_load_generic<
         QuadratureRule,
     ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<[F; DOF_PER_ELEMENT], String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     let mut fe = [F::zero(); DOF_PER_ELEMENT];
     let two_pi = two_pi::<F>();
     for sample in face_samples_fn(coords, local_face, quadrature)? {

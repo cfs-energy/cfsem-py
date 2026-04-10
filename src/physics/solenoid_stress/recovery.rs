@@ -67,7 +67,9 @@ fn quadrature_field_operators_impl<
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<QuadratureFieldOperators<F>, String> {
-    debug_assert_eq!(DOF_PER_ELEMENT, DOF_PER_NODE * NODES_PER_ELEMENT);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
     validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()?;
     if material_ids.len() != mesh.num_elements() {

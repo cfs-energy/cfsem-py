@@ -396,7 +396,7 @@
 //! into the same global rows, which is why the final right-hand side represents the combined
 //! generalized force seen by each global displacement degree of freedom.
 //!
-//! The reusable-load API in [`load_operators`] constructs the same objects in column form rather
+//! The reusable-load API in [`loads`] constructs the same objects in column form rather
 //! than summing them immediately.  A body-force operator column is the global RHS produced by unit
 //! radial or axial body force on one element.  A pressure operator column is the global RHS
 //! produced by unit pressure on one loaded face.  A traction operator contributes two columns per
@@ -439,9 +439,8 @@
 //! - [`geometry`] adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
 //!   summaries needed by the structural solver.
 //! - [`axisym`] constructs the axisymmetric strain operator and local stiffness kernel.
-//! - [`loads`] assembles consistent nodal loads from body forces, pressures, and tractions.
-//! - [`load_operators`] builds sparse linear maps from load amplitudes or nodal temperatures to the
-//!   global right-hand side for repeated-load solves.
+//! - [`loads`] assembles consistent nodal loads and builds sparse linear maps from load amplitudes
+//!   or nodal temperatures to the global right-hand side for repeated-load solves.
 //! - [`assembly`] ties the pieces together into sparse triplets plus the global right-hand side.
 //! - [`recovery`] builds sparse operators for quadrature-point strain and stress recovery.
 //!
@@ -456,7 +455,6 @@
 mod assembly;
 mod axisym;
 mod geometry;
-mod load_operators;
 mod loads;
 mod recovery;
 mod types;
@@ -468,7 +466,7 @@ pub use geometry::{
     ElementMeasures, ElementQuadrature, element_measures_quad4, element_measures_quad9,
     element_quadrature_quad4, element_quadrature_quad9,
 };
-pub use load_operators::{
+pub use loads::{
     SparseOperator, ThermalLoadOperator, body_force_operator_quad4, body_force_operator_quad9,
     pressure_operator_quad4, pressure_operator_quad9, temperature_operator_quad4,
     temperature_operator_quad9, traction_operator_quad4, traction_operator_quad9,

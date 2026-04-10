@@ -6,15 +6,13 @@
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{MeshView, QuadratureRule};
-use crate::physics::solenoid_stress::axisym::{
-    accumulate_b_transpose_vector, accumulate_stiffness, build_b_matrix, constitutive_times_strain,
-};
+use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
 use crate::physics::solenoid_stress::geometry::{
     FaceSample, VolumeSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_nodes,
     volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::loads::{
-    accumulate_body_force, pressure_element_load, traction_element_load,
+    accumulate_body_force, accumulate_thermal_load, pressure_element_load, traction_element_load,
 };
 use crate::physics::solenoid_stress::types::{
     AssemblyResult, DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad,
@@ -122,20 +120,15 @@ fn assemble_axisymmetric_impl<
             accumulate_stiffness(&mut ke, material, &b, scale);
             accumulate_body_force(&mut fe, element_body_force, &sample.n, scale);
             if let Some(thermal) = thermal_material {
-                let mut temperature = F::zero();
-                for local_node in 0..NODES_PER_ELEMENT {
-                    temperature =
-                        temperature + sample.n[local_node] * element_temperature[local_node];
-                }
-                let delta_temperature = temperature - thermal.reference_temperature;
-                let thermal_strain = [
-                    thermal.alpha[0] * delta_temperature,
-                    thermal.alpha[1] * delta_temperature,
-                    thermal.alpha[2] * delta_temperature,
-                    thermal.alpha[3] * delta_temperature,
-                ];
-                let thermal_stress = constitutive_times_strain(material, &thermal_strain);
-                accumulate_b_transpose_vector(&mut fe, &b, &thermal_stress, scale);
+                accumulate_thermal_load(
+                    &mut fe,
+                    material,
+                    thermal,
+                    &element_temperature,
+                    &sample.n,
+                    &b,
+                    scale,
+                );
             }
         }
 

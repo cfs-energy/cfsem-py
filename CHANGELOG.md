@@ -1,5 +1,20 @@
 # Changelog
 
+## 5.3.0 2026-04-10
+
+### Added
+
+* Rust
+    * Solenoid stress module with axisymmetric finite element system assembly
+    * `mesh` submodules for quadrature rules and for each supported mesh and element type
+* Python
+    * Bindings and examples for new axisymmetric FEM stress solver
+
+### Changed
+
+* Rust
+    * Factor out quadrature rules and triangle mesh functions from BEM into mesh module
+
 ## 5.2.0 2026-04-01
 
 ### Added

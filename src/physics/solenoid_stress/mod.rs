@@ -148,6 +148,102 @@
 //! `sigma = D (epsilon - epsilon_th)`, so the `D epsilon_th` contribution is moved to the load
 //! vector as an equivalent nodal force.
 //!
+//! ## Load-specific virtual-work interpretation
+//!
+//! It is useful to read each load contribution as the answer to the question: what generalized
+//! nodal force vector would do the same virtual work as the underlying distributed load, for every
+//! displacement field representable by this element basis?  The element right-hand side is the sum
+//! of those consistent nodal representations, so after assembly the global vector `f` is the total
+//! external virtual-work functional written in nodal coordinates.
+//!
+//! ### Body force
+//!
+//! A body-force density `b = [b_r, b_z]` acts throughout the revolved element volume.  Its virtual
+//! work is
+//! `delta W_body = integral((delta u)^T b 2*pi*r dA)`,
+//! which becomes
+//! `delta u_e^T integral(N^T b 2*pi*r dA)`
+//! after interpolation.  The corresponding consistent nodal load is therefore
+//! `f_body = integral(N^T b 2*pi*r dA)`.
+//!
+//! In the code this is accumulated point-by-point inside the same volume quadrature loop that
+//! forms the stiffness matrix.  Each quadrature point contributes a small force increment to the
+//! radial and axial nodal degrees of freedom in proportion to the local shape values `N_i`.  This
+//! means the nodal loads are not arbitrary lumped forces; they are the projection of the true
+//! distributed volume loading onto the element basis.  If the body force is, for example, a
+//! `J x B` Lorentz force density, then the assembled `f_body` is the mechanical forcing needed so
+//! that the elastic response `K u` can balance the magnetic load in weak form.
+//!
+//! From an energy viewpoint, body force contributes a linear potential term
+//! `- integral(u^T b 2*pi*r dA)`, so its nodal representation is the gradient of that potential
+//! with respect to the nodal displacements.
+//!
+//! ### Pressure
+//!
+//! Pressure is a scalar normal load on an element face.  Its physical traction is `-p n`, so the
+//! virtual work is
+//! `delta W_pressure = integral((delta u)^T (-p n) 2*pi*r ds)`.
+//! After interpolation this becomes
+//! `delta u_e^T integral(N^T (-p n) 2*pi*r ds)`,
+//! which defines
+//! `f_pressure = integral(N^T (-p n) 2*pi*r ds)`.
+//!
+//! Pressure is different from a general traction because the load direction is determined by the
+//! face geometry itself rather than being prescribed independently.  In the implementation, the
+//! outward normal and the face Jacobian are bundled together as `normal_area = [t_z, -t_r]`, so
+//! the integral is evaluated without separately normalizing the normal vector.  This preserves the
+//! correct resultant force from a uniform pressure and ensures that the nodal load vector does the
+//! same virtual work as the true distributed surface stress.
+//!
+//! In force-balance terms, pressure loads are how the formulation applies boundary tractions that
+//! compress or separate the body through the face normal.  In energy terms, they contribute the
+//! negative potential of the applied boundary traction against admissible displacements.
+//!
+//! ### Traction
+//!
+//! A traction load is a prescribed vector `t = [t_r, t_z]` on a face, expressed directly in the
+//! global `(r, z)` directions.  Its virtual work is
+//! `delta W_traction = integral((delta u)^T t 2*pi*r ds)`,
+//! so the corresponding nodal load is
+//! `f_traction = integral(N^T t 2*pi*r ds)`.
+//!
+//! Compared to pressure, traction does not derive its direction from the face normal.  It is the
+//! right abstraction when the boundary load is known in global components, for example an imposed
+//! axial pull, a radial support reaction represented as a load, or a prescribed tangential/shear
+//! surface stress.  The line element enters through `|dx/ds|`, but the direction remains the user-
+//! supplied global traction vector.
+//!
+//! Because the consistent load vector is obtained from `N^T t`, the resulting nodal forces
+//! preserve the correct total force and moment for all displacement fields representable by the
+//! element basis.  That is the key benefit of the consistent-load construction over ad hoc nodal
+//! lumping.
+//!
+//! ### Thermal strain
+//!
+//! Thermal strain is fundamentally different from the previous three load types because it is not
+//! an externally applied force density.  Instead, it is an eigenstrain
+//! `epsilon_th = alpha * (T - T_ref)` representing the strain the material would adopt if it were
+//! free to expand or contract without mechanical constraint.  The constitutive law is written as
+//! `sigma = D (epsilon - epsilon_th)`, so the thermal part enters the weak form as
+//! `delta W_thermal = - integral((delta epsilon)^T D epsilon_th 2*pi*r dA)`.
+//! After interpolation this becomes
+//! `- delta u_e^T integral(B^T D epsilon_th 2*pi*r dA)`,
+//! which is why the equivalent nodal contribution is
+//! `f_thermal = integral(B^T D epsilon_th 2*pi*r dA)`.
+//!
+//! This is best understood as an incompatibility load.  If the body were completely free, the
+//! displacement field could match the thermal strain and the elastic stress would vanish.  When
+//! boundary conditions or neighboring material prevent that free expansion, the difference
+//! `epsilon - epsilon_th` produces stress, and the equivalent nodal thermal load is the term that
+//! drives the structural solve toward the constrained thermoelastic equilibrium state.
+//!
+//! The clearest energy interpretation comes from the elastic strain-energy density
+//! `1/2 (epsilon - epsilon_th)^T D (epsilon - epsilon_th)`.  Expanding this expression gives the
+//! usual quadratic mechanical term plus a linear coupling term in the nodal displacements.  That
+//! linear term is exactly what appears on the right-hand side as the thermal load vector.  So
+//! `f_thermal` is not an external "push" in the same sense as pressure or body force; it is the
+//! nodal representation of the stress-free strain state that the structure would prefer to realize.
+//!
 //! Face integrals for pressure and traction are evaluated by parameterizing each loaded element
 //! edge with a 1D reference coordinate `s in [-1, 1]` and applying a 1D Gauss rule along that
 //! edge.  At each face quadrature point the solver:
@@ -171,10 +267,10 @@
 //! This is why face orientation and consistent element node ordering matter for pressure loads.
 //!
 //! The code is organized so that each module owns one step of that pipeline:
-//! - [`crate::mesh::elements::quad4`] defines the bilinear shape functions and reference-element
-//!   geometry.
-//! - [`crate::mesh::elements::quad9`] defines the quadratic shape functions and reference-element
-//!   geometry.
+//! - [`crate::mesh::elements::quad2d::quad4`] defines the bilinear shape functions and
+//!   reference-element geometry.
+//! - [`crate::mesh::elements::quad2d::quad9`] defines the quadratic shape functions and
+//!   reference-element geometry.
 //! - [`crate::mesh::quadrature`] provides the shared 1D Gauss-Legendre rules on an interval.
 //! - [`crate::mesh::elements::quad2d::quadrature`] builds the quadrilateral tensor-product square
 //!   and face rules from that 1D basis.

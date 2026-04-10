@@ -1,6 +1,6 @@
 //! Gauss quadrature rules used by the 2D quadrilateral reference elements.
 //!
-//! The 1D rules in this module are the standard Gauss-Legendre rules on `[-1, 1]`: the nodes
+//! The 1D rules in this module are Gauss-Legendre rules on `[-1, 1]`: the nodes
 //! are the roots of the degree-`n` Legendre polynomial and the weights are the corresponding
 //! Christoffel numbers. The 2D square rules are then formed as tensor products of that 1D rule.
 //!

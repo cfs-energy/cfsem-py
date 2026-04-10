@@ -1,6 +1,6 @@
 //! Axisymmetric element assembly for small-strain elasticity.
 //!
-//! The element system matrix is assembled in the standard Galerkin form
+//! The element system matrix is assembled in Galerkin form
 //! `K_e = integral(B^T D B 2*pi*r dA)` and the consistent load vectors are assembled from the
 //! same weak form.
 

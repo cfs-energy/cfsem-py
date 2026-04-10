@@ -1,6 +1,6 @@
 //! Generic isoparametric mapping and Jacobian helpers for 2D quadrilateral elements.
 //!
-//! These routines implement the standard finite-element geometry pipeline for one 2D isoparametric
+//! These routines implement the finite-element geometry pipeline for one 2D isoparametric
 //! element:
 //! - interpolate physical coordinates from nodal coordinates with the shape functions,
 //! - differentiate that interpolation to form the element Jacobian `J`,
@@ -110,7 +110,7 @@ pub fn grad_phys<F: Scalar, const NODES_PER_ELEMENT: usize>(
 
 /// Map a reference-edge direction into a physical tangent vector.
 ///
-/// Face integration usually starts with a one-dimensional reference coordinate `s` on an edge.
+/// Face integration starts with a one-dimensional reference coordinate `s` on an edge.
 /// If `ds_reference = d[\xi, \eta]/ds`, then the physical tangent follows from the chain rule:
 /// `dx/ds = J d[\xi, \eta]/ds`.
 ///

@@ -1,6 +1,6 @@
 //! Axisymmetric finite-element elasticity helpers for solenoid stress problems.
 //!
-//! The 2D-axisymmetric small-strain formulation implemented here uses the standard
+//! The 2D-axisymmetric small-strain formulation implemented here uses the
 //! displacement-based Galerkin finite-element construction
 //! `K_e = integral(B^T D B 2*pi*r dA)`.
 //!
@@ -90,8 +90,10 @@
 //! the global linear system `K u = f`.
 //!
 //! This is the origin of the generalized-force interpretation used throughout the implementation.
-//! A generalized force is simply the quantity that is work-conjugate to a generalized displacement
-//! coordinate.  Here the generalized coordinates are the nodal radial and axial displacements, so
+//! A generalized force is the quantity that is work-conjugate to a generalized displacement
+//! coordinate.  Its "force-like" character comes from units: because virtual work has units of
+//! energy and displacement has units of distance, the conjugate quantity has units of energy per
+//! distance.  Here the generalized coordinates are the nodal radial and axial displacements, so
 //! the load-vector entries are the corresponding radial and axial generalized nodal forces.
 //! Distributed loads are therefore converted into equivalent nodal loads by asking: which nodal
 //! force vector would produce the same virtual work as the original distributed loading for every
@@ -113,9 +115,10 @@
 //!
 //! Each node carries two displacement unknowns: radial `u_r` and axial `u_z`.  The global
 //! linear system therefore has the form `K u = f`, where `u = [u_r(0), u_z(0), u_r(1), u_z(1), ...]^T`.
-//! The corresponding load-vector entries are generalized nodal forces, not usually literal point
-//! forces.  Entry `f[2a]` is the force-like quantity work-conjugate to the radial displacement
-//! degree of freedom at node `a`, and `f[2a + 1]` is the corresponding axial quantity.
+//! The corresponding load-vector entries are generalized nodal forces rather than literal point
+//! forces.  Entry `f[2a]` is the energy-per-distance quantity work-conjugate to the radial
+//! displacement degree of freedom at node `a`, and `f[2a + 1]` is the corresponding axial
+//! quantity.
 //!
 //! Each equation in the assembled system is a weak equilibrium statement for one nodal test
 //! displacement pattern: the internal virtual work from the elastic stress field balances the
@@ -131,7 +134,7 @@
 //! - maps their reference gradients into physical gradients with the element Jacobian `J`,
 //! - builds the axisymmetric strain-displacement matrix `B`,
 //! - forms `B^T D B` for the local stiffness contribution, and
-//! - scales the contribution by the usual area weight `det(J) w` and by the additional
+//! - scales the contribution by the area weight `det(J) w` and by the additional
 //!   axisymmetric revolution factor `2*pi*r`.
 //!
 //! The right-hand side is assembled from the same weak form, so each load type is converted into a
@@ -254,7 +257,7 @@
 //!
 //! The clearest energy interpretation comes from the elastic strain-energy density
 //! `1/2 (epsilon - epsilon_th)^T D (epsilon - epsilon_th)`.  Expanding this expression gives the
-//! usual quadratic mechanical term plus a linear coupling term in the nodal displacements.  That
+//! quadratic mechanical term plus a linear coupling term in the nodal displacements.  That
 //! linear term is exactly what appears on the right-hand side as the thermal load vector.  So
 //! `f_thermal` is not an external "push" in the same sense as pressure or body force; it is the
 //! nodal representation of the stress-free strain state that the structure would prefer to realize.
@@ -266,7 +269,7 @@
 //! vector `f_e`, and that local vector is then scattered into the global right-hand side.
 //!
 //! For body force, one assumes an elementwise-constant load `b = [b_r, b_z]`.  At one volume
-//! quadrature point `q`, the code forms the usual axisymmetric volume scale
+//! quadrature point `q`, the code forms the axisymmetric volume scale
 //! `scale_q = 2*pi*r_q det(J_q) w_q`.
 //! If node `i` has local radial degree of freedom `2i` and local axial degree of freedom
 //! `2i + 1`, then the contribution from that quadrature point is
@@ -308,7 +311,7 @@
 //! expansion of
 //! `integral(B^T D epsilon_th 2*pi*r dA)`.
 //!
-//! After the local vector `f_e` has been accumulated, assembly is the usual scatter operation:
+//! After the local vector `f_e` has been accumulated, assembly is the scatter operation:
 //! if local node `i` corresponds to global node `g`, then `f_e[2i]` adds into global row `2g`
 //! and `f_e[2i + 1]` adds into global row `2g + 1`.  Contributions from neighboring elements sum
 //! into the same global rows, which is why the final right-hand side represents the combined

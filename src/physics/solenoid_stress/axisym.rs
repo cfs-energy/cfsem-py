@@ -1,8 +1,8 @@
 //! Axisymmetric strain-displacement utilities.
 //!
-//! The `B` matrix uses the standard small-strain axisymmetric ordering
-//! `[e_rr, e_zz, e_tt, g_rz]` with `e_tt = u_r / r`.  The resulting element stiffness is the
-//! conventional `B^T D B` construction; see Hughes (1987), Bathe (1996), and Reddy (2005).
+//! The `B` matrix uses the small-strain axisymmetric ordering
+//! `[e_rr, e_zz, e_tt, g_rz]` with `e_tt = u_r / r`.  The resulting element stiffness uses the
+//! `B^T D B` construction; see Hughes (1987), Bathe (1996), and Reddy (2005).
 //!
 //! In this formulation each node carries only two displacement unknowns: radial `u_r` and axial
 //! `u_z`.  Circumferential displacement is omitted by the axisymmetric assumption, but the hoop

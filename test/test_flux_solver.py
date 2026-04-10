@@ -93,3 +93,23 @@ def test_flux_solver_reuse_and_boundary_condition():
             zmesh[r_slice, z_slice],
         )
         assert np.allclose(psi[r_slice, z_slice], psi_expected)
+
+
+def test_flux_solver_rejects_non_increasing_and_axis_inclusive_grids():
+    zgrid = np.linspace(-0.4, 0.4, 19)
+    with raises(ValueError, match="strictly positive"):
+        cfsem.flux_solver((np.linspace(0.0, 1.4, 17), zgrid))
+
+    with raises(ValueError, match="strictly increasing"):
+        cfsem.flux_solver((np.linspace(0.6, 1.4, 17), zgrid[::-1]))
+
+
+def test_flux_solver_rejects_source_current_on_boundary():
+    rgrid = np.linspace(0.6, 1.4, 17)
+    zgrid = np.linspace(-0.4, 0.4, 19)
+    rmesh, zmesh = np.meshgrid(rgrid, zgrid, indexing="ij")
+    current_density = np.zeros_like(rmesh)
+    current_density[0, 5] = 2.5e6
+
+    with raises(ValueError, match="finite-difference boundary"):
+        cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density)

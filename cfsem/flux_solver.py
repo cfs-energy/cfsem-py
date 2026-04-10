@@ -195,6 +195,13 @@ def solve_flux_axisymmetric(
     dr, dz = _check_regular(grids)  # [m] grid spacing
     area = dr * dz  # [m^2]
     rmesh, zmesh = meshes  # [m]
+    if (
+        np.any(current_density[0, :] != 0.0)
+        or np.any(current_density[-1, :] != 0.0)
+        or np.any(current_density[:, 0] != 0.0)
+        or np.any(current_density[:, -1] != 0.0)
+    ):
+        raise ValueError("current_density must be zero on the finite-difference boundary")
     nonzero_inds = np.where(current_density != 0.0)
     current_density_nonzero = np.ascontiguousarray(current_density[nonzero_inds])  # [A/m^2]
     rmesh_nonzero = np.ascontiguousarray(rmesh[nonzero_inds])  # [m]
@@ -219,15 +226,22 @@ def solve_flux_axisymmetric(
 
 
 def _check_regular(grids: tuple[NDArray, NDArray], tol=1e-6) -> tuple[float, float]:
-    """Check that grids are regular and returns spacing"""
-    del tol
+    """Check that grids are regular, strictly increasing, and at positive radius."""
     rgrid, zgrid = grids
+    if np.any(rgrid <= 0.0):
+        raise ValueError("rgrid must be strictly positive")
     drs = np.diff(rgrid)
     dzs = np.diff(zgrid)
+    if np.any(drs <= 0.0):
+        raise ValueError("rgrid must be strictly increasing")
+    if np.any(dzs <= 0.0):
+        raise ValueError("zgrid must be strictly increasing")
     drmean = float(np.mean(drs))
     dzmean = float(np.mean(dzs))
-    assert np.all(np.abs(drs - drmean) / drmean < 1e-4), "Grids must be regular"
-    assert np.all(np.abs(dzs - dzmean) / dzmean < 1e-4), "Grids must be regular"
+    if not np.all(np.abs(drs - drmean) / drmean < tol):
+        raise ValueError("rgrid must be regular")
+    if not np.all(np.abs(dzs - dzmean) / dzmean < tol):
+        raise ValueError("zgrid must be regular")
 
     return drmean, dzmean  # [m]
 

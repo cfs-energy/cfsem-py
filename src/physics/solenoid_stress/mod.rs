@@ -237,6 +237,21 @@
 //! `epsilon - epsilon_th` produces stress, and the equivalent nodal thermal load is the term that
 //! drives the structural solve toward the constrained thermoelastic equilibrium state.
 //!
+//! In this implementation `epsilon_th` is known before the structural solve because the
+//! temperature field is treated as prescribed input data rather than as an additional structural
+//! unknown.  The sequence is therefore:
+//! - provide nodal temperatures on the mesh,
+//! - interpolate those nodal values to each quadrature point with the same shape functions `N`,
+//! - form `DeltaT = T - T_ref` using the per-material reference temperature,
+//! - compute `epsilon_th = alpha * DeltaT`,
+//! - assemble `f_thermal = integral(B^T D epsilon_th 2*pi*r dA)`,
+//! - then solve the structural system for `u`.
+//! In other words, the temperature field is an input to the structural problem, not one of its
+//! unknowns.  The solver does not need to guess `epsilon_th`; it computes `epsilon_th` directly
+//! from the supplied thermal state before it begins solving for displacement.
+//! This makes the current formulation one-way coupled: temperature drives mechanics, but the
+//! structural solve does not solve for temperature itself.
+//!
 //! The clearest energy interpretation comes from the elastic strain-energy density
 //! `1/2 (epsilon - epsilon_th)^T D (epsilon - epsilon_th)`.  Expanding this expression gives the
 //! usual quadratic mechanical term plus a linear coupling term in the nodal displacements.  That

@@ -3,9 +3,36 @@ use crate::mesh::{MeshView, QuadratureRule};
 use crate::physics::solenoid_stress::geometry::{
     VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
 };
-use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, dof_per_element, two_pi};
+use crate::physics::solenoid_stress::types::{
+    DOF_PER_NODE, Real, dof_per_element, local_dofs, two_pi,
+};
 
-use super::SparseOperator;
+use super::{SparseOperator, scatter_local_matrix};
+
+fn body_force_element_kernel<
+    F: Real,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    samples: &[VolumeSample<F, NODES_PER_ELEMENT>],
+) -> [[F; 2]; DOF_PER_ELEMENT] {
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    let mut local = [[F::zero(); 2]; DOF_PER_ELEMENT];
+    let two_pi = two_pi::<F>();
+
+    for sample in samples {
+        let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
+        for local_node in 0..NODES_PER_ELEMENT {
+            local[2 * local_node][0] = local[2 * local_node][0] + scale * sample.n[local_node];
+            local[2 * local_node + 1][1] =
+                local[2 * local_node + 1][1] + scale * sample.n[local_node];
+        }
+    }
+
+    local
+}
 
 fn body_force_operator_impl<
     F: Real,
@@ -29,39 +56,22 @@ fn body_force_operator_impl<
     let mut rows = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * 2);
     let mut cols = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * 2);
     let mut vals = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * 2);
-    let two_pi = two_pi::<F>();
 
     for element_index in 0..mesh.num_elements() {
         let coords = mesh.element_coords(element_index)?;
         let nodes = mesh.element_nodes(element_index)?;
-        let mut local_r = [F::zero(); DOF_PER_ELEMENT];
-        let mut local_z = [F::zero(); DOF_PER_ELEMENT];
-
-        for sample in volume_samples_fn(&coords, quadrature)? {
-            let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
-            for local_node in 0..NODES_PER_ELEMENT {
-                local_r[2 * local_node] = local_r[2 * local_node] + scale * sample.n[local_node];
-                local_z[2 * local_node + 1] =
-                    local_z[2 * local_node + 1] + scale * sample.n[local_node];
-            }
-        }
-
-        for (local_node, global_node) in nodes.iter().copied().enumerate() {
-            let dof_r = 2 * global_node;
-            let dof_z = dof_r + 1;
-            let local_r_index = 2 * local_node;
-            let local_z_index = local_r_index + 1;
-            if local_r[local_r_index] != F::zero() {
-                rows.push(dof_r);
-                cols.push(2 * element_index);
-                vals.push(local_r[local_r_index]);
-            }
-            if local_z[local_z_index] != F::zero() {
-                rows.push(dof_z);
-                cols.push(2 * element_index + 1);
-                vals.push(local_z[local_z_index]);
-            }
-        }
+        let samples = volume_samples_fn(&coords, quadrature)?;
+        let local = body_force_element_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples);
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        let global_cols = [2 * element_index, 2 * element_index + 1];
+        scatter_local_matrix(
+            &mut rows,
+            &mut cols,
+            &mut vals,
+            &global_rows,
+            &global_cols,
+            &local,
+        );
     }
 
     Ok(SparseOperator {

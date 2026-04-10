@@ -26,6 +26,44 @@ pub struct ThermalLoadOperator<F: Real> {
     pub reference_rhs: Vec<F>,
 }
 
+pub(super) fn scatter_local_vector<F: Real, const NROW: usize>(
+    rows: &mut Vec<usize>,
+    cols: &mut Vec<usize>,
+    vals: &mut Vec<F>,
+    global_rows: &[usize; NROW],
+    global_col: usize,
+    local: &[F; NROW],
+) {
+    for row in 0..NROW {
+        let value = local[row];
+        if value != F::zero() {
+            rows.push(global_rows[row]);
+            cols.push(global_col);
+            vals.push(value);
+        }
+    }
+}
+
+pub(super) fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
+    rows: &mut Vec<usize>,
+    cols: &mut Vec<usize>,
+    vals: &mut Vec<F>,
+    global_rows: &[usize; NROW],
+    global_cols: &[usize; NCOL],
+    local: &[[F; NCOL]; NROW],
+) {
+    for row in 0..NROW {
+        for col in 0..NCOL {
+            let value = local[row][col];
+            if value != F::zero() {
+                rows.push(global_rows[row]);
+                cols.push(global_cols[col]);
+                vals.push(value);
+            }
+        }
+    }
+}
+
 pub use body_force::{body_force_operator_quad4, body_force_operator_quad9};
 pub use pressure::{pressure_operator_quad4, pressure_operator_quad9};
 pub use thermal::{temperature_operator_quad4, temperature_operator_quad9};

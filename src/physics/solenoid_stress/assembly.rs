@@ -10,7 +10,7 @@ use crate::physics::solenoid_stress::geometry::{
     VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::types::{
-    AssemblyResult, DOF_PER_NODE, Real, dof_per_element, two_pi,
+    AssemblyResult, DOF_PER_NODE, Real, dof_per_element, local_dofs, two_pi,
 };
 
 fn assemble_axisymmetric_impl<
@@ -64,16 +64,12 @@ fn assemble_axisymmetric_impl<
             accumulate_stiffness(&mut ke, material, &b, scale);
         }
 
-        let mut local_dofs = [0usize; DOF_PER_ELEMENT];
-        for (local_node, global_node) in nodes.iter().copied().enumerate() {
-            local_dofs[2 * local_node] = 2 * global_node;
-            local_dofs[2 * local_node + 1] = 2 * global_node + 1;
-        }
+        let global_dofs = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
 
         for row in 0..DOF_PER_ELEMENT {
             for col in 0..DOF_PER_ELEMENT {
-                rows.push(local_dofs[row]);
-                cols.push(local_dofs[col]);
+                rows.push(global_dofs[row]);
+                cols.push(global_dofs[col]);
                 vals.push(ke[row][col]);
             }
         }

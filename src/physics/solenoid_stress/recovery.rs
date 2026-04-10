@@ -9,7 +9,7 @@ use crate::physics::solenoid_stress::geometry::{
     VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, ThermalMaterial, dof_per_element,
+    DOF_PER_NODE, Real, ThermalMaterial, dof_per_element, local_dofs,
 };
 
 #[derive(Debug, Clone)]
@@ -50,6 +50,86 @@ pub struct QuadratureFieldOperators<F: Real> {
     pub ndof: usize,
     /// Number of nodal temperatures the thermal operators act on.
     pub ntemp: usize,
+}
+
+struct LocalQuadratureSampleKernel<
+    F: Real,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+> {
+    strain: [[F; DOF_PER_ELEMENT]; 4],
+    stress: [[F; DOF_PER_ELEMENT]; 4],
+    thermal_strain: [[F; NODES_PER_ELEMENT]; 4],
+    thermal_stress: [[F; NODES_PER_ELEMENT]; 4],
+    thermal_strain_constant: [F; 4],
+    thermal_stress_constant: [F; 4],
+}
+
+fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
+    rows: &mut Vec<usize>,
+    cols: &mut Vec<usize>,
+    vals: &mut Vec<F>,
+    global_rows: &[usize; NROW],
+    global_cols: &[usize; NCOL],
+    local: &[[F; NCOL]; NROW],
+) {
+    for row in 0..NROW {
+        for col in 0..NCOL {
+            let value = local[row][col];
+            if value != F::zero() {
+                rows.push(global_rows[row]);
+                cols.push(global_cols[col]);
+                vals.push(value);
+            }
+        }
+    }
+}
+
+fn quadrature_sample_kernel<
+    F: Real,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    sample: &VolumeSample<F, NODES_PER_ELEMENT>,
+    material: &[[F; 4]; 4],
+    thermal_material: Option<&ThermalMaterial<F>>,
+    thermal_stress_unit: Option<&[F; 4]>,
+) -> Result<LocalQuadratureSampleKernel<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>, String> {
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    let strain = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        &sample.n,
+        &sample.grad_phys,
+        sample.point[0],
+    )?;
+    let stress = constitutive_times_b(material, &strain);
+    let mut local = LocalQuadratureSampleKernel {
+        strain,
+        stress,
+        thermal_strain: [[F::zero(); NODES_PER_ELEMENT]; 4],
+        thermal_stress: [[F::zero(); NODES_PER_ELEMENT]; 4],
+        thermal_strain_constant: [F::zero(); 4],
+        thermal_stress_constant: [F::zero(); 4],
+    };
+
+    if let Some(thermal) = thermal_material {
+        let thermal_stress_unit = thermal_stress_unit.expect("thermal stress unit");
+        for component in 0..4 {
+            for local_temp_node in 0..NODES_PER_ELEMENT {
+                local.thermal_strain[component][local_temp_node] =
+                    thermal.alpha[component] * sample.n[local_temp_node];
+                local.thermal_stress[component][local_temp_node] =
+                    thermal_stress_unit[component] * sample.n[local_temp_node];
+            }
+            local.thermal_strain_constant[component] =
+                -thermal.alpha[component] * thermal.reference_temperature;
+            local.thermal_stress_constant[component] =
+                -thermal_stress_unit[component] * thermal.reference_temperature;
+        }
+    }
+
+    Ok(local)
 }
 
 fn quadrature_field_operators_impl<
@@ -115,67 +195,61 @@ fn quadrature_field_operators_impl<
                 })
             })
             .transpose()?;
-        let mut local_dofs = [0usize; DOF_PER_ELEMENT];
-        for (local_node, global_node) in nodes.iter().copied().enumerate() {
-            local_dofs[2 * local_node] = 2 * global_node;
-            local_dofs[2 * local_node + 1] = 2 * global_node + 1;
-        }
+        let global_dofs = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        let thermal_stress_unit =
+            thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
 
         for (q_local, sample) in volume_samples_fn(&coords, quadrature)?
             .into_iter()
             .enumerate()
         {
-            let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                &sample.n,
-                &sample.grad_phys,
-                sample.point[0],
+            let local = quadrature_sample_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                &sample,
+                material,
+                thermal_material,
+                thermal_stress_unit.as_ref(),
             )?;
-            let db = constitutive_times_b(material, &b);
             let row_base = 4 * (element_index * nq_per_element + q_local);
+            let global_rows = [row_base, row_base + 1, row_base + 2, row_base + 3];
             points_rz.push(sample.point);
-            let thermal_stress_unit =
-                thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
-
-            for component in 0..4 {
-                let global_row = row_base + component;
-                for local_dof in 0..DOF_PER_ELEMENT {
-                    let global_col = local_dofs[local_dof];
-                    let strain_value = b[component][local_dof];
-                    if strain_value != F::zero() {
-                        strain_rows.push(global_row);
-                        strain_cols.push(global_col);
-                        strain_vals.push(strain_value);
-                    }
-                    let stress_value = db[component][local_dof];
-                    if stress_value != F::zero() {
-                        stress_rows.push(global_row);
-                        stress_cols.push(global_col);
-                        stress_vals.push(stress_value);
-                    }
-                }
-                if let Some(thermal) = thermal_material {
-                    for (local_temp_node, global_temp_node) in nodes.iter().copied().enumerate() {
-                        let thermal_strain_value =
-                            thermal.alpha[component] * sample.n[local_temp_node];
-                        if thermal_strain_value != F::zero() {
-                            thermal_strain_rows.push(global_row);
-                            thermal_strain_cols.push(global_temp_node);
-                            thermal_strain_vals.push(thermal_strain_value);
-                        }
-                        let thermal_stress_value = thermal_stress_unit
-                            .expect("thermal stress unit")[component]
-                            * sample.n[local_temp_node];
-                        if thermal_stress_value != F::zero() {
-                            thermal_stress_rows.push(global_row);
-                            thermal_stress_cols.push(global_temp_node);
-                            thermal_stress_vals.push(thermal_stress_value);
-                        }
-                    }
-                    thermal_strain_constant[global_row] =
-                        -thermal.alpha[component] * thermal.reference_temperature;
-                    thermal_stress_constant[global_row] = -thermal_stress_unit
-                        .expect("thermal stress unit")[component]
-                        * thermal.reference_temperature;
+            scatter_local_matrix(
+                &mut strain_rows,
+                &mut strain_cols,
+                &mut strain_vals,
+                &global_rows,
+                &global_dofs,
+                &local.strain,
+            );
+            scatter_local_matrix(
+                &mut stress_rows,
+                &mut stress_cols,
+                &mut stress_vals,
+                &global_rows,
+                &global_dofs,
+                &local.stress,
+            );
+            if thermal_material.is_some() {
+                scatter_local_matrix(
+                    &mut thermal_strain_rows,
+                    &mut thermal_strain_cols,
+                    &mut thermal_strain_vals,
+                    &global_rows,
+                    &nodes,
+                    &local.thermal_strain,
+                );
+                scatter_local_matrix(
+                    &mut thermal_stress_rows,
+                    &mut thermal_stress_cols,
+                    &mut thermal_stress_vals,
+                    &global_rows,
+                    &nodes,
+                    &local.thermal_stress,
+                );
+                for component in 0..4 {
+                    thermal_strain_constant[global_rows[component]] =
+                        local.thermal_strain_constant[component];
+                    thermal_stress_constant[global_rows[component]] =
+                        local.thermal_stress_constant[component];
                 }
             }
         }

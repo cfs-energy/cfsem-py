@@ -4,10 +4,33 @@ use crate::physics::solenoid_stress::geometry::{
     FaceSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_nodes,
 };
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, PressureLoad, Real, dof_per_element, two_pi,
+    DOF_PER_NODE, PressureLoad, Real, dof_per_element, local_dofs, two_pi,
 };
 
-use super::SparseOperator;
+use super::{SparseOperator, scatter_local_vector};
+
+fn pressure_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    samples: &[FaceSample<F, NODES_PER_ELEMENT>],
+) -> [F; DOF_PER_ELEMENT] {
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    let mut local = [F::zero(); DOF_PER_ELEMENT];
+    let two_pi = two_pi::<F>();
+
+    for sample in samples {
+        let normal_area = [sample.tangent[1], -sample.tangent[0]];
+        let scale = -two_pi * sample.point[0] * sample.weight;
+        for local_node in 0..NODES_PER_ELEMENT {
+            local[2 * local_node] =
+                local[2 * local_node] + scale * sample.n[local_node] * normal_area[0];
+            local[2 * local_node + 1] =
+                local[2 * local_node + 1] + scale * sample.n[local_node] * normal_area[1];
+        }
+    }
+
+    local
+}
 
 fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
@@ -29,7 +52,6 @@ fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
     let mut rows = Vec::with_capacity(pressure_faces.len() * DOF_PER_ELEMENT);
     let mut cols = Vec::with_capacity(pressure_faces.len() * DOF_PER_ELEMENT);
     let mut vals = Vec::with_capacity(pressure_faces.len() * DOF_PER_ELEMENT);
-    let two_pi = two_pi::<F>();
 
     for (load_index, load) in pressure_faces.iter().enumerate() {
         if load.element >= mesh.num_elements() {
@@ -41,35 +63,17 @@ fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
-        let mut local = [F::zero(); DOF_PER_ELEMENT];
-
-        for sample in face_samples_fn(&coords, load.local_face, quadrature)? {
-            let normal_area = [sample.tangent[1], -sample.tangent[0]];
-            let scale = -two_pi * sample.point[0] * sample.weight;
-            for local_node in 0..NODES_PER_ELEMENT {
-                local[2 * local_node] =
-                    local[2 * local_node] + scale * sample.n[local_node] * normal_area[0];
-                local[2 * local_node + 1] =
-                    local[2 * local_node + 1] + scale * sample.n[local_node] * normal_area[1];
-            }
-        }
-
-        for (local_node, global_node) in nodes.iter().copied().enumerate() {
-            let dof_r = 2 * global_node;
-            let dof_z = dof_r + 1;
-            let local_r_index = 2 * local_node;
-            let local_z_index = local_r_index + 1;
-            if local[local_r_index] != F::zero() {
-                rows.push(dof_r);
-                cols.push(load_index);
-                vals.push(local[local_r_index]);
-            }
-            if local[local_z_index] != F::zero() {
-                rows.push(dof_z);
-                cols.push(load_index);
-                vals.push(local[local_z_index]);
-            }
-        }
+        let samples = face_samples_fn(&coords, load.local_face, quadrature)?;
+        let local = pressure_face_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples);
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        scatter_local_vector(
+            &mut rows,
+            &mut cols,
+            &mut vals,
+            &global_rows,
+            load_index,
+            &local,
+        );
     }
 
     Ok(SparseOperator {

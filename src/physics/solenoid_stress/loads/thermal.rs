@@ -7,10 +7,57 @@ use crate::physics::solenoid_stress::geometry::{
     VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, ThermalMaterial, dof_per_element, two_pi,
+    DOF_PER_NODE, Real, ThermalMaterial, dof_per_element, local_dofs, two_pi,
 };
 
-use super::{SparseOperator, ThermalLoadOperator};
+use super::{SparseOperator, ThermalLoadOperator, scatter_local_matrix};
+
+struct LocalThermalKernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize> {
+    temperature_to_rhs: [[F; NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
+    reference_rhs: [F; DOF_PER_ELEMENT],
+}
+
+fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    samples: &[VolumeSample<F, NODES_PER_ELEMENT>],
+    material: &[[F; 4]; 4],
+    thermal: &ThermalMaterial<F>,
+) -> Result<LocalThermalKernel<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>, String> {
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    let mut local = LocalThermalKernel {
+        temperature_to_rhs: [[F::zero(); NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
+        reference_rhs: [F::zero(); DOF_PER_ELEMENT],
+    };
+    let two_pi = two_pi::<F>();
+    let thermal_stress_unit = constitutive_times_strain(material, &thermal.alpha);
+
+    for sample in samples {
+        let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            &sample.n,
+            &sample.grad_phys,
+            sample.point[0],
+        )?;
+        let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
+        let mut local_unit_rhs = [F::zero(); DOF_PER_ELEMENT];
+        accumulate_b_transpose_vector(&mut local_unit_rhs, &b, &thermal_stress_unit, scale);
+
+        for local_temp_node in 0..NODES_PER_ELEMENT {
+            let scale_node = sample.n[local_temp_node];
+            for dof in 0..DOF_PER_ELEMENT {
+                local.temperature_to_rhs[dof][local_temp_node] = local.temperature_to_rhs[dof]
+                    [local_temp_node]
+                    + local_unit_rhs[dof] * scale_node;
+            }
+        }
+        for dof in 0..DOF_PER_ELEMENT {
+            local.reference_rhs[dof] =
+                local.reference_rhs[dof] - local_unit_rhs[dof] * thermal.reference_temperature;
+        }
+    }
+
+    Ok(local)
+}
 
 fn temperature_operator_impl<
     F: Real,
@@ -45,7 +92,6 @@ fn temperature_operator_impl<
     let mut cols = Vec::new();
     let mut vals = Vec::new();
     let mut reference_rhs = vec![F::zero(); ndof];
-    let two_pi = two_pi::<F>();
 
     for element_index in 0..mesh.num_elements() {
         let coords = mesh.element_coords(element_index)?;
@@ -57,54 +103,22 @@ fn temperature_operator_impl<
         let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
             format!("thermal material_id {material_id} on element {element_index} is out of range")
         })?;
-        let mut local_operator = [[F::zero(); NODES_PER_ELEMENT]; DOF_PER_ELEMENT];
-        let mut local_reference_rhs = [F::zero(); DOF_PER_ELEMENT];
-
-        for sample in volume_samples_fn(&coords, quadrature)? {
-            let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                &sample.n,
-                &sample.grad_phys,
-                sample.point[0],
-            )?;
-            let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
-            let thermal_strain_unit = thermal.alpha;
-            let thermal_stress_unit = constitutive_times_strain(material, &thermal_strain_unit);
-            let mut local_unit_rhs = [F::zero(); DOF_PER_ELEMENT];
-            accumulate_b_transpose_vector(&mut local_unit_rhs, &b, &thermal_stress_unit, scale);
-
-            for local_temp_node in 0..NODES_PER_ELEMENT {
-                let scale_node = sample.n[local_temp_node];
-                for dof in 0..DOF_PER_ELEMENT {
-                    local_operator[dof][local_temp_node] =
-                        local_operator[dof][local_temp_node] + local_unit_rhs[dof] * scale_node;
-                }
-            }
-            for dof in 0..DOF_PER_ELEMENT {
-                local_reference_rhs[dof] =
-                    local_reference_rhs[dof] - local_unit_rhs[dof] * thermal.reference_temperature;
-            }
-        }
-
-        for (local_node, global_node) in nodes.iter().copied().enumerate() {
-            let dof_r = 2 * global_node;
-            let dof_z = dof_r + 1;
-            reference_rhs[dof_r] = reference_rhs[dof_r] + local_reference_rhs[2 * local_node];
-            reference_rhs[dof_z] = reference_rhs[dof_z] + local_reference_rhs[2 * local_node + 1];
-            for local_temp_node in 0..NODES_PER_ELEMENT {
-                let global_temp_node = nodes[local_temp_node];
-                let radial_value = local_operator[2 * local_node][local_temp_node];
-                let axial_value = local_operator[2 * local_node + 1][local_temp_node];
-                if radial_value != F::zero() {
-                    rows.push(dof_r);
-                    cols.push(global_temp_node);
-                    vals.push(radial_value);
-                }
-                if axial_value != F::zero() {
-                    rows.push(dof_z);
-                    cols.push(global_temp_node);
-                    vals.push(axial_value);
-                }
-            }
+        let samples = volume_samples_fn(&coords, quadrature)?;
+        let local = thermal_element_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            &samples, material, thermal,
+        )?;
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        scatter_local_matrix(
+            &mut rows,
+            &mut cols,
+            &mut vals,
+            &global_rows,
+            &nodes,
+            &local.temperature_to_rhs,
+        );
+        for dof in 0..DOF_PER_ELEMENT {
+            reference_rhs[global_rows[dof]] =
+                reference_rhs[global_rows[dof]] + local.reference_rhs[dof];
         }
     }
 

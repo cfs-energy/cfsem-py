@@ -5,11 +5,8 @@
 //! `2*pi*r` measure factor on the revolved face; see Hughes (1987), Bathe (1996), and Reddy (2005).
 
 use crate::mesh::QuadratureRule;
-use crate::mesh::elements::quad2d::{quad4, quad9};
-use crate::physics::solenoid_stress::geometry::{
-    FaceSample, face_samples_quad4, face_samples_quad9,
-};
-use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, dof_per_element, two_pi};
+use crate::physics::solenoid_stress::geometry::FaceSample;
+use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, two_pi};
 
 /// Accumulate the consistent nodal load vector for a uniform body-force density on one element.
 pub fn accumulate_body_force<
@@ -31,7 +28,7 @@ pub fn accumulate_body_force<
     }
 }
 
-fn pressure_element_load_generic<
+pub(crate) fn pressure_element_load<
     F: Real,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
@@ -62,7 +59,7 @@ fn pressure_element_load_generic<
     Ok(fe)
 }
 
-fn traction_element_load_generic<
+pub(crate) fn traction_element_load<
     F: Real,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
@@ -92,84 +89,4 @@ fn traction_element_load_generic<
         }
     }
     Ok(fe)
-}
-
-/// Integrate the consistent nodal load vector for a constant pressure on one Quad4 element face.
-pub fn pressure_element_load_quad4<F: Real>(
-    coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
-    local_face: u8,
-    pressure: F,
-    quadrature: QuadratureRule,
-) -> Result<[F; dof_per_element(quad4::NODES_PER_ELEMENT)], String> {
-    pressure_element_load_generic::<
-        F,
-        { quad4::NODES_PER_ELEMENT },
-        { dof_per_element(quad4::NODES_PER_ELEMENT) },
-    >(
-        coords,
-        local_face,
-        pressure,
-        quadrature,
-        face_samples_quad4::<F>,
-    )
-}
-
-/// Integrate the consistent nodal load vector for a constant pressure on one Quad9 element face.
-pub fn pressure_element_load_quad9<F: Real>(
-    coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
-    local_face: u8,
-    pressure: F,
-    quadrature: QuadratureRule,
-) -> Result<[F; dof_per_element(quad9::NODES_PER_ELEMENT)], String> {
-    pressure_element_load_generic::<
-        F,
-        { quad9::NODES_PER_ELEMENT },
-        { dof_per_element(quad9::NODES_PER_ELEMENT) },
-    >(
-        coords,
-        local_face,
-        pressure,
-        quadrature,
-        face_samples_quad9::<F>,
-    )
-}
-
-/// Integrate the consistent nodal load vector for a constant traction on one Quad4 element face.
-pub fn traction_element_load_quad4<F: Real>(
-    coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
-    local_face: u8,
-    traction: [F; 2],
-    quadrature: QuadratureRule,
-) -> Result<[F; dof_per_element(quad4::NODES_PER_ELEMENT)], String> {
-    traction_element_load_generic::<
-        F,
-        { quad4::NODES_PER_ELEMENT },
-        { dof_per_element(quad4::NODES_PER_ELEMENT) },
-    >(
-        coords,
-        local_face,
-        traction,
-        quadrature,
-        face_samples_quad4::<F>,
-    )
-}
-
-/// Integrate the consistent nodal load vector for a constant traction on one Quad9 element face.
-pub fn traction_element_load_quad9<F: Real>(
-    coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
-    local_face: u8,
-    traction: [F; 2],
-    quadrature: QuadratureRule,
-) -> Result<[F; dof_per_element(quad9::NODES_PER_ELEMENT)], String> {
-    traction_element_load_generic::<
-        F,
-        { quad9::NODES_PER_ELEMENT },
-        { dof_per_element(quad9::NODES_PER_ELEMENT) },
-    >(
-        coords,
-        local_face,
-        traction,
-        quadrature,
-        face_samples_quad9::<F>,
-    )
 }

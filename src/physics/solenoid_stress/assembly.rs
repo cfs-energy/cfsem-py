@@ -10,11 +10,11 @@ use crate::physics::solenoid_stress::axisym::{
     accumulate_b_transpose_vector, accumulate_stiffness, build_b_matrix, constitutive_times_strain,
 };
 use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
+    FaceSample, VolumeSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_nodes,
+    volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::loads::{
-    accumulate_body_force, pressure_element_load_quad4, pressure_element_load_quad9,
-    traction_element_load_quad4, traction_element_load_quad9,
+    accumulate_body_force, pressure_element_load, traction_element_load,
 };
 use crate::physics::solenoid_stress::types::{
     AssemblyResult, DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad,
@@ -39,18 +39,11 @@ fn assemble_axisymmetric_impl<
         &[[F; 2]; NODES_PER_ELEMENT],
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
-    pressure_element_load_fn: fn(
+    face_samples_fn: fn(
         &[[F; 2]; NODES_PER_ELEMENT],
         u8,
-        F,
         QuadratureRule,
-    ) -> Result<[F; DOF_PER_ELEMENT], String>,
-    traction_element_load_fn: fn(
-        &[[F; 2]; NODES_PER_ELEMENT],
-        u8,
-        [F; 2],
-        QuadratureRule,
-    ) -> Result<[F; DOF_PER_ELEMENT], String>,
+    ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
 ) -> Result<AssemblyResult<F>, String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
@@ -172,7 +165,13 @@ fn assemble_axisymmetric_impl<
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
-        let fe = pressure_element_load_fn(&coords, load.local_face, load.value, quadrature)?;
+        let fe = pressure_element_load::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            &coords,
+            load.local_face,
+            load.value,
+            quadrature,
+            face_samples_fn,
+        )?;
         for (local_node, global_node) in nodes.iter().copied().enumerate() {
             rhs[2 * global_node] = rhs[2 * global_node] + fe[2 * local_node];
             rhs[2 * global_node + 1] = rhs[2 * global_node + 1] + fe[2 * local_node + 1];
@@ -189,7 +188,13 @@ fn assemble_axisymmetric_impl<
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
-        let fe = traction_element_load_fn(&coords, load.local_face, load.value, quadrature)?;
+        let fe = traction_element_load::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            &coords,
+            load.local_face,
+            load.value,
+            quadrature,
+            face_samples_fn,
+        )?;
         for (local_node, global_node) in nodes.iter().copied().enumerate() {
             rhs[2 * global_node] = rhs[2 * global_node] + fe[2 * local_node];
             rhs[2 * global_node + 1] = rhs[2 * global_node + 1] + fe[2 * local_node + 1];
@@ -232,8 +237,7 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
         nodal_temperature,
         quadrature,
         volume_samples_quad4::<F>,
-        pressure_element_load_quad4::<F>,
-        traction_element_load_quad4::<F>,
+        face_samples_quad4::<F>,
     )
 }
 
@@ -264,8 +268,7 @@ pub fn assemble_axisymmetric_quad9<F: Real>(
         nodal_temperature,
         quadrature,
         volume_samples_quad9::<F>,
-        pressure_element_load_quad9::<F>,
-        traction_element_load_quad9::<F>,
+        face_samples_quad9::<F>,
     )
 }
 

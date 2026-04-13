@@ -205,6 +205,39 @@ def test_axisymmetric_model_rhs_matches_direct_assembly(dtype: DType, quadrature
     assert np.allclose(model.rhs(body_force=body_force, pressure_values=pressure_values), assembly.rhs)
 
 
+def test_one_shot_assembly_dtype_resolution_includes_material_tables() -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
+    thermal_material = fem.isotropic_axisymmetric_thermal_material(
+        1.1e-5,
+        reference_temperature=293.15,
+        dtype=np.float64,
+    )
+    nodal_temperature = np.linspace(294.0, 301.0, nodes.shape[0], dtype=np.float32)
+
+    assembly = assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=np.array([0.0, 0.0], dtype=np.float32),
+        thermal_material_table=np.asarray([thermal_material]),
+        nodal_temperature=nodal_temperature,
+    )
+    model = fem.assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        thermal_material_table=np.asarray([thermal_material]),
+    )
+
+    assert assembly.vals.dtype == np.float64
+    assert assembly.rhs.dtype == np.float64
+    assert assembly.to_csr().dtype == np.float64
+    assert model.dtype == np.dtype(np.float64)
+
+
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType, quadrature: str) -> None:

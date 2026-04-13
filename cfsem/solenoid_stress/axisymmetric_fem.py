@@ -543,7 +543,14 @@ def _validate_element_quadrature_combo(element_type: str, quadrature_code: int) 
 
 
 def _resolve_float_dtype(*values: object) -> np.dtype[np.float32] | np.dtype[np.float64]:
-    arrays = [np.asarray(value) for value in values if value is not None and not isinstance(value, Mapping)]
+    arrays: list[np.ndarray[Any, Any]] = []
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, Mapping):
+            arrays.extend(np.asarray(item) for item in value.values())
+        else:
+            arrays.append(np.asarray(value))
     result = np.dtype(np.result_type(*arrays, np.float32))
     if result.kind != "f" or result.itemsize <= 4:
         return np.dtype(np.float32)
@@ -1611,7 +1618,15 @@ def assemble_axisymmetric(
     `(r, z)` components.
     """
 
-    dtype = _resolve_float_dtype(nodes, body_force, pressure_values, traction_values, nodal_temperature)
+    dtype = _resolve_float_dtype(
+        nodes,
+        material_table,
+        body_force,
+        pressure_values,
+        traction_values,
+        thermal_material_table,
+        nodal_temperature,
+    )
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)

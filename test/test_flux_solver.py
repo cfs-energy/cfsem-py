@@ -153,3 +153,13 @@ def test_flux_solver_rejects_source_current_on_boundary():
 
     with raises(ValueError, match="finite-difference boundary"):
         cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density)
+
+
+def test_flux_solver_rejects_default_meshgrid_layout_when_unambiguous():
+    rgrid = np.linspace(0.6, 1.4, 17)
+    zgrid = np.linspace(-0.4, 0.4, 19)
+    rmesh, zmesh = np.meshgrid(rgrid, zgrid)
+    current_density = np.zeros_like(rmesh)
+
+    with raises(ValueError, match="transposed|indexing='ij'"):
+        cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density)

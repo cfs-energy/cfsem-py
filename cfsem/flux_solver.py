@@ -168,6 +168,42 @@ def flux_solver(grids: tuple[NDArray, NDArray]) -> Callable[[NDArray], NDArray]:
     return factorized(operator)
 
 
+def _validate_flux_mesh_inputs(
+    grids: tuple[NDArray, NDArray],
+    meshes: tuple[NDArray, NDArray],
+    current_density: NDArray,
+    tol: float = 1e-6,
+) -> None:
+    """Best-effort validation that the mesh arrays are consistent with the FD grid ordering."""
+    rgrid, zgrid = grids
+    rmesh, zmesh = meshes
+    expected_shape = (rgrid.size, zgrid.size)
+    transposed_shape = (zgrid.size, rgrid.size)
+
+    if rmesh.shape != expected_shape or zmesh.shape != expected_shape or current_density.shape != expected_shape:
+        if (
+            rgrid.size != zgrid.size
+            and rmesh.shape == transposed_shape
+            and zmesh.shape == transposed_shape
+            and current_density.shape == transposed_shape
+        ):
+            raise ValueError("meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')")
+        raise ValueError(f"meshes and current_density must all have shape {expected_shape}")
+
+    # If the two axes have different lengths, we can also check the axis content without ambiguity.
+    if rgrid.size != zgrid.size:
+        r_axis_matches = np.allclose(rmesh[:, 0], rgrid, rtol=tol, atol=tol)
+        z_axis_matches = np.allclose(zmesh[0, :], zgrid, rtol=tol, atol=tol)
+        if not (r_axis_matches and z_axis_matches):
+            if np.allclose(rmesh[0, :], rgrid, rtol=tol, atol=tol) and np.allclose(
+                zmesh[:, 0], zgrid, rtol=tol, atol=tol
+            ):
+                raise ValueError(
+                    "meshes appear transposed; use np.meshgrid(..., indexing='ij')"
+                )
+            raise ValueError("meshes must be consistent with grids and use np.meshgrid(..., indexing='ij')")
+
+
 def solve_flux_axisymmetric(
     grids: tuple[NDArray, NDArray],
     meshes: tuple[NDArray, NDArray],
@@ -190,6 +226,9 @@ def solve_flux_axisymmetric(
     Returns:
         poloidal flux field, [Wb] with shape (nr, nz)
     """
+    _ = _check_regular(grids, min_points=7)
+    _validate_flux_mesh_inputs(grids, meshes, current_density)
+
     # Build the differential operator, if needed
     solver = solver or flux_solver(grids)
 

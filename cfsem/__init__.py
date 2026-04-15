@@ -355,21 +355,21 @@ def inductance_matrix_axisymmetric_coaxial_rectangular_coils(
     """
 
     # Check that all input lists have the same length
-    assert len(np.unique([len(r), len(z), len(dr), len(dz), len(td), len(nr), len(nz)])) == 1, (
-        "All input lists must have the same length."
-    )
+    assert (
+        len(np.unique([len(r), len(z), len(dr), len(dz), len(td), len(nr), len(nz)])) == 1
+    ), "All input lists must have the same length."
 
     # Check for sizes to be positive
     assert all(size > 0 for size in dr), "All coil radial sizes must be positive."
     assert all(size > 0 for size in dz), "All coil axial sizes must be positive."
 
     # Check for discretizations to be positive integers
-    assert all(isinstance(n, int) and n > 0 for n in nr), (
-        "All radial discretizations must be positive integers."
-    )
-    assert all(isinstance(n, int) and n > 0 for n in nz), (
-        "All axial discretizations must be positive integers."
-    )
+    assert all(
+        isinstance(n, int) and n > 0 for n in nr
+    ), "All radial discretizations must be positive integers."
+    assert all(
+        isinstance(n, int) and n > 0 for n in nz
+    ), "All axial discretizations must be positive integers."
 
     # Make sure that rectangular coil don't overlap
     nc = len(r)
@@ -463,28 +463,30 @@ def self_inductance_axisymmetric_coil(
     """
 
     # Validate valid section_kind and section_size
-    assert section_kind in ("rectangular", "circular", "annular"), (
-        "section_kind must be one of 'rectangular', 'circular', or 'annular'"
-    )
+    assert section_kind in (
+        "rectangular",
+        "circular",
+        "annular",
+    ), "section_kind must be one of 'rectangular', 'circular', or 'annular'"
 
     if section_kind == "rectangular":
-        assert isinstance(section_size, tuple), (
-            "For rectangular section, section_size must be a tuple (conductor width and height)"
-        )
+        assert isinstance(
+            section_size, tuple
+        ), "For rectangular section, section_size must be a tuple (conductor width and height)"
         assert len(section_size) == 2, "For rectangular section, section_size must be a tuple of length 2"
-        assert section_size[0] > 0.0 and section_size[1] > 0.0, (
-            "Conductor section sizes (width and height) must be positive"
-        )
+        assert (
+            section_size[0] > 0.0 and section_size[1] > 0.0
+        ), "Conductor section sizes (width and height) must be positive"
 
     if section_kind == "circular":
-        assert isinstance(section_size, float) and section_size > 0.0, (
-            "For circular section, section size must be a non-negative float (conductor radius)"
-        )
+        assert (
+            isinstance(section_size, float) and section_size > 0.0
+        ), "For circular section, section size must be a non-negative float (conductor radius)"
 
     if section_kind == "annular":
-        assert isinstance(section_size, tuple) and len(section_size) == 2, (
-            "For annular section, section_size must be a tuple (inner and outer conductor radius)"
-        )
+        assert (
+            isinstance(section_size, tuple) and len(section_size) == 2
+        ), "For annular section, section_size must be a tuple (inner and outer conductor radius)"
         assert section_size[0] >= 0.0 and section_size[1] > section_size[0], (
             "For annular section, "
             "inner radius must be non-negative and outer radius must be larger than inner radius"

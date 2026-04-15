@@ -70,12 +70,12 @@ def gradient_order4(z: NDArray, xmesh: NDArray, ymesh: NDArray) -> tuple[NDArray
     dy = ymesh[0][1] - ymesh[0][0]
 
     # Check regular grid assumption
-    assert np.all(np.abs(np.diff(xmesh[:, 0]) - dx) / dx < 1e-6), (
-        "This method is only implemented for a regular grid"
-    )
-    assert np.all(np.abs(np.diff(ymesh[0, :]) - dy) / dy < 1e-6), (
-        "This method is only implemented for a regular grid"
-    )
+    assert np.all(
+        np.abs(np.diff(xmesh[:, 0]) - dx) / dx < 1e-6
+    ), "This method is only implemented for a regular grid"
+    assert np.all(
+        np.abs(np.diff(ymesh[0, :]) - dy) / dy < 1e-6
+    ), "This method is only implemented for a regular grid"
 
     accumulator_dtype = np.result_type(z, np.float64)
     dzdx = np.zeros(z.shape, dtype=accumulator_dtype)
@@ -181,14 +181,20 @@ def _validate_flux_mesh_inputs(
     expected_shape = (rgrid.size, zgrid.size)
     transposed_shape = (zgrid.size, rgrid.size)
 
-    if rmesh.shape != expected_shape or zmesh.shape != expected_shape or current_density.shape != expected_shape:
+    if (
+        rmesh.shape != expected_shape
+        or zmesh.shape != expected_shape
+        or current_density.shape != expected_shape
+    ):
         if (
             rgrid.size != zgrid.size
             and rmesh.shape == transposed_shape
             and zmesh.shape == transposed_shape
             and current_density.shape == transposed_shape
         ):
-            raise ValueError("meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')")
+            raise ValueError(
+                "meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')"
+            )
         raise ValueError(f"meshes and current_density must all have shape {expected_shape}")
 
     # If the two axes have different lengths, the expected `indexing="ij"` layout

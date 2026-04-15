@@ -43,6 +43,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 import cfsem.cfsem as _cfsem_bindings
+
 _assemble_axisymmetric_quad4_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f32
 _assemble_axisymmetric_quad4_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f64
 _assemble_axisymmetric_quad9_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f32
@@ -522,9 +523,29 @@ class QuadratureFieldSamples:
 
 
 def _quadrature_code(quadrature: str | int) -> int:
-    if quadrature in (3, "3", "gl3", "GL3", "gausslegendre3", "GaussLegendre3", "3x3", "gauss3x3", "Gauss3x3"):
+    if quadrature in (
+        3,
+        "3",
+        "gl3",
+        "GL3",
+        "gausslegendre3",
+        "GaussLegendre3",
+        "3x3",
+        "gauss3x3",
+        "Gauss3x3",
+    ):
         return 3
-    if quadrature in (4, "4", "gl4", "GL4", "gausslegendre4", "GaussLegendre4", "4x4", "gauss4x4", "Gauss4x4"):
+    if quadrature in (
+        4,
+        "4",
+        "gl4",
+        "GL4",
+        "gausslegendre4",
+        "GaussLegendre4",
+        "4x4",
+        "gauss4x4",
+        "Gauss4x4",
+    ):
         return 4
     raise ValueError(f"unsupported quadrature {quadrature!r}; use 'gl3' or 'gl4'")
 
@@ -758,9 +779,7 @@ def _normalize_thermal_material_table(
         for key in keys:
             row = np.asarray(mapping[key], dtype=dtype)
             if row.shape != (5,):
-                raise ValueError(
-                    f"thermal_material_table[{key}] must have shape (5,); got {row.shape}"
-                )
+                raise ValueError(f"thermal_material_table[{key}] must have shape (5,); got {row.shape}")
             dense_table.append(row)
         try:
             normalized_ids = np.asarray([tag_to_index[int(tag)] for tag in ids], dtype=np.uint64)
@@ -1457,9 +1476,7 @@ def _quadrature_field_operators_rust(
         ),
     )
     thermal_table_arr = (
-        _empty_thermal_material_table(dtype)
-        if thermal_material_table is None
-        else thermal_material_table
+        _empty_thermal_material_table(dtype) if thermal_material_table is None else thermal_material_table
     )
     (
         points_flat,
@@ -1593,6 +1610,8 @@ def _assemble_quadrature_field_operators_python(
         ndof=ndof,
         ntemp=0,
     )
+
+
 def assemble_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,

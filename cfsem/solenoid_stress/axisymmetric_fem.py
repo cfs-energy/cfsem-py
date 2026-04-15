@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -137,6 +137,18 @@ ArrayLike = npt.ArrayLike
 ElementType = str
 
 
+def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:
+    """Normalize sparse results to the matrix API expected by this module."""
+
+    return cast(sp.csr_matrix, sp.csr_matrix(matrix))
+
+
+def _sparse_shape(matrix: Any) -> tuple[int, int]:
+    """Return a concrete 2D sparse shape for pyright and runtime callers."""
+
+    return cast(tuple[int, int], matrix.shape)
+
+
 @dataclass(frozen=True, slots=True)
 class AssemblyResult:
     """Sparse system assembled in COO triplet form."""
@@ -151,7 +163,7 @@ class AssemblyResult:
         return sp.coo_matrix((self.vals, (self.rows, self.cols)), shape=(self.ndof, self.ndof))
 
     def to_csr(self) -> sp.csr_matrix:
-        return self.to_coo().tocsr()
+        return _to_csr_matrix(self.to_coo())
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,15 +265,17 @@ class AxisymmetricFEMModel:
         return np.asarray(self.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=self.dtype)
 
     def pressure_rhs(self, pressure_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
-        pressure_arr = _normalize_pressure_values(pressure_values, self.pressure_to_rhs.shape[1], self.dtype)
+        _, nload = _sparse_shape(self.pressure_to_rhs)
+        pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
         if pressure_arr.size == 0:
             return np.zeros((self.ndof,), dtype=self.dtype)
         return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
 
     def traction_rhs(self, traction_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
+        _, ntraction_cols = _sparse_shape(self.traction_to_rhs)
         traction_arr = _normalize_traction_values(
             traction_values,
-            self.traction_to_rhs.shape[1] // 2,
+            ntraction_cols // 2,
             self.dtype,
         )
         if traction_arr.size == 0:
@@ -272,7 +286,8 @@ class AxisymmetricFEMModel:
         self,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        if self.temperature_to_rhs.shape[1] == 0:
+        _, ntemp_cols = _sparse_shape(self.temperature_to_rhs)
+        if ntemp_cols == 0:
             return np.zeros((self.ndof,), dtype=self.dtype)
         if nodal_temperature is None:
             raise ValueError("nodal_temperature is required because this model includes thermal materials")
@@ -309,10 +324,10 @@ class AxisymmetricFEMModel:
         )
         return ReducedAxisymmetricFEMModel(
             matrix=reduced.matrix,
-            body_force_to_rhs=self.body_force_to_rhs[reduced.free_dofs].tocsr(),
-            pressure_to_rhs=self.pressure_to_rhs[reduced.free_dofs].tocsr(),
-            traction_to_rhs=self.traction_to_rhs[reduced.free_dofs].tocsr(),
-            temperature_to_rhs=self.temperature_to_rhs[reduced.free_dofs].tocsr(),
+            body_force_to_rhs=_to_csr_matrix(self.body_force_to_rhs[reduced.free_dofs]),
+            pressure_to_rhs=_to_csr_matrix(self.pressure_to_rhs[reduced.free_dofs]),
+            traction_to_rhs=_to_csr_matrix(self.traction_to_rhs[reduced.free_dofs]),
+            temperature_to_rhs=_to_csr_matrix(self.temperature_to_rhs[reduced.free_dofs]),
             thermal_reference_rhs=(
                 apply_dirichlet(
                     self.stiffness,
@@ -398,27 +413,33 @@ class ReducedAxisymmetricFEMModel:
         return np.asarray(self.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=self.dtype)
 
     def pressure_rhs(self, pressure_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
-        pressure_arr = _normalize_pressure_values(pressure_values, self.pressure_to_rhs.shape[1], self.dtype)
+        _, nload = _sparse_shape(self.pressure_to_rhs)
+        pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
         if pressure_arr.size == 0:
-            return np.zeros((self.matrix.shape[0],), dtype=self.dtype)
+            nrow, _ = _sparse_shape(self.matrix)
+            return np.zeros((nrow,), dtype=self.dtype)
         return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
 
     def traction_rhs(self, traction_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
+        _, ntraction_cols = _sparse_shape(self.traction_to_rhs)
         traction_arr = _normalize_traction_values(
             traction_values,
-            self.traction_to_rhs.shape[1] // 2,
+            ntraction_cols // 2,
             self.dtype,
         )
         if traction_arr.size == 0:
-            return np.zeros((self.matrix.shape[0],), dtype=self.dtype)
+            nrow, _ = _sparse_shape(self.matrix)
+            return np.zeros((nrow,), dtype=self.dtype)
         return np.asarray(self.traction_to_rhs @ traction_arr.reshape(-1), dtype=self.dtype)
 
     def temperature_rhs(
         self,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        if self.temperature_to_rhs.shape[1] == 0:
-            return np.zeros((self.matrix.shape[0],), dtype=self.dtype)
+        _, ntemp_cols = _sparse_shape(self.temperature_to_rhs)
+        if ntemp_cols == 0:
+            nrow, _ = _sparse_shape(self.matrix)
+            return np.zeros((nrow,), dtype=self.dtype)
         if nodal_temperature is None:
             raise ValueError("nodal_temperature is required because this model includes thermal materials")
         temperature_arr = _normalize_nodal_temperature(
@@ -458,7 +479,8 @@ class ReducedAxisymmetricFEMModel:
             traction_values=traction_values,
             nodal_temperature=nodal_temperature,
         )
-        if self.matrix.shape[0] == 0:
+        nrow, _ = _sparse_shape(self.matrix)
+        if nrow == 0:
             return self.recover(np.zeros((0,), dtype=self.dtype))
         if solver is None:
             free_solution = spla.factorized(self.matrix.tocsc())(rhs)
@@ -472,7 +494,8 @@ class ReducedAxisymmetricFEMModel:
         [ArrayLike | None, ArrayLike | None, ArrayLike | None, ArrayLike | None],
         npt.NDArray[np.floating[Any]],
     ]:
-        if self.matrix.shape[0] == 0:
+        nrow, _ = _sparse_shape(self.matrix)
+        if nrow == 0:
 
             def solve_empty(
                 body_force: ArrayLike | None = None,
@@ -615,7 +638,9 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
         for local_edge, ((local_a, local_b), (xi, eta)) in enumerate(
             zip(edge_nodes, midside_parametric_points, strict=True)
         ):
-            edge_key = tuple(sorted((int(conn[local_a]), int(conn[local_b]))))
+            node_a = int(conn[local_a])
+            node_b = int(conn[local_b])
+            edge_key = (node_a, node_b) if node_a < node_b else (node_b, node_a)
             midpoint_index = edge_to_midpoint.get(edge_key)
             if midpoint_index is None:
                 midpoint = (_quad4_shape(xi, eta).astype(dtype, copy=False) @ coords).astype(
@@ -681,7 +706,9 @@ def _temperature_elevation_operator(
     edge_nodes = ((0, 1), (1, 2), (2, 3), (3, 0))
     for element_index, conn in enumerate(elevated.input_elements):
         for local_edge, (local_a, local_b) in enumerate(edge_nodes):
-            edge_key = tuple(sorted((int(conn[local_a]), int(conn[local_b]))))
+            node_a = int(conn[local_a])
+            node_b = int(conn[local_b])
+            edge_key = (node_a, node_b) if node_a < node_b else (node_b, node_a)
             if edge_key in edge_to_midpoint:
                 continue
             midpoint_index = int(elevated.analysis_elements[element_index, 4 + local_edge])
@@ -694,10 +721,12 @@ def _temperature_elevation_operator(
         cols.extend([int(node) for node in conn])
         vals.extend([0.25] * 4)
 
-    return sp.coo_matrix(
+    return _to_csr_matrix(
+        sp.coo_matrix(
         (np.asarray(vals, dtype=dtype), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))),
         shape=(n_analysis_nodes, n_input_nodes),
-    ).tocsr()
+        )
+    )
 
 
 def _analysis_temperature_for_element_type(
@@ -1288,16 +1317,18 @@ def _coo_operator_from_triplets(
     shape: tuple[int, int],
     dtype: np.dtype[Any],
 ) -> sp.csr_matrix:
-    return sp.coo_matrix(
-        (
-            np.asarray(vals, dtype=dtype),
+    return _to_csr_matrix(
+        sp.coo_matrix(
             (
-                np.asarray(rows, dtype=np.int64),
-                np.asarray(cols, dtype=np.int64),
+                np.asarray(vals, dtype=dtype),
+                (
+                    np.asarray(rows, dtype=np.int64),
+                    np.asarray(cols, dtype=np.int64),
+                ),
             ),
-        ),
-        shape=shape,
-    ).tocsr()
+            shape=shape,
+        )
+    )
 
 
 def _assemble_body_force_operator_rust(
@@ -1725,12 +1756,14 @@ def assemble_axisymmetric(
         thermal_reference_rhs = np.zeros((ndof,), dtype=dtype)
         temperature_arr = None
     else:
-        temperature_arr = _normalize_nodal_temperature(nodal_temperature, nodes_arr.shape[0], dtype)
+        temperature_arr = _normalize_nodal_temperature(
+            cast(ArrayLike, nodal_temperature), nodes_arr.shape[0], dtype
+        )
         if elevated is None:
             temperature_to_rhs = analysis_temperature_to_rhs
         else:
-            temperature_to_rhs = analysis_temperature_to_rhs @ _temperature_elevation_operator(
-                elevated, dtype
+            temperature_to_rhs = _to_csr_matrix(
+                analysis_temperature_to_rhs @ _temperature_elevation_operator(elevated, dtype)
             )
     rhs = np.asarray(thermal_reference_rhs, dtype=dtype).copy()
     rhs += np.asarray(body_force_to_rhs @ body_force_arr.reshape(-1), dtype=dtype)
@@ -1844,8 +1877,8 @@ def assemble_axisymmetric_model(
         if elevated is None:
             temperature_to_rhs = analysis_temperature_to_rhs
         else:
-            temperature_to_rhs = analysis_temperature_to_rhs @ _temperature_elevation_operator(
-                elevated, dtype
+            temperature_to_rhs = _to_csr_matrix(
+                analysis_temperature_to_rhs @ _temperature_elevation_operator(elevated, dtype)
             )
         n_temperature_nodes = nodes_arr.shape[0]
 
@@ -1854,7 +1887,7 @@ def assemble_axisymmetric_model(
         body_force_to_rhs=body_force_to_rhs,
         pressure_to_rhs=pressure_to_rhs,
         traction_to_rhs=traction_to_rhs,
-        temperature_to_rhs=temperature_to_rhs.tocsr(),
+        temperature_to_rhs=_to_csr_matrix(temperature_to_rhs),
         thermal_reference_rhs=np.asarray(thermal_reference_rhs, dtype=dtype),
         pressure_faces=pressure_faces_arr,
         traction_faces=traction_faces_arr,
@@ -2090,12 +2123,13 @@ def apply_dirichlet(
 ) -> ReducedSystem:
     """Eliminate prescribed degrees of freedom by free-dof partitioning."""
 
-    csr = matrix.tocsr()
+    csr = _to_csr_matrix(matrix)
+    nrow, ncol = _sparse_shape(csr)
     rhs_arr = np.asarray(rhs, dtype=csr.dtype).reshape(-1)
-    if csr.shape[0] != csr.shape[1]:
-        raise ValueError(f"matrix must be square; got {csr.shape}")
-    if rhs_arr.shape[0] != csr.shape[0]:
-        raise ValueError(f"rhs length {rhs_arr.shape[0]} does not match matrix size {csr.shape[0]}")
+    if nrow != ncol:
+        raise ValueError(f"matrix must be square; got {(nrow, ncol)}")
+    if rhs_arr.shape[0] != nrow:
+        raise ValueError(f"rhs length {rhs_arr.shape[0]} does not match matrix size {nrow}")
     prescribed = {} if prescribed is None else dict(prescribed)
     if prescribed:
         fixed_dofs = np.asarray(sorted(int(dof) for dof in prescribed), dtype=np.int64)
@@ -2103,20 +2137,20 @@ def apply_dirichlet(
     else:
         fixed_dofs = np.zeros((0,), dtype=np.int64)
         fixed_values = np.zeros((0,), dtype=rhs_arr.dtype)
-    if fixed_dofs.size and ((fixed_dofs < 0).any() or (fixed_dofs >= csr.shape[0]).any()):
+    if fixed_dofs.size and ((fixed_dofs < 0).any() or (fixed_dofs >= nrow).any()):
         raise ValueError("prescribed DOF index is out of bounds")
-    free_dofs = np.setdiff1d(np.arange(csr.shape[0], dtype=np.int64), fixed_dofs, assume_unique=True)
+    free_dofs = np.setdiff1d(np.arange(nrow, dtype=np.int64), fixed_dofs, assume_unique=True)
     reduced_rhs = rhs_arr[free_dofs].copy()
     if fixed_dofs.size:
         reduced_rhs -= csr[free_dofs][:, fixed_dofs] @ fixed_values
-    reduced_matrix = csr[free_dofs][:, free_dofs].tocsr()
+    reduced_matrix = _to_csr_matrix(csr[free_dofs][:, free_dofs])
     return ReducedSystem(
         matrix=reduced_matrix,
         rhs=reduced_rhs,
         free_dofs=free_dofs,
         fixed_dofs=fixed_dofs,
         fixed_values=fixed_values,
-        ndof=csr.shape[0],
+        ndof=nrow,
     )
 
 
@@ -2129,7 +2163,8 @@ def solve_dirichlet(
     """Solve the reduced sparse system after applying prescribed Dirichlet values."""
 
     reduced = apply_dirichlet(matrix, rhs, prescribed)
-    if reduced.matrix.shape[0] == 0:
+    nrow, _ = _sparse_shape(reduced.matrix)
+    if nrow == 0:
         return reduced.recover(np.zeros((0,), dtype=reduced.rhs.dtype))
     if solver is None:
         free_solution = spla.factorized(reduced.matrix.tocsc())(reduced.rhs)

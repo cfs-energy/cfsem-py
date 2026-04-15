@@ -1630,7 +1630,7 @@ def assemble_axisymmetric(
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+    _thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
         material_ids,
         thermal_material_table,
         dtype,
@@ -1644,8 +1644,6 @@ def assemble_axisymmetric(
     if thermal_material_table_arr is not None:
         if nodal_temperature is None:
             raise ValueError("nodal_temperature must be provided when thermal_material_table is provided")
-        if not np.array_equal(thermal_ids_arr, material_ids_arr):
-            raise ValueError("thermal_material_table must align with material_table material IDs")
     elif nodal_temperature is not None:
         raise ValueError("thermal_material_table must be provided when nodal_temperature is provided")
     body_force_arr = _normalize_body_force(body_force, elements_arr.shape[0], dtype)
@@ -1762,14 +1760,12 @@ def assemble_axisymmetric_model(
     dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
     nodes_arr = _normalize_nodes(nodes, dtype)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+    _thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
         material_ids,
         thermal_material_table,
         dtype,
         require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
     )
-    if thermal_material_table_arr is not None and not np.array_equal(thermal_ids_arr, material_ids_arr):
-        raise ValueError("thermal_material_table must align with material_table material IDs")
     pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
     traction_faces_arr = _normalize_traction_faces(traction_faces)
     quadrature_code = _quadrature_code(quadrature)
@@ -1876,7 +1872,7 @@ def quadrature_field_operators_axisymmetric(
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+    _thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
         material_ids,
         thermal_material_table,
         dtype,
@@ -1887,9 +1883,6 @@ def quadrature_field_operators_axisymmetric(
             f"material_ids has length {material_ids_arr.shape[0]}, "
             f"but elements has {elements_arr.shape[0]} rows"
         )
-    if thermal_material_table_arr is not None and not np.array_equal(thermal_ids_arr, material_ids_arr):
-        raise ValueError("thermal_material_table must align with material_table material IDs")
-
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
     _validate_element_quadrature_combo(normalized_element_type, quadrature_code)

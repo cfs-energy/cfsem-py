@@ -77,7 +77,8 @@ def gradient_order4(z: NDArray, xmesh: NDArray, ymesh: NDArray) -> tuple[NDArray
         "This method is only implemented for a regular grid"
     )
 
-    dzdx = np.zeros_like(z)
+    accumulator_dtype = np.result_type(z, np.float64)
+    dzdx = np.zeros(z.shape, dtype=accumulator_dtype)
     for offs, w in _DDX_CENTRAL_ORDER4:
         start = int(2 + offs)
         end = int(nx - 2 + offs)
@@ -89,7 +90,7 @@ def gradient_order4(z: NDArray, xmesh: NDArray, ymesh: NDArray) -> tuple[NDArray
     for offs, w in _DDX_BWD_ORDER4:
         dzdx[-2:, :] += w * z[right_rows + int(offs), :] / dx  # One-sided difference on right side
 
-    dzdy = np.zeros_like(z)
+    dzdy = np.zeros(z.shape, dtype=accumulator_dtype)
     for offs, w in _DDX_CENTRAL_ORDER4:
         start = int(2 + offs)
         end = int(ny - 2 + offs)
@@ -190,17 +191,12 @@ def _validate_flux_mesh_inputs(
             raise ValueError("meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')")
         raise ValueError(f"meshes and current_density must all have shape {expected_shape}")
 
-    # If the two axes have different lengths, we can also check the axis content without ambiguity.
+    # If the two axes have different lengths, the expected `indexing="ij"` layout
+    # is no longer ambiguous, so we can validate the mesh-axis content directly.
     if rgrid.size != zgrid.size:
         r_axis_matches = np.allclose(rmesh[:, 0], rgrid, rtol=tol, atol=tol)
         z_axis_matches = np.allclose(zmesh[0, :], zgrid, rtol=tol, atol=tol)
         if not (r_axis_matches and z_axis_matches):
-            if np.allclose(rmesh[0, :], rgrid, rtol=tol, atol=tol) and np.allclose(
-                zmesh[:, 0], zgrid, rtol=tol, atol=tol
-            ):
-                raise ValueError(
-                    "meshes appear transposed; use np.meshgrid(..., indexing='ij')"
-                )
             raise ValueError("meshes must be consistent with grids and use np.meshgrid(..., indexing='ij')")
 
 

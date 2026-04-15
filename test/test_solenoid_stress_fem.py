@@ -1270,3 +1270,342 @@ def test_quad9_quadrature_field_operator_shapes(quadrature: str) -> None:
     assert operators.ndof == 2 * elevated.analysis_nodes.shape[0]
     assert operators.strain_operator.shape == (elements.shape[0] * nq * 4, operators.ndof)
     assert operators.stress_operator.shape == (elements.shape[0] * nq * 4, operators.ndof)
+
+
+def test_model_and_reduced_model_zero_load_and_solver_branches() -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+
+    model = fem.assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+    )
+    assert np.allclose(model.pressure_rhs(), 0.0)
+    assert np.allclose(model.traction_rhs(), 0.0)
+    assert np.allclose(model.temperature_rhs(), 0.0)
+
+    displacement = model.solve_dirichlet(body_force=np.array([0.0, 0.0], dtype=dtype))
+    assert displacement.shape == (model.ndof,)
+
+    reduced = model.apply_dirichlet()
+    assert np.allclose(reduced.pressure_rhs(), 0.0)
+    assert np.allclose(reduced.traction_rhs(), 0.0)
+    assert np.allclose(reduced.temperature_rhs(), 0.0)
+
+    solver_called = {"count": 0}
+
+    def solver(mat: sp.csr_matrix, rhs: np.ndarray) -> np.ndarray:
+        solver_called["count"] += 1
+        return spla.factorized(mat.tocsc())(rhs)
+
+    reduced.solve(body_force=np.array([0.0, 0.0], dtype=dtype), solver=solver)
+    assert solver_called["count"] == 1
+
+    all_fixed = {dof: 0.0 for dof in range(model.ndof)}
+    reduced_empty = model.apply_dirichlet(all_fixed)
+    assert reduced_empty.matrix.shape == (0, 0)
+    assert np.allclose(reduced_empty.solve(), 0.0)
+    assert np.allclose(reduced_empty.factorized_solver()(), 0.0)
+
+
+def test_thermal_model_missing_temperature_and_alignment_validation_branches() -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    thermal_material = fem.isotropic_axisymmetric_thermal_material(1.2e-5, 293.15, dtype=dtype)
+
+    model = fem.assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        thermal_material_table=np.asarray([thermal_material]),
+    )
+    nodal_temperature = np.full(nodes.shape[0], 300.0, dtype=dtype)
+    assert model.temperature_rhs(nodal_temperature).shape == (model.ndof,)
+    with pytest.raises(ValueError, match="nodal_temperature is required"):
+        model.temperature_rhs()
+    reduced = model.apply_dirichlet()
+    assert reduced.temperature_rhs(nodal_temperature).shape == (reduced.matrix.shape[0],)
+    with pytest.raises(ValueError, match="nodal_temperature is required"):
+        reduced.temperature_rhs()
+
+    with pytest.raises(ValueError, match="nodal_temperature must be provided"):
+        assemble_axisymmetric(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+            material_table=np.asarray([material]),
+            body_force=np.array([0.0, 0.0], dtype=dtype),
+            thermal_material_table=np.asarray([thermal_material]),
+        )
+
+    with pytest.raises(ValueError, match="thermal_material_table must be provided"):
+        assemble_axisymmetric(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+            material_table=np.asarray([material]),
+            body_force=np.array([0.0, 0.0], dtype=dtype),
+            nodal_temperature=np.full(nodes.shape[0], 300.0, dtype=dtype),
+        )
+
+    with pytest.raises(ValueError, match="missing from thermal_material_table"):
+        assemble_axisymmetric(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.array([0], dtype=np.uint64),
+            material_table={0: material},
+            body_force=np.array([0.0, 0.0], dtype=dtype),
+            thermal_material_table={1: thermal_material},
+            nodal_temperature=nodal_temperature,
+        )
+
+    with pytest.raises(ValueError, match="missing from thermal_material_table"):
+        fem.assemble_axisymmetric_model(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.array([0], dtype=np.uint64),
+            material_table={0: material},
+            thermal_material_table={1: thermal_material},
+        )
+
+    with pytest.raises(ValueError, match="missing from thermal_material_table"):
+        fem.quadrature_field_operators_axisymmetric(
+            nodes,
+            elements,
+            np.array([0], dtype=np.uint64),
+            {0: material},
+            thermal_material_table={1: thermal_material},
+        )
+
+    with pytest.raises(ValueError, match="nodal_temperature is required"):
+        evaluate_axisymmetric_strain_stress_at_quadrature(
+            nodes,
+            elements,
+            np.zeros(elements.shape[0], dtype=np.uint64),
+            np.asarray([material]),
+            np.zeros((nodes.shape[0], 2), dtype=dtype),
+            thermal_material_table=np.asarray([thermal_material]),
+        )
+
+
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_python_fallback_assembly_matches_rust_and_validation_branches(element_type: str) -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    body_force = np.array([[1.5e4, -2.5e4]], dtype=dtype)
+    pressure_faces = np.array([[0, 0], [0, 1], [0, 2], [0, 3]], dtype=np.uint64)
+    pressure_values = np.array([1.0e5, -2.0e5, 3.0e5, -4.0e5], dtype=dtype)
+    traction_faces = pressure_faces.copy()
+    traction_values = np.array(
+        [[1.0e5, 0.0], [0.0, 2.0e5], [-1.5e5, 1.0e5], [2.5e5, -3.0e5]],
+        dtype=dtype,
+    )
+    quadrature_code = fem._quadrature_code("gl3")
+
+    analysis_nodes, analysis_elements, _elevated = fem._analysis_mesh_for_element_type(nodes, elements, element_type)
+    python_assembly = fem._assemble_axisymmetric_python(
+        analysis_nodes,
+        analysis_elements,
+        np.zeros(analysis_elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        body_force,
+        pressure_faces,
+        pressure_values,
+        traction_faces,
+        traction_values,
+        quadrature_code,
+        np.dtype(dtype),
+        element_type,
+    )
+    rust_assembly = assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=body_force,
+        pressure_faces=pressure_faces,
+        pressure_values=pressure_values,
+        traction_faces=traction_faces,
+        traction_values=traction_values,
+        quadrature="gl3",
+        element_type=element_type,
+    )
+
+    assert np.allclose(python_assembly.to_csr().toarray(), rust_assembly.to_csr().toarray(), rtol=1.0e-12, atol=2.0e-4)
+    assert np.allclose(python_assembly.rhs, rust_assembly.rhs)
+
+    bad_face = np.array([[0, 4]], dtype=np.uint64)
+    with pytest.raises(ValueError, match="invalid local face"):
+        fem._assemble_axisymmetric_python(
+            analysis_nodes,
+            analysis_elements,
+            np.zeros(analysis_elements.shape[0], dtype=np.uint64),
+            np.asarray([material]),
+            body_force,
+            bad_face,
+            np.array([1.0], dtype=dtype),
+            np.zeros((0, 2), dtype=np.uint64),
+            np.zeros((0, 2), dtype=dtype),
+            quadrature_code,
+            np.dtype(dtype),
+            element_type,
+        )
+
+    with pytest.raises(ValueError, match="pressure_faces references element 1"):
+        fem._assemble_axisymmetric_python(
+            analysis_nodes,
+            analysis_elements,
+            np.zeros(analysis_elements.shape[0], dtype=np.uint64),
+            np.asarray([material]),
+            body_force,
+            np.array([[1, 0]], dtype=np.uint64),
+            np.array([1.0], dtype=dtype),
+            np.zeros((0, 2), dtype=np.uint64),
+            np.zeros((0, 2), dtype=dtype),
+            quadrature_code,
+            np.dtype(dtype),
+            element_type,
+        )
+
+    with pytest.raises(ValueError, match="traction_faces references element 1"):
+        fem._assemble_axisymmetric_python(
+            analysis_nodes,
+            analysis_elements,
+            np.zeros(analysis_elements.shape[0], dtype=np.uint64),
+            np.asarray([material]),
+            body_force,
+            np.zeros((0, 2), dtype=np.uint64),
+            np.zeros((0,), dtype=dtype),
+            np.array([[1, 0]], dtype=np.uint64),
+            np.array([[1.0, 0.0]], dtype=dtype),
+            quadrature_code,
+            np.dtype(dtype),
+            element_type,
+        )
+
+
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_python_quadrature_operator_fallback_matches_rust(element_type: str) -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    analysis_nodes, analysis_elements, _elevated = fem._analysis_mesh_for_element_type(nodes, elements, element_type)
+
+    python_ops = fem._assemble_quadrature_field_operators_python(
+        analysis_nodes,
+        analysis_elements,
+        np.zeros(analysis_elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        fem._quadrature_code("gl3"),
+        np.dtype(dtype),
+        element_type,
+    )
+    rust_ops = fem.quadrature_field_operators_axisymmetric(
+        nodes,
+        elements,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        quadrature="gl3",
+        element_type=element_type,
+    )
+
+    assert np.allclose(python_ops.points_rz, rust_ops.points_rz)
+    assert np.allclose(python_ops.strain_operator.toarray(), rust_ops.strain_operator.toarray())
+    assert np.allclose(python_ops.stress_operator.toarray(), rust_ops.stress_operator.toarray())
+    assert np.allclose(python_ops.thermal_strain_constant, 0.0)
+    assert np.allclose(python_ops.thermal_stress_constant, 0.0)
+
+
+def test_private_helper_and_validation_branches_not_hit_by_public_paths() -> None:
+    dtype = np.dtype(np.float64)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+
+    with pytest.raises(ValueError, match="unsupported element_type"):
+        fem._normalize_element_type("tri3")
+    with pytest.raises(ValueError, match="unsupported quadrature code"):
+        fem._validate_element_quadrature_combo("quad4", 2)
+
+    assert fem._resolve_float_dtype({"a": np.array([1.0], dtype=np.float64)}) == np.dtype(np.float64)
+    empty_elevation = fem._temperature_elevation_operator(None, dtype)
+    assert empty_elevation.shape == (0, 0)
+
+    with pytest.raises(ValueError, match="material_ids must have shape"):
+        fem._normalize_thermal_material_table(np.zeros((1, 1), dtype=np.uint64), np.zeros((1, 5)), dtype)
+    with pytest.raises(ValueError, match="same mapping/dense convention"):
+        fem._normalize_thermal_material_table(
+            np.zeros((1,), dtype=np.uint64),
+            {0: np.zeros((5,))},
+            dtype,
+            require_mapping=False,
+        )
+    with pytest.raises(ValueError, match="thermal_material_table mapping cannot be empty"):
+        fem._normalize_thermal_material_table(np.zeros((1,), dtype=np.uint64), {}, dtype)
+    normalized_ids, thermal_table = fem._normalize_thermal_material_table(
+        np.array([4, 2, 4], dtype=np.uint64),
+        {2: np.array([1.0, 2.0, 3.0, 0.0, 4.0]), 4: np.array([5.0, 6.0, 7.0, 0.0, 8.0])},
+        dtype,
+    )
+    assert np.array_equal(normalized_ids, np.array([1, 0, 1], dtype=np.uint64))
+    assert thermal_table.shape == (2, 5)
+    with pytest.raises(ValueError, match=r"thermal_material_table\[0\] must have shape"):
+        fem._normalize_thermal_material_table(
+            np.zeros((1,), dtype=np.uint64),
+            {0: np.zeros((4,))},
+            dtype,
+        )
+    with pytest.raises(ValueError, match="thermal_material_table must have shape"):
+        fem._normalize_thermal_material_table(np.zeros((1,), dtype=np.uint64), np.zeros((1, 4)), dtype)
+    with pytest.raises(ValueError, match="shear thermal expansion must be zero"):
+        fem._normalize_thermal_material_table(
+            np.zeros((1,), dtype=np.uint64),
+            np.array([[1.0, 1.0, 1.0, 1.0, 0.0]]),
+            dtype,
+        )
+
+    with pytest.raises(ValueError, match=r"nodal_temperature must have shape \(3,\)"):
+        fem._normalize_nodal_temperature(np.zeros((3, 1)), 3, dtype)
+    with pytest.raises(ValueError, match="pressure_values must have shape"):
+        fem._normalize_pressure_values(np.zeros((1, 1)), 1, dtype)
+    with pytest.raises(ValueError, match="pressure_values has 2 entries, but expected 1"):
+        fem._normalize_pressure_values(np.zeros((2,)), 1, dtype)
+
+    assert fem._quad_face_reference(0, 0.25) == (0.25, -1.0, (1.0, 0.0))
+    assert fem._quad_face_reference(1, 0.25) == (1.0, 0.25, (0.0, 1.0))
+    assert fem._quad_face_reference(2, 0.25) == (-0.25, 1.0, (-1.0, 0.0))
+    assert fem._quad_face_reference(3, 0.25) == (-1.0, -0.25, (0.0, -1.0))
+    with pytest.raises(ValueError, match="invalid local face"):
+        fem._quad_face_reference(4, 0.0)
+
+    shape = fem._quad9_shape(0.0, 0.0)
+    grad = fem._quad9_grad_ref(0.0, 0.0)
+    assert shape.shape == (9,)
+    assert np.isclose(shape.sum(), 1.0)
+    assert grad.shape == (9, 2)
+    assert fem._element_shape("quad9", 0.0, 0.0).shape == (9,)
+    assert fem._element_grad_ref("quad9", 0.0, 0.0).shape == (9, 2)
+
+    with pytest.raises(ValueError, match="too close to zero"):
+        fem._axisymmetric_b_matrix(np.array([1.0]), np.array([[0.0, 0.0]]), 0.0, dtype)
+
+    inverted_coords = np.array([[0.5, 0.0], [0.5, 0.2], [1.0, 0.2], [1.0, 0.0]], dtype=np.float64)
+    with pytest.raises(ValueError, match="non-positive element Jacobian determinant"):
+        next(fem._volume_samples(inverted_coords, "quad4", 3, dtype))
+
+    negative_radius_coords = np.array([[-1.0, 0.0], [-0.5, 0.0], [-0.5, 0.2], [-1.0, 0.2]], dtype=np.float64)
+    with pytest.raises(ValueError, match="negative radius"):
+        next(fem._volume_samples(negative_radius_coords, "quad4", 3, dtype))
+    with pytest.raises(ValueError, match="negative radius"):
+        next(fem._face_samples(negative_radius_coords, "quad4", 0, 3, dtype))
+
+    degenerate_face_coords = np.array([[0.5, 0.0], [0.5, 0.0], [0.5, 0.2], [0.5, 0.2]], dtype=np.float64)
+    with pytest.raises(ValueError, match="degenerate face tangent"):
+        next(fem._face_samples(degenerate_face_coords, "quad4", 0, 3, dtype))
+
+    ortho = fem.orthotropic_axisymmetric_thermal_material(1.0, 2.0, 3.0, reference_temperature=4.0, dtype=dtype)
+    assert np.allclose(ortho, np.array([1.0, 2.0, 3.0, 0.0, 4.0], dtype=dtype))

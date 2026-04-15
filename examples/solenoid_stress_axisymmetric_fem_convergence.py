@@ -35,7 +35,7 @@ from matplotlib import pyplot as plt
 
 from cfsem.solenoid_stress.axisymmetric_fem import (
     apply_dirichlet,
-    assemble_axisymmetric,
+    assemble_axisymmetric_model,
     cfsem_radial_material,
     element_quadrature_axisymmetric,
     infer_quad9_mesh,
@@ -327,18 +327,18 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
     bz_mean = np.sum(bz_weighted, axis=1) / np.sum(weights, axis=1)
     body_force = np.column_stack((CURRENT_DENSITY * bz_mean, np.zeros(nelem, dtype=np.float64)))
 
-    assembly = assemble_axisymmetric(
+    model = assemble_axisymmetric_model(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(nelem, dtype=np.uint64),
         material_table=np.asarray([material]),
-        body_force=body_force,
         quadrature=QUADRATURE,
         element_type=ELEMENT_TYPE,
     )
+    rhs = model.rhs(body_force=body_force)
     reduced = apply_dirichlet(
-        assembly.to_csr(),
-        assembly.rhs,
+        model.stiffness,
+        rhs,
         prescribed=prescribed_z_dofs(analysis_nodes.shape[0]),
     )
     fem_build_seconds = perf_counter() - build_start
@@ -369,7 +369,7 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
 
     return (
         Profile(radius=radius, u_r=u_r, s_rr=s_rr, s_tt=s_tt),
-        assembly.ndof,
+        model.ndof,
         fem_build_seconds,
         fem_factorize_seconds,
         fem_solve_seconds,

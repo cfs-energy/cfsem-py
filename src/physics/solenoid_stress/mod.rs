@@ -453,7 +453,7 @@ mod types;
 
 pub use crate::mesh::elements::quad2d::{quad4, quad9};
 pub use crate::mesh::{MeshView, QuadratureRule};
-pub use assembly::{assemble_axisymmetric_quad4, assemble_axisymmetric_quad9};
+pub use assembly::{assemble_stiffness_quad4, assemble_stiffness_quad9};
 pub use geometry::{
     ElementMeasures, ElementQuadrature, element_measures_quad4, element_measures_quad9,
     element_quadrature_quad4, element_quadrature_quad9,
@@ -467,6 +467,6 @@ pub use recovery::{
     QuadratureFieldOperators, quadrature_field_operators_quad4, quadrature_field_operators_quad9,
 };
 pub use types::{
-    AssemblyResult, DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad,
+    DOF_PER_NODE, PressureLoad, Real, StiffnessTriplets, ThermalMaterial, TractionLoad,
     dof_per_element,
 };

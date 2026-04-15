@@ -25,6 +25,13 @@ The FEM path supports:
 - reusable sparse load operators for body force, pressure, traction, and nodal-temperature thermal strain,
 - quadrature-point recovery operators for strain and stress.
 
+The intended workflow is:
+
+1. call `assemble_axisymmetric_model(...)` once,
+2. build each load vector with `model.rhs(...)` or the exposed sparse operators,
+3. apply boundary conditions with `apply_dirichlet(...)`,
+4. solve the reduced sparse system with your solver of choice.
+
 ::: cfsem.solenoid_stress.axisymmetric_fem
 
 ## Analytic Reference Formulas

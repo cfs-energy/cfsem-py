@@ -12,7 +12,6 @@ from cfsem.solenoid_stress.axisymmetric_fem import (
     element_quadrature_axisymmetric,
     evaluate_axisymmetric_strain_stress_at_quadrature,
     isotropic_axisymmetric_material,
-    assemble_axisymmetric,
 )
 from cfsem.solenoid_stress.solenoid_1d import (
     SolenoidStress1D,
@@ -104,6 +103,42 @@ def solve_with_factorized_dirichlet(
     return reduced.recover(spla.factorized(reduced.matrix.tocsc())(reduced.rhs))
 
 
+def assemble_model_and_rhs(
+    *,
+    nodes: np.ndarray,
+    elements: np.ndarray,
+    material_ids: np.ndarray,
+    material_table: np.ndarray | dict[int, np.ndarray],
+    body_force: np.ndarray | list[float] | tuple[float, float] | None = None,
+    pressure_faces: np.ndarray | None = None,
+    pressure_values: np.ndarray | None = None,
+    traction_faces: np.ndarray | None = None,
+    traction_values: np.ndarray | None = None,
+    thermal_material_table: np.ndarray | dict[int, np.ndarray] | None = None,
+    nodal_temperature: np.ndarray | None = None,
+    quadrature: str = "gl3",
+    element_type: str = "quad4",
+) -> tuple[fem.AxisymmetricFEMModel, np.ndarray]:
+    model = fem.assemble_axisymmetric_model(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
+        pressure_faces=pressure_faces,
+        traction_faces=traction_faces,
+        thermal_material_table=thermal_material_table,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    rhs = model.rhs(
+        body_force=body_force,
+        pressure_values=pressure_values,
+        traction_values=traction_values,
+        nodal_temperature=nodal_temperature,
+    )
+    return model, rhs
+
+
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize(("nr", "nz"), AREA_VOLUME_MESHES, ids=["single", "refined"])
@@ -153,7 +188,7 @@ def test_body_force_total_matches_requested_total_force(
     total_force = np.array([1234.0, -432.0], dtype=dtype)
     density = total_force / measures.swept_volumes.sum()
 
-    assembly = assemble_axisymmetric(
+    model, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -162,7 +197,8 @@ def test_body_force_total_matches_requested_total_force(
         quadrature=quadrature,
     )
 
-    rhs = assembly.rhs.reshape(-1, 2)
+    assert model.stiffness.shape == (model.ndof, model.ndof)
+    rhs = rhs.reshape(-1, 2)
     rtol, atol = tolerance(dtype)
     assert np.allclose(rhs[:, 0].sum(), total_force[0], rtol=rtol, atol=max(atol, 1.0e-4))
     assert np.allclose(rhs[:, 1].sum(), total_force[1], rtol=rtol, atol=max(atol, 1.0e-4))
@@ -170,7 +206,7 @@ def test_body_force_total_matches_requested_total_force(
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
-def test_axisymmetric_model_rhs_matches_direct_assembly(dtype: DType, quadrature: str) -> None:
+def test_axisymmetric_model_rhs_matches_operator_sum(dtype: DType, quadrature: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
     pressure_faces = np.vstack([inner_faces, outer_faces])
@@ -191,22 +227,18 @@ def test_axisymmetric_model_rhs_matches_direct_assembly(dtype: DType, quadrature
         pressure_faces=pressure_faces,
         quadrature=quadrature,
     )
-    assembly = assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
-        body_force=body_force,
-        pressure_faces=pressure_faces,
-        pressure_values=pressure_values,
-        quadrature=quadrature,
-    )
+    rhs = model.rhs(body_force=body_force, pressure_values=pressure_values)
+    body_force_arr = fem._normalize_body_force(body_force, elements.shape[0], np.dtype(dtype))
+    pressure_arr = fem._normalize_pressure_values(pressure_values, pressure_faces.shape[0], np.dtype(dtype))
 
-    assert np.allclose(model.stiffness.toarray(), assembly.to_csr().toarray())
-    assert np.allclose(model.rhs(body_force=body_force, pressure_values=pressure_values), assembly.rhs)
+    expected_rhs = np.asarray(model.thermal_reference_rhs, dtype=dtype).copy()
+    expected_rhs += np.asarray(model.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=dtype)
+    expected_rhs += np.asarray(model.pressure_to_rhs @ pressure_arr, dtype=dtype)
+
+    assert np.allclose(rhs, expected_rhs)
 
 
-def test_one_shot_assembly_dtype_resolution_includes_material_tables() -> None:
+def test_model_dtype_resolution_includes_material_tables() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
     thermal_material = fem.isotropic_axisymmetric_thermal_material(
@@ -216,15 +248,6 @@ def test_one_shot_assembly_dtype_resolution_includes_material_tables() -> None:
     )
     nodal_temperature = np.linspace(294.0, 301.0, nodes.shape[0], dtype=np.float32)
 
-    assembly = assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
-        body_force=np.array([0.0, 0.0], dtype=np.float32),
-        thermal_material_table=np.asarray([thermal_material]),
-        nodal_temperature=nodal_temperature,
-    )
     model = fem.assemble_axisymmetric_model(
         nodes=nodes,
         elements=elements,
@@ -233,10 +256,12 @@ def test_one_shot_assembly_dtype_resolution_includes_material_tables() -> None:
         thermal_material_table=np.asarray([thermal_material]),
     )
 
-    assert assembly.vals.dtype == np.float64
-    assert assembly.rhs.dtype == np.float64
-    assert assembly.to_csr().dtype == np.float64
     assert model.dtype == np.dtype(np.float64)
+    assert model.stiffness.dtype == np.float64
+    assert model.rhs(
+        body_force=np.array([0.0, 0.0], dtype=np.float32),
+        nodal_temperature=nodal_temperature,
+    ).dtype == np.float64
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
@@ -255,7 +280,12 @@ def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType,
         quadrature=quadrature,
     )
     prescribed = prescribed_z_dofs(nodes.shape[0])
-    solve_case = model.factorized_solver(prescribed=prescribed)
+    reduced_zero = fem.apply_dirichlet(
+        model.stiffness,
+        np.zeros(model.ndof, dtype=dtype),
+        prescribed=prescribed,
+    )
+    solve_free = spla.factorized(reduced_zero.matrix.tocsc())
 
     cases = [
         (
@@ -280,28 +310,20 @@ def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType,
 
     rtol, atol = tolerance(dtype)
     for body_force, pressure_values in cases:
-        assembly = assemble_axisymmetric(
-            nodes=nodes,
-            elements=elements,
-            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-            material_table=np.asarray([material]),
-            body_force=body_force,
-            pressure_faces=pressure_faces,
-            pressure_values=pressure_values,
-            quadrature=quadrature,
-        )
+        rhs = model.rhs(body_force=body_force, pressure_values=pressure_values)
         expected = solve_with_factorized_dirichlet(
-            assembly.to_csr(),
-            assembly.rhs,
+            model.stiffness,
+            rhs,
             prescribed=prescribed,
         )
-        actual = solve_case(body_force, pressure_values)
+        reduced = fem.apply_dirichlet(model.stiffness, rhs, prescribed=prescribed)
+        actual = reduced.recover(solve_free(reduced.rhs))
         assert np.allclose(actual, expected, rtol=rtol, atol=max(atol, 1.0e-6))
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
-def test_traction_model_rhs_matches_direct_assembly(quadrature: str, element_type: str) -> None:
+def test_traction_model_rhs_matches_operator_sum(quadrature: str, element_type: str) -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
@@ -333,29 +355,19 @@ def test_traction_model_rhs_matches_direct_assembly(quadrature: str, element_typ
         quadrature=quadrature,
         element_type=element_type,
     )
-    assembly = assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
+    rhs = model.rhs(
         body_force=body_force,
-        pressure_faces=pressure_faces,
         pressure_values=pressure_values,
-        traction_faces=traction_faces,
         traction_values=traction_values,
-        quadrature=quadrature,
-        element_type=element_type,
     )
-
-    assert np.allclose(model.stiffness.toarray(), assembly.to_csr().toarray())
-    assert np.allclose(
-        model.rhs(
-            body_force=body_force,
-            pressure_values=pressure_values,
-            traction_values=traction_values,
-        ),
-        assembly.rhs,
-    )
+    body_force_arr = fem._normalize_body_force(body_force, elements.shape[0], np.dtype(dtype))
+    pressure_arr = fem._normalize_pressure_values(pressure_values, pressure_faces.shape[0], np.dtype(dtype))
+    traction_arr = fem._normalize_traction_values(traction_values, traction_faces.shape[0], np.dtype(dtype))
+    expected_rhs = np.asarray(model.thermal_reference_rhs, dtype=dtype).copy()
+    expected_rhs += np.asarray(model.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=dtype)
+    expected_rhs += np.asarray(model.pressure_to_rhs @ pressure_arr, dtype=dtype)
+    expected_rhs += np.asarray(model.traction_to_rhs @ traction_arr.reshape(-1), dtype=dtype)
+    assert np.allclose(rhs, expected_rhs)
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
@@ -374,7 +386,7 @@ def test_pressure_and_traction_superpose_linearly(quadrature: str, element_type:
         ]
     )
 
-    pressure_only = assemble_axisymmetric(
+    pressure_model, pressure_rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -385,7 +397,7 @@ def test_pressure_and_traction_superpose_linearly(quadrature: str, element_type:
         quadrature=quadrature,
         element_type=element_type,
     )
-    traction_only = assemble_axisymmetric(
+    traction_model, traction_rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -396,7 +408,7 @@ def test_pressure_and_traction_superpose_linearly(quadrature: str, element_type:
         quadrature=quadrature,
         element_type=element_type,
     )
-    combined = assemble_axisymmetric(
+    combined_model, combined_rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -410,8 +422,9 @@ def test_pressure_and_traction_superpose_linearly(quadrature: str, element_type:
         element_type=element_type,
     )
 
-    assert np.allclose(combined.to_csr().toarray(), pressure_only.to_csr().toarray())
-    assert np.allclose(combined.rhs, pressure_only.rhs + traction_only.rhs)
+    assert np.allclose(combined_model.stiffness.toarray(), pressure_model.stiffness.toarray())
+    assert np.allclose(combined_model.stiffness.toarray(), traction_model.stiffness.toarray())
+    assert np.allclose(combined_rhs, pressure_rhs + traction_rhs)
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
@@ -425,7 +438,7 @@ def test_radial_traction_on_outer_face_matches_expected_total_force(
     nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=2, nz=1, dtype=dtype)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=2, nz=1)
     traction = 3.5e5
-    assembly = assemble_axisymmetric(
+    model, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -437,7 +450,8 @@ def test_radial_traction_on_outer_face_matches_expected_total_force(
         element_type=element_type,
     )
 
-    rhs = assembly.rhs.reshape(-1, 2)
+    assert model.stiffness.shape == (model.ndof, model.ndof)
+    rhs = rhs.reshape(-1, 2)
     expected_force = traction * 2.0 * np.pi * ro * height
     assert np.allclose(rhs[:, 1], 0.0)
     assert np.isclose(rhs[:, 0].sum(), expected_force)
@@ -451,7 +465,7 @@ def test_axial_traction_on_top_face_matches_expected_total_force(quadrature: str
     nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=2, nz=1, dtype=dtype)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=2, nz=1)
     traction = -4.0e5
-    assembly = assemble_axisymmetric(
+    model, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -463,7 +477,8 @@ def test_axial_traction_on_top_face_matches_expected_total_force(quadrature: str
         element_type=element_type,
     )
 
-    rhs = assembly.rhs.reshape(-1, 2)
+    assert model.stiffness.shape == (model.ndof, model.ndof)
+    rhs = rhs.reshape(-1, 2)
     expected_force = traction * np.pi * (ro**2 - ri**2)
     assert np.allclose(rhs[:, 0], 0.0)
     assert np.isclose(rhs[:, 1].sum(), expected_force)
@@ -482,7 +497,7 @@ def test_pressure_matches_equivalent_normal_traction_on_straight_faces(
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=2, nz=1)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
 
-    outer_pressure = assemble_axisymmetric(
+    _outer_pressure_model, outer_pressure_rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -493,7 +508,7 @@ def test_pressure_matches_equivalent_normal_traction_on_straight_faces(
         quadrature=quadrature,
         element_type=element_type,
     )
-    outer_traction = assemble_axisymmetric(
+    _outer_traction_model, outer_traction_rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -504,7 +519,7 @@ def test_pressure_matches_equivalent_normal_traction_on_straight_faces(
         quadrature=quadrature,
         element_type=element_type,
     )
-    top_pressure = assemble_axisymmetric(
+    _top_pressure_model, top_pressure_rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -515,7 +530,7 @@ def test_pressure_matches_equivalent_normal_traction_on_straight_faces(
         quadrature=quadrature,
         element_type=element_type,
     )
-    top_traction = assemble_axisymmetric(
+    _top_traction_model, top_traction_rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -527,13 +542,15 @@ def test_pressure_matches_equivalent_normal_traction_on_straight_faces(
         element_type=element_type,
     )
 
-    assert np.allclose(outer_pressure.rhs, outer_traction.rhs)
-    assert np.allclose(top_pressure.rhs, top_traction.rhs)
+    assert np.allclose(outer_pressure_rhs, outer_traction_rhs)
+    assert np.allclose(top_pressure_rhs, top_traction_rhs)
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
-def test_factorized_solver_reuses_stiffness_with_varying_traction(quadrature: str, element_type: str) -> None:
+def test_factorized_solve_reuses_stiffness_with_varying_traction(
+    quadrature: str, element_type: str
+) -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
@@ -550,7 +567,12 @@ def test_factorized_solver_reuses_stiffness_with_varying_traction(quadrature: st
         element_type=element_type,
     )
     prescribed = prescribed_z_dofs(model.ndof // 2)
-    solve_case = model.factorized_solver(prescribed=prescribed)
+    reduced_zero = fem.apply_dirichlet(
+        model.stiffness,
+        np.zeros(model.ndof, dtype=dtype),
+        prescribed=prescribed,
+    )
+    solve_free = spla.factorized(reduced_zero.matrix.tocsc())
 
     cases = [
         (
@@ -574,31 +596,24 @@ def test_factorized_solver_reuses_stiffness_with_varying_traction(quadrature: st
     ]
 
     for pressure_values, traction_values in cases:
-        assembly = assemble_axisymmetric(
-            nodes=nodes,
-            elements=elements,
-            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-            material_table=np.asarray([material]),
+        rhs = model.rhs(
             body_force=np.array([0.0, 0.0], dtype=dtype),
-            pressure_faces=outer_faces,
             pressure_values=pressure_values,
-            traction_faces=top_faces,
             traction_values=traction_values,
-            quadrature=quadrature,
-            element_type=element_type,
         )
         expected = solve_with_factorized_dirichlet(
-            assembly.to_csr(),
-            assembly.rhs,
+            model.stiffness,
+            rhs,
             prescribed=prescribed,
         )
-        actual = solve_case(None, pressure_values, traction_values)
+        reduced = fem.apply_dirichlet(model.stiffness, rhs, prescribed=prescribed)
+        actual = reduced.recover(solve_free(reduced.rhs))
         assert np.allclose(actual, expected)
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
-def test_thermal_model_rhs_matches_direct_assembly(
+def test_thermal_model_rhs_matches_operator_sum(
     quadrature: str,
     element_type: str,
 ) -> None:
@@ -645,29 +660,19 @@ def test_thermal_model_rhs_matches_direct_assembly(
         quadrature=quadrature,
         element_type=element_type,
     )
-    assembly = fem.assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements,
-        material_ids=material_ids,
-        material_table=material_table,
+    rhs = model.rhs(
         body_force=body_force,
-        pressure_faces=pressure_faces,
         pressure_values=pressure_values,
-        thermal_material_table=thermal_material_table,
         nodal_temperature=nodal_temperature,
-        quadrature=quadrature,
-        element_type=element_type,
     )
-
-    assert np.allclose(model.stiffness.toarray(), assembly.to_csr().toarray())
-    assert np.allclose(
-        model.rhs(
-            body_force=body_force,
-            pressure_values=pressure_values,
-            nodal_temperature=nodal_temperature,
-        ),
-        assembly.rhs,
-    )
+    body_force_arr = fem._normalize_body_force(body_force, elements.shape[0], np.dtype(dtype))
+    pressure_arr = fem._normalize_pressure_values(pressure_values, pressure_faces.shape[0], np.dtype(dtype))
+    temperature_arr = fem._normalize_nodal_temperature(nodal_temperature, nodes.shape[0], np.dtype(dtype))
+    expected_rhs = np.asarray(model.thermal_reference_rhs, dtype=dtype).copy()
+    expected_rhs += np.asarray(model.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=dtype)
+    expected_rhs += np.asarray(model.pressure_to_rhs @ pressure_arr, dtype=dtype)
+    expected_rhs += np.asarray(model.temperature_to_rhs @ temperature_arr, dtype=dtype)
+    assert np.allclose(rhs, expected_rhs)
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
@@ -688,7 +693,7 @@ def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
         dtype=dtype,
     )
     nodal_temperature = np.full(nodes.shape[0], reference_temperature + delta_temperature, dtype=dtype)
-    assembly = fem.assemble_axisymmetric(
+    model, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -699,10 +704,10 @@ def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
         quadrature=quadrature,
         element_type=element_type,
     )
-    displacement = fem.solve_dirichlet(
-        assembly.to_csr(),
-        assembly.rhs,
-        prescribed={dof: 0.0 for dof in range(assembly.ndof)},
+    displacement = solve_with_factorized_dirichlet(
+        model.stiffness,
+        rhs,
+        prescribed={dof: 0.0 for dof in range(model.ndof)},
     )
     samples = fem.evaluate_axisymmetric_strain_stress_at_quadrature(
         nodes,
@@ -782,7 +787,7 @@ def test_pressure_vessel_stresses_match_lame_reference(dtype: DType, quadrature:
     )
 
     material = cfsem_radial_material(200.0e9, 0.27, dtype=dtype)
-    assembly = assemble_axisymmetric(
+    model, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -793,8 +798,8 @@ def test_pressure_vessel_stresses_match_lame_reference(dtype: DType, quadrature:
         quadrature=quadrature,
     )
     displacement = solve_with_factorized_dirichlet(
-        assembly.to_csr(),
-        assembly.rhs,
+        model.stiffness,
+        rhs,
         prescribed=prescribed_z_dofs(nodes.shape[0]),
     )
     samples = evaluate_axisymmetric_strain_stress_at_quadrature(
@@ -834,7 +839,7 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
     nodes, elements = build_annulus_strip_mesh(ri, ro, height=0.1, nr=nr, nz=1, dtype=dtype)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=1)
     material = cfsem_radial_material(200.0e9, 0.27, dtype=dtype)
-    assembly = assemble_axisymmetric(
+    model_fe, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -850,8 +855,8 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
         quadrature=quadrature,
     )
     displacement = solve_with_factorized_dirichlet(
-        assembly.to_csr(),
-        assembly.rhs,
+        model_fe.stiffness,
+        rhs,
         prescribed=prescribed_z_dofs(nodes.shape[0]),
     ).reshape(nodes.shape[0], 2)
 
@@ -942,7 +947,7 @@ def test_dirichlet_and_solver_validation_branches() -> None:
     assert reduced.fixed_dofs.size == 0
     assert reduced.fixed_values.size == 0
 
-    solution = fem.solve_dirichlet(matrix, rhs)
+    solution = reduced.recover(spla.factorized(reduced.matrix.tocsc())(reduced.rhs))
     assert np.allclose(matrix @ solution, rhs)
 
     called = {"count": 0}
@@ -953,11 +958,13 @@ def test_dirichlet_and_solver_validation_branches() -> None:
         assert sp.isspmatrix_csr(mat)
         return spla.factorized(mat.tocsc())(vec)
 
-    solution = fem.solve_dirichlet(matrix, rhs, solver=solver)
+    custom_reduced = fem.apply_dirichlet(matrix, rhs)
+    solution = custom_reduced.recover(solver(custom_reduced.matrix, custom_reduced.rhs))
     assert called["count"] == 1
     assert np.allclose(matrix @ solution, rhs)
 
-    fixed_solution = fem.solve_dirichlet(matrix, rhs, prescribed={0: 1.25, 1: -0.5})
+    fixed_reduced = fem.apply_dirichlet(matrix, rhs, prescribed={0: 1.25, 1: -0.5})
+    fixed_solution = fixed_reduced.recover(np.zeros((0,), dtype=rhs.dtype))
     assert np.allclose(fixed_solution, np.array([1.25, -0.5]))
 
 
@@ -965,22 +972,20 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=np.float64)
     material = isotropic_axisymmetric_material(200.0e9, 0.27)
 
-    with pytest.raises(ValueError, match="material_ids has length 0, but elements has 1 rows"):
-        assemble_axisymmetric(
+    with pytest.raises(ValueError, match="material_ids has length 0"):
+        fem.assemble_axisymmetric_model(
             nodes=nodes,
             elements=elements,
             material_ids=np.zeros((0,), dtype=np.uint64),
             material_table=np.asarray([material]),
-            body_force=np.array([0.0, 0.0]),
         )
 
     with pytest.raises(ValueError, match="unsupported quadrature"):
-        assemble_axisymmetric(
+        fem.assemble_axisymmetric_model(
             nodes=nodes,
             elements=elements,
             material_ids=np.zeros((1,), dtype=np.uint64),
             material_table=np.asarray([material]),
-            body_force=np.array([0.0, 0.0]),
             quadrature="2x2",
         )
 
@@ -1121,7 +1126,7 @@ def test_quad9_measures_match_quad4_for_inferred_geometry(quadrature: str) -> No
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
-def test_quad9_model_rhs_matches_direct_assembly(quadrature: str) -> None:
+def test_quad9_model_rhs_matches_operator_sum(quadrature: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=np.float64)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
     pressure_faces = np.vstack([inner_faces, outer_faces])
@@ -1143,30 +1148,29 @@ def test_quad9_model_rhs_matches_direct_assembly(quadrature: str) -> None:
         quadrature=quadrature,
         element_type="quad9",
     )
-    assembly = fem.assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
-        body_force=body_force,
-        pressure_faces=pressure_faces,
-        pressure_values=pressure_values,
-        quadrature=quadrature,
-        element_type="quad9",
-    )
-
     assert model.analysis_elements.shape[1] == 9
     assert model.analysis_nodes.shape[0] > nodes.shape[0]
     assert model.ndof == 2 * model.analysis_nodes.shape[0]
-    assert np.allclose(model.stiffness.toarray(), assembly.to_csr().toarray())
-    assert np.allclose(model.rhs(body_force=body_force, pressure_values=pressure_values), assembly.rhs)
+    rhs = model.rhs(body_force=body_force, pressure_values=pressure_values)
+    expected_rhs = np.asarray(model.thermal_reference_rhs, dtype=np.float64).copy()
+    expected_rhs += np.asarray(
+        model.body_force_to_rhs
+        @ fem._normalize_body_force(body_force, elements.shape[0], np.dtype(np.float64)).reshape(-1),
+        dtype=np.float64,
+    )
+    expected_rhs += np.asarray(
+        model.pressure_to_rhs
+        @ fem._normalize_pressure_values(pressure_values, pressure_faces.shape[0], np.dtype(np.float64)),
+        dtype=np.float64,
+    )
+    assert np.allclose(rhs, expected_rhs)
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 def test_quad9_quadrature_recovery_shapes(quadrature: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float64)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
-    assembly = fem.assemble_axisymmetric(
+    model, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -1176,9 +1180,9 @@ def test_quad9_quadrature_recovery_shapes(quadrature: str) -> None:
         element_type="quad9",
     )
     displacement = solve_with_factorized_dirichlet(
-        assembly.to_csr(),
-        assembly.rhs,
-        prescribed=prescribed_z_dofs(assembly.ndof // 2),
+        model.stiffness,
+        rhs,
+        prescribed=prescribed_z_dofs(model.ndof // 2),
     )
     samples = fem.evaluate_axisymmetric_strain_stress_at_quadrature(
         nodes,
@@ -1217,7 +1221,7 @@ def test_quad9_quadrature_field_operator_shapes(quadrature: str) -> None:
     assert operators.stress_operator.shape == (elements.shape[0] * nq * 4, operators.ndof)
 
 
-def test_model_and_reduced_model_zero_load_and_solver_branches() -> None:
+def test_model_zero_load_and_empty_reduction_branches() -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
@@ -1228,17 +1232,8 @@ def test_model_and_reduced_model_zero_load_and_solver_branches() -> None:
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
         material_table=np.asarray([material]),
     )
-    assert np.allclose(model.pressure_rhs(), 0.0)
-    assert np.allclose(model.traction_rhs(), 0.0)
-    assert np.allclose(model.temperature_rhs(), 0.0)
-
-    displacement = model.solve_dirichlet(body_force=np.array([0.0, 0.0], dtype=dtype))
-    assert displacement.shape == (model.ndof,)
-
-    reduced = model.apply_dirichlet()
-    assert np.allclose(reduced.pressure_rhs(), 0.0)
-    assert np.allclose(reduced.traction_rhs(), 0.0)
-    assert np.allclose(reduced.temperature_rhs(), 0.0)
+    rhs = model.rhs(body_force=np.array([0.0, 0.0], dtype=dtype))
+    assert np.allclose(rhs, 0.0)
 
     solver_called = {"count": 0}
 
@@ -1246,14 +1241,16 @@ def test_model_and_reduced_model_zero_load_and_solver_branches() -> None:
         solver_called["count"] += 1
         return spla.factorized(mat.tocsc())(rhs)
 
-    reduced.solve(body_force=np.array([0.0, 0.0], dtype=dtype), solver=solver)
+    reduced = fem.apply_dirichlet(model.stiffness, rhs)
+    free_solution = solver(reduced.matrix, reduced.rhs)
+    displacement = reduced.recover(free_solution)
+    assert displacement.shape == (model.ndof,)
     assert solver_called["count"] == 1
 
     all_fixed = {dof: 0.0 for dof in range(model.ndof)}
-    reduced_empty = model.apply_dirichlet(all_fixed)
+    reduced_empty = fem.apply_dirichlet(model.stiffness, rhs, all_fixed)
     assert reduced_empty.matrix.shape == (0, 0)
-    assert np.allclose(reduced_empty.solve(), 0.0)
-    assert np.allclose(reduced_empty.factorized_solver()(), 0.0)
+    assert np.allclose(reduced_empty.recover(np.zeros((0,), dtype=dtype)), 0.0)
 
 
 def test_thermal_model_missing_temperature_and_alignment_validation_branches() -> None:
@@ -1270,24 +1267,9 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
         thermal_material_table=np.asarray([thermal_material]),
     )
     nodal_temperature = np.full(nodes.shape[0], 300.0, dtype=dtype)
-    assert model.temperature_rhs(nodal_temperature).shape == (model.ndof,)
+    assert model.rhs(nodal_temperature=nodal_temperature).shape == (model.ndof,)
     with pytest.raises(ValueError, match="nodal_temperature is required"):
-        model.temperature_rhs()
-    reduced = model.apply_dirichlet()
-    assert reduced.temperature_rhs(nodal_temperature).shape == (reduced.matrix.shape[0],)
-    with pytest.raises(ValueError, match="nodal_temperature is required"):
-        reduced.temperature_rhs()
-
-    with pytest.raises(ValueError, match="missing from thermal_material_table"):
-        assemble_axisymmetric(
-            nodes=nodes,
-            elements=elements,
-            material_ids=np.array([0], dtype=np.uint64),
-            material_table={0: material},
-            body_force=np.array([0.0, 0.0], dtype=dtype),
-            thermal_material_table={1: thermal_material},
-            nodal_temperature=nodal_temperature,
-        )
+        model.rhs()
 
     with pytest.raises(ValueError, match="missing from thermal_material_table"):
         fem.assemble_axisymmetric_model(
@@ -1316,135 +1298,6 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
             np.zeros((nodes.shape[0], 2), dtype=dtype),
             thermal_material_table=np.asarray([thermal_material]),
         )
-
-
-@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
-def test_python_fallback_assembly_matches_rust_and_validation_branches(element_type: str) -> None:
-    dtype = np.float64
-    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    body_force = np.array([[1.5e4, -2.5e4]], dtype=dtype)
-    pressure_faces = np.array([[0, 0], [0, 1], [0, 2], [0, 3]], dtype=np.uint64)
-    pressure_values = np.array([1.0e5, -2.0e5, 3.0e5, -4.0e5], dtype=dtype)
-    traction_faces = pressure_faces.copy()
-    traction_values = np.array(
-        [[1.0e5, 0.0], [0.0, 2.0e5], [-1.5e5, 1.0e5], [2.5e5, -3.0e5]],
-        dtype=dtype,
-    )
-    quadrature_code = fem._quadrature_code("gl3")
-
-    analysis_nodes, analysis_elements, _elevated = fem._analysis_mesh_for_element_type(nodes, elements, element_type)
-    python_assembly = fem._assemble_axisymmetric_python(
-        analysis_nodes,
-        analysis_elements,
-        np.zeros(analysis_elements.shape[0], dtype=np.uint64),
-        np.asarray([material]),
-        body_force,
-        pressure_faces,
-        pressure_values,
-        traction_faces,
-        traction_values,
-        quadrature_code,
-        np.dtype(dtype),
-        element_type,
-    )
-    rust_assembly = assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
-        body_force=body_force,
-        pressure_faces=pressure_faces,
-        pressure_values=pressure_values,
-        traction_faces=traction_faces,
-        traction_values=traction_values,
-        quadrature="gl3",
-        element_type=element_type,
-    )
-
-    assert np.allclose(python_assembly.to_csr().toarray(), rust_assembly.to_csr().toarray(), rtol=1.0e-12, atol=2.0e-4)
-    assert np.allclose(python_assembly.rhs, rust_assembly.rhs)
-
-    bad_face = np.array([[0, 4]], dtype=np.uint64)
-    with pytest.raises(ValueError, match="invalid local face"):
-        fem._assemble_axisymmetric_python(
-            analysis_nodes,
-            analysis_elements,
-            np.zeros(analysis_elements.shape[0], dtype=np.uint64),
-            np.asarray([material]),
-            body_force,
-            bad_face,
-            np.array([1.0], dtype=dtype),
-            np.zeros((0, 2), dtype=np.uint64),
-            np.zeros((0, 2), dtype=dtype),
-            quadrature_code,
-            np.dtype(dtype),
-            element_type,
-        )
-
-    with pytest.raises(ValueError, match="pressure_faces references element 1"):
-        fem._assemble_axisymmetric_python(
-            analysis_nodes,
-            analysis_elements,
-            np.zeros(analysis_elements.shape[0], dtype=np.uint64),
-            np.asarray([material]),
-            body_force,
-            np.array([[1, 0]], dtype=np.uint64),
-            np.array([1.0], dtype=dtype),
-            np.zeros((0, 2), dtype=np.uint64),
-            np.zeros((0, 2), dtype=dtype),
-            quadrature_code,
-            np.dtype(dtype),
-            element_type,
-        )
-
-    with pytest.raises(ValueError, match="traction_faces references element 1"):
-        fem._assemble_axisymmetric_python(
-            analysis_nodes,
-            analysis_elements,
-            np.zeros(analysis_elements.shape[0], dtype=np.uint64),
-            np.asarray([material]),
-            body_force,
-            np.zeros((0, 2), dtype=np.uint64),
-            np.zeros((0,), dtype=dtype),
-            np.array([[1, 0]], dtype=np.uint64),
-            np.array([[1.0, 0.0]], dtype=dtype),
-            quadrature_code,
-            np.dtype(dtype),
-            element_type,
-        )
-
-
-@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
-def test_python_quadrature_operator_fallback_matches_rust(element_type: str) -> None:
-    dtype = np.float64
-    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    analysis_nodes, analysis_elements, _elevated = fem._analysis_mesh_for_element_type(nodes, elements, element_type)
-
-    python_ops = fem._assemble_quadrature_field_operators_python(
-        analysis_nodes,
-        analysis_elements,
-        np.zeros(analysis_elements.shape[0], dtype=np.uint64),
-        np.asarray([material]),
-        fem._quadrature_code("gl3"),
-        np.dtype(dtype),
-        element_type,
-    )
-    rust_ops = fem.quadrature_field_operators_axisymmetric(
-        nodes,
-        elements,
-        np.zeros(elements.shape[0], dtype=np.uint64),
-        np.asarray([material]),
-        quadrature="gl3",
-        element_type=element_type,
-    )
-
-    assert np.allclose(python_ops.points_rz, rust_ops.points_rz)
-    assert np.allclose(python_ops.strain_operator.toarray(), rust_ops.strain_operator.toarray())
-    assert np.allclose(python_ops.stress_operator.toarray(), rust_ops.stress_operator.toarray())
-    assert np.allclose(python_ops.thermal_strain_constant, 0.0)
-    assert np.allclose(python_ops.thermal_stress_constant, 0.0)
 
 
 def test_private_helper_and_validation_branches_not_hit_by_public_paths() -> None:

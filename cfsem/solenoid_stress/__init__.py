@@ -19,17 +19,14 @@ from .thick_wall_cylinder_handcalc import (
     s_radial_thick_wall_cylinder,
 )
 from .axisymmetric_fem import (
-    AssemblyResult,
     AxisymmetricFEMModel,
     ElevatedQuad9Mesh,
     ElementMeasures,
     ElementQuadrature,
     QuadratureFieldOperators,
     QuadratureFieldSamples,
-    ReducedAxisymmetricFEMModel,
     ReducedSystem,
     apply_dirichlet,
-    assemble_axisymmetric,
     assemble_axisymmetric_model,
     cfsem_radial_material,
     element_measures_axisymmetric,
@@ -40,23 +37,19 @@ from .axisymmetric_fem import (
     isotropic_axisymmetric_thermal_material,
     orthotropic_axisymmetric_thermal_material,
     quadrature_field_operators_axisymmetric,
-    solve_dirichlet,
 )
 
 __all__ = [
-    "AssemblyResult",
     "AxisymmetricFEMModel",
     "ElevatedQuad9Mesh",
     "ElementMeasures",
     "ElementQuadrature",
     "QuadratureFieldOperators",
     "QuadratureFieldSamples",
-    "ReducedAxisymmetricFEMModel",
     "ReducedSystem",
     "SolenoidStress1D",
     "SolenoidStress1DOperators",
     "apply_dirichlet",
-    "assemble_axisymmetric",
     "assemble_axisymmetric_model",
     "cfsem_radial_material",
     "element_measures_axisymmetric",
@@ -72,5 +65,4 @@ __all__ = [
     "s_radial_thick_wall_cylinder",
     "solenoid_1d_structural_factor",
     "solenoid_1d_structural_rhs",
-    "solve_dirichlet",
 ]

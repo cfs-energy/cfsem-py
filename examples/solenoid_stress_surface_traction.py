@@ -3,10 +3,10 @@ from __future__ import annotations
 import os
 
 import numpy as np
+import scipy.sparse.linalg as spla
 
 from cfsem.solenoid_stress import (
     apply_dirichlet,
-    assemble_axisymmetric,
     assemble_axisymmetric_model,
     evaluate_axisymmetric_strain_stress_at_quadrature,
     isotropic_axisymmetric_material,
@@ -125,8 +125,7 @@ def make_temperature_field(
 def summarize_case(
     name: str,
     model,
-    reduced_model,
-    solve_case,
+    solve_free,
     input_nodes: np.ndarray,
     elements: np.ndarray,
     material: np.ndarray,
@@ -139,10 +138,10 @@ def summarize_case(
     traction_values: np.ndarray,
     nodal_temperature: np.ndarray,
 ) -> None:
-    rhs_body = model.body_force_rhs(body_force)
-    rhs_pressure = model.pressure_rhs(pressure_values)
-    rhs_traction = model.traction_rhs(traction_values)
-    rhs_temperature = model.temperature_rhs(nodal_temperature)
+    rhs_body = np.asarray(model.body_force_to_rhs @ body_force.reshape(-1), dtype=np.float64)
+    rhs_pressure = np.asarray(model.pressure_to_rhs @ pressure_values, dtype=np.float64)
+    rhs_traction = np.asarray(model.traction_to_rhs @ traction_values.reshape(-1), dtype=np.float64)
+    rhs_temperature = np.asarray(model.temperature_to_rhs @ nodal_temperature, dtype=np.float64)
     rhs_manual = (
         model.thermal_reference_rhs
         + rhs_body
@@ -156,28 +155,8 @@ def summarize_case(
         traction_values=traction_values,
         nodal_temperature=nodal_temperature,
     )
-    reference = assemble_axisymmetric(
-        nodes=input_nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
-        body_force=body_force,
-        pressure_faces=model.pressure_faces,
-        pressure_values=pressure_values,
-        traction_faces=model.traction_faces,
-        traction_values=traction_values,
-        thermal_material_table=np.asarray([thermal_material]),
-        nodal_temperature=nodal_temperature,
-        quadrature=quadrature,
-        element_type=element_type,
-    )
-    reduced_reference = apply_dirichlet(reference.to_csr(), reference.rhs, prescribed=prescribed)
-    displacement = solve_case(
-        body_force=body_force,
-        pressure_values=pressure_values,
-        traction_values=traction_values,
-        nodal_temperature=nodal_temperature,
-    )
+    reduced = apply_dirichlet(model.stiffness, rhs_full, prescribed=prescribed)
+    displacement = reduced.recover(solve_free(reduced.rhs))
     samples = evaluate_axisymmetric_strain_stress_at_quadrature(
         input_nodes,
         elements,
@@ -194,18 +173,6 @@ def summarize_case(
 
     if not np.allclose(rhs_manual, rhs_full):
         raise AssertionError(f"{name}: operator sum did not match model.rhs(...)")
-    if not np.allclose(rhs_full, reference.rhs):
-        raise AssertionError(f"{name}: operator-built RHS did not match direct assembly")
-    if not np.allclose(
-        reduced_model.rhs(
-            body_force=body_force,
-            pressure_values=pressure_values,
-            traction_values=traction_values,
-            nodal_temperature=nodal_temperature,
-        ),
-        reduced_reference.rhs,
-    ):
-        raise AssertionError(f"{name}: reduced operator RHS did not match direct reduction")
 
     print(name)
     print(
@@ -219,7 +186,7 @@ def summarize_case(
     print(
         "  checks:"
         f" manual-vs-model={np.linalg.norm(rhs_manual - rhs_full):.3e},"
-        f" model-vs-direct={np.linalg.norm(rhs_full - reference.rhs):.3e}"
+        f" reduced-rhs={np.linalg.norm(reduced.rhs):.3e}"
     )
     print(
         "  response:"
@@ -259,8 +226,8 @@ def main() -> None:
         element_type=element_type,
     )
     prescribed = prescribed_dofs(model.analysis_nodes)
-    reduced_model = model.apply_dirichlet(prescribed)
-    solve_case = reduced_model.factorized_solver()
+    reduced_zero = apply_dirichlet(model.stiffness, np.zeros(model.ndof, dtype=np.float64), prescribed=prescribed)
+    solve_free = spla.factorized(reduced_zero.matrix.tocsc())
 
     print("Reusable axisymmetric FEM model")
     print(
@@ -312,8 +279,7 @@ def main() -> None:
     summarize_case(
         "Case 1: outward pressure, top traction, moderate thermal gradient",
         model,
-        reduced_model,
-        solve_case,
+        solve_free,
         nodes,
         elements,
         material,
@@ -329,8 +295,7 @@ def main() -> None:
     summarize_case(
         "Case 2: updated load values reusing the same operators and factorization",
         model,
-        reduced_model,
-        solve_case,
+        solve_free,
         nodes,
         elements,
         material,

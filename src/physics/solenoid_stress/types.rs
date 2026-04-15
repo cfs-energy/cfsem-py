@@ -74,12 +74,12 @@ pub struct ThermalMaterial<F: Real> {
 }
 
 #[derive(Debug, Clone)]
-pub struct AssemblyResult<F: Real> {
-    /// Sparse row indices for the assembled stiffness matrix triplets.
+pub struct StiffnessTriplets<F: Real> {
+    /// Sparse row indices for the assembled stiffness-operator triplets.
     pub rows: Vec<usize>,
-    /// Sparse column indices for the assembled stiffness matrix triplets.
+    /// Sparse column indices for the assembled stiffness-operator triplets.
     pub cols: Vec<usize>,
-    /// Sparse values for the assembled stiffness matrix triplets.
+    /// Sparse values for the assembled stiffness-operator triplets.
     pub vals: Vec<F>,
     /// Total number of displacement unknowns in the global system.
     pub ndof: usize,

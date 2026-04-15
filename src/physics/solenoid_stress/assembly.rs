@@ -10,7 +10,7 @@ use crate::physics::solenoid_stress::geometry::{
     VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::types::{
-    AssemblyResult, DOF_PER_NODE, Real, dof_per_element, local_dofs, two_pi,
+    DOF_PER_NODE, Real, StiffnessTriplets, dof_per_element, local_dofs, two_pi,
 };
 
 fn assemble_axisymmetric_impl<
@@ -26,7 +26,7 @@ fn assemble_axisymmetric_impl<
         &[[F; 2]; NODES_PER_ELEMENT],
         QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
-) -> Result<AssemblyResult<F>, String> {
+) -> Result<StiffnessTriplets<F>, String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
@@ -75,7 +75,7 @@ fn assemble_axisymmetric_impl<
         }
     }
 
-    Ok(AssemblyResult {
+    Ok(StiffnessTriplets {
         rows,
         cols,
         vals,
@@ -83,13 +83,13 @@ fn assemble_axisymmetric_impl<
     })
 }
 
-/// Assemble the global axisymmetric Quad4 stiffness matrix in COO triplet form.
-pub fn assemble_axisymmetric_quad4<F: Real>(
+/// Assemble the global axisymmetric Quad4 stiffness operator in COO triplet form.
+pub fn assemble_stiffness_quad4<F: Real>(
     mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     quadrature: QuadratureRule,
-) -> Result<AssemblyResult<F>, String> {
+) -> Result<StiffnessTriplets<F>, String> {
     assemble_axisymmetric_impl::<
         F,
         { quad4::NODES_PER_ELEMENT },
@@ -103,13 +103,13 @@ pub fn assemble_axisymmetric_quad4<F: Real>(
     )
 }
 
-/// Assemble the global axisymmetric Quad9 stiffness matrix in COO triplet form.
-pub fn assemble_axisymmetric_quad9<F: Real>(
+/// Assemble the global axisymmetric Quad9 stiffness operator in COO triplet form.
+pub fn assemble_stiffness_quad9<F: Real>(
     mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     quadrature: QuadratureRule,
-) -> Result<AssemblyResult<F>, String> {
+) -> Result<StiffnessTriplets<F>, String> {
     assemble_axisymmetric_impl::<
         F,
         { quad9::NODES_PER_ELEMENT },
@@ -125,7 +125,7 @@ pub fn assemble_axisymmetric_quad9<F: Real>(
 
 #[cfg(test)]
 mod tests {
-    use super::assemble_axisymmetric_quad4;
+    use super::assemble_stiffness_quad4;
     use crate::mesh::{MeshView, QuadratureRule};
 
     fn isotropic_material(e: f64, nu: f64) -> [[f64; 4]; 4] {
@@ -149,7 +149,7 @@ mod tests {
         };
         let material_ids = [0usize];
         let material_table = [isotropic_material(200.0e9, 0.27)];
-        let result = assemble_axisymmetric_quad4(
+        let result = assemble_stiffness_quad4(
             mesh,
             &material_ids,
             &material_table,

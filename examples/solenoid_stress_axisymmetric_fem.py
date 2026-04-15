@@ -14,7 +14,7 @@ from scipy.sparse.linalg import factorized
 import cfsem
 from cfsem.solenoid_stress.axisymmetric_fem import (
     apply_dirichlet,
-    assemble_axisymmetric,
+    assemble_axisymmetric_model,
     cfsem_radial_material,
     element_measures_axisymmetric,
     element_quadrature_axisymmetric,
@@ -1017,19 +1017,18 @@ def solve_case(
             ]
         )
 
-    assembly = assemble_axisymmetric(
+    model = assemble_axisymmetric_model(
         nodes=nodes,
         elements=elements,
         material_ids=material_ids,
         material_table=material_table,
-        body_force=body_force,
         pressure_faces=pressure_faces,
-        pressure_values=pressure_values,
         quadrature=quadrature,
         element_type=element_type,
     )
-    stiffness = assembly.to_csr()
-    reduced = apply_dirichlet(stiffness, assembly.rhs, prescribed={1: 0.0})
+    stiffness = model.stiffness
+    rhs = model.rhs(body_force=body_force, pressure_values=pressure_values)
+    reduced = apply_dirichlet(stiffness, rhs, prescribed={1: 0.0})
     displacement = reduced.recover(factorized(reduced.matrix.tocsc())(reduced.rhs)).reshape(
         analysis_nodes.shape[0], 2
     )
@@ -1106,7 +1105,7 @@ def solve_case(
         z_max=z_max,
         nr=nr,
         nz=nz,
-        ndof=assembly.ndof,
+        ndof=model.ndof,
         stiffness_nnz=stiffness.nnz,
         field_r=field_r,
         field_z=field_z,
@@ -1123,7 +1122,7 @@ def solve_case(
         net_body_force_z=net_body_force_z,
         pressure_top=pressure_top,
         pressure_bottom=pressure_bottom,
-        net_total_force_z=float(np.sum(assembly.rhs[1::2])),
+        net_total_force_z=float(np.sum(rhs[1::2])),
         peak_body_force_density=float(np.max(np.sqrt(body_force[:, 0] ** 2 + body_force[:, 1] ** 2))),
         vm_stress_fem=vm_stress_fem,
         vm_stress_1d=vm_stress_1d,

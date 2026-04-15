@@ -213,85 +213,6 @@ fn read_axisym_thermal_material_table<F: physics::solenoid_stress::Real + NumpyE
     Ok(out)
 }
 
-fn read_axisym_nodal_temperature<F: physics::solenoid_stress::Real + NumpyElement>(
-    name: &str,
-    nodal_temperature: PyReadonlyArray1<'_, F>,
-) -> PyResult<Vec<F>> {
-    let view = nodal_temperature.as_array();
-    let shape = view.shape();
-    if shape.len() != 1 {
-        return Err(PyInteropError::DimensionalityError {
-            msg: format!("{name} must have shape (nnode,)"),
-        }
-        .into());
-    }
-    Ok(view.iter().copied().collect())
-}
-
-fn read_axisym_body_force<F: physics::solenoid_stress::Real + NumpyElement>(
-    name: &str,
-    body_force: PyReadonlyArray2<'_, F>,
-) -> PyResult<Vec<[F; 2]>> {
-    let view = body_force.as_array();
-    let shape = view.shape();
-    if shape.len() != 2 || shape[1] != 2 {
-        return Err(PyInteropError::DimensionalityError {
-            msg: format!("{name} must have shape (nelem, 2)"),
-        }
-        .into());
-    }
-    let mut out = Vec::with_capacity(shape[0]);
-    for row in view.rows() {
-        out.push([row[0], row[1]]);
-    }
-    Ok(out)
-}
-
-fn read_axisym_pressure_loads<F: physics::solenoid_stress::Real + NumpyElement>(
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    pressure_values: PyReadonlyArray1<'_, F>,
-) -> PyResult<Vec<physics::solenoid_stress::PressureLoad<F>>> {
-    let faces_view = pressure_faces.as_array();
-    let values_view = pressure_values.as_array();
-    let faces_shape = faces_view.shape();
-    let values_shape = values_view.shape();
-    if faces_shape.len() != 2 || faces_shape[1] != 2 {
-        return Err(PyInteropError::DimensionalityError {
-            msg: "pressure_faces must have shape (nload, 2)".to_string(),
-        }
-        .into());
-    }
-    if values_shape.len() != 1 {
-        return Err(PyInteropError::DimensionalityError {
-            msg: "pressure_values must have shape (nload,)".to_string(),
-        }
-        .into());
-    }
-    if faces_shape[0] != values_view.len() {
-        return Err(PyInteropError::DimensionalityError {
-            msg: format!(
-                "pressure_faces has {} rows, but pressure_values has length {}",
-                faces_shape[0],
-                values_view.len()
-            ),
-        }
-        .into());
-    }
-    let mut out = Vec::with_capacity(values_view.len());
-    for (index, row) in faces_view.rows().into_iter().enumerate() {
-        out.push(physics::solenoid_stress::PressureLoad {
-            element: usize::try_from(row[0]).map_err(|_| PyInteropError::ValueError {
-                msg: "pressure_faces element index overflowed usize".to_string(),
-            })?,
-            local_face: u8::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
-                msg: "pressure_faces local face overflowed u8".to_string(),
-            })?,
-            value: values_view[index],
-        });
-    }
-    Ok(out)
-}
-
 fn read_axisym_pressure_faces<F: physics::solenoid_stress::Real + NumpyElement>(
     pressure_faces: PyReadonlyArray2<'_, u64>,
 ) -> PyResult<Vec<physics::solenoid_stress::PressureLoad<F>>> {
@@ -313,50 +234,6 @@ fn read_axisym_pressure_faces<F: physics::solenoid_stress::Real + NumpyElement>(
                 msg: "pressure_faces local face overflowed u8".to_string(),
             })?,
             value: F::one(),
-        });
-    }
-    Ok(out)
-}
-
-fn read_axisym_traction_loads<F: physics::solenoid_stress::Real + NumpyElement>(
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    traction_values: PyReadonlyArray2<'_, F>,
-) -> PyResult<Vec<physics::solenoid_stress::TractionLoad<F>>> {
-    let faces_view = traction_faces.as_array();
-    let values_view = traction_values.as_array();
-    let faces_shape = faces_view.shape();
-    let values_shape = values_view.shape();
-    if faces_shape.len() != 2 || faces_shape[1] != 2 {
-        return Err(PyInteropError::DimensionalityError {
-            msg: "traction_faces must have shape (nload, 2)".to_string(),
-        }
-        .into());
-    }
-    if values_shape.len() != 2 || values_shape[1] != 2 {
-        return Err(PyInteropError::DimensionalityError {
-            msg: "traction_values must have shape (nload, 2)".to_string(),
-        }
-        .into());
-    }
-    if faces_shape[0] != values_shape[0] {
-        return Err(PyInteropError::DimensionalityError {
-            msg: format!(
-                "traction_faces has {} rows, but traction_values has shape {:?}",
-                faces_shape[0], values_shape
-            ),
-        }
-        .into());
-    }
-    let mut out = Vec::with_capacity(values_shape[0]);
-    for (index, row) in faces_view.rows().into_iter().enumerate() {
-        out.push(physics::solenoid_stress::TractionLoad {
-            element: usize::try_from(row[0]).map_err(|_| PyInteropError::ValueError {
-                msg: "traction_faces element index overflowed usize".to_string(),
-            })?,
-            local_face: u8::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
-                msg: "traction_faces local face overflowed u8".to_string(),
-            })?,
-            value: [values_view[[index, 0]], values_view[[index, 1]]],
         });
     }
     Ok(out)
@@ -404,7 +281,7 @@ fn flatten_axisym_points<F: physics::solenoid_stress::Real>(points: Vec<[F; 2]>)
     points_flat
 }
 
-fn assemble_axisymmetric_low_level<
+fn assemble_stiffness_axisymmetric_low_level<
     F: physics::solenoid_stress::Real + NumpyElement,
     const NODES_PER_ELEMENT: usize,
 >(
@@ -418,7 +295,7 @@ fn assemble_axisymmetric_low_level<
         &[usize],
         &[[[F; 4]; 4]],
         physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::AssemblyResult<F>, String>,
+    ) -> Result<physics::solenoid_stress::StiffnessTriplets<F>, String>,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, usize)> {
     let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
     let nodes = read_axisym_nodes("nodes", nodes)?;
@@ -715,13 +592,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
     material_table: PyReadonlyArray3<'_, f64>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize)> {
-    assemble_axisymmetric_low_level::<f64, 4>(
+    assemble_stiffness_axisymmetric_low_level::<f64, 4>(
         nodes,
         elements,
         material_ids,
         material_table,
         quadrature,
-        physics::solenoid_stress::assemble_axisymmetric_quad4,
+        physics::solenoid_stress::assemble_stiffness_quad4,
     )
 }
 
@@ -733,13 +610,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
     material_table: PyReadonlyArray3<'_, f32>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize)> {
-    assemble_axisymmetric_low_level::<f32, 4>(
+    assemble_stiffness_axisymmetric_low_level::<f32, 4>(
         nodes,
         elements,
         material_ids,
         material_table,
         quadrature,
-        physics::solenoid_stress::assemble_axisymmetric_quad4,
+        physics::solenoid_stress::assemble_stiffness_quad4,
     )
 }
 
@@ -751,13 +628,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f64(
     material_table: PyReadonlyArray3<'_, f64>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize)> {
-    assemble_axisymmetric_low_level::<f64, 9>(
+    assemble_stiffness_axisymmetric_low_level::<f64, 9>(
         nodes,
         elements,
         material_ids,
         material_table,
         quadrature,
-        physics::solenoid_stress::assemble_axisymmetric_quad9,
+        physics::solenoid_stress::assemble_stiffness_quad9,
     )
 }
 
@@ -769,13 +646,13 @@ fn solenoid_stress_fem_assemble_axisymmetric_quad9_f32(
     material_table: PyReadonlyArray3<'_, f32>,
     quadrature: u8,
 ) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize)> {
-    assemble_axisymmetric_low_level::<f32, 9>(
+    assemble_stiffness_axisymmetric_low_level::<f32, 9>(
         nodes,
         elements,
         material_ids,
         material_table,
         quadrature,
-        physics::solenoid_stress::assemble_axisymmetric_quad9,
+        physics::solenoid_stress::assemble_stiffness_quad9,
     )
 }
 

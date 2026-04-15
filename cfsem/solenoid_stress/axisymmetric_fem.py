@@ -33,21 +33,28 @@ References:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
 
 import cfsem.cfsem as _cfsem_bindings
 
-_assemble_axisymmetric_quad4_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f32
-_assemble_axisymmetric_quad4_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f64
-_assemble_axisymmetric_quad9_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f32
-_assemble_axisymmetric_quad9_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f64
+_assemble_stiffness_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f32
+)
+_assemble_stiffness_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f64
+)
+_assemble_stiffness_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f32
+)
+_assemble_stiffness_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f64
+)
 _element_measures_axisymmetric_quad4_f32 = (
     _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad4_f32
 )
@@ -150,23 +157,6 @@ def _sparse_shape(matrix: Any) -> tuple[int, int]:
 
 
 @dataclass(frozen=True, slots=True)
-class AssemblyResult:
-    """Sparse system assembled in COO triplet form."""
-
-    rows: npt.NDArray[np.int64]
-    cols: npt.NDArray[np.int64]
-    vals: npt.NDArray[np.floating[Any]]
-    rhs: npt.NDArray[np.floating[Any]]
-    ndof: int
-
-    def to_coo(self) -> sp.coo_matrix:
-        return sp.coo_matrix((self.vals, (self.rows, self.cols)), shape=(self.ndof, self.ndof))
-
-    def to_csr(self) -> sp.csr_matrix:
-        return _to_csr_matrix(self.to_coo())
-
-
-@dataclass(frozen=True, slots=True)
 class ElementMeasures:
     """Per-element meridian area and swept volume."""
 
@@ -260,44 +250,6 @@ class AxisymmetricFEMModel:
     n_temperature_nodes: int
     dtype: np.dtype[Any]
 
-    def body_force_rhs(self, body_force: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
-        body_force_arr = _normalize_body_force_or_zero(body_force, self.nelem, self.dtype)
-        return np.asarray(self.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=self.dtype)
-
-    def pressure_rhs(self, pressure_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
-        _, nload = _sparse_shape(self.pressure_to_rhs)
-        pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
-        if pressure_arr.size == 0:
-            return np.zeros((self.ndof,), dtype=self.dtype)
-        return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
-
-    def traction_rhs(self, traction_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
-        _, ntraction_cols = _sparse_shape(self.traction_to_rhs)
-        traction_arr = _normalize_traction_values(
-            traction_values,
-            ntraction_cols // 2,
-            self.dtype,
-        )
-        if traction_arr.size == 0:
-            return np.zeros((self.ndof,), dtype=self.dtype)
-        return np.asarray(self.traction_to_rhs @ traction_arr.reshape(-1), dtype=self.dtype)
-
-    def temperature_rhs(
-        self,
-        nodal_temperature: ArrayLike | None = None,
-    ) -> npt.NDArray[np.floating[Any]]:
-        _, ntemp_cols = _sparse_shape(self.temperature_to_rhs)
-        if ntemp_cols == 0:
-            return np.zeros((self.ndof,), dtype=self.dtype)
-        if nodal_temperature is None:
-            raise ValueError("nodal_temperature is required because this model includes thermal materials")
-        temperature_arr = _normalize_nodal_temperature(
-            nodal_temperature,
-            self.n_temperature_nodes,
-            self.dtype,
-        )
-        return np.asarray(self.temperature_to_rhs @ temperature_arr, dtype=self.dtype)
-
     def rhs(
         self,
         body_force: ArrayLike | None = None,
@@ -305,229 +257,34 @@ class AxisymmetricFEMModel:
         traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        return (
-            self.thermal_reference_rhs
-            + self.body_force_rhs(body_force)
-            + self.pressure_rhs(pressure_values)
-            + self.traction_rhs(traction_values)
-            + self.temperature_rhs(nodal_temperature)
-        )
-
-    def apply_dirichlet(
-        self,
-        prescribed: Mapping[int, float] | None = None,
-    ) -> ReducedAxisymmetricFEMModel:
-        reduced = apply_dirichlet(
-            self.stiffness,
-            np.zeros((self.ndof,), dtype=self.dtype),
-            prescribed=prescribed,
-        )
-        return ReducedAxisymmetricFEMModel(
-            matrix=reduced.matrix,
-            body_force_to_rhs=_to_csr_matrix(self.body_force_to_rhs[reduced.free_dofs]),
-            pressure_to_rhs=_to_csr_matrix(self.pressure_to_rhs[reduced.free_dofs]),
-            traction_to_rhs=_to_csr_matrix(self.traction_to_rhs[reduced.free_dofs]),
-            temperature_to_rhs=_to_csr_matrix(self.temperature_to_rhs[reduced.free_dofs]),
-            thermal_reference_rhs=(
-                apply_dirichlet(
-                    self.stiffness,
-                    self.thermal_reference_rhs,
-                    prescribed=prescribed,
-                ).rhs
-                - reduced.rhs
-            ),
-            constant_rhs=reduced.rhs,
-            pressure_faces=self.pressure_faces,
-            traction_faces=self.traction_faces,
-            analysis_nodes=self.analysis_nodes,
-            analysis_elements=self.analysis_elements,
-            element_type=self.element_type,
-            free_dofs=reduced.free_dofs,
-            fixed_dofs=reduced.fixed_dofs,
-            fixed_values=reduced.fixed_values,
-            ndof=self.ndof,
-            nelem=self.nelem,
-            n_temperature_nodes=self.n_temperature_nodes,
-            dtype=self.dtype,
-        )
-
-    def solve_dirichlet(
-        self,
-        body_force: ArrayLike | None = None,
-        pressure_values: ArrayLike | None = None,
-        traction_values: ArrayLike | None = None,
-        nodal_temperature: ArrayLike | None = None,
-        prescribed: Mapping[int, float] | None = None,
-        solver: Any | None = None,
-    ) -> npt.NDArray[np.floating[Any]]:
-        return self.apply_dirichlet(prescribed).solve(
-            body_force=body_force,
-            pressure_values=pressure_values,
-            traction_values=traction_values,
-            nodal_temperature=nodal_temperature,
-            solver=solver,
-        )
-
-    def factorized_solver(
-        self,
-        prescribed: Mapping[int, float] | None = None,
-    ) -> Callable[
-        [ArrayLike | None, ArrayLike | None, ArrayLike | None, ArrayLike | None],
-        npt.NDArray[np.floating[Any]],
-    ]:
-        return self.apply_dirichlet(prescribed).factorized_solver()
-
-
-@dataclass(frozen=True, slots=True)
-class ReducedAxisymmetricFEMModel:
-    """Axisymmetric FEM model after eliminating prescribed Dirichlet dofs."""
-
-    matrix: sp.csr_matrix
-    body_force_to_rhs: sp.csr_matrix
-    pressure_to_rhs: sp.csr_matrix
-    traction_to_rhs: sp.csr_matrix
-    temperature_to_rhs: sp.csr_matrix
-    thermal_reference_rhs: npt.NDArray[np.floating[Any]]
-    constant_rhs: npt.NDArray[np.floating[Any]]
-    pressure_faces: npt.NDArray[np.uint64]
-    traction_faces: npt.NDArray[np.uint64]
-    analysis_nodes: npt.NDArray[np.floating[Any]]
-    analysis_elements: npt.NDArray[np.uint64]
-    element_type: str
-    free_dofs: npt.NDArray[np.int64]
-    fixed_dofs: npt.NDArray[np.int64]
-    fixed_values: npt.NDArray[np.floating[Any]]
-    ndof: int
-    nelem: int
-    n_temperature_nodes: int
-    dtype: np.dtype[Any]
-
-    def recover(self, free_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
-        solution = np.zeros(self.ndof, dtype=self.dtype)
-        solution[self.fixed_dofs] = self.fixed_values
-        solution[self.free_dofs] = np.asarray(free_solution, dtype=self.dtype)
-        return solution
-
-    def body_force_rhs(self, body_force: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
+        rhs = np.asarray(self.thermal_reference_rhs, dtype=self.dtype).copy()
         body_force_arr = _normalize_body_force_or_zero(body_force, self.nelem, self.dtype)
-        return np.asarray(self.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=self.dtype)
-
-    def pressure_rhs(self, pressure_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
+        rhs += np.asarray(self.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=self.dtype)
         _, nload = _sparse_shape(self.pressure_to_rhs)
         pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
-        if pressure_arr.size == 0:
-            nrow, _ = _sparse_shape(self.matrix)
-            return np.zeros((nrow,), dtype=self.dtype)
-        return np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
-
-    def traction_rhs(self, traction_values: ArrayLike | None = None) -> npt.NDArray[np.floating[Any]]:
+        if pressure_arr.size:
+            rhs += np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
         _, ntraction_cols = _sparse_shape(self.traction_to_rhs)
         traction_arr = _normalize_traction_values(
             traction_values,
             ntraction_cols // 2,
             self.dtype,
         )
-        if traction_arr.size == 0:
-            nrow, _ = _sparse_shape(self.matrix)
-            return np.zeros((nrow,), dtype=self.dtype)
-        return np.asarray(self.traction_to_rhs @ traction_arr.reshape(-1), dtype=self.dtype)
-
-    def temperature_rhs(
-        self,
-        nodal_temperature: ArrayLike | None = None,
-    ) -> npt.NDArray[np.floating[Any]]:
+        if traction_arr.size:
+            rhs += np.asarray(self.traction_to_rhs @ traction_arr.reshape(-1), dtype=self.dtype)
         _, ntemp_cols = _sparse_shape(self.temperature_to_rhs)
-        if ntemp_cols == 0:
-            nrow, _ = _sparse_shape(self.matrix)
-            return np.zeros((nrow,), dtype=self.dtype)
-        if nodal_temperature is None:
-            raise ValueError("nodal_temperature is required because this model includes thermal materials")
-        temperature_arr = _normalize_nodal_temperature(
-            nodal_temperature,
-            self.n_temperature_nodes,
-            self.dtype,
-        )
-        return np.asarray(self.temperature_to_rhs @ temperature_arr, dtype=self.dtype)
-
-    def rhs(
-        self,
-        body_force: ArrayLike | None = None,
-        pressure_values: ArrayLike | None = None,
-        traction_values: ArrayLike | None = None,
-        nodal_temperature: ArrayLike | None = None,
-    ) -> npt.NDArray[np.floating[Any]]:
-        return (
-            self.constant_rhs
-            + self.thermal_reference_rhs
-            + self.body_force_rhs(body_force)
-            + self.pressure_rhs(pressure_values)
-            + self.traction_rhs(traction_values)
-            + self.temperature_rhs(nodal_temperature)
-        )
-
-    def solve(
-        self,
-        body_force: ArrayLike | None = None,
-        pressure_values: ArrayLike | None = None,
-        traction_values: ArrayLike | None = None,
-        nodal_temperature: ArrayLike | None = None,
-        solver: Any | None = None,
-    ) -> npt.NDArray[np.floating[Any]]:
-        rhs = self.rhs(
-            body_force=body_force,
-            pressure_values=pressure_values,
-            traction_values=traction_values,
-            nodal_temperature=nodal_temperature,
-        )
-        nrow, _ = _sparse_shape(self.matrix)
-        if nrow == 0:
-            return self.recover(np.zeros((0,), dtype=self.dtype))
-        if solver is None:
-            free_solution = spla.factorized(self.matrix.tocsc())(rhs)
-        else:
-            free_solution = solver(self.matrix, rhs)
-        return self.recover(free_solution)
-
-    def factorized_solver(
-        self,
-    ) -> Callable[
-        [ArrayLike | None, ArrayLike | None, ArrayLike | None, ArrayLike | None],
-        npt.NDArray[np.floating[Any]],
-    ]:
-        nrow, _ = _sparse_shape(self.matrix)
-        if nrow == 0:
-
-            def solve_empty(
-                body_force: ArrayLike | None = None,
-                pressure_values: ArrayLike | None = None,
-                traction_values: ArrayLike | None = None,
-                nodal_temperature: ArrayLike | None = None,
-            ) -> npt.NDArray[np.floating[Any]]:
-                del body_force, pressure_values, traction_values, nodal_temperature
-                return self.recover(np.zeros((0,), dtype=self.dtype))
-
-            return solve_empty
-
-        solve_free = spla.factorized(self.matrix.tocsc())
-
-        def solve_case(
-            body_force: ArrayLike | None = None,
-            pressure_values: ArrayLike | None = None,
-            traction_values: ArrayLike | None = None,
-            nodal_temperature: ArrayLike | None = None,
-        ) -> npt.NDArray[np.floating[Any]]:
-            return self.recover(
-                solve_free(
-                    self.rhs(
-                        body_force=body_force,
-                        pressure_values=pressure_values,
-                        traction_values=traction_values,
-                        nodal_temperature=nodal_temperature,
-                    )
+        if ntemp_cols:
+            if nodal_temperature is None:
+                raise ValueError(
+                    "nodal_temperature is required because this model includes thermal materials"
                 )
+            temperature_arr = _normalize_nodal_temperature(
+                nodal_temperature,
+                self.n_temperature_nodes,
+                self.dtype,
             )
-
-        return solve_case
+            rhs += np.asarray(self.temperature_to_rhs @ temperature_arr, dtype=self.dtype)
+        return rhs
 
 
 @dataclass(frozen=True, slots=True)
@@ -1130,112 +887,6 @@ def _face_samples(
         )
         yield n, tangent, np.asarray(point, dtype=dtype), dtype.type(weight)
 
-
-def _assemble_axisymmetric_python(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    material_ids: npt.NDArray[np.uint64],
-    material_table: npt.NDArray[np.floating[Any]],
-    body_force: npt.NDArray[np.floating[Any]],
-    pressure_faces: npt.NDArray[np.uint64],
-    pressure_values: npt.NDArray[np.floating[Any]],
-    traction_faces: npt.NDArray[np.uint64],
-    traction_values: npt.NDArray[np.floating[Any]],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> AssemblyResult:
-    nelem = elements.shape[0]
-    ndof = nodes.shape[0] * 2
-    nnodes_per_element = elements.shape[1]
-    dof_per_element = 2 * nnodes_per_element
-    rows: list[int] = []
-    cols: list[int] = []
-    vals: list[Any] = []
-    rhs = np.zeros((ndof,), dtype=dtype)
-    two_pi = dtype.type(2.0 * np.pi)
-
-    for element_index, conn in enumerate(elements):
-        coords = nodes[conn]
-        material = material_table[int(material_ids[element_index])]
-        ke = np.zeros((dof_per_element, dof_per_element), dtype=dtype)
-        fe = np.zeros((dof_per_element,), dtype=dtype)
-        for n, grad_phys, det_j, point, weight in _volume_samples(
-            coords, element_type, quadrature_code, dtype
-        ):
-            b = _axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype)
-            scale = two_pi * point[0] * det_j * weight
-            ke += scale * (b.T @ material @ b)
-            for local_node in range(nnodes_per_element):
-                fe[2 * local_node] += scale * n[local_node] * body_force[element_index, 0]
-                fe[2 * local_node + 1] += scale * n[local_node] * body_force[element_index, 1]
-
-        local_dofs = np.empty((dof_per_element,), dtype=np.int64)
-        for local_node, global_node in enumerate(conn):
-            local_dofs[2 * local_node] = 2 * int(global_node)
-            local_dofs[2 * local_node + 1] = 2 * int(global_node) + 1
-        rhs[local_dofs] += fe
-        for row_local, row_dof in enumerate(local_dofs):
-            for col_local, col_dof in enumerate(local_dofs):
-                rows.append(int(row_dof))
-                cols.append(int(col_dof))
-                vals.append(ke[row_local, col_local])
-
-    for load_index, (element_index_u64, local_face_u64) in enumerate(pressure_faces):
-        element_index = int(element_index_u64)
-        if element_index < 0 or element_index >= nelem:
-            raise ValueError(
-                f"pressure_faces references element {element_index}, "
-                f"but mesh has {elements.shape[0]} elements"
-            )
-        local_face = int(local_face_u64)
-        conn = elements[element_index]
-        coords = nodes[conn]
-        fe = np.zeros((dof_per_element,), dtype=dtype)
-        for n, tangent, point, weight in _face_samples(
-            coords, element_type, local_face, quadrature_code, dtype
-        ):
-            normal_area = np.array([tangent[1], -tangent[0]], dtype=dtype)
-            scale = -pressure_values[load_index] * two_pi * point[0] * weight
-            for local_node in range(nnodes_per_element):
-                fe[2 * local_node] += scale * n[local_node] * normal_area[0]
-                fe[2 * local_node + 1] += scale * n[local_node] * normal_area[1]
-        for local_node, global_node in enumerate(conn):
-            rhs[2 * int(global_node)] += fe[2 * local_node]
-            rhs[2 * int(global_node) + 1] += fe[2 * local_node + 1]
-
-    for load_index, (element_index_u64, local_face_u64) in enumerate(traction_faces):
-        element_index = int(element_index_u64)
-        if element_index < 0 or element_index >= nelem:
-            raise ValueError(
-                f"traction_faces references element {element_index}, "
-                f"but mesh has {elements.shape[0]} elements"
-            )
-        local_face = int(local_face_u64)
-        conn = elements[element_index]
-        coords = nodes[conn]
-        fe = np.zeros((dof_per_element,), dtype=dtype)
-        for n, tangent, point, weight in _face_samples(
-            coords, element_type, local_face, quadrature_code, dtype
-        ):
-            tangent_norm = dtype.type(np.sqrt(tangent[0] * tangent[0] + tangent[1] * tangent[1]))
-            scale = two_pi * point[0] * tangent_norm * weight
-            for local_node in range(nnodes_per_element):
-                fe[2 * local_node] += scale * n[local_node] * traction_values[load_index, 0]
-                fe[2 * local_node + 1] += scale * n[local_node] * traction_values[load_index, 1]
-        for local_node, global_node in enumerate(conn):
-            rhs[2 * int(global_node)] += fe[2 * local_node]
-            rhs[2 * int(global_node) + 1] += fe[2 * local_node + 1]
-
-    return AssemblyResult(
-        rows=np.asarray(rows, dtype=np.int64),
-        cols=np.asarray(cols, dtype=np.int64),
-        vals=np.asarray(vals, dtype=dtype),
-        rhs=rhs,
-        ndof=ndof,
-    )
-
-
 def _assemble_body_force_operator(
     nodes: npt.NDArray[np.floating[Any]],
     elements: npt.NDArray[np.uint64],
@@ -1431,13 +1082,13 @@ def _assemble_stiffness_rust(
         dtype,
         _dispatch_by_element_type(
             element_type,
-            _assemble_axisymmetric_quad4_f32,
-            _assemble_axisymmetric_quad9_f32,
+            _assemble_stiffness_axisymmetric_quad4_f32,
+            _assemble_stiffness_axisymmetric_quad9_f32,
         ),
         _dispatch_by_element_type(
             element_type,
-            _assemble_axisymmetric_quad4_f64,
-            _assemble_axisymmetric_quad9_f64,
+            _assemble_stiffness_axisymmetric_quad4_f64,
+            _assemble_stiffness_axisymmetric_quad9_f64,
         ),
     )
     rows, cols, vals, ndof = low_level(
@@ -1561,224 +1212,6 @@ def _quadrature_field_operators_rust(
         nq_per_element=int(nq_per_element),
         ndof=int(ndof),
         ntemp=int(ntemp),
-    )
-
-
-def _assemble_quadrature_field_operators_python(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    material_ids: npt.NDArray[np.uint64],
-    material_table: npt.NDArray[np.floating[Any]],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> QuadratureFieldOperators:
-    nelem = elements.shape[0]
-    ndof = 2 * nodes.shape[0]
-    q1d = _gauss_1d(quadrature_code)
-    nq = len(q1d) ** 2
-    points = np.zeros((nelem, nq, 2), dtype=dtype)
-    strain_rows: list[int] = []
-    strain_cols: list[int] = []
-    strain_vals: list[Any] = []
-    stress_rows: list[int] = []
-    stress_cols: list[int] = []
-    stress_vals: list[Any] = []
-
-    for element_index, conn in enumerate(elements):
-        coords = nodes[conn]
-        material = material_table[int(material_ids[element_index])]
-        local_dofs = np.empty((2 * conn.shape[0],), dtype=np.int64)
-        for local_node, global_node in enumerate(conn):
-            global_node_int = int(global_node)
-            local_dofs[2 * local_node] = 2 * global_node_int
-            local_dofs[2 * local_node + 1] = 2 * global_node_int + 1
-
-        for q_local, (n, grad_phys, _det_j, point, _weight) in enumerate(
-            _volume_samples(coords, element_type, quadrature_code, dtype)
-        ):
-            b = _axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype)
-            db = np.asarray(material @ b, dtype=dtype)
-            points[element_index, q_local] = point
-            row_base = 4 * (element_index * nq + q_local)
-            for component in range(4):
-                global_row = row_base + component
-                for local_dof, global_col in enumerate(local_dofs):
-                    strain_value = b[component, local_dof]
-                    if strain_value != 0.0:
-                        strain_rows.append(global_row)
-                        strain_cols.append(int(global_col))
-                        strain_vals.append(strain_value)
-                    stress_value = db[component, local_dof]
-                    if stress_value != 0.0:
-                        stress_rows.append(global_row)
-                        stress_cols.append(int(global_col))
-                        stress_vals.append(stress_value)
-
-    nrow = nelem * nq * 4
-    return QuadratureFieldOperators(
-        points_rz=points,
-        strain_operator=_coo_operator_from_triplets(
-            strain_rows,
-            strain_cols,
-            strain_vals,
-            shape=(nrow, ndof),
-            dtype=dtype,
-        ),
-        stress_operator=_coo_operator_from_triplets(
-            stress_rows,
-            stress_cols,
-            stress_vals,
-            shape=(nrow, ndof),
-            dtype=dtype,
-        ),
-        thermal_strain_operator=sp.csr_matrix((nrow, 0), dtype=dtype),
-        thermal_stress_operator=sp.csr_matrix((nrow, 0), dtype=dtype),
-        thermal_strain_constant=np.zeros((nrow,), dtype=dtype),
-        thermal_stress_constant=np.zeros((nrow,), dtype=dtype),
-        nq_per_element=nq,
-        ndof=ndof,
-        ntemp=0,
-    )
-
-
-def assemble_axisymmetric(
-    nodes: ArrayLike,
-    elements: ArrayLike,
-    material_ids: ArrayLike,
-    material_table: ArrayLike | Mapping[int, ArrayLike],
-    body_force: ArrayLike,
-    pressure_faces: ArrayLike | None = None,
-    pressure_values: ArrayLike | None = None,
-    traction_faces: ArrayLike | None = None,
-    traction_values: ArrayLike | None = None,
-    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
-    nodal_temperature: ArrayLike | None = None,
-    quadrature: str | int = "gl3",
-    element_type: str = "quad4",
-) -> AssemblyResult:
-    """
-    Assemble the global axisymmetric elasticity system in COO form.
-
-    The assembled element matrix uses the standard axisymmetric weak form
-    `K_e = integral(B^T D B 2*pi*r dA)`; see [1]-[3] in the module references.
-    The right-hand side is built by applying the sparse body-force, pressure,
-    traction, and thermal operators. Traction values are specified in global
-    `(r, z)` components.
-    """
-
-    dtype = _resolve_float_dtype(
-        nodes,
-        material_table,
-        body_force,
-        pressure_values,
-        traction_values,
-        thermal_material_table,
-        nodal_temperature,
-    )
-    nodes_arr = _normalize_nodes(nodes, dtype)
-    elements_arr = _normalize_elements(elements)
-    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    _thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
-        material_ids,
-        thermal_material_table,
-        dtype,
-        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
-    )
-    if material_ids_arr.shape[0] != elements_arr.shape[0]:
-        raise ValueError(
-            f"material_ids has length {material_ids_arr.shape[0]}, "
-            f"but elements has {elements_arr.shape[0]} rows"
-        )
-    assert not (
-        thermal_material_table_arr is not None and nodal_temperature is None
-    ), "nodal_temperature must be provided when thermal_material_table is provided"
-    assert not (
-        thermal_material_table_arr is None and nodal_temperature is not None
-    ), "thermal_material_table must be provided when nodal_temperature is provided"
-    body_force_arr = _normalize_body_force(body_force, elements_arr.shape[0], dtype)
-    pressure_faces_arr, pressure_values_arr = _normalize_pressure_loads(
-        pressure_faces, pressure_values, dtype
-    )
-    traction_faces_arr, traction_values_arr = _normalize_traction_loads(
-        traction_faces, traction_values, dtype
-    )
-    quadrature_code = _quadrature_code(quadrature)
-    normalized_element_type = _normalize_element_type(element_type)
-    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
-        nodes_arr, elements_arr, normalized_element_type
-    )
-    rows, cols, vals, ndof = _assemble_stiffness_rust(
-        analysis_nodes,
-        analysis_elements,
-        material_ids_arr,
-        material_table_arr,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    body_force_to_rhs = _assemble_body_force_operator(
-        analysis_nodes,
-        analysis_elements,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    pressure_to_rhs = _assemble_pressure_operator(
-        analysis_nodes,
-        analysis_elements,
-        pressure_faces_arr,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    traction_to_rhs = _assemble_traction_operator(
-        analysis_nodes,
-        analysis_elements,
-        traction_faces_arr,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    analysis_temperature_to_rhs, thermal_reference_rhs = _assemble_temperature_operator(
-        analysis_nodes,
-        analysis_elements,
-        material_ids_arr,
-        material_table_arr,
-        thermal_material_table_arr,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    if thermal_material_table_arr is None:
-        temperature_to_rhs = sp.csr_matrix((ndof, 0), dtype=dtype)
-        thermal_reference_rhs = np.zeros((ndof,), dtype=dtype)
-        temperature_arr = None
-    else:
-        temperature_arr = _normalize_nodal_temperature(
-            cast(ArrayLike, nodal_temperature), nodes_arr.shape[0], dtype
-        )
-        if elevated is None:
-            temperature_to_rhs = analysis_temperature_to_rhs
-        else:
-            temperature_to_rhs = _to_csr_matrix(
-                analysis_temperature_to_rhs @ _temperature_elevation_operator(elevated, dtype)
-            )
-    rhs = np.asarray(thermal_reference_rhs, dtype=dtype).copy()
-    rhs += np.asarray(body_force_to_rhs @ body_force_arr.reshape(-1), dtype=dtype)
-    if pressure_values_arr.size:
-        rhs += np.asarray(pressure_to_rhs @ pressure_values_arr, dtype=dtype)
-    if traction_values_arr.size:
-        rhs += np.asarray(traction_to_rhs @ traction_values_arr.reshape(-1), dtype=dtype)
-    if temperature_arr is not None:
-        rhs += np.asarray(temperature_to_rhs @ temperature_arr, dtype=dtype)
-    return AssemblyResult(
-        rows=rows,
-        cols=cols,
-        vals=vals,
-        rhs=rhs,
-        ndof=ndof,
     )
 
 
@@ -2153,25 +1586,6 @@ def apply_dirichlet(
     )
 
 
-def solve_dirichlet(
-    matrix: sp.spmatrix,
-    rhs: ArrayLike,
-    prescribed: Mapping[int, float] | None = None,
-    solver: Any | None = None,
-) -> npt.NDArray[np.floating[Any]]:
-    """Solve the reduced sparse system after applying prescribed Dirichlet values."""
-
-    reduced = apply_dirichlet(matrix, rhs, prescribed)
-    nrow, _ = _sparse_shape(reduced.matrix)
-    if nrow == 0:
-        return reduced.recover(np.zeros((0,), dtype=reduced.rhs.dtype))
-    if solver is None:
-        free_solution = spla.factorized(reduced.matrix.tocsc())(reduced.rhs)
-    else:
-        free_solution = solver(reduced.matrix, reduced.rhs)
-    return reduced.recover(free_solution)
-
-
 def _gauss_1d(code: int) -> list[tuple[float, float]]:
     if code == 3:
         a = np.sqrt(3.0 / 5.0)
@@ -2296,17 +1710,14 @@ def evaluate_axisymmetric_strain_stress_at_quadrature(
 
 
 __all__ = [
-    "AssemblyResult",
     "AxisymmetricFEMModel",
     "ElevatedQuad9Mesh",
     "ElementMeasures",
     "ElementQuadrature",
     "QuadratureFieldOperators",
     "QuadratureFieldSamples",
-    "ReducedAxisymmetricFEMModel",
     "ReducedSystem",
     "apply_dirichlet",
-    "assemble_axisymmetric",
     "assemble_axisymmetric_model",
     "cfsem_radial_material",
     "element_measures_axisymmetric",
@@ -2317,5 +1728,4 @@ __all__ = [
     "isotropic_axisymmetric_thermal_material",
     "orthotropic_axisymmetric_thermal_material",
     "quadrature_field_operators_axisymmetric",
-    "solve_dirichlet",
 ]

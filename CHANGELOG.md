@@ -7,6 +7,8 @@
 * Rust
     * Solenoid stress module with axisymmetric finite element system assembly
     * `mesh` submodules for quadrature rules and for each supported mesh and element type
+    * Build python bindings with abi3-py310
+    * Update rust dep versions
 * Python
     * Bindings and examples for new axisymmetric FEM stress solver
 
@@ -14,6 +16,8 @@
 
 * Rust
     * Factor out quadrature rules and triangle mesh functions from BEM into mesh module
+* Python
+    * Fix docs build script
 
 ## 5.2.0 2026-04-01
 

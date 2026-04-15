@@ -6,7 +6,7 @@ export CFSEM_TESTING="True";
 cp examples/*.png docs/python/example_outputs
 
 # Build the top-level documentation (including the python docs)
-if [[ -z "$READTHEDOCS_OUTPUT" ]]; then
+if [ -z "${READTHEDOCS_OUTPUT:-}" ]; then
     # This is not a readthedocs build
     mkdocs build;
 fi

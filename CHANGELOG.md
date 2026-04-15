@@ -16,6 +16,7 @@
 
 * Rust
     * Factor out quadrature rules and triangle mesh functions from BEM into mesh module
+        * This is technically a breaking change, but documented here as a minor change because there are no direct users of the affected items yet
 * Python
     * Fix docs build script
 

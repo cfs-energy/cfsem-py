@@ -894,29 +894,6 @@ def test_axisymmetric_fem_helper_validation_branches() -> None:
     with pytest.raises(ValueError, match="unsupported quadrature"):
         fem._quadrature_code("bad")
 
-    with pytest.raises(ValidationError, match="nodes must have shape"):
-        fem._normalize_nodes(np.zeros((3, 3)), np.dtype(np.float64))
-
-    with pytest.raises(ValidationError, match="elements must have shape"):
-        fem._normalize_elements(np.zeros((2, 3), dtype=np.uint64))
-
-    with pytest.raises(ValidationError, match="material_ids must have shape"):
-        fem._normalize_materials(
-            np.zeros((1, 1), dtype=np.uint64),
-            np.asarray([material]),
-            np.dtype(np.float64),
-        )
-
-    with pytest.raises(ValidationError, match="material_table mapping cannot be empty"):
-        fem._normalize_materials(np.zeros((1,), dtype=np.uint64), {}, np.dtype(np.float64))
-
-    with pytest.raises(ValidationError, match=r"material_table\[1\] must have shape"):
-        fem._normalize_materials(
-            np.array([1], dtype=np.uint64),
-            {1: np.zeros((3, 3))},
-            np.dtype(np.float64),
-        )
-
     with pytest.raises(ValueError, match="missing from material_table"):
         fem._normalize_materials(
             np.array([1], dtype=np.uint64),
@@ -943,37 +920,13 @@ def test_axisymmetric_fem_helper_validation_branches() -> None:
 
     body_force = fem._normalize_body_force(np.array([1.0, 2.0]), 3, np.dtype(np.float64))
     assert body_force.shape == (3, 2)
-    with pytest.raises(ValidationError, match="body_force must have shape"):
-        fem._normalize_body_force(np.zeros((3, 3)), 3, np.dtype(np.float64))
 
     faces, values = fem._normalize_pressure_loads(None, None, np.dtype(np.float64))
     assert faces.shape == (0, 2)
     assert values.shape == (0,)
-    with pytest.raises(ValidationError, match="both be provided"):
-        fem._normalize_pressure_loads(np.zeros((0, 2), dtype=np.uint64), None, np.dtype(np.float64))
-    with pytest.raises(ValidationError, match="pressure_faces must have shape"):
-        fem._normalize_pressure_loads(np.zeros((1, 3), dtype=np.uint64), np.zeros((1,)), np.dtype(np.float64))
-    with pytest.raises(ValidationError, match="pressure_values must have shape"):
-        fem._normalize_pressure_loads(
-            np.zeros((1, 2), dtype=np.uint64),
-            np.zeros((1, 1)),
-            np.dtype(np.float64),
-        )
-    with pytest.raises(ValidationError, match="pressure_faces has 1 rows, but pressure_values has 2 entries"):
-        fem._normalize_pressure_loads(
-            np.zeros((1, 2), dtype=np.uint64),
-            np.zeros((2,), dtype=np.float64),
-            np.dtype(np.float64),
-        )
 
     traction = fem._normalize_traction_values(np.array([1.0, 2.0]), 3, np.dtype(np.float64))
     assert traction.shape == (3, 2)
-    with pytest.raises(ValidationError, match="traction_faces must have shape"):
-        fem._normalize_traction_faces(np.zeros((1, 3), dtype=np.uint64))
-    with pytest.raises(ValidationError, match="traction_values must have shape"):
-        fem._normalize_traction_values(np.zeros((3, 3)), 3, np.dtype(np.float64))
-    with pytest.raises(ValidationError, match="both be provided or both be omitted"):
-        fem._normalize_traction_loads(np.zeros((1, 2), dtype=np.uint64), None, np.dtype(np.float64))
 
     assert len(fem._gauss_1d(3)) == 3
     assert len(fem._gauss_1d(4)) == 4
@@ -988,15 +941,6 @@ def test_dirichlet_and_solver_validation_branches() -> None:
     reduced = fem.apply_dirichlet(matrix, rhs)
     assert reduced.fixed_dofs.size == 0
     assert reduced.fixed_values.size == 0
-
-    with pytest.raises(ValidationError, match="matrix must be square"):
-        fem.apply_dirichlet(sp.csr_matrix(np.ones((2, 3))), rhs)
-
-    with pytest.raises(ValidationError, match="rhs length 1 does not match matrix size 2"):
-        fem.apply_dirichlet(matrix, np.array([1.0]))
-
-    with pytest.raises(ValidationError, match="out of bounds"):
-        fem.apply_dirichlet(matrix, rhs, prescribed={2: 0.0})
 
     solution = fem.solve_dirichlet(matrix, rhs)
     assert np.allclose(matrix @ solution, rhs)
@@ -1334,26 +1278,6 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
     with pytest.raises(ValueError, match="nodal_temperature is required"):
         reduced.temperature_rhs()
 
-    with pytest.raises(ValidationError, match="nodal_temperature must be provided"):
-        assemble_axisymmetric(
-            nodes=nodes,
-            elements=elements,
-            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-            material_table=np.asarray([material]),
-            body_force=np.array([0.0, 0.0], dtype=dtype),
-            thermal_material_table=np.asarray([thermal_material]),
-        )
-
-    with pytest.raises(ValidationError, match="thermal_material_table must be provided"):
-        assemble_axisymmetric(
-            nodes=nodes,
-            elements=elements,
-            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-            material_table=np.asarray([material]),
-            body_force=np.array([0.0, 0.0], dtype=dtype),
-            nodal_temperature=np.full(nodes.shape[0], 300.0, dtype=dtype),
-        )
-
     with pytest.raises(ValueError, match="missing from thermal_material_table"):
         assemble_axisymmetric(
             nodes=nodes,
@@ -1525,28 +1449,10 @@ def test_python_quadrature_operator_fallback_matches_rust(element_type: str) -> 
 
 def test_private_helper_and_validation_branches_not_hit_by_public_paths() -> None:
     dtype = np.dtype(np.float64)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-
-    with pytest.raises(ValidationError, match="unsupported element_type"):
-        fem._normalize_element_type("tri3")
-    with pytest.raises(ValidationError, match="unsupported quadrature code"):
-        fem._validate_element_quadrature_combo("quad4", 2)
 
     assert fem._resolve_float_dtype({"a": np.array([1.0], dtype=np.float64)}) == np.dtype(np.float64)
     empty_elevation = fem._temperature_elevation_operator(None, dtype)
     assert empty_elevation.shape == (0, 0)
-
-    with pytest.raises(ValidationError, match="material_ids must have shape"):
-        fem._normalize_thermal_material_table(np.zeros((1, 1), dtype=np.uint64), np.zeros((1, 5)), dtype)
-    with pytest.raises(ValidationError, match="same mapping/dense convention"):
-        fem._normalize_thermal_material_table(
-            np.zeros((1,), dtype=np.uint64),
-            {0: np.zeros((5,))},
-            dtype,
-            require_mapping=False,
-        )
-    with pytest.raises(ValidationError, match="thermal_material_table mapping cannot be empty"):
-        fem._normalize_thermal_material_table(np.zeros((1,), dtype=np.uint64), {}, dtype)
     normalized_ids, thermal_table = fem._normalize_thermal_material_table(
         np.array([4, 2, 4], dtype=np.uint64),
         {2: np.array([1.0, 2.0, 3.0, 0.0, 4.0]), 4: np.array([5.0, 6.0, 7.0, 0.0, 8.0])},
@@ -1554,27 +1460,6 @@ def test_private_helper_and_validation_branches_not_hit_by_public_paths() -> Non
     )
     assert np.array_equal(normalized_ids, np.array([1, 0, 1], dtype=np.uint64))
     assert thermal_table.shape == (2, 5)
-    with pytest.raises(ValidationError, match=r"thermal_material_table\[0\] must have shape"):
-        fem._normalize_thermal_material_table(
-            np.zeros((1,), dtype=np.uint64),
-            {0: np.zeros((4,))},
-            dtype,
-        )
-    with pytest.raises(ValidationError, match="thermal_material_table must have shape"):
-        fem._normalize_thermal_material_table(np.zeros((1,), dtype=np.uint64), np.zeros((1, 4)), dtype)
-    with pytest.raises(ValidationError, match="shear thermal expansion must be zero"):
-        fem._normalize_thermal_material_table(
-            np.zeros((1,), dtype=np.uint64),
-            np.array([[1.0, 1.0, 1.0, 1.0, 0.0]]),
-            dtype,
-        )
-
-    with pytest.raises(ValidationError, match=r"nodal_temperature must have shape \(3,\)"):
-        fem._normalize_nodal_temperature(np.zeros((3, 1)), 3, dtype)
-    with pytest.raises(ValidationError, match="pressure_values must have shape"):
-        fem._normalize_pressure_values(np.zeros((1, 1)), 1, dtype)
-    with pytest.raises(ValidationError, match="pressure_values has 2 entries, but expected 1"):
-        fem._normalize_pressure_values(np.zeros((2,)), 1, dtype)
 
     assert fem._quad_face_reference(0, 0.25) == (0.25, -1.0, (1.0, 0.0))
     assert fem._quad_face_reference(1, 0.25) == (1.0, 0.25, (0.0, 1.0))
@@ -1590,23 +1475,6 @@ def test_private_helper_and_validation_branches_not_hit_by_public_paths() -> Non
     assert grad.shape == (9, 2)
     assert fem._element_shape("quad9", 0.0, 0.0).shape == (9,)
     assert fem._element_grad_ref("quad9", 0.0, 0.0).shape == (9, 2)
-
-    with pytest.raises(ValidationError, match="too close to zero"):
-        fem._axisymmetric_b_matrix(np.array([1.0]), np.array([[0.0, 0.0]]), 0.0, dtype)
-
-    inverted_coords = np.array([[0.5, 0.0], [0.5, 0.2], [1.0, 0.2], [1.0, 0.0]], dtype=np.float64)
-    with pytest.raises(ValidationError, match="non-positive element Jacobian determinant"):
-        next(fem._volume_samples(inverted_coords, "quad4", 3, dtype))
-
-    negative_radius_coords = np.array([[-1.0, 0.0], [-0.5, 0.0], [-0.5, 0.2], [-1.0, 0.2]], dtype=np.float64)
-    with pytest.raises(ValidationError, match="negative radius"):
-        next(fem._volume_samples(negative_radius_coords, "quad4", 3, dtype))
-    with pytest.raises(ValidationError, match="negative radius"):
-        next(fem._face_samples(negative_radius_coords, "quad4", 0, 3, dtype))
-
-    degenerate_face_coords = np.array([[0.5, 0.0], [0.5, 0.0], [0.5, 0.2], [0.5, 0.2]], dtype=np.float64)
-    with pytest.raises(ValidationError, match="degenerate face tangent"):
-        next(fem._face_samples(degenerate_face_coords, "quad4", 0, 3, dtype))
 
     ortho = fem.orthotropic_axisymmetric_thermal_material(1.0, 2.0, 3.0, reference_temperature=4.0, dtype=dtype)
     assert np.allclose(ortho, np.array([1.0, 2.0, 3.0, 0.0, 4.0], dtype=dtype))

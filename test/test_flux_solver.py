@@ -4,6 +4,8 @@ from pytest import raises
 import cfsem
 from cfsem.flux_solver import gradient_order4
 
+ValidationError = (AssertionError, ValueError)
+
 
 def test_gradient_order4():
     """Make sure order 2 and order 4 gradients converge to the same value"""
@@ -69,7 +71,7 @@ def test_gradient_order4_rejects_5x5_grid():
     xmesh, ymesh = np.meshgrid(xgrid, ygrid, indexing="ij")
     z = 2.0 * xmesh - 3.0 * ymesh
 
-    with raises(ValueError, match="at least 6 points"):
+    with raises(ValidationError, match="at least 6 points"):
         gradient_order4(z, xmesh, ymesh)
 
 
@@ -107,7 +109,7 @@ def test_calc_flux_density_from_flux_rejects_axis_inclusive_mesh():
     rmesh, zmesh = np.meshgrid(rgrid, zgrid, indexing="ij")
     psi = rmesh**2 + zmesh
 
-    with raises(ValueError, match="strictly positive"):
+    with raises(ValidationError, match="strictly positive"):
         cfsem.calc_flux_density_from_flux(psi, rmesh, zmesh)
 
 
@@ -143,31 +145,31 @@ def test_flux_solver_reuse_and_boundary_condition():
 
 def test_flux_solver_rejects_non_increasing_and_axis_inclusive_grids():
     zgrid = np.linspace(-0.4, 0.4, 19)
-    with raises(ValueError, match="strictly positive"):
+    with raises(ValidationError, match="strictly positive"):
         cfsem.flux_solver((np.linspace(0.0, 1.4, 17), zgrid))
 
-    with raises(ValueError, match="rgrid must be strictly increasing"):
+    with raises(ValidationError, match="rgrid must be strictly increasing"):
         cfsem.flux_solver((np.array([0.6, 0.65, 0.65, *np.linspace(0.7, 1.4, 14)]), zgrid))
 
-    with raises(ValueError, match="strictly increasing"):
+    with raises(ValidationError, match="strictly increasing"):
         cfsem.flux_solver((np.linspace(0.6, 1.4, 17), zgrid[::-1]))
 
     irregular_rgrid = np.linspace(0.6, 1.4, 17)
     irregular_rgrid[5] += 1.0e-3
-    with raises(ValueError, match="rgrid must be regular"):
+    with raises(ValidationError, match="rgrid must be regular"):
         cfsem.flux_solver((irregular_rgrid, zgrid))
 
     irregular_zgrid = np.linspace(-0.4, 0.4, 19)
     irregular_zgrid[7] += 1.0e-3
-    with raises(ValueError, match="zgrid must be regular"):
+    with raises(ValidationError, match="zgrid must be regular"):
         cfsem.flux_solver((np.linspace(0.6, 1.4, 17), irregular_zgrid))
 
 
 def test_flux_solver_rejects_grids_too_short_for_order4_gs_stencil():
-    with raises(ValueError, match="at least 7 points"):
+    with raises(ValidationError, match="at least 7 points"):
         cfsem.flux_solver((np.linspace(0.6, 1.4, 6), np.linspace(-0.4, 0.4, 19)))
 
-    with raises(ValueError, match="at least 7 points"):
+    with raises(ValidationError, match="at least 7 points"):
         cfsem.flux_solver((np.linspace(0.6, 1.4, 17), np.linspace(-0.4, 0.4, 6)))
 
 
@@ -178,7 +180,7 @@ def test_flux_solver_rejects_source_current_on_boundary():
     current_density = np.zeros_like(rmesh)
     current_density[0, 5] = 2.5e6
 
-    with raises(ValueError, match="finite-difference boundary"):
+    with raises(ValidationError, match="finite-difference boundary"):
         cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density)
 
 
@@ -188,7 +190,7 @@ def test_flux_solver_rejects_default_meshgrid_layout_when_unambiguous():
     rmesh, zmesh = np.meshgrid(rgrid, zgrid)
     current_density = np.zeros_like(rmesh)
 
-    with raises(ValueError, match="transposed|indexing='ij'"):
+    with raises(ValidationError, match="transposed|indexing='ij'"):
         cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density)
 
 
@@ -198,10 +200,10 @@ def test_flux_solver_rejects_mesh_shape_and_axis_content_mismatches():
     rmesh, zmesh = np.meshgrid(rgrid, zgrid, indexing="ij")
     current_density = np.zeros_like(rmesh)
 
-    with raises(ValueError, match=r"must all have shape \(17, 19\)"):
+    with raises(ValidationError, match=r"must all have shape \(17, 19\)"):
         cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density[:-1, :])
 
     bad_rmesh = rmesh.copy()
     bad_rmesh[:, 0] += 0.1
-    with raises(ValueError, match="consistent with grids"):
+    with raises(ValidationError, match="consistent with grids"):
         cfsem.solve_flux_axisymmetric((rgrid, zgrid), (bad_rmesh, zmesh), current_density)

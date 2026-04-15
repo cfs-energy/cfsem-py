@@ -64,8 +64,7 @@ def gradient_order4(z: NDArray, xmesh: NDArray, ymesh: NDArray) -> tuple[NDArray
         (dzdx, dzdy) [<xunits>/m] 2D arrays of gradient components
     """
     nx, ny = z.shape
-    if nx < 6 or ny < 6:
-        raise ValueError("gradient_order4 requires each grid dimension to have at least 6 points")
+    assert nx >= 6 and ny >= 6, "gradient_order4 requires each grid dimension to have at least 6 points"
     dx = xmesh[1][0] - xmesh[0][0]
     dy = ymesh[0][1] - ymesh[0][0]
 
@@ -130,8 +129,7 @@ def calc_flux_density_from_flux(psi: NDArray, rmesh: NDArray, zmesh: NDArray) ->
     Returns:
         (br, bz) [T] 2D arrays of poloidal flux density
     """
-    if np.any(rmesh <= 0.0):
-        raise ValueError("rmesh must be strictly positive")
+    assert not np.any(rmesh <= 0.0), "rmesh must be strictly positive"
 
     dpsidr, dpsidz = gradient_order4(psi, rmesh, zmesh)
 
@@ -189,24 +187,22 @@ def _validate_flux_mesh_inputs(
         or zmesh.shape != expected_shape
         or current_density.shape != expected_shape
     ):
-        if (
+        assert not (
             rgrid.size != zgrid.size
             and rmesh.shape == transposed_shape
             and zmesh.shape == transposed_shape
             and current_density.shape == transposed_shape
-        ):
-            raise ValueError(
-                "meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')"
-            )
-        raise ValueError(f"meshes and current_density must all have shape {expected_shape}")
+        ), "meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')"
+        assert False, f"meshes and current_density must all have shape {expected_shape}"
 
     # If the two axes have different lengths, the expected `indexing="ij"` layout
     # is no longer ambiguous, so we can validate the mesh-axis content directly.
     if rgrid.size != zgrid.size:
         r_axis_matches = np.allclose(rmesh[:, 0], rgrid, rtol=tol, atol=tol)
         z_axis_matches = np.allclose(zmesh[0, :], zgrid, rtol=tol, atol=tol)
-        if not (r_axis_matches and z_axis_matches):
-            raise ValueError("meshes must be consistent with grids and use np.meshgrid(..., indexing='ij')")
+        assert (
+            r_axis_matches and z_axis_matches
+        ), "meshes must be consistent with grids and use np.meshgrid(..., indexing='ij')"
 
 
 def solve_flux_axisymmetric(
@@ -244,13 +240,12 @@ def solve_flux_axisymmetric(
     dr, dz = _check_regular(grids, min_points=7)  # [m] grid spacing
     area = dr * dz  # [m^2]
     rmesh, zmesh = meshes  # [m]
-    if (
+    assert not (
         np.any(current_density[0, :] != 0.0)
         or np.any(current_density[-1, :] != 0.0)
         or np.any(current_density[:, 0] != 0.0)
         or np.any(current_density[:, -1] != 0.0)
-    ):
-        raise ValueError("current_density must be zero on the finite-difference boundary")
+    ), "current_density must be zero on the finite-difference boundary"
     nonzero_inds = np.where(current_density != 0.0)
     current_density_nonzero = np.ascontiguousarray(current_density[nonzero_inds])  # [A/m^2]
     rmesh_nonzero = np.ascontiguousarray(rmesh[nonzero_inds])  # [m]
@@ -277,22 +272,18 @@ def solve_flux_axisymmetric(
 def _check_regular(grids: tuple[NDArray, NDArray], tol=1e-6, min_points: int = 2) -> tuple[float, float]:
     """Check that grids are regular, strictly increasing, and at positive radius."""
     rgrid, zgrid = grids
-    if rgrid.size < min_points or zgrid.size < min_points:
-        raise ValueError(f"rgrid and zgrid must each have at least {min_points} points")
-    if np.any(rgrid <= 0.0):
-        raise ValueError("rgrid must be strictly positive")
+    assert (
+        rgrid.size >= min_points and zgrid.size >= min_points
+    ), f"rgrid and zgrid must each have at least {min_points} points"
+    assert not np.any(rgrid <= 0.0), "rgrid must be strictly positive"
     drs = np.diff(rgrid)
     dzs = np.diff(zgrid)
-    if np.any(drs <= 0.0):
-        raise ValueError("rgrid must be strictly increasing")
-    if np.any(dzs <= 0.0):
-        raise ValueError("zgrid must be strictly increasing")
+    assert not np.any(drs <= 0.0), "rgrid must be strictly increasing"
+    assert not np.any(dzs <= 0.0), "zgrid must be strictly increasing"
     drmean = float(np.mean(drs))
     dzmean = float(np.mean(dzs))
-    if not np.all(np.abs(drs - drmean) / drmean < tol):
-        raise ValueError("rgrid must be regular")
-    if not np.all(np.abs(dzs - dzmean) / dzmean < tol):
-        raise ValueError("zgrid must be regular")
+    assert np.all(np.abs(drs - drmean) / drmean < tol), "rgrid must be regular"
+    assert np.all(np.abs(dzs - dzmean) / dzmean < tol), "zgrid must be regular"
 
     return drmean, dzmean  # [m]
 

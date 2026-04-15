@@ -575,14 +575,15 @@ def _quadrature_code(quadrature: str | int) -> int:
 
 def _normalize_element_type(element_type: str) -> str:
     normalized = str(element_type).strip().lower()
-    if normalized not in {"quad4", "quad9"}:
-        raise ValueError(f"unsupported element_type {element_type!r}; use 'quad4' or 'quad9'")
+    assert normalized in {
+        "quad4",
+        "quad9",
+    }, f"unsupported element_type {element_type!r}; use 'quad4' or 'quad9'"
     return normalized
 
 
 def _validate_element_quadrature_combo(element_type: str, quadrature_code: int) -> None:
-    if quadrature_code not in {3, 4}:
-        raise ValueError(f"unsupported quadrature code {quadrature_code}; use 3 or 4")
+    assert quadrature_code in {3, 4}, f"unsupported quadrature code {quadrature_code}; use 3 or 4"
     _normalize_element_type(element_type)
 
 
@@ -603,15 +604,13 @@ def _resolve_float_dtype(*values: object) -> np.dtype[np.float32] | np.dtype[np.
 
 def _normalize_nodes(nodes: ArrayLike, dtype: np.dtype[Any]) -> npt.NDArray[np.floating[Any]]:
     arr = np.asarray(nodes, dtype=dtype)
-    if arr.ndim != 2 or arr.shape[1] != 2:
-        raise ValueError(f"nodes must have shape (nnode, 2); got {arr.shape}")
+    assert arr.ndim == 2 and arr.shape[1] == 2, f"nodes must have shape (nnode, 2); got {arr.shape}"
     return np.ascontiguousarray(arr)
 
 
 def _normalize_elements(elements: ArrayLike) -> npt.NDArray[np.uint64]:
     arr = np.asarray(elements, dtype=np.uint64)
-    if arr.ndim != 2 or arr.shape[1] != 4:
-        raise ValueError(f"elements must have shape (nelem, 4); got {arr.shape}")
+    assert arr.ndim == 2 and arr.shape[1] == 4, f"elements must have shape (nelem, 4); got {arr.shape}"
     return np.ascontiguousarray(arr)
 
 
@@ -723,8 +722,11 @@ def _temperature_elevation_operator(
 
     return _to_csr_matrix(
         sp.coo_matrix(
-        (np.asarray(vals, dtype=dtype), (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64))),
-        shape=(n_analysis_nodes, n_input_nodes),
+            (
+                np.asarray(vals, dtype=dtype),
+                (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64)),
+            ),
+            shape=(n_analysis_nodes, n_input_nodes),
         )
     )
 
@@ -754,18 +756,15 @@ def _normalize_materials(
     dtype: np.dtype[Any],
 ) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
     ids = np.asarray(material_ids, dtype=np.uint64)
-    if ids.ndim != 1:
-        raise ValueError(f"material_ids must have shape (nelem,); got {ids.shape}")
+    assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     if isinstance(material_table, Mapping):
-        if not material_table:
-            raise ValueError("material_table mapping cannot be empty")
+        assert material_table, "material_table mapping cannot be empty"
         keys = sorted(int(key) for key in material_table)
         dense_table = []
         tag_to_index = {key: index for index, key in enumerate(keys)}
         for key in keys:
             matrix = np.asarray(material_table[key], dtype=dtype)
-            if matrix.shape != (4, 4):
-                raise ValueError(f"material_table[{key}] must have shape (4, 4); got {matrix.shape}")
+            assert matrix.shape == (4, 4), f"material_table[{key}] must have shape (4, 4); got {matrix.shape}"
             dense_table.append(matrix)
         try:
             normalized_ids = np.asarray([tag_to_index[int(tag)] for tag in ids], dtype=np.uint64)
@@ -776,8 +775,10 @@ def _normalize_materials(
         return normalized_ids, np.ascontiguousarray(np.stack(dense_table, axis=0), dtype=dtype)
 
     table = np.asarray(material_table, dtype=dtype)
-    if table.ndim != 3 or table.shape[1:] != (4, 4):
-        raise ValueError(f"material_table must have shape (nmat, 4, 4); got {table.shape}")
+    assert table.ndim == 3 and table.shape[1:] == (
+        4,
+        4,
+    ), f"material_table must have shape (nmat, 4, 4); got {table.shape}"
     return np.ascontiguousarray(ids), np.ascontiguousarray(table)
 
 
@@ -791,24 +792,20 @@ def _normalize_thermal_material_table(
     if thermal_material_table is None:
         return None, None
     ids = np.asarray(material_ids, dtype=np.uint64)
-    if ids.ndim != 1:
-        raise ValueError(f"material_ids must have shape (nelem,); got {ids.shape}")
+    assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     is_mapping = isinstance(thermal_material_table, Mapping)
-    if require_mapping is not None and is_mapping != require_mapping:
-        raise ValueError(
-            "thermal_material_table must use the same mapping/dense convention as material_table"
-        )
+    assert (
+        require_mapping is None or is_mapping == require_mapping
+    ), "thermal_material_table must use the same mapping/dense convention as material_table"
     if is_mapping:
         mapping = thermal_material_table
-        if not mapping:
-            raise ValueError("thermal_material_table mapping cannot be empty")
+        assert mapping, "thermal_material_table mapping cannot be empty"
         keys = sorted(int(key) for key in mapping)
         dense_table = []
         tag_to_index = {key: index for index, key in enumerate(keys)}
         for key in keys:
             row = np.asarray(mapping[key], dtype=dtype)
-            if row.shape != (5,):
-                raise ValueError(f"thermal_material_table[{key}] must have shape (5,); got {row.shape}")
+            assert row.shape == (5,), f"thermal_material_table[{key}] must have shape (5,); got {row.shape}"
             dense_table.append(row)
         try:
             normalized_ids = np.asarray([tag_to_index[int(tag)] for tag in ids], dtype=np.uint64)
@@ -819,12 +816,14 @@ def _normalize_thermal_material_table(
         table = np.ascontiguousarray(np.stack(dense_table, axis=0), dtype=dtype)
     else:
         table = np.asarray(thermal_material_table, dtype=dtype)
-        if table.ndim != 2 or table.shape[1] != 5:
-            raise ValueError(f"thermal_material_table must have shape (nmat, 5); got {table.shape}")
+        assert (
+            table.ndim == 2 and table.shape[1] == 5
+        ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
         normalized_ids = np.ascontiguousarray(ids)
         table = np.ascontiguousarray(table)
-    if not np.allclose(table[:, 3], 0.0):
-        raise ValueError("thermal_material_table shear thermal expansion must be zero in phase 1")
+    assert np.allclose(
+        table[:, 3], 0.0
+    ), "thermal_material_table shear thermal expansion must be zero in phase 1"
     return normalized_ids, table
 
 
@@ -838,8 +837,9 @@ def _normalize_nodal_temperature(
     dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
     arr = np.asarray(nodal_temperature, dtype=dtype)
-    if arr.ndim != 1 or arr.shape[0] != nnode:
-        raise ValueError(f"nodal_temperature must have shape ({nnode},); got {arr.shape}")
+    assert (
+        arr.ndim == 1 and arr.shape[0] == nnode
+    ), f"nodal_temperature must have shape ({nnode},); got {arr.shape}"
     return np.ascontiguousarray(arr)
 
 
@@ -851,8 +851,10 @@ def _normalize_body_force(
     arr = np.asarray(body_force, dtype=dtype)
     if arr.ndim == 1 and arr.shape == (2,):
         arr = np.broadcast_to(arr, (nelem, 2)).copy()
-    if arr.ndim != 2 or arr.shape != (nelem, 2):
-        raise ValueError(f"body_force must have shape (2,) or (nelem, 2); got {arr.shape}")
+    assert arr.ndim == 2 and arr.shape == (
+        nelem,
+        2,
+    ), f"body_force must have shape (2,) or (nelem, 2); got {arr.shape}"
     return np.ascontiguousarray(arr)
 
 
@@ -870,8 +872,9 @@ def _normalize_pressure_faces(pressure_faces: ArrayLike | None) -> npt.NDArray[n
     if pressure_faces is None:
         return np.zeros((0, 2), dtype=np.uint64)
     faces = np.asarray(pressure_faces, dtype=np.uint64)
-    if faces.ndim != 2 or faces.shape[1] != 2:
-        raise ValueError(f"pressure_faces must have shape (nload, 2); got {faces.shape}")
+    assert (
+        faces.ndim == 2 and faces.shape[1] == 2
+    ), f"pressure_faces must have shape (nload, 2); got {faces.shape}"
     return np.ascontiguousarray(faces)
 
 
@@ -883,10 +886,8 @@ def _normalize_pressure_values(
     if pressure_values is None:
         return np.zeros((nload,), dtype=dtype)
     values = np.asarray(pressure_values, dtype=dtype)
-    if values.ndim != 1:
-        raise ValueError(f"pressure_values must have shape (nload,); got {values.shape}")
-    if values.shape[0] != nload:
-        raise ValueError(f"pressure_values has {values.shape[0]} entries, but expected {nload}")
+    assert values.ndim == 1, f"pressure_values must have shape (nload,); got {values.shape}"
+    assert values.shape[0] == nload, f"pressure_values has {values.shape[0]} entries, but expected {nload}"
     return np.ascontiguousarray(values)
 
 
@@ -897,16 +898,15 @@ def _normalize_pressure_loads(
 ) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
     if pressure_faces is None and pressure_values is None:
         return _normalize_pressure_faces(None), _normalize_pressure_values(None, 0, dtype)
-    if pressure_faces is None or pressure_values is None:
-        raise ValueError("pressure_faces and pressure_values must either both be provided or both be omitted")
+    assert (
+        pressure_faces is not None and pressure_values is not None
+    ), "pressure_faces and pressure_values must either both be provided or both be omitted"
     faces = _normalize_pressure_faces(pressure_faces)
     values = np.asarray(pressure_values, dtype=dtype)
-    if values.ndim != 1:
-        raise ValueError(f"pressure_values must have shape (nload,); got {values.shape}")
-    if faces.shape[0] != values.shape[0]:
-        raise ValueError(
-            f"pressure_faces has {faces.shape[0]} rows, but pressure_values has {values.shape[0]} entries"
-        )
+    assert values.ndim == 1, f"pressure_values must have shape (nload,); got {values.shape}"
+    assert (
+        faces.shape[0] == values.shape[0]
+    ), f"pressure_faces has {faces.shape[0]} rows, but pressure_values has {values.shape[0]} entries"
     return faces, np.ascontiguousarray(values)
 
 
@@ -914,8 +914,9 @@ def _normalize_traction_faces(traction_faces: ArrayLike | None) -> npt.NDArray[n
     if traction_faces is None:
         return np.zeros((0, 2), dtype=np.uint64)
     faces = np.asarray(traction_faces, dtype=np.uint64)
-    if faces.ndim != 2 or faces.shape[1] != 2:
-        raise ValueError(f"traction_faces must have shape (nload, 2); got {faces.shape}")
+    assert (
+        faces.ndim == 2 and faces.shape[1] == 2
+    ), f"traction_faces must have shape (nload, 2); got {faces.shape}"
     return np.ascontiguousarray(faces)
 
 
@@ -929,8 +930,10 @@ def _normalize_traction_values(
     values = np.asarray(traction_values, dtype=dtype)
     if values.ndim == 1 and values.shape == (2,):
         values = np.broadcast_to(values, (nload, 2)).copy()
-    if values.ndim != 2 or values.shape != (nload, 2):
-        raise ValueError(f"traction_values must have shape (2,) or ({nload}, 2); got {values.shape}")
+    assert values.ndim == 2 and values.shape == (
+        nload,
+        2,
+    ), f"traction_values must have shape (2,) or ({nload}, 2); got {values.shape}"
     return np.ascontiguousarray(values)
 
 
@@ -941,8 +944,9 @@ def _normalize_traction_loads(
 ) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
     if traction_faces is None and traction_values is None:
         return _normalize_traction_faces(None), _normalize_traction_values(None, 0, dtype)
-    if traction_faces is None or traction_values is None:
-        raise ValueError("traction_faces and traction_values must either both be provided or both be omitted")
+    assert (
+        traction_faces is not None and traction_values is not None
+    ), "traction_faces and traction_values must either both be provided or both be omitted"
     faces = _normalize_traction_faces(traction_faces)
     values = _normalize_traction_values(traction_values, faces.shape[0], dtype)
     return faces, values
@@ -1059,8 +1063,7 @@ def _axisymmetric_b_matrix(
     radius: float,
     dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
-    if radius <= np.finfo(dtype).eps:
-        raise ValueError(f"quadrature radius {radius} is too close to zero")
+    assert radius > np.finfo(dtype).eps, f"quadrature radius {radius} is too close to zero"
     nnodes = int(n.shape[0])
     b = np.zeros((4, 2 * nnodes), dtype=dtype)
     for i in range(nnodes):
@@ -1086,11 +1089,9 @@ def _volume_samples(
             grad_ref = _element_grad_ref(element_type, xi, eta).astype(dtype, copy=False)
             jac = _element_jacobian(coords, grad_ref, dtype)
             det_j = jac[0, 0] * jac[1, 1] - jac[0, 1] * jac[1, 0]
-            if det_j <= 0.0:
-                raise ValueError(f"encountered non-positive element Jacobian determinant {float(det_j)!r}")
+            assert det_j > 0.0, f"encountered non-positive element Jacobian determinant {float(det_j)!r}"
             point = n @ coords
-            if point[0] < 0.0:
-                raise ValueError(f"quadrature point has negative radius {float(point[0])!r}")
+            assert point[0] >= 0.0, f"quadrature point has negative radius {float(point[0])!r}"
             inv_j = np.linalg.inv(jac)
             grad_phys = np.column_stack(
                 [
@@ -1114,8 +1115,7 @@ def _face_samples(
         grad_ref = _element_grad_ref(element_type, xi, eta).astype(dtype, copy=False)
         jac = _element_jacobian(coords, grad_ref, dtype)
         point = n @ coords
-        if point[0] < 0.0:
-            raise ValueError(f"face quadrature point has negative radius {float(point[0])!r}")
+        assert point[0] >= 0.0, f"face quadrature point has negative radius {float(point[0])!r}"
         tangent = np.array(
             [
                 jac[0, 0] * ds_reference[0] + jac[0, 1] * ds_reference[1],
@@ -1124,11 +1124,10 @@ def _face_samples(
             dtype=dtype,
         )
         tangent_norm_sq = tangent[0] * tangent[0] + tangent[1] * tangent[1]
-        if tangent_norm_sq <= 0.0:
-            raise ValueError(
-                f"degenerate face tangent on local face {local_face}; "
-                f"tangent squared norm is {float(tangent_norm_sq)!r}"
-            )
+        assert tangent_norm_sq > 0.0, (
+            f"degenerate face tangent on local face {local_face}; "
+            f"tangent squared norm is {float(tangent_norm_sq)!r}"
+        )
         yield n, tangent, np.asarray(point, dtype=dtype), dtype.type(weight)
 
 
@@ -1691,11 +1690,12 @@ def assemble_axisymmetric(
             f"material_ids has length {material_ids_arr.shape[0]}, "
             f"but elements has {elements_arr.shape[0]} rows"
         )
-    if thermal_material_table_arr is not None:
-        if nodal_temperature is None:
-            raise ValueError("nodal_temperature must be provided when thermal_material_table is provided")
-    elif nodal_temperature is not None:
-        raise ValueError("thermal_material_table must be provided when nodal_temperature is provided")
+    assert not (
+        thermal_material_table_arr is not None and nodal_temperature is None
+    ), "nodal_temperature must be provided when thermal_material_table is provided"
+    assert not (
+        thermal_material_table_arr is None and nodal_temperature is not None
+    ), "thermal_material_table must be provided when nodal_temperature is provided"
     body_force_arr = _normalize_body_force(body_force, elements_arr.shape[0], dtype)
     pressure_faces_arr, pressure_values_arr = _normalize_pressure_loads(
         pressure_faces, pressure_values, dtype
@@ -2126,10 +2126,8 @@ def apply_dirichlet(
     csr = _to_csr_matrix(matrix)
     nrow, ncol = _sparse_shape(csr)
     rhs_arr = np.asarray(rhs, dtype=csr.dtype).reshape(-1)
-    if nrow != ncol:
-        raise ValueError(f"matrix must be square; got {(nrow, ncol)}")
-    if rhs_arr.shape[0] != nrow:
-        raise ValueError(f"rhs length {rhs_arr.shape[0]} does not match matrix size {nrow}")
+    assert nrow == ncol, f"matrix must be square; got {(nrow, ncol)}"
+    assert rhs_arr.shape[0] == nrow, f"rhs length {rhs_arr.shape[0]} does not match matrix size {nrow}"
     prescribed = {} if prescribed is None else dict(prescribed)
     if prescribed:
         fixed_dofs = np.asarray(sorted(int(dof) for dof in prescribed), dtype=np.int64)
@@ -2137,8 +2135,9 @@ def apply_dirichlet(
     else:
         fixed_dofs = np.zeros((0,), dtype=np.int64)
         fixed_values = np.zeros((0,), dtype=rhs_arr.dtype)
-    if fixed_dofs.size and ((fixed_dofs < 0).any() or (fixed_dofs >= nrow).any()):
-        raise ValueError("prescribed DOF index is out of bounds")
+    assert not (
+        fixed_dofs.size and ((fixed_dofs < 0).any() or (fixed_dofs >= nrow).any())
+    ), "prescribed DOF index is out of bounds"
     free_dofs = np.setdiff1d(np.arange(nrow, dtype=np.int64), fixed_dofs, assume_unique=True)
     reduced_rhs = rhs_arr[free_dofs].copy()
     if fixed_dofs.size:

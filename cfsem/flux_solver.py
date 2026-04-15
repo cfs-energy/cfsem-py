@@ -116,6 +116,7 @@ def calc_flux_density_from_flux(psi: NDArray, rmesh: NDArray, zmesh: NDArray) ->
 
         * If the input grids are not regular
         * If any input grid dimensions have size less than 6
+        * If `rmesh` contains non-positive radii
 
     # References
 
@@ -151,7 +152,9 @@ def flux_solver(grids: tuple[NDArray, NDArray]) -> Callable[[NDArray], NDArray]:
     values set to the circular-filament solved flux.
 
     Args:
-        grids: [m] regular 1D r,z grids
+        grids: [m] regular 1D r,z grids. The fourth-order Grad-Shafranov stencil
+            requires strictly increasing grids with positive radius and at least
+            7 points on each axis.
 
     Returns:
         solver: factorized solver for Grad-Shafranov differential operator
@@ -220,9 +223,12 @@ def solve_flux_axisymmetric(
     and applies to anything with an equivalent toroidal current density and axisymmetry.
 
     Args:
-        grids: [m] 1D r,z regular coordinate grids
+        grids: [m] 1D r,z regular coordinate grids. The fourth-order solve requires
+            strictly increasing grids with positive radius and at least 7 points
+            on each axis.
         meshes: [m] 2D meshgrids made from grids like np.meshgrid(*grids, indexing="ij")
         current_density: [A/m^2], shape (nr, nz), toroidal current density on finite-difference mesh
+            with zero values on the finite-difference boundary
         solver: Optionally, provide a pre-initialized linear solver. See `cfsem.flux_solver`.
 
     Returns:

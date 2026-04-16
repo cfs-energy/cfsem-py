@@ -26,13 +26,6 @@ pub enum AxisymmetricElementType {
 }
 
 impl AxisymmetricElementType {
-    pub const fn nodes_per_element(self) -> usize {
-        match self {
-            Self::Quad4 => 4,
-            Self::Quad9 => 9,
-        }
-    }
-
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Quad4 => "quad4",
@@ -46,142 +39,48 @@ pub enum AxisymmetricElements<'a> {
     Quad9(&'a [[usize; 9]]),
 }
 
-impl<'a> AxisymmetricElements<'a> {
-    pub const fn element_type(&self) -> AxisymmetricElementType {
-        match self {
-            Self::Quad4(_) => AxisymmetricElementType::Quad4,
-            Self::Quad9(_) => AxisymmetricElementType::Quad9,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Quad4(elements) => elements.len(),
-            Self::Quad9(elements) => elements.len(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
 #[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub struct ReducedRecoveryOperators<F: Real> {
-    pub points_rz: Vec<[F; 2]>,
-    pub strain_operator: SparseRowMat<usize, F>,
-    pub stress_operator: SparseRowMat<usize, F>,
-    pub thermal_strain_operator: SparseRowMat<usize, F>,
-    pub thermal_stress_operator: SparseRowMat<usize, F>,
-    pub strain_constant: Vec<F>,
-    pub stress_constant: Vec<F>,
-    pub thermal_strain_constant: Vec<F>,
-    pub thermal_stress_constant: Vec<F>,
-    pub nq_per_element: usize,
-    pub n_temperature_nodes: usize,
+    pub(crate) points_rz: Vec<[F; 2]>,
+    pub(crate) strain_operator: SparseRowMat<usize, F>,
+    pub(crate) stress_operator: SparseRowMat<usize, F>,
+    pub(crate) thermal_strain_operator: SparseRowMat<usize, F>,
+    pub(crate) thermal_stress_operator: SparseRowMat<usize, F>,
+    pub(crate) strain_constant: Vec<F>,
+    pub(crate) stress_constant: Vec<F>,
+    pub(crate) thermal_strain_constant: Vec<F>,
+    pub(crate) thermal_stress_constant: Vec<F>,
+    pub(crate) nq_per_element: usize,
+    pub(crate) n_temperature_nodes: usize,
 }
 
 #[derive(Debug)]
+#[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub struct AxisymmetricModel<F: Real> {
-    stiffness: SparseColMat<usize, F>,
-    body_force_to_rhs: SparseRowMat<usize, F>,
-    pressure_to_rhs: SparseRowMat<usize, F>,
-    traction_to_rhs: SparseRowMat<usize, F>,
-    temperature_to_rhs: SparseRowMat<usize, F>,
-    constant_rhs: Vec<F>,
-    recovery: ReducedRecoveryOperators<F>,
-    pressure_faces: Vec<[usize; 2]>,
-    traction_faces: Vec<[usize; 2]>,
-    analysis_nodes: Vec<[F; 2]>,
-    analysis_elements_flat: Vec<usize>,
-    nodes_per_element: usize,
-    element_type: AxisymmetricElementType,
-    ndof_full: usize,
-    ndof_reduced: usize,
-    nelem: usize,
-    free_dofs: Vec<usize>,
-    fixed_dofs: Vec<usize>,
-    fixed_values: Vec<F>,
+    pub(crate) stiffness: SparseColMat<usize, F>,
+    pub(crate) body_force_to_rhs: SparseRowMat<usize, F>,
+    pub(crate) pressure_to_rhs: SparseRowMat<usize, F>,
+    pub(crate) traction_to_rhs: SparseRowMat<usize, F>,
+    pub(crate) temperature_to_rhs: SparseRowMat<usize, F>,
+    pub(crate) constant_rhs: Vec<F>,
+    pub(crate) recovery: ReducedRecoveryOperators<F>,
+    pub(crate) pressure_faces: Vec<[usize; 2]>,
+    pub(crate) traction_faces: Vec<[usize; 2]>,
+    pub(crate) analysis_nodes: Vec<[F; 2]>,
+    pub(crate) analysis_elements_flat: Vec<usize>,
+    pub(crate) nodes_per_element: usize,
+    pub(crate) element_type: AxisymmetricElementType,
+    pub(crate) ndof_full: usize,
+    pub(crate) ndof_reduced: usize,
+    pub(crate) nelem: usize,
+    pub(crate) free_dofs: Vec<usize>,
+    pub(crate) fixed_dofs: Vec<usize>,
+    pub(crate) fixed_values: Vec<F>,
     lu: Option<Lu<usize, F>>,
 }
 
 impl<F: Real> AxisymmetricModel<F> {
-    pub fn stiffness(&self) -> &SparseColMat<usize, F> {
-        &self.stiffness
-    }
-
-    pub fn body_force_to_rhs(&self) -> &SparseRowMat<usize, F> {
-        &self.body_force_to_rhs
-    }
-
-    pub fn pressure_to_rhs(&self) -> &SparseRowMat<usize, F> {
-        &self.pressure_to_rhs
-    }
-
-    pub fn traction_to_rhs(&self) -> &SparseRowMat<usize, F> {
-        &self.traction_to_rhs
-    }
-
-    pub fn temperature_to_rhs(&self) -> &SparseRowMat<usize, F> {
-        &self.temperature_to_rhs
-    }
-
-    pub fn recovery(&self) -> &ReducedRecoveryOperators<F> {
-        &self.recovery
-    }
-
-    pub fn constant_rhs(&self) -> &[F] {
-        &self.constant_rhs
-    }
-
-    pub fn pressure_faces(&self) -> &[[usize; 2]] {
-        &self.pressure_faces
-    }
-
-    pub fn traction_faces(&self) -> &[[usize; 2]] {
-        &self.traction_faces
-    }
-
-    pub fn analysis_nodes(&self) -> &[[F; 2]] {
-        &self.analysis_nodes
-    }
-
-    pub fn analysis_elements_flat(&self) -> &[usize] {
-        &self.analysis_elements_flat
-    }
-
-    pub const fn nodes_per_element(&self) -> usize {
-        self.nodes_per_element
-    }
-
-    pub const fn element_type(&self) -> AxisymmetricElementType {
-        self.element_type
-    }
-
-    pub const fn ndof_full(&self) -> usize {
-        self.ndof_full
-    }
-
-    pub const fn ndof_reduced(&self) -> usize {
-        self.ndof_reduced
-    }
-
-    pub const fn nelem(&self) -> usize {
-        self.nelem
-    }
-
-    pub fn free_dofs(&self) -> &[usize] {
-        &self.free_dofs
-    }
-
-    pub fn fixed_dofs(&self) -> &[usize] {
-        &self.fixed_dofs
-    }
-
-    pub fn fixed_values(&self) -> &[F] {
-        &self.fixed_values
-    }
-
     pub fn build_rhs(
         &self,
         body_force: Option<&[F]>,
@@ -405,6 +304,8 @@ type RecoveryOperatorFn<F, const NODES: usize> = fn(
     QuadratureRule,
 ) -> Result<QuadratureFieldOperators<F>, String>;
 
+type ReducedLayout<F> = (Vec<usize>, Vec<usize>, Vec<F>, Vec<usize>, Vec<Option<F>>);
+
 #[allow(clippy::too_many_arguments)]
 fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
     nodes_rz: &[[F; 2]],
@@ -427,7 +328,7 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
     let mesh = MeshView { nodes_rz, elements };
     let ndof_full = nodes_rz.len() * 2;
     let nelem = elements.len();
-    let (free_dofs, fixed_dofs, fixed_values, global_to_reduced) =
+    let (free_dofs, fixed_dofs, fixed_values, global_to_reduced, fixed_lookup) =
         reduce_layout(ndof_full, prescribed)?;
     let ndof_reduced = free_dofs.len();
 
@@ -438,26 +339,12 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
         &stiffness_full.cols,
         &stiffness_full.vals,
         &global_to_reduced,
-        &fixed_values,
+        &fixed_lookup,
         &mut constant_rhs,
     );
     let stiffness = csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)?;
-
-    let body_force = reduce_row_operator(
-        body_force_operator_fn(mesh, quadrature)?,
-        &global_to_reduced,
-        ndof_reduced,
-    );
-    let pressure = reduce_row_operator(
-        pressure_operator_fn(mesh, pressure_faces, quadrature)?,
-        &global_to_reduced,
-        ndof_reduced,
-    );
-    let traction = reduce_row_operator(
-        traction_operator_fn(mesh, traction_faces, quadrature)?,
-        &global_to_reduced,
-        ndof_reduced,
-    );
+    let reduce_operator =
+        |operator| reduce_row_operator_to_csr(operator, &global_to_reduced, ndof_reduced);
 
     let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) =
         if let Some(thermal_material_table) = thermal_material_table {
@@ -468,29 +355,18 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
                 thermal_material_table,
                 quadrature,
             )?;
-            let reduced_temperature = reduce_row_operator(
-                thermal_full.temperature_to_rhs,
-                &global_to_reduced,
-                ndof_reduced,
-            );
             let reduced_reference_rhs = free_dofs
                 .iter()
                 .map(|&dof| thermal_full.reference_rhs[dof])
                 .collect::<Vec<_>>();
             (
-                csr_from_triplets(
-                    reduced_temperature.nrow,
-                    reduced_temperature.ncol,
-                    reduced_temperature.rows,
-                    reduced_temperature.cols,
-                    reduced_temperature.vals,
-                )?,
+                reduce_operator(thermal_full.temperature_to_rhs)?,
                 reduced_reference_rhs,
                 nodes_rz.len(),
             )
         } else {
             (
-                csr_from_triplets(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
+                csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
                 vec![F::zero(); ndof_reduced],
                 0,
             )
@@ -499,27 +375,9 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
         *dst = *dst + *src;
     }
 
-    let body_force_to_rhs = csr_from_triplets(
-        body_force.nrow,
-        body_force.ncol,
-        body_force.rows,
-        body_force.cols,
-        body_force.vals,
-    )?;
-    let pressure_to_rhs = csr_from_triplets(
-        pressure.nrow,
-        pressure.ncol,
-        pressure.rows,
-        pressure.cols,
-        pressure.vals,
-    )?;
-    let traction_to_rhs = csr_from_triplets(
-        traction.nrow,
-        traction.ncol,
-        traction.rows,
-        traction.cols,
-        traction.vals,
-    )?;
+    let body_force_to_rhs = reduce_operator(body_force_operator_fn(mesh, quadrature)?)?;
+    let pressure_to_rhs = reduce_operator(pressure_operator_fn(mesh, pressure_faces, quadrature)?)?;
+    let traction_to_rhs = reduce_operator(traction_operator_fn(mesh, traction_faces, quadrature)?)?;
 
     let recovery_full = recovery_operator_fn(
         mesh,
@@ -528,44 +386,33 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
         thermal_material_table,
         quadrature,
     )?;
-    let (strain_rows, strain_cols, strain_vals, strain_constant) = reduce_column_operator(
+    let nq_row_count = recovery_full.points_rz.len() * 4;
+    let (strain_operator, strain_constant) = reduce_column_operator(
         recovery_full.strain_rows,
         recovery_full.strain_cols,
         recovery_full.strain_vals,
+        nq_row_count,
+        ndof_reduced,
         &global_to_reduced,
-        &fixed_values,
-        vec![F::zero(); recovery_full.points_rz.len() * 4],
-    );
-    let (stress_rows, stress_cols, stress_vals, stress_constant) = reduce_column_operator(
+        &fixed_lookup,
+    )?;
+    let (stress_operator, stress_constant) = reduce_column_operator(
         recovery_full.stress_rows,
         recovery_full.stress_cols,
         recovery_full.stress_vals,
+        nq_row_count,
+        ndof_reduced,
         &global_to_reduced,
-        &fixed_values,
-        vec![F::zero(); recovery_full.points_rz.len() * 4],
-    );
-    let strain_operator = csr_from_triplets(
-        recovery_full.points_rz.len() * 4,
-        ndof_reduced,
-        strain_rows,
-        strain_cols,
-        strain_vals,
+        &fixed_lookup,
     )?;
-    let stress_operator = csr_from_triplets(
-        recovery_full.points_rz.len() * 4,
-        ndof_reduced,
-        stress_rows,
-        stress_cols,
-        stress_vals,
-    )?;
-    let thermal_strain_operator = csr_from_triplets(
+    let thermal_strain_operator = csr_from_parts(
         recovery_full.points_rz.len() * 4,
         recovery_full.ntemp,
         recovery_full.thermal_strain_rows,
         recovery_full.thermal_strain_cols,
         recovery_full.thermal_strain_vals,
     )?;
-    let thermal_stress_operator = csr_from_triplets(
+    let thermal_stress_operator = csr_from_parts(
         recovery_full.points_rz.len() * 4,
         recovery_full.ntemp,
         recovery_full.thermal_stress_rows,
@@ -615,7 +462,7 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
         nelem,
         free_dofs,
         fixed_dofs,
-        fixed_values: fixed_values.into_iter().map(|(_, value)| value).collect(),
+        fixed_values,
         lu: None,
     })
 }
@@ -623,7 +470,7 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
 fn reduce_layout<F: Real>(
     ndof_full: usize,
     prescribed: &[(usize, F)],
-) -> Result<(Vec<usize>, Vec<usize>, Vec<(usize, F)>, Vec<usize>), String> {
+) -> Result<ReducedLayout<F>, String> {
     let mut prescribed_sorted = prescribed.to_vec();
     prescribed_sorted.sort_by_key(|&(dof, _)| dof);
     for window in prescribed_sorted.windows(2) {
@@ -636,6 +483,7 @@ fn reduce_layout<F: Real>(
     }
     let mut fixed_dofs = Vec::with_capacity(prescribed_sorted.len());
     let mut fixed_values = Vec::with_capacity(prescribed_sorted.len());
+    let mut fixed_lookup = vec![None; ndof_full];
     for &(dof, value) in &prescribed_sorted {
         if dof >= ndof_full {
             return Err(format!(
@@ -643,7 +491,8 @@ fn reduce_layout<F: Real>(
             ));
         }
         fixed_dofs.push(dof);
-        fixed_values.push((dof, value));
+        fixed_values.push(value);
+        fixed_lookup[dof] = Some(value);
     }
     let mut is_fixed = vec![false; ndof_full];
     for &dof in &fixed_dofs {
@@ -657,7 +506,13 @@ fn reduce_layout<F: Real>(
             free_dofs.push(dof);
         }
     }
-    Ok((free_dofs, fixed_dofs, fixed_values, global_to_reduced))
+    Ok((
+        free_dofs,
+        fixed_dofs,
+        fixed_values,
+        global_to_reduced,
+        fixed_lookup,
+    ))
 }
 
 fn reduce_square_triplets<F: Real>(
@@ -665,23 +520,19 @@ fn reduce_square_triplets<F: Real>(
     cols: &[usize],
     vals: &[F],
     global_to_reduced: &[usize],
-    fixed_values: &[(usize, F)],
+    fixed_lookup: &[Option<F>],
     constant_rhs: &mut [F],
 ) -> Vec<Triplet<usize, usize, F>> {
-    let fixed_map = fixed_values
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeMap<usize, F>>();
     let mut triplets = Vec::with_capacity(vals.len());
     for ((&row, &col), &value) in rows.iter().zip(cols).zip(vals) {
         let reduced_row = global_to_reduced[row];
         let reduced_col = global_to_reduced[col];
         if reduced_row != usize::MAX && reduced_col != usize::MAX {
             triplets.push(Triplet::new(reduced_row, reduced_col, value));
-        } else if reduced_row != usize::MAX {
-            if let Some(&fixed_value) = fixed_map.get(&col) {
-                constant_rhs[reduced_row] = constant_rhs[reduced_row] - value * fixed_value;
-            }
+        } else if reduced_row != usize::MAX
+            && let Some(fixed_value) = fixed_lookup[col]
+        {
+            constant_rhs[reduced_row] = constant_rhs[reduced_row] - value * fixed_value;
         }
     }
     triplets
@@ -717,18 +568,31 @@ fn reduce_row_operator<F: Real>(
     }
 }
 
+fn reduce_row_operator_to_csr<F: Real>(
+    operator: SparseOperator<F>,
+    global_to_reduced: &[usize],
+    nrow_reduced: usize,
+) -> Result<SparseRowMat<usize, F>, String> {
+    let operator = reduce_row_operator(operator, global_to_reduced, nrow_reduced);
+    csr_from_parts(
+        operator.nrow,
+        operator.ncol,
+        operator.rows,
+        operator.cols,
+        operator.vals,
+    )
+}
+
 fn reduce_column_operator<F: Real>(
     rows: Vec<usize>,
     cols: Vec<usize>,
     vals: Vec<F>,
+    nrow: usize,
+    ncol: usize,
     global_to_reduced: &[usize],
-    fixed_values: &[(usize, F)],
-    mut constant: Vec<F>,
-) -> (Vec<usize>, Vec<usize>, Vec<F>, Vec<F>) {
-    let fixed_map = fixed_values
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeMap<usize, F>>();
+    fixed_lookup: &[Option<F>],
+) -> Result<(SparseRowMat<usize, F>, Vec<F>), String> {
+    let mut constant = vec![F::zero(); nrow];
     let mut reduced_rows = Vec::with_capacity(vals.len());
     let mut reduced_cols = Vec::with_capacity(vals.len());
     let mut reduced_vals = Vec::with_capacity(vals.len());
@@ -738,14 +602,17 @@ fn reduce_column_operator<F: Real>(
             reduced_rows.push(row);
             reduced_cols.push(reduced_col);
             reduced_vals.push(value);
-        } else if let Some(&fixed_value) = fixed_map.get(&col) {
+        } else if let Some(fixed_value) = fixed_lookup[col] {
             constant[row] = constant[row] + value * fixed_value;
         }
     }
-    (reduced_rows, reduced_cols, reduced_vals, constant)
+    Ok((
+        csr_from_parts(nrow, ncol, reduced_rows, reduced_cols, reduced_vals)?,
+        constant,
+    ))
 }
 
-fn csr_from_triplets<F: Real>(
+fn csr_from_parts<F: Real>(
     nrow: usize,
     ncol: usize,
     rows: Vec<usize>,

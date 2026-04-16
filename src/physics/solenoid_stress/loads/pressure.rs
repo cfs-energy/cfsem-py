@@ -1,7 +1,7 @@
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{MeshView, QuadratureRule};
 use crate::physics::solenoid_stress::geometry::{
-    FaceSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_nodes,
+    FaceSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_mesh,
 };
 use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, PressureLoad, Real, dof_per_element, local_dofs, two_pi,
@@ -54,8 +54,7 @@ fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    validate_axisymmetric_nodes(mesh)?;
-    mesh.validate_connectivity()?;
+    validate_axisymmetric_mesh(mesh)?;
     let ndof = mesh.num_nodes() * 2;
     let ncol = pressure_faces.len();
     let mut rows = Vec::with_capacity(pressure_faces.len() * DOF_PER_ELEMENT);

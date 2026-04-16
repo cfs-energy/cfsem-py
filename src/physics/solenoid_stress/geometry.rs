@@ -25,6 +25,13 @@ pub(crate) fn validate_axisymmetric_nodes<F: Real, const NODES_PER_ELEMENT: usiz
     Ok(())
 }
 
+pub(crate) fn validate_axisymmetric_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
+    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
+) -> Result<(), String> {
+    validate_axisymmetric_nodes(mesh)?;
+    mesh.validate_connectivity()
+}
+
 fn validate_axisymmetric_volume_samples<F: Real, const NODES_PER_ELEMENT: usize>(
     samples: Vec<VolumeSample<F, NODES_PER_ELEMENT>>,
 ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String> {

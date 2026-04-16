@@ -7,7 +7,7 @@ use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{MeshView, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
 use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
+    VolumeSample, validate_axisymmetric_mesh, volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, StiffnessTriplets, dof_per_element, local_dofs, two_pi,
@@ -30,8 +30,7 @@ fn assemble_axisymmetric_impl<
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    validate_axisymmetric_nodes(mesh)?;
-    mesh.validate_connectivity()?;
+    validate_axisymmetric_mesh(mesh)?;
     if material_ids.len() != mesh.num_elements() {
         return Err(format!(
             "material_ids has length {}, but mesh has {} elements",

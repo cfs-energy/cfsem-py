@@ -347,91 +347,91 @@ macro_rules! impl_solenoid_stress_model_pyclass {
         impl $name {
             #[getter]
             fn ndof_full(&self) -> usize {
-                self.inner.ndof_full()
+                self.inner.ndof_full
             }
 
             #[getter]
             fn ndof_reduced(&self) -> usize {
-                self.inner.ndof_reduced()
+                self.inner.ndof_reduced
             }
 
             #[getter]
             fn nelem(&self) -> usize {
-                self.inner.nelem()
+                self.inner.nelem
             }
 
             #[getter]
             fn n_temperature_nodes(&self) -> usize {
-                self.inner.recovery().n_temperature_nodes
+                self.inner.recovery.n_temperature_nodes
             }
 
             #[getter]
             fn nq_per_element(&self) -> usize {
-                self.inner.recovery().nq_per_element
+                self.inner.recovery.nq_per_element
             }
 
             #[getter]
             fn nodes_per_element(&self) -> usize {
-                self.inner.nodes_per_element()
+                self.inner.nodes_per_element
             }
 
             #[getter]
             fn element_type(&self) -> String {
-                self.inner.element_type().as_str().to_string()
+                self.inner.element_type.as_str().to_string()
             }
 
             fn analysis_nodes_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, flatten_axisym_points(self.inner.analysis_nodes().to_vec())).unbind()
+                PyArray1::from_vec(py, flatten_axisym_points(self.inner.analysis_nodes.clone())).unbind()
             }
 
             fn analysis_elements_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
-                PyArray1::from_vec(py, self.inner.analysis_elements_flat().to_vec()).unbind()
+                PyArray1::from_vec(py, self.inner.analysis_elements_flat.clone()).unbind()
             }
 
             fn pressure_faces_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
-                PyArray1::from_vec(py, flatten_usize_pairs(self.inner.pressure_faces())).unbind()
+                PyArray1::from_vec(py, flatten_usize_pairs(&self.inner.pressure_faces)).unbind()
             }
 
             fn traction_faces_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
-                PyArray1::from_vec(py, flatten_usize_pairs(self.inner.traction_faces())).unbind()
+                PyArray1::from_vec(py, flatten_usize_pairs(&self.inner.traction_faces)).unbind()
             }
 
             fn free_dofs<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
-                PyArray1::from_vec(py, self.inner.free_dofs().to_vec()).unbind()
+                PyArray1::from_vec(py, self.inner.free_dofs.clone()).unbind()
             }
 
             fn fixed_dofs<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
-                PyArray1::from_vec(py, self.inner.fixed_dofs().to_vec()).unbind()
+                PyArray1::from_vec(py, self.inner.fixed_dofs.clone()).unbind()
             }
 
             fn fixed_values<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.fixed_values().to_vec()).unbind()
+                PyArray1::from_vec(py, self.inner.fixed_values.clone()).unbind()
             }
 
             fn constant_rhs<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.constant_rhs().to_vec()).unbind()
+                PyArray1::from_vec(py, self.inner.constant_rhs.clone()).unbind()
             }
 
             fn quadrature_points_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, flatten_axisym_points(self.inner.recovery().points_rz.clone()))
+                PyArray1::from_vec(py, flatten_axisym_points(self.inner.recovery.points_rz.clone()))
                     .unbind()
             }
 
             fn strain_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery().strain_constant.clone()).unbind()
+                PyArray1::from_vec(py, self.inner.recovery.strain_constant.clone()).unbind()
             }
 
             fn stress_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery().stress_constant.clone()).unbind()
+                PyArray1::from_vec(py, self.inner.recovery.stress_constant.clone()).unbind()
             }
 
             fn thermal_strain_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery().thermal_strain_constant.clone())
+                PyArray1::from_vec(py, self.inner.recovery.thermal_strain_constant.clone())
                     .unbind()
             }
 
             fn thermal_stress_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery().thermal_stress_constant.clone())
+                PyArray1::from_vec(py, self.inner.recovery.thermal_stress_constant.clone())
                     .unbind()
             }
 
@@ -445,7 +445,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let stiffness = self.inner.stiffness();
+                let stiffness = &self.inner.stiffness;
                 (
                     PyArray1::from_vec(py, stiffness.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, stiffness.row_idx().to_vec()).unbind(),
@@ -465,7 +465,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = self.inner.body_force_to_rhs();
+                let operator = &self.inner.body_force_to_rhs;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
@@ -485,7 +485,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = self.inner.pressure_to_rhs();
+                let operator = &self.inner.pressure_to_rhs;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
@@ -505,7 +505,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = self.inner.traction_to_rhs();
+                let operator = &self.inner.traction_to_rhs;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
@@ -525,7 +525,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = self.inner.temperature_to_rhs();
+                let operator = &self.inner.temperature_to_rhs;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
@@ -545,7 +545,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = &self.inner.recovery().strain_operator;
+                let operator = &self.inner.recovery.strain_operator;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
@@ -565,7 +565,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = &self.inner.recovery().stress_operator;
+                let operator = &self.inner.recovery.stress_operator;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
@@ -585,7 +585,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = &self.inner.recovery().thermal_strain_operator;
+                let operator = &self.inner.recovery.thermal_strain_operator;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
@@ -605,7 +605,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             ) {
-                let operator = &self.inner.recovery().thermal_stress_operator;
+                let operator = &self.inner.recovery.thermal_stress_operator;
                 (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),

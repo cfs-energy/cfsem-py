@@ -1,7 +1,7 @@
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{MeshView, QuadratureRule};
 use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, validate_axisymmetric_nodes, volume_samples_quad4, volume_samples_quad9,
+    VolumeSample, validate_axisymmetric_mesh, volume_samples_quad4, volume_samples_quad9,
 };
 use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, dof_per_element, local_dofs, two_pi,
@@ -61,8 +61,7 @@ fn body_force_operator_impl<
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    validate_axisymmetric_nodes(mesh)?;
-    mesh.validate_connectivity()?;
+    validate_axisymmetric_mesh(mesh)?;
     let ndof = mesh.num_nodes() * 2;
     let ncol = 2 * mesh.num_elements();
     let mut rows = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * 2);

@@ -9,15 +9,11 @@ from pathlib import Path
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from scipy.sparse.linalg import factorized
 
 import cfsem
 from cfsem.solenoid_stress.axisymmetric_fem import (
-    apply_dirichlet,
-    assemble_axisymmetric_model,
+    assemble_axisymmetric,
     cfsem_radial_material,
-    element_measures_axisymmetric,
-    element_quadrature_axisymmetric,
     infer_quad9_mesh,
 )
 from cfsem.solenoid_stress.solenoid_1d import (
@@ -964,12 +960,23 @@ def solve_case(
     material_table = np.asarray([material], dtype=np.float64)
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
 
-    quadrature_data = element_quadrature_axisymmetric(
-        nodes,
-        elements,
+    pressure_faces = None
+    pressure_values = None
+    if balance_axial_load:
+        bottom_faces, top_faces = top_bottom_pressure_faces(nr, nz)
+        pressure_faces = np.vstack([bottom_faces, top_faces])
+
+    model = assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
+        pressure_faces=pressure_faces,
+        prescribed={1: 0.0},
         quadrature=quadrature,
         element_type=element_type,
     )
+    quadrature_data = model.element_quadrature()
     quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
     br_loop_q, bz_loop_q = sample_loop_field(
         quadrature_points[:, 0],
@@ -994,44 +1001,20 @@ def solve_case(
     axial_body_force = -current_density * br_mean if include_axial_body_force else np.zeros_like(br_mean)
     body_force = np.column_stack((current_density * bz_mean, axial_body_force))
 
-    measures = element_measures_axisymmetric(
-        nodes,
-        elements,
-        quadrature=quadrature,
-        element_type=element_type,
-    )
+    measures = model.element_measures()
     net_body_force_z = float(np.sum(body_force[:, 1] * measures.swept_volumes))
     top_area = np.pi * (ro**2 - ri**2)
     pressure_top = net_body_force_z / (2.0 * top_area) if balance_axial_load else 0.0
     pressure_bottom = -pressure_top
-
-    pressure_faces = None
-    pressure_values = None
-    if balance_axial_load:
-        bottom_faces, top_faces = top_bottom_pressure_faces(nr, nz)
-        pressure_faces = np.vstack([bottom_faces, top_faces])
+    if balance_axial_load and pressure_faces is not None:
         pressure_values = np.concatenate(
             [
                 np.full(bottom_faces.shape[0], pressure_bottom, dtype=np.float64),
                 np.full(top_faces.shape[0], pressure_top, dtype=np.float64),
             ]
         )
-
-    model = assemble_axisymmetric_model(
-        nodes=nodes,
-        elements=elements,
-        material_ids=material_ids,
-        material_table=material_table,
-        pressure_faces=pressure_faces,
-        quadrature=quadrature,
-        element_type=element_type,
-    )
-    stiffness = model.stiffness
-    rhs = model.rhs(body_force=body_force, pressure_values=pressure_values)
-    reduced = apply_dirichlet(stiffness, rhs, prescribed={1: 0.0})
-    displacement = reduced.recover(factorized(reduced.matrix.tocsc())(reduced.rhs)).reshape(
-        analysis_nodes.shape[0], 2
-    )
+    rhs = model.build_rhs(body_force=body_force, pressure_values=pressure_values)
+    displacement = model.solve(rhs).reshape(analysis_nodes.shape[0], 2)
 
     body_force_r = body_force[:, 0].reshape(nz, nr)
     body_force_z = body_force[:, 1].reshape(nz, nr)
@@ -1105,8 +1088,8 @@ def solve_case(
         z_max=z_max,
         nr=nr,
         nz=nz,
-        ndof=model.ndof,
-        stiffness_nnz=stiffness.nnz,
+            ndof=model.ndof_full,
+            stiffness_nnz=model.stiffness.nnz,
         field_r=field_r,
         field_z=field_z,
         bmag_field=bmag_field,

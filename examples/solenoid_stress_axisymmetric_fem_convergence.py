@@ -34,10 +34,8 @@ if os.getenv("CFSEM_TESTING"):
 from matplotlib import pyplot as plt
 
 from cfsem.solenoid_stress.axisymmetric_fem import (
-    apply_dirichlet,
-    assemble_axisymmetric_model,
+    assemble_axisymmetric,
     cfsem_radial_material,
-    element_quadrature_axisymmetric,
     infer_quad9_mesh,
 )
 from cfsem.solenoid_stress.solenoid_handcalc import s_long_solenoid
@@ -312,43 +310,34 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
     elevated = infer_quad9_mesh(nodes, elements) if ELEMENT_TYPE == "quad9" else None
     analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
     analysis_elements = elevated.analysis_elements if elevated is not None else elements
+    nelem = elements.shape[0]
     material = cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO, dtype=np.float64)
-    quadrature_data = element_quadrature_axisymmetric(
-        nodes,
-        elements,
+    prescribed = prescribed_z_dofs(analysis_nodes.shape[0])
+    model = assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(nelem, dtype=np.uint64),
+        material_table=np.asarray([material]),
+        prescribed=prescribed,
         quadrature=QUADRATURE,
         element_type=ELEMENT_TYPE,
     )
+    quadrature_data = model.element_quadrature()
     points = quadrature_data.points_rz.reshape(-1, 2)
-    nelem = elements.shape[0]
     nq = quadrature_data.nq_per_element
     weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64)
     bz_weighted = linear_bz_profile(points[:, 0]).reshape(nelem, nq) * weights
     bz_mean = np.sum(bz_weighted, axis=1) / np.sum(weights, axis=1)
     body_force = np.column_stack((CURRENT_DENSITY * bz_mean, np.zeros(nelem, dtype=np.float64)))
-
-    model = assemble_axisymmetric_model(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(nelem, dtype=np.uint64),
-        material_table=np.asarray([material]),
-        quadrature=QUADRATURE,
-        element_type=ELEMENT_TYPE,
-    )
-    rhs = model.rhs(body_force=body_force)
-    reduced = apply_dirichlet(
-        model.stiffness,
-        rhs,
-        prescribed=prescribed_z_dofs(analysis_nodes.shape[0]),
-    )
+    rhs = model.build_rhs(body_force=body_force)
     fem_build_seconds = perf_counter() - build_start
 
     factorize_start = perf_counter()
-    solve_reduced = factorized(reduced.matrix.tocsc())
+    _ = model.solve(np.zeros_like(rhs))
     fem_factorize_seconds = perf_counter() - factorize_start
 
     solve_start = perf_counter()
-    displacement = reduced.recover(solve_reduced(reduced.rhs)).reshape(analysis_nodes.shape[0], 2)
+    displacement = model.solve(rhs).reshape(analysis_nodes.shape[0], 2)
     fem_solve_seconds = perf_counter() - solve_start
 
     radius = np.zeros(nr, dtype=np.float64)
@@ -426,12 +415,16 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
     elevated = infer_quad9_mesh(nodes, elements) if ELEMENT_TYPE == "quad9" else None
     analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
     analysis_elements = elevated.analysis_elements if elevated is not None else elements
-    quadrature_data = element_quadrature_axisymmetric(
-        nodes,
-        elements,
+    model = assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO)]),
+        prescribed=prescribed_z_dofs(analysis_nodes.shape[0]),
         quadrature=QUADRATURE,
         element_type=ELEMENT_TYPE,
     )
+    quadrature_data = model.element_quadrature()
     quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
     fd_grid = build_1d_grid((RO - RI) / nr)[1:-1]
 

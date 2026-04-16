@@ -142,6 +142,7 @@ dependencies = [
  "branches",
  "criterion",
  "faer",
+ "faer-traits",
  "itertools 0.14.0",
  "libm",
  "nalgebra",

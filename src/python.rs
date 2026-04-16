@@ -281,867 +281,583 @@ fn flatten_axisym_points<F: physics::solenoid_stress::Real>(points: Vec<[F; 2]>)
     points_flat
 }
 
-fn assemble_stiffness_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
+fn flatten_usize_pairs(pairs: &[[usize; 2]]) -> Vec<usize> {
+    let mut out = Vec::with_capacity(pairs.len() * 2);
+    for pair in pairs {
+        out.push(pair[0]);
+        out.push(pair[1]);
+    }
+    out
+}
+
+fn read_axisym_prescribed<F: physics::solenoid_stress::Real + NumpyElement>(
+    prescribed_dofs: PyReadonlyArray1<'_, u64>,
+    prescribed_values: PyReadonlyArray1<'_, F>,
+) -> PyResult<Vec<(usize, F)>> {
+    let dofs = prescribed_dofs.as_array();
+    let values = prescribed_values.as_array();
+    if dofs.ndim() != 1 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "prescribed_dofs must have shape (nfixed,)".to_string(),
+        }
+        .into());
+    }
+    if values.ndim() != 1 {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "prescribed_values must have shape (nfixed,)".to_string(),
+        }
+        .into());
+    }
+    if dofs.len() != values.len() {
+        return Err(PyInteropError::ValueError {
+            msg: format!(
+                "prescribed_dofs has length {}, but prescribed_values has length {}",
+                dofs.len(),
+                values.len()
+            ),
+        }
+        .into());
+    }
+    dofs.iter()
+        .zip(values.iter())
+        .map(|(&dof, &value)| {
+            usize::try_from(dof)
+                .map(|dof| (dof, value))
+                .map_err(|_| PyInteropError::ValueError {
+                    msg: "prescribed_dofs contains a value that overflows usize".to_string(),
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+#[pyclass(module = "cfsem", unsendable)]
+struct SolenoidStressAxisymmetricModelF64 {
+    inner: physics::solenoid_stress::AxisymmetricModel<f64>,
+}
+
+#[pyclass(module = "cfsem", unsendable)]
+struct SolenoidStressAxisymmetricModelF32 {
+    inner: physics::solenoid_stress::AxisymmetricModel<f32>,
+}
+
+macro_rules! impl_solenoid_stress_model_pyclass {
+    ($name:ident, $ty:ty) => {
+        #[pymethods]
+        impl $name {
+            #[getter]
+            fn ndof_full(&self) -> usize {
+                self.inner.ndof_full()
+            }
+
+            #[getter]
+            fn ndof_reduced(&self) -> usize {
+                self.inner.ndof_reduced()
+            }
+
+            #[getter]
+            fn nelem(&self) -> usize {
+                self.inner.nelem()
+            }
+
+            #[getter]
+            fn n_temperature_nodes(&self) -> usize {
+                self.inner.recovery().n_temperature_nodes
+            }
+
+            #[getter]
+            fn nq_per_element(&self) -> usize {
+                self.inner.recovery().nq_per_element
+            }
+
+            #[getter]
+            fn nodes_per_element(&self) -> usize {
+                self.inner.nodes_per_element()
+            }
+
+            #[getter]
+            fn element_type(&self) -> String {
+                self.inner.element_type().as_str().to_string()
+            }
+
+            fn analysis_nodes_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, flatten_axisym_points(self.inner.analysis_nodes().to_vec())).unbind()
+            }
+
+            fn analysis_elements_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
+                PyArray1::from_vec(py, self.inner.analysis_elements_flat().to_vec()).unbind()
+            }
+
+            fn pressure_faces_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
+                PyArray1::from_vec(py, flatten_usize_pairs(self.inner.pressure_faces())).unbind()
+            }
+
+            fn traction_faces_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
+                PyArray1::from_vec(py, flatten_usize_pairs(self.inner.traction_faces())).unbind()
+            }
+
+            fn free_dofs<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
+                PyArray1::from_vec(py, self.inner.free_dofs().to_vec()).unbind()
+            }
+
+            fn fixed_dofs<'py>(&self, py: Python<'py>) -> Py<PyArray1<usize>> {
+                PyArray1::from_vec(py, self.inner.fixed_dofs().to_vec()).unbind()
+            }
+
+            fn fixed_values<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, self.inner.fixed_values().to_vec()).unbind()
+            }
+
+            fn constant_rhs<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, self.inner.constant_rhs().to_vec()).unbind()
+            }
+
+            fn quadrature_points_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, flatten_axisym_points(self.inner.recovery().points_rz.clone()))
+                    .unbind()
+            }
+
+            fn strain_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, self.inner.recovery().strain_constant.clone()).unbind()
+            }
+
+            fn stress_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, self.inner.recovery().stress_constant.clone()).unbind()
+            }
+
+            fn thermal_strain_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, self.inner.recovery().thermal_strain_constant.clone())
+                    .unbind()
+            }
+
+            fn thermal_stress_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
+                PyArray1::from_vec(py, self.inner.recovery().thermal_stress_constant.clone())
+                    .unbind()
+            }
+
+            fn stiffness_csc<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let stiffness = self.inner.stiffness();
+                (
+                    PyArray1::from_vec(py, stiffness.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, stiffness.row_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, stiffness.col_ptr().to_vec()).unbind(),
+                    stiffness.nrows(),
+                    stiffness.ncols(),
+                )
+            }
+
+            fn body_force_to_rhs_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = self.inner.body_force_to_rhs();
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            fn pressure_to_rhs_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = self.inner.pressure_to_rhs();
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            fn traction_to_rhs_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = self.inner.traction_to_rhs();
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            fn temperature_to_rhs_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = self.inner.temperature_to_rhs();
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            fn strain_operator_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = &self.inner.recovery().strain_operator;
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            fn stress_operator_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = &self.inner.recovery().stress_operator;
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            fn thermal_strain_operator_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = &self.inner.recovery().thermal_strain_operator;
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            fn thermal_stress_operator_csr<'py>(
+                &self,
+                py: Python<'py>,
+            ) -> (
+                Py<PyArray1<$ty>>,
+                Py<PyArray1<usize>>,
+                Py<PyArray1<usize>>,
+                usize,
+                usize,
+            ) {
+                let operator = &self.inner.recovery().thermal_stress_operator;
+                (
+                    PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
+                    PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
+                    operator.nrows(),
+                    operator.ncols(),
+                )
+            }
+
+            #[pyo3(signature = (body_force=None, pressure_values=None, traction_values=None, nodal_temperature=None))]
+            fn build_rhs<'py>(
+                &self,
+                py: Python<'py>,
+                body_force: Option<PyReadonlyArray1<'_, $ty>>,
+                pressure_values: Option<PyReadonlyArray1<'_, $ty>>,
+                traction_values: Option<PyReadonlyArray1<'_, $ty>>,
+                nodal_temperature: Option<PyReadonlyArray1<'_, $ty>>,
+            ) -> PyResult<Py<PyArray1<$ty>>> {
+                let body_force = match &body_force {
+                    Some(arr) => Some(arr.as_slice()?),
+                    None => None,
+                };
+                let pressure_values = match &pressure_values {
+                    Some(arr) => Some(arr.as_slice()?),
+                    None => None,
+                };
+                let traction_values = match &traction_values {
+                    Some(arr) => Some(arr.as_slice()?),
+                    None => None,
+                };
+                let nodal_temperature = match &nodal_temperature {
+                    Some(arr) => Some(arr.as_slice()?),
+                    None => None,
+                };
+                let rhs = self
+                    .inner
+                    .build_rhs(body_force, pressure_values, traction_values, nodal_temperature)
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok(PyArray1::from_vec(py, rhs).unbind())
+            }
+
+            fn solve<'py>(
+                &mut self,
+                py: Python<'py>,
+                rhs: PyReadonlyArray1<'_, $ty>,
+            ) -> PyResult<Py<PyArray1<$ty>>> {
+                let rhs = rhs.as_slice()?;
+                let solution = self
+                    .inner
+                    .solve(rhs)
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok(PyArray1::from_vec(py, solution).unbind())
+            }
+        }
+    };
+}
+
+impl_solenoid_stress_model_pyclass!(SolenoidStressAxisymmetricModelF64, f64);
+impl_solenoid_stress_model_pyclass!(SolenoidStressAxisymmetricModelF32, f32);
+
+fn assemble_axisymmetric_model_low_level_quad4<F: physics::solenoid_stress::Real + NumpyElement>(
     nodes: PyReadonlyArray2<'_, F>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, F>,
-    quadrature: u8,
-    assemble_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        &[usize],
-        &[[[F; 4]; 4]],
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::StiffnessTriplets<F>, String>,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, usize)> {
-    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
-    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
-    let material_table = read_axisym_material_table("material_table", material_table)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let result = assemble_fn(mesh, &material_ids, &material_table, quadrature)
-        .map_err(|msg| PyInteropError::ValueError { msg })?;
-    Ok((result.rows, result.cols, result.vals, result.ndof))
-}
-
-fn element_measures_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
-    nodes: PyReadonlyArray2<'_, F>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-    measures_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::ElementMeasures<F>, String>,
-) -> PyResult<(Vec<F>, Vec<F>)> {
-    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let measures =
-        measures_fn(mesh, quadrature).map_err(|msg| PyInteropError::ValueError { msg })?;
-    Ok((measures.areas, measures.swept_volumes))
-}
-
-fn element_quadrature_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
-    nodes: PyReadonlyArray2<'_, F>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-    quadrature_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::ElementQuadrature<F>, String>,
-) -> PyResult<(Vec<F>, Vec<F>, Vec<F>, usize)> {
-    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let quadrature_data =
-        quadrature_fn(mesh, quadrature).map_err(|msg| PyInteropError::ValueError { msg })?;
-    let points_flat = flatten_axisym_points(quadrature_data.points_rz);
-    Ok((
-        points_flat,
-        quadrature_data.weights_area,
-        quadrature_data.weights_volume,
-        quadrature_data.nq_per_element,
-    ))
-}
-
-fn quadrature_field_operators_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
-    nodes: PyReadonlyArray2<'_, F>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, F>,
-    thermal_material_table: PyReadonlyArray2<'_, F>,
-    quadrature: u8,
-    operators_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        &[usize],
-        &[[[F; 4]; 4]],
-        Option<&[physics::solenoid_stress::ThermalMaterial<F>]>,
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::QuadratureFieldOperators<F>, String>,
-) -> PyResult<(
-    Vec<F>,
-    (Vec<usize>, Vec<usize>, Vec<F>),
-    (Vec<usize>, Vec<usize>, Vec<F>),
-    (Vec<usize>, Vec<usize>, Vec<F>),
-    (Vec<usize>, Vec<usize>, Vec<F>),
-    (Vec<F>, Vec<F>),
-    (usize, usize, usize),
-)> {
-    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
-    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
-    let material_table = read_axisym_material_table("material_table", material_table)?;
-    let thermal_material_table =
-        read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let operators = operators_fn(
-        mesh,
-        &material_ids,
-        &material_table,
-        (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice()),
-        quadrature,
-    )
-    .map_err(|msg| PyInteropError::ValueError { msg })?;
-    let points_flat = flatten_axisym_points(operators.points_rz);
-    Ok((
-        points_flat,
-        (
-            operators.strain_rows,
-            operators.strain_cols,
-            operators.strain_vals,
-        ),
-        (
-            operators.stress_rows,
-            operators.stress_cols,
-            operators.stress_vals,
-        ),
-        (
-            operators.thermal_strain_rows,
-            operators.thermal_strain_cols,
-            operators.thermal_strain_vals,
-        ),
-        (
-            operators.thermal_stress_rows,
-            operators.thermal_stress_cols,
-            operators.thermal_stress_vals,
-        ),
-        (
-            operators.thermal_strain_constant,
-            operators.thermal_stress_constant,
-        ),
-        (operators.nq_per_element, operators.ndof, operators.ntemp),
-    ))
-}
-
-fn body_force_operator_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
-    nodes: PyReadonlyArray2<'_, F>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-    operator_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::SparseOperator<F>, String>,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, usize, usize)> {
-    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let operator =
-        operator_fn(mesh, quadrature).map_err(|msg| PyInteropError::ValueError { msg })?;
-    Ok((
-        operator.rows,
-        operator.cols,
-        operator.vals,
-        operator.nrow,
-        operator.ncol,
-    ))
-}
-
-fn pressure_operator_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
-    nodes: PyReadonlyArray2<'_, F>,
-    elements: PyReadonlyArray2<'_, u64>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
+    thermal_material_table: PyReadonlyArray2<'_, F>,
+    prescribed_dofs: PyReadonlyArray1<'_, u64>,
+    prescribed_values: PyReadonlyArray1<'_, F>,
     quadrature: u8,
-    operator_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        &[physics::solenoid_stress::PressureLoad<F>],
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::SparseOperator<F>, String>,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, usize, usize)> {
+) -> PyResult<physics::solenoid_stress::AxisymmetricModel<F>> {
     let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
     let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
+    let elements = read_axisym_elements::<4>("elements", elements)?;
+    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
+    let material_table = read_axisym_material_table("material_table", material_table)?;
     let pressure_faces = read_axisym_pressure_faces::<F>(pressure_faces)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let operator = operator_fn(mesh, &pressure_faces, quadrature)
-        .map_err(|msg| PyInteropError::ValueError { msg })?;
-    Ok((
-        operator.rows,
-        operator.cols,
-        operator.vals,
-        operator.nrow,
-        operator.ncol,
-    ))
+    let traction_faces = read_axisym_traction_faces::<F>(traction_faces)?;
+    let thermal_material_table =
+        read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
+    let prescribed = read_axisym_prescribed(prescribed_dofs, prescribed_values)?;
+    let thermal_material_table =
+        (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice());
+    physics::solenoid_stress::AxisymmetricModelBuilder::new(
+        &nodes,
+        physics::solenoid_stress::AxisymmetricElements::Quad4(&elements),
+        &material_ids,
+        &material_table,
+    )
+    .quadrature(quadrature)
+    .pressure_faces(&pressure_faces)
+    .traction_faces(&traction_faces)
+    .thermal_material_table(thermal_material_table)
+    .prescribed_dirichlet(&prescribed)
+    .build()
+    .map_err(|msg| PyInteropError::ValueError { msg }.into())
 }
 
-fn temperature_operator_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
+fn assemble_axisymmetric_model_low_level_quad9<F: physics::solenoid_stress::Real + NumpyElement>(
     nodes: PyReadonlyArray2<'_, F>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, F>,
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
     thermal_material_table: PyReadonlyArray2<'_, F>,
+    prescribed_dofs: PyReadonlyArray1<'_, u64>,
+    prescribed_values: PyReadonlyArray1<'_, F>,
     quadrature: u8,
-    operator_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        &[usize],
-        &[[[F; 4]; 4]],
-        &[physics::solenoid_stress::ThermalMaterial<F>],
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::ThermalLoadOperator<F>, String>,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, Vec<F>, usize, usize)> {
+) -> PyResult<physics::solenoid_stress::AxisymmetricModel<F>> {
     let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
     let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
+    let elements = read_axisym_elements::<9>("elements", elements)?;
     let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
     let material_table = read_axisym_material_table("material_table", material_table)?;
+    let pressure_faces = read_axisym_pressure_faces::<F>(pressure_faces)?;
+    let traction_faces = read_axisym_traction_faces::<F>(traction_faces)?;
     let thermal_material_table =
         read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let operator = operator_fn(
-        mesh,
+    let prescribed = read_axisym_prescribed(prescribed_dofs, prescribed_values)?;
+    let thermal_material_table =
+        (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice());
+    physics::solenoid_stress::AxisymmetricModelBuilder::new(
+        &nodes,
+        physics::solenoid_stress::AxisymmetricElements::Quad9(&elements),
         &material_ids,
         &material_table,
-        &thermal_material_table,
-        quadrature,
     )
-    .map_err(|msg| PyInteropError::ValueError { msg })?;
-    Ok((
-        operator.temperature_to_rhs.rows,
-        operator.temperature_to_rhs.cols,
-        operator.temperature_to_rhs.vals,
-        operator.reference_rhs,
-        operator.temperature_to_rhs.nrow,
-        operator.temperature_to_rhs.ncol,
-    ))
-}
-
-fn traction_operator_axisymmetric_low_level<
-    F: physics::solenoid_stress::Real + NumpyElement,
-    const NODES_PER_ELEMENT: usize,
->(
-    nodes: PyReadonlyArray2<'_, F>,
-    elements: PyReadonlyArray2<'_, u64>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-    operator_fn: fn(
-        physics::solenoid_stress::MeshView<'_, F, NODES_PER_ELEMENT>,
-        &[physics::solenoid_stress::TractionLoad<F>],
-        physics::solenoid_stress::QuadratureRule,
-    ) -> Result<physics::solenoid_stress::SparseOperator<F>, String>,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<F>, usize, usize)> {
-    let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<NODES_PER_ELEMENT>("elements", elements)?;
-    let traction_faces = read_axisym_traction_faces::<F>(traction_faces)?;
-    let mesh = physics::solenoid_stress::MeshView {
-        nodes_rz: &nodes,
-        elements: &elements,
-    };
-    let operator = operator_fn(mesh, &traction_faces, quadrature)
-        .map_err(|msg| PyInteropError::ValueError { msg })?;
-    Ok((
-        operator.rows,
-        operator.cols,
-        operator.vals,
-        operator.nrow,
-        operator.ncol,
-    ))
+    .quadrature(quadrature)
+    .pressure_faces(&pressure_faces)
+    .traction_faces(&traction_faces)
+    .thermal_material_table(thermal_material_table)
+    .prescribed_dirichlet(&prescribed)
+    .build()
+    .map_err(|msg| PyInteropError::ValueError { msg }.into())
 }
 
 #[pyfunction]
-fn solenoid_stress_fem_assemble_axisymmetric_quad4_f64(
+fn solenoid_stress_fem_assemble_model_axisymmetric_quad4_f64(
     nodes: PyReadonlyArray2<'_, f64>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize)> {
-    assemble_stiffness_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        quadrature,
-        physics::solenoid_stress::assemble_stiffness_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_assemble_axisymmetric_quad4_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f32>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize)> {
-    assemble_stiffness_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        quadrature,
-        physics::solenoid_stress::assemble_stiffness_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_assemble_axisymmetric_quad9_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize)> {
-    assemble_stiffness_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        quadrature,
-        physics::solenoid_stress::assemble_stiffness_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_assemble_axisymmetric_quad9_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f32>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize)> {
-    assemble_stiffness_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        quadrature,
-        physics::solenoid_stress::assemble_stiffness_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_measures_axisymmetric_quad4_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f64>, Vec<f64>)> {
-    element_measures_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_measures_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_measures_axisymmetric_quad4_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f32>, Vec<f32>)> {
-    element_measures_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_measures_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_measures_axisymmetric_quad9_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f64>, Vec<f64>)> {
-    element_measures_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_measures_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_measures_axisymmetric_quad9_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f32>, Vec<f32>)> {
-    element_measures_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_measures_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, usize)> {
-    element_quadrature_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_quadrature_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>, usize)> {
-    element_quadrature_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_quadrature_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, usize)> {
-    element_quadrature_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_quadrature_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>, usize)> {
-    element_quadrature_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::element_quadrature_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f64>,
-    thermal_material_table: PyReadonlyArray2<'_, f64>,
-    quadrature: u8,
-) -> PyResult<(
-    Vec<f64>,
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<f64>, Vec<f64>),
-    (usize, usize, usize),
-)> {
-    quadrature_field_operators_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::quadrature_field_operators_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f32>,
-    thermal_material_table: PyReadonlyArray2<'_, f32>,
-    quadrature: u8,
-) -> PyResult<(
-    Vec<f32>,
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<f32>, Vec<f32>),
-    (usize, usize, usize),
-)> {
-    quadrature_field_operators_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::quadrature_field_operators_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f64>,
-    thermal_material_table: PyReadonlyArray2<'_, f64>,
-    quadrature: u8,
-) -> PyResult<(
-    Vec<f64>,
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<usize>, Vec<usize>, Vec<f64>),
-    (Vec<f64>, Vec<f64>),
-    (usize, usize, usize),
-)> {
-    quadrature_field_operators_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::quadrature_field_operators_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f32>,
-    thermal_material_table: PyReadonlyArray2<'_, f32>,
-    quadrature: u8,
-) -> PyResult<(
-    Vec<f32>,
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<usize>, Vec<usize>, Vec<f32>),
-    (Vec<f32>, Vec<f32>),
-    (usize, usize, usize),
-)> {
-    quadrature_field_operators_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::quadrature_field_operators_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
-    body_force_operator_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::body_force_operator_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
-    body_force_operator_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::body_force_operator_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
-    body_force_operator_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::body_force_operator_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
-    body_force_operator_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        quadrature,
-        physics::solenoid_stress::body_force_operator_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
-    pressure_operator_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        pressure_faces,
-        quadrature,
-        physics::solenoid_stress::pressure_operator_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
-    pressure_operator_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        pressure_faces,
-        quadrature,
-        physics::solenoid_stress::pressure_operator_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
-    pressure_operator_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        pressure_faces,
-        quadrature,
-        physics::solenoid_stress::pressure_operator_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
-    pressure_operator_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        pressure_faces,
-        quadrature,
-        physics::solenoid_stress::pressure_operator_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_traction_operator_axisymmetric_quad4_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
     traction_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
-    traction_operator_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        traction_faces,
-        quadrature,
-        physics::solenoid_stress::traction_operator_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_traction_operator_axisymmetric_quad4_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
-    traction_operator_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        traction_faces,
-        quadrature,
-        physics::solenoid_stress::traction_operator_quad4,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_traction_operator_axisymmetric_quad9_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, usize, usize)> {
-    traction_operator_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        traction_faces,
-        quadrature,
-        physics::solenoid_stress::traction_operator_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_traction_operator_axisymmetric_quad9_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, usize, usize)> {
-    traction_operator_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        traction_faces,
-        quadrature,
-        physics::solenoid_stress::traction_operator_quad9,
-    )
-}
-
-#[pyfunction]
-fn solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f64(
-    nodes: PyReadonlyArray2<'_, f64>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f64>,
     thermal_material_table: PyReadonlyArray2<'_, f64>,
+    prescribed_dofs: PyReadonlyArray1<'_, u64>,
+    prescribed_values: PyReadonlyArray1<'_, f64>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize, usize)> {
-    temperature_operator_axisymmetric_low_level::<f64, 4>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::temperature_operator_quad4,
-    )
+) -> PyResult<SolenoidStressAxisymmetricModelF64> {
+    Ok(SolenoidStressAxisymmetricModelF64 {
+        inner: assemble_axisymmetric_model_low_level_quad4::<f64>(
+            nodes,
+            elements,
+            material_ids,
+            material_table,
+            pressure_faces,
+            traction_faces,
+            thermal_material_table,
+            prescribed_dofs,
+            prescribed_values,
+            quadrature,
+        )?,
+    })
 }
 
 #[pyfunction]
-fn solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f32(
+fn solenoid_stress_fem_assemble_model_axisymmetric_quad4_f32(
     nodes: PyReadonlyArray2<'_, f32>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
     thermal_material_table: PyReadonlyArray2<'_, f32>,
+    prescribed_dofs: PyReadonlyArray1<'_, u64>,
+    prescribed_values: PyReadonlyArray1<'_, f32>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize, usize)> {
-    temperature_operator_axisymmetric_low_level::<f32, 4>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::temperature_operator_quad4,
-    )
+) -> PyResult<SolenoidStressAxisymmetricModelF32> {
+    Ok(SolenoidStressAxisymmetricModelF32 {
+        inner: assemble_axisymmetric_model_low_level_quad4::<f32>(
+            nodes,
+            elements,
+            material_ids,
+            material_table,
+            pressure_faces,
+            traction_faces,
+            thermal_material_table,
+            prescribed_dofs,
+            prescribed_values,
+            quadrature,
+        )?,
+    })
 }
 
 #[pyfunction]
-fn solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f64(
+fn solenoid_stress_fem_assemble_model_axisymmetric_quad9_f64(
     nodes: PyReadonlyArray2<'_, f64>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f64>,
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
     thermal_material_table: PyReadonlyArray2<'_, f64>,
+    prescribed_dofs: PyReadonlyArray1<'_, u64>,
+    prescribed_values: PyReadonlyArray1<'_, f64>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f64>, Vec<f64>, usize, usize)> {
-    temperature_operator_axisymmetric_low_level::<f64, 9>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::temperature_operator_quad9,
-    )
+) -> PyResult<SolenoidStressAxisymmetricModelF64> {
+    Ok(SolenoidStressAxisymmetricModelF64 {
+        inner: assemble_axisymmetric_model_low_level_quad9::<f64>(
+            nodes,
+            elements,
+            material_ids,
+            material_table,
+            pressure_faces,
+            traction_faces,
+            thermal_material_table,
+            prescribed_dofs,
+            prescribed_values,
+            quadrature,
+        )?,
+    })
 }
 
 #[pyfunction]
-fn solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f32(
+fn solenoid_stress_fem_assemble_model_axisymmetric_quad9_f32(
     nodes: PyReadonlyArray2<'_, f32>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
     material_table: PyReadonlyArray3<'_, f32>,
+    pressure_faces: PyReadonlyArray2<'_, u64>,
+    traction_faces: PyReadonlyArray2<'_, u64>,
     thermal_material_table: PyReadonlyArray2<'_, f32>,
+    prescribed_dofs: PyReadonlyArray1<'_, u64>,
+    prescribed_values: PyReadonlyArray1<'_, f32>,
     quadrature: u8,
-) -> PyResult<(Vec<usize>, Vec<usize>, Vec<f32>, Vec<f32>, usize, usize)> {
-    temperature_operator_axisymmetric_low_level::<f32, 9>(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        physics::solenoid_stress::temperature_operator_quad9,
-    )
+) -> PyResult<SolenoidStressAxisymmetricModelF32> {
+    Ok(SolenoidStressAxisymmetricModelF32 {
+        inner: assemble_axisymmetric_model_low_level_quad9::<f32>(
+            nodes,
+            elements,
+            material_ids,
+            material_table,
+            pressure_faces,
+            traction_faces,
+            thermal_material_table,
+            prescribed_dofs,
+            prescribed_values,
+            quadrature,
+        )?,
+    })
 }
 
 #[pyfunction]
@@ -2980,132 +2696,22 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(vector_potential_dipole, m.clone())?)?;
 
     // Solenoid stress FEM
+    m.add_class::<SolenoidStressAxisymmetricModelF64>()?;
+    m.add_class::<SolenoidStressAxisymmetricModelF32>()?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_assemble_axisymmetric_quad4_f64,
+        solenoid_stress_fem_assemble_model_axisymmetric_quad4_f64,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_assemble_axisymmetric_quad4_f32,
+        solenoid_stress_fem_assemble_model_axisymmetric_quad4_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_assemble_axisymmetric_quad9_f64,
+        solenoid_stress_fem_assemble_model_axisymmetric_quad9_f64,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_assemble_axisymmetric_quad9_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_measures_axisymmetric_quad4_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_measures_axisymmetric_quad4_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_measures_axisymmetric_quad9_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_measures_axisymmetric_quad9_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_traction_operator_axisymmetric_quad4_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_traction_operator_axisymmetric_quad4_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_traction_operator_axisymmetric_quad9_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_traction_operator_axisymmetric_quad9_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f32,
+        solenoid_stress_fem_assemble_model_axisymmetric_quad9_f32,
         m.clone()
     )?)?;
 

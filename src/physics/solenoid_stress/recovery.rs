@@ -46,8 +46,6 @@ pub struct QuadratureFieldOperators<F: Real> {
     pub thermal_stress_constant: Vec<F>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
-    /// Number of global displacement DOFs the operators act on.
-    pub ndof: usize,
     /// Number of nodal temperatures the thermal operators act on.
     pub ntemp: usize,
 }
@@ -172,7 +170,6 @@ fn quadrature_field_operators_impl<
         ));
     }
 
-    let ndof = mesh.num_nodes() * 2;
     let nq_per_element = quadrature.points_per_element();
     let nsamples = mesh.num_elements() * nq_per_element;
     let mut points_rz = Vec::with_capacity(nsamples);
@@ -284,7 +281,6 @@ fn quadrature_field_operators_impl<
         thermal_strain_constant,
         thermal_stress_constant,
         nq_per_element,
-        ndof,
         ntemp: thermal_material_table.map_or(0, |_| mesh.num_nodes()),
     })
 }

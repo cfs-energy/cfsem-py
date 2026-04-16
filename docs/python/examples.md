@@ -78,18 +78,20 @@ or add `--no-plot` for CI-style execution.
 
 ## Axisymmetric FEM Repeated-Load Operator Example
 
-Run a small non-GUI example that assembles the reusable load operators once,
-then updates the load values to rebuild the right-hand side for multiple cases.
-The script makes the operator construction explicit and applies all four
-supported load types:
+Run a small non-GUI example that assembles the constrained reduced model once,
+then updates the load values to rebuild the reduced right-hand side for multiple
+cases. The script makes the operator construction explicit, applies all four
+supported load types,
 
 - body-force density
 - surface pressure
 - surface traction in global `(r, z)` components
 - nodal temperature with thermal strain
 
-It uses the operators `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`,
-`temperature_to_rhs`, and `thermal_reference_rhs` to rebuild the global load vector.
+and checks the Rust-side `model.solve(rhs)` result against a SciPy solve on the
+same reduced stiffness matrix. It uses the operators `body_force_to_rhs`,
+`pressure_to_rhs`, `traction_to_rhs`, `temperature_to_rhs`, and `constant_rhs`
+to rebuild the reduced load vector.
 
 Run it with `uv run --group dev examples/solenoid_stress_surface_traction.py`.
 

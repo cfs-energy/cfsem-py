@@ -39,7 +39,6 @@ fn assemble_axisymmetric_impl<
             mesh.num_elements()
         ));
     }
-    let ndof = mesh.num_nodes() * 2;
     let mut rows = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
     let mut cols = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
     let mut vals = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
@@ -75,12 +74,7 @@ fn assemble_axisymmetric_impl<
         }
     }
 
-    Ok(StiffnessTriplets {
-        rows,
-        cols,
-        vals,
-        ndof,
-    })
+    Ok(StiffnessTriplets { rows, cols, vals })
 }
 
 /// Assemble the global axisymmetric Quad4 stiffness operator in COO triplet form.

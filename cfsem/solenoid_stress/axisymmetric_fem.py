@@ -2,9 +2,9 @@
 2D-axisymmetric elasticity finite-element assembly for solenoid stress problems.
 
 This module provides a small displacement-based axisymmetric finite-element solver
-for the `(r, z)` meridian plane. The Rust backend assembles the global COO stiffness
-matrix and sparse load operators, while Python handles load-operator application,
-sparse linear algebra, postprocessing, and validation workflows.
+for the `(r, z)` meridian plane. The Rust backend assembles the reduced constrained
+model, stores the sparse operators, caches the LU factorization, and runs the solve.
+Python wraps that model, normalizes load data, and handles postprocessing workflows.
 
 The element formulation follows the standard small-strain Galerkin construction
 
@@ -43,101 +43,17 @@ import scipy.sparse as sp
 
 import cfsem.cfsem as _cfsem_bindings
 
-_assemble_stiffness_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f32
+_assemble_model_axisymmetric_quad4_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad4_f32
 )
-_assemble_stiffness_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad4_f64
+_assemble_model_axisymmetric_quad4_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad4_f64
 )
-_assemble_stiffness_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f32
+_assemble_model_axisymmetric_quad9_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad9_f32
 )
-_assemble_stiffness_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_axisymmetric_quad9_f64
-)
-_element_measures_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad4_f32
-)
-_element_measures_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad4_f64
-)
-_element_measures_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad9_f32
-)
-_element_measures_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_element_measures_axisymmetric_quad9_f64
-)
-_element_quadrature_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f32
-)
-_element_quadrature_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad4_f64
-)
-_element_quadrature_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f32
-)
-_element_quadrature_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_element_quadrature_axisymmetric_quad9_f64
-)
-_quadrature_field_operators_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f32
-)
-_quadrature_field_operators_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad4_f64
-)
-_quadrature_field_operators_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f32
-)
-_quadrature_field_operators_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_quadrature_field_operators_axisymmetric_quad9_f64
-)
-_body_force_operator_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f32
-)
-_body_force_operator_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad4_f64
-)
-_body_force_operator_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f32
-)
-_body_force_operator_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_body_force_operator_axisymmetric_quad9_f64
-)
-_pressure_operator_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f32
-)
-_pressure_operator_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad4_f64
-)
-_pressure_operator_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f32
-)
-_pressure_operator_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_pressure_operator_axisymmetric_quad9_f64
-)
-_traction_operator_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad4_f32
-)
-_traction_operator_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad4_f64
-)
-_traction_operator_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad9_f32
-)
-_traction_operator_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_traction_operator_axisymmetric_quad9_f64
-)
-_temperature_operator_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f32
-)
-_temperature_operator_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad4_f64
-)
-_temperature_operator_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f32
-)
-_temperature_operator_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_temperature_operator_axisymmetric_quad9_f64
+_assemble_model_axisymmetric_quad9_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad9_f64
 )
 
 ArrayLike = npt.ArrayLike
@@ -150,10 +66,50 @@ def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:
     return cast(sp.csr_matrix, sp.csr_matrix(matrix))
 
 
+def _to_csc_matrix(matrix: Any) -> sp.csc_matrix:
+    """Normalize sparse results to CSC matrices."""
+
+    return cast(sp.csc_matrix, sp.csc_matrix(matrix))
+
+
 def _sparse_shape(matrix: Any) -> tuple[int, int]:
     """Return a concrete 2D sparse shape for pyright and runtime callers."""
 
     return cast(tuple[int, int], matrix.shape)
+
+
+def _csr_matrix_from_binding(
+    binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
+    dtype: np.dtype[Any],
+) -> sp.csr_matrix:
+    vals, indices, indptr, nrow, ncol = binding
+    return _to_csr_matrix(
+        sp.csr_matrix(
+            (
+                np.asarray(vals, dtype=dtype),
+                np.asarray(indices, dtype=np.int64),
+                np.asarray(indptr, dtype=np.int64),
+            ),
+            shape=(int(nrow), int(ncol)),
+        )
+    )
+
+
+def _csc_matrix_from_binding(
+    binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
+    dtype: np.dtype[Any],
+) -> sp.csc_matrix:
+    vals, indices, indptr, nrow, ncol = binding
+    return _to_csc_matrix(
+        sp.csc_matrix(
+            (
+                np.asarray(vals, dtype=dtype),
+                np.asarray(indices, dtype=np.int64),
+                np.asarray(indptr, dtype=np.int64),
+            ),
+            shape=(int(nrow), int(ncol)),
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,22 +131,6 @@ class ElementQuadrature:
 
 
 @dataclass(frozen=True, slots=True)
-class QuadratureFieldOperators:
-    """Sparse operators that map nodal displacements to quadrature-point strain/stress."""
-
-    points_rz: npt.NDArray[np.floating[Any]]
-    strain_operator: sp.csr_matrix
-    stress_operator: sp.csr_matrix
-    thermal_strain_operator: sp.csr_matrix
-    thermal_stress_operator: sp.csr_matrix
-    thermal_strain_constant: npt.NDArray[np.floating[Any]]
-    thermal_stress_constant: npt.NDArray[np.floating[Any]]
-    nq_per_element: int
-    ndof: int
-    ntemp: int
-
-
-@dataclass(frozen=True, slots=True)
 class ElevatedQuad9Mesh:
     """Explicit 9-node analysis mesh inferred from a corner-only quad mesh."""
 
@@ -202,78 +142,230 @@ class ElevatedQuad9Mesh:
     midside_node_indices: npt.NDArray[np.int64]
     center_node_indices: npt.NDArray[np.int64]
 
-
-@dataclass(frozen=True, slots=True)
-class ReducedSystem:
-    """Linear system after eliminating prescribed Dirichlet dofs."""
-
-    matrix: sp.csr_matrix
-    rhs: npt.NDArray[np.floating[Any]]
-    free_dofs: npt.NDArray[np.int64]
-    fixed_dofs: npt.NDArray[np.int64]
-    fixed_values: npt.NDArray[np.floating[Any]]
-    ndof: int
-
-    def recover(self, free_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
-        solution = np.zeros(self.ndof, dtype=self.rhs.dtype)
-        solution[self.fixed_dofs] = self.fixed_values
-        solution[self.free_dofs] = np.asarray(free_solution, dtype=self.rhs.dtype)
-        return solution
-
-
-@dataclass(frozen=True, slots=True)
 class AxisymmetricFEMModel:
-    """
-    Reusable axisymmetric FEM model with fixed stiffness and linear load operators.
+    """Reduced axisymmetric FEM model assembled once and reused for load cases."""
 
-    `body_force_to_rhs` maps flattened per-element body-force data
-    `[f_r(0), f_z(0), f_r(1), f_z(1), ...]` onto the global load vector.
-    `pressure_to_rhs` maps the reusable `pressure_values` vector associated with
-    `pressure_faces` onto the global load vector. `traction_to_rhs` maps flattened
-    per-face traction vectors `[t_r(0), t_z(0), ...]` associated with `traction_faces`
-    onto the same load vector.
-    """
+    def __init__(
+        self,
+        *,
+        backend: Any,
+        dtype: np.dtype[Any],
+        input_nodes: npt.NDArray[np.floating[Any]],
+        input_elements: npt.NDArray[np.uint64],
+        analysis_nodes: npt.NDArray[np.floating[Any]],
+        analysis_elements: npt.NDArray[np.uint64],
+        elevated: ElevatedQuad9Mesh | None,
+        pressure_faces: npt.NDArray[np.uint64],
+        traction_faces: npt.NDArray[np.uint64],
+        element_type: str,
+        stiffness: sp.csc_matrix,
+        body_force_to_rhs: sp.csr_matrix,
+        pressure_to_rhs: sp.csr_matrix,
+        traction_to_rhs: sp.csr_matrix,
+        temperature_to_rhs: sp.csr_matrix,
+        constant_rhs: npt.NDArray[np.floating[Any]],
+        quadrature_points_rz: npt.NDArray[np.floating[Any]],
+        strain_operator: sp.csr_matrix,
+        stress_operator: sp.csr_matrix,
+        thermal_strain_operator: sp.csr_matrix,
+        thermal_stress_operator: sp.csr_matrix,
+        strain_constant: npt.NDArray[np.floating[Any]],
+        stress_constant: npt.NDArray[np.floating[Any]],
+        thermal_strain_constant: npt.NDArray[np.floating[Any]],
+        thermal_stress_constant: npt.NDArray[np.floating[Any]],
+        free_dofs: npt.NDArray[np.int64],
+        fixed_dofs: npt.NDArray[np.int64],
+        fixed_values: npt.NDArray[np.floating[Any]],
+        ndof_full: int,
+        ndof_reduced: int,
+        nelem: int,
+        nq_per_element: int,
+        n_temperature_nodes: int,
+        quadrature_code: int,
+    ) -> None:
+        self._backend = backend
+        self._dtype = dtype
+        self._input_nodes = input_nodes
+        self._input_elements = input_elements
+        self._elevated = elevated
+        self.stiffness = stiffness
+        self.body_force_to_rhs = body_force_to_rhs
+        self.pressure_to_rhs = pressure_to_rhs
+        self.traction_to_rhs = traction_to_rhs
+        self.temperature_to_rhs = temperature_to_rhs
+        self.constant_rhs = constant_rhs
+        self.pressure_faces = pressure_faces
+        self.traction_faces = traction_faces
+        self.analysis_nodes = analysis_nodes
+        self.analysis_elements = analysis_elements
+        self.quadrature_points_rz = quadrature_points_rz
+        self.strain_operator = strain_operator
+        self.stress_operator = stress_operator
+        self.thermal_strain_operator = thermal_strain_operator
+        self.thermal_stress_operator = thermal_stress_operator
+        self.strain_constant = strain_constant
+        self.stress_constant = stress_constant
+        self.thermal_strain_constant = thermal_strain_constant
+        self.thermal_stress_constant = thermal_stress_constant
+        self.free_dofs = free_dofs
+        self.fixed_dofs = fixed_dofs
+        self.fixed_values = fixed_values
+        self.element_type = element_type
+        self.ndof_full = int(ndof_full)
+        self.ndof_reduced = int(ndof_reduced)
+        self.nelem = int(nelem)
+        self.nq_per_element = int(nq_per_element)
+        self.n_temperature_nodes = int(n_temperature_nodes)
+        self._quadrature_code = int(quadrature_code)
+        self._element_quadrature_cache: ElementQuadrature | None = None
+        self._element_measures_cache: ElementMeasures | None = None
 
-    stiffness: sp.csr_matrix
-    body_force_to_rhs: sp.csr_matrix
-    pressure_to_rhs: sp.csr_matrix
-    traction_to_rhs: sp.csr_matrix
-    temperature_to_rhs: sp.csr_matrix
-    thermal_reference_rhs: npt.NDArray[np.floating[Any]]
-    pressure_faces: npt.NDArray[np.uint64]
-    traction_faces: npt.NDArray[np.uint64]
-    analysis_nodes: npt.NDArray[np.floating[Any]]
-    analysis_elements: npt.NDArray[np.uint64]
-    element_type: str
-    ndof: int
-    nelem: int
-    n_temperature_nodes: int
-    dtype: np.dtype[Any]
+    @property
+    def dtype(self) -> np.dtype[Any]:
+        return self._dtype
 
-    def rhs(
+    @property
+    def ndof(self) -> int:
+        return self.ndof_full
+
+    @property
+    def nodes(self) -> npt.NDArray[np.floating[Any]]:
+        return self._input_nodes
+
+    @property
+    def elements(self) -> npt.NDArray[np.uint64]:
+        return self._input_elements
+
+    @property
+    def thermal_reference_rhs(self) -> npt.NDArray[np.floating[Any]]:
+        return self.constant_rhs
+
+    def element_quadrature(self) -> ElementQuadrature:
+        """Return physical quadrature points and mapped area/volume weights per element."""
+
+        if self._element_quadrature_cache is not None:
+            return self._element_quadrature_cache
+        nelem = self.analysis_elements.shape[0]
+        nq = self.nq_per_element
+        points_rz = np.zeros((nelem, nq, 2), dtype=self.dtype)
+        weights_area = np.zeros((nelem, nq), dtype=self.dtype)
+        weights_volume = np.zeros((nelem, nq), dtype=self.dtype)
+        for element_index, conn in enumerate(self.analysis_elements):
+            coords = self.analysis_nodes[conn]
+            for sample_index, (_n, _grad_phys, det_j, point, weight) in enumerate(
+                _volume_samples(coords, self.element_type, self._quadrature_code, self.dtype)
+            ):
+                points_rz[element_index, sample_index] = point
+                weights_area[element_index, sample_index] = det_j * weight
+                weights_volume[element_index, sample_index] = det_j * weight * (
+                    2.0 * np.pi * point[0]
+                )
+        self._element_quadrature_cache = ElementQuadrature(
+            points_rz=points_rz,
+            weights_area=weights_area,
+            weights_volume=weights_volume,
+            nq_per_element=nq,
+        )
+        return self._element_quadrature_cache
+
+    def element_measures(self) -> ElementMeasures:
+        """Return per-element meridian area and swept axisymmetric volume."""
+
+        if self._element_measures_cache is not None:
+            return self._element_measures_cache
+        quadrature = self.element_quadrature()
+        self._element_measures_cache = ElementMeasures(
+            areas=np.sum(quadrature.weights_area, axis=1),
+            swept_volumes=np.sum(quadrature.weights_volume, axis=1),
+        )
+        return self._element_measures_cache
+
+    def _normalize_temperature_for_backend(
+        self,
+        nodal_temperature: ArrayLike | None,
+    ) -> npt.NDArray[np.floating[Any]] | None:
+        if self.n_temperature_nodes == 0:
+            if nodal_temperature is None:
+                return None
+            values = np.asarray(nodal_temperature, dtype=self.dtype).reshape(-1)
+            if values.size:
+                raise ValueError(
+                    "nodal_temperature was provided, but this model has no thermal operator"
+                )
+            return None
+        if nodal_temperature is None:
+            raise ValueError(
+                "nodal_temperature is required because this model includes thermal materials"
+            )
+        return _analysis_temperature_for_element_type(
+            nodal_temperature,
+            self._input_nodes.shape[0],
+            self.element_type,
+            self._elevated,
+            self.dtype,
+        )
+
+    def build_rhs(
         self,
         body_force: ArrayLike | None = None,
         pressure_values: ArrayLike | None = None,
         traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        rhs = np.asarray(self.thermal_reference_rhs, dtype=self.dtype).copy()
         body_force_arr = _normalize_body_force_or_zero(body_force, self.nelem, self.dtype)
-        rhs += np.asarray(self.body_force_to_rhs @ body_force_arr.reshape(-1), dtype=self.dtype)
         _, nload = _sparse_shape(self.pressure_to_rhs)
         pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
-        if pressure_arr.size:
-            rhs += np.asarray(self.pressure_to_rhs @ pressure_arr, dtype=self.dtype)
         _, ntraction_cols = _sparse_shape(self.traction_to_rhs)
         traction_arr = _normalize_traction_values(
             traction_values,
             ntraction_cols // 2,
             self.dtype,
         )
-        if traction_arr.size:
-            rhs += np.asarray(self.traction_to_rhs @ traction_arr.reshape(-1), dtype=self.dtype)
-        _, ntemp_cols = _sparse_shape(self.temperature_to_rhs)
-        if ntemp_cols:
+        temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
+        rhs = self._backend.build_rhs(
+            body_force_arr.reshape(-1),
+            pressure_arr if pressure_arr.size else None,
+            traction_arr.reshape(-1) if traction_arr.size else None,
+            temperature_arr,
+        )
+        return np.asarray(rhs, dtype=self.dtype)
+
+    def solve(self, rhs: ArrayLike) -> npt.NDArray[np.floating[Any]]:
+        rhs_arr = np.asarray(rhs, dtype=self.dtype).reshape(-1)
+        assert (
+            rhs_arr.shape[0] == self.ndof_reduced
+        ), f"rhs must have length {self.ndof_reduced}; got {rhs_arr.shape}"
+        return np.asarray(self._backend.solve(rhs_arr), dtype=self.dtype)
+
+    def recover_full(self, reduced_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
+        reduced_arr = np.asarray(reduced_solution, dtype=self.dtype).reshape(-1)
+        assert (
+            reduced_arr.shape[0] == self.ndof_reduced
+        ), f"reduced_solution must have length {self.ndof_reduced}; got {reduced_arr.shape}"
+        full = np.zeros((self.ndof_full,), dtype=self.dtype)
+        full[self.fixed_dofs] = self.fixed_values
+        full[self.free_dofs] = reduced_arr
+        return full
+
+    def _normalize_reduced_solution(
+        self,
+        displacements: ArrayLike,
+    ) -> npt.NDArray[np.floating[Any]]:
+        arr = np.asarray(displacements, dtype=self.dtype)
+        if arr.ndim == 1 and arr.shape == (self.ndof_reduced,):
+            return np.ascontiguousarray(arr)
+        full = _normalize_displacements(displacements, self.analysis_nodes.shape[0], self.dtype).reshape(-1)
+        return np.ascontiguousarray(full[self.free_dofs], dtype=self.dtype)
+
+    def evaluate_quadrature(
+        self,
+        displacements: ArrayLike,
+        nodal_temperature: ArrayLike | None = None,
+    ) -> QuadratureFieldSamples:
+        reduced = self._normalize_reduced_solution(displacements)
+        if self.n_temperature_nodes == 0:
+            temperature_arr = np.zeros((0,), dtype=self.dtype)
+        else:
             if nodal_temperature is None:
                 raise ValueError(
                     "nodal_temperature is required because this model includes thermal materials"
@@ -283,8 +375,30 @@ class AxisymmetricFEMModel:
                 self.n_temperature_nodes,
                 self.dtype,
             )
-            rhs += np.asarray(self.temperature_to_rhs @ temperature_arr, dtype=self.dtype)
-        return rhs
+        nelem = self.analysis_elements.shape[0]
+        nq = self.nq_per_element
+        strain = (
+            np.asarray(self.strain_operator @ reduced, dtype=self.dtype) + self.strain_constant
+        ).reshape(nelem, nq, 4)
+        thermal_strain = (
+            np.asarray(self.thermal_strain_operator @ temperature_arr, dtype=self.dtype)
+            + self.thermal_strain_constant
+        ).reshape(nelem, nq, 4)
+        stress = (
+            np.asarray(self.stress_operator @ reduced, dtype=self.dtype)
+            + self.stress_constant
+            - (
+                np.asarray(self.thermal_stress_operator @ temperature_arr, dtype=self.dtype)
+                + self.thermal_stress_constant
+            )
+        ).reshape(nelem, nq, 4)
+        return QuadratureFieldSamples(
+            points_rz=self.quadrature_points_rz,
+            strain=strain,
+            thermal_strain=thermal_strain,
+            elastic_strain=strain - thermal_strain,
+            stress=stress,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -709,6 +823,21 @@ def _normalize_traction_loads(
     return faces, values
 
 
+def _normalize_prescribed_dirichlet(
+    prescribed: Mapping[int, float] | None,
+    dtype: np.dtype[Any],
+) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
+    if prescribed is None:
+        return np.zeros((0,), dtype=np.uint64), np.zeros((0,), dtype=dtype)
+    items = sorted((int(dof), float(value)) for dof, value in prescribed.items())
+    if not items:
+        return np.zeros((0,), dtype=np.uint64), np.zeros((0,), dtype=dtype)
+    return (
+        np.asarray([dof for dof, _ in items], dtype=np.uint64),
+        np.asarray([value for _, value in items], dtype=dtype),
+    )
+
+
 def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     if dtype == np.float32:
         return f32
@@ -886,336 +1015,7 @@ def _face_samples(
             f"tangent squared norm is {float(tangent_norm_sq)!r}"
         )
         yield n, tangent, np.asarray(point, dtype=dtype), dtype.type(weight)
-
-def _assemble_body_force_operator(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> sp.csr_matrix:
-    return _assemble_body_force_operator_rust(nodes, elements, quadrature_code, dtype, element_type)
-
-
-def _assemble_pressure_operator(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    pressure_faces: npt.NDArray[np.uint64],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> sp.csr_matrix:
-    return _assemble_pressure_operator_rust(
-        nodes,
-        elements,
-        pressure_faces,
-        quadrature_code,
-        dtype,
-        element_type,
-    )
-
-
-def _assemble_traction_operator(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    traction_faces: npt.NDArray[np.uint64],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> sp.csr_matrix:
-    return _assemble_traction_operator_rust(
-        nodes,
-        elements,
-        traction_faces,
-        quadrature_code,
-        dtype,
-        element_type,
-    )
-
-
-def _assemble_temperature_operator(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    material_ids: npt.NDArray[np.uint64],
-    material_table: npt.NDArray[np.floating[Any]],
-    thermal_material_table: npt.NDArray[np.floating[Any]] | None,
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> tuple[sp.csr_matrix, npt.NDArray[np.floating[Any]]]:
-    if thermal_material_table is None:
-        return (
-            sp.csr_matrix((2 * nodes.shape[0], 0), dtype=dtype),
-            np.zeros((2 * nodes.shape[0],), dtype=dtype),
-        )
-    return _assemble_temperature_operator_rust(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature_code,
-        dtype,
-        element_type,
-    )
-
-
-def _coo_operator_from_triplets(
-    rows: ArrayLike,
-    cols: ArrayLike,
-    vals: ArrayLike,
-    shape: tuple[int, int],
-    dtype: np.dtype[Any],
-) -> sp.csr_matrix:
-    return _to_csr_matrix(
-        sp.coo_matrix(
-            (
-                np.asarray(vals, dtype=dtype),
-                (
-                    np.asarray(rows, dtype=np.int64),
-                    np.asarray(cols, dtype=np.int64),
-                ),
-            ),
-            shape=shape,
-        )
-    )
-
-
-def _assemble_body_force_operator_rust(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> sp.csr_matrix:
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            element_type,
-            _body_force_operator_axisymmetric_quad4_f32,
-            _body_force_operator_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            element_type,
-            _body_force_operator_axisymmetric_quad4_f64,
-            _body_force_operator_axisymmetric_quad9_f64,
-        ),
-    )
-    rows, cols, vals, nrow, ncol = low_level(nodes, elements, quadrature_code)
-    return _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype)
-
-
-def _assemble_pressure_operator_rust(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    pressure_faces: npt.NDArray[np.uint64],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> sp.csr_matrix:
-    if pressure_faces.shape[0] == 0:
-        return sp.csr_matrix((2 * nodes.shape[0], 0), dtype=dtype)
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            element_type,
-            _pressure_operator_axisymmetric_quad4_f32,
-            _pressure_operator_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            element_type,
-            _pressure_operator_axisymmetric_quad4_f64,
-            _pressure_operator_axisymmetric_quad9_f64,
-        ),
-    )
-    rows, cols, vals, nrow, ncol = low_level(nodes, elements, pressure_faces, quadrature_code)
-    return _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype)
-
-
-def _assemble_temperature_operator_rust(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    material_ids: npt.NDArray[np.uint64],
-    material_table: npt.NDArray[np.floating[Any]],
-    thermal_material_table: npt.NDArray[np.floating[Any]],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> tuple[sp.csr_matrix, npt.NDArray[np.floating[Any]]]:
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            element_type,
-            _temperature_operator_axisymmetric_quad4_f32,
-            _temperature_operator_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            element_type,
-            _temperature_operator_axisymmetric_quad4_f64,
-            _temperature_operator_axisymmetric_quad9_f64,
-        ),
-    )
-    rows, cols, vals, reference_rhs, nrow, ncol = low_level(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature_code,
-    )
-    return (
-        _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype),
-        np.asarray(reference_rhs, dtype=dtype),
-    )
-
-
-def _assemble_stiffness_rust(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    material_ids: npt.NDArray[np.uint64],
-    material_table: npt.NDArray[np.floating[Any]],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.floating[Any]], int]:
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            element_type,
-            _assemble_stiffness_axisymmetric_quad4_f32,
-            _assemble_stiffness_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            element_type,
-            _assemble_stiffness_axisymmetric_quad4_f64,
-            _assemble_stiffness_axisymmetric_quad9_f64,
-        ),
-    )
-    rows, cols, vals, ndof = low_level(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        quadrature_code,
-    )
-    return (
-        np.asarray(rows, dtype=np.int64),
-        np.asarray(cols, dtype=np.int64),
-        np.asarray(vals, dtype=dtype),
-        int(ndof),
-    )
-
-
-def _assemble_traction_operator_rust(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    traction_faces: npt.NDArray[np.uint64],
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> sp.csr_matrix:
-    if traction_faces.shape[0] == 0:
-        return sp.csr_matrix((2 * nodes.shape[0], 0), dtype=dtype)
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            element_type,
-            _traction_operator_axisymmetric_quad4_f32,
-            _traction_operator_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            element_type,
-            _traction_operator_axisymmetric_quad4_f64,
-            _traction_operator_axisymmetric_quad9_f64,
-        ),
-    )
-    rows, cols, vals, nrow, ncol = low_level(nodes, elements, traction_faces, quadrature_code)
-    return _coo_operator_from_triplets(rows, cols, vals, shape=(int(nrow), int(ncol)), dtype=dtype)
-
-
-def _quadrature_field_operators_rust(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    material_ids: npt.NDArray[np.uint64],
-    material_table: npt.NDArray[np.floating[Any]],
-    thermal_material_table: npt.NDArray[np.floating[Any]] | None,
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-    element_type: str,
-) -> QuadratureFieldOperators:
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            element_type,
-            _quadrature_field_operators_axisymmetric_quad4_f32,
-            _quadrature_field_operators_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            element_type,
-            _quadrature_field_operators_axisymmetric_quad4_f64,
-            _quadrature_field_operators_axisymmetric_quad9_f64,
-        ),
-    )
-    thermal_table_arr = (
-        _empty_thermal_material_table(dtype) if thermal_material_table is None else thermal_material_table
-    )
-    (
-        points_flat,
-        (strain_rows, strain_cols, strain_vals),
-        (stress_rows, stress_cols, stress_vals),
-        (thermal_strain_rows, thermal_strain_cols, thermal_strain_vals),
-        (thermal_stress_rows, thermal_stress_cols, thermal_stress_vals),
-        (thermal_strain_constant, thermal_stress_constant),
-        (nq_per_element, ndof, ntemp),
-    ) = low_level(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_table_arr,
-        quadrature_code,
-    )
-    nelem = elements.shape[0]
-    nrow = nelem * int(nq_per_element) * 4
-    return QuadratureFieldOperators(
-        points_rz=np.asarray(points_flat, dtype=dtype).reshape(nelem, int(nq_per_element), 2),
-        strain_operator=_coo_operator_from_triplets(
-            strain_rows,
-            strain_cols,
-            strain_vals,
-            shape=(nrow, int(ndof)),
-            dtype=dtype,
-        ),
-        stress_operator=_coo_operator_from_triplets(
-            stress_rows,
-            stress_cols,
-            stress_vals,
-            shape=(nrow, int(ndof)),
-            dtype=dtype,
-        ),
-        thermal_strain_operator=_coo_operator_from_triplets(
-            thermal_strain_rows,
-            thermal_strain_cols,
-            thermal_strain_vals,
-            shape=(nrow, int(ntemp)),
-            dtype=dtype,
-        ),
-        thermal_stress_operator=_coo_operator_from_triplets(
-            thermal_stress_rows,
-            thermal_stress_cols,
-            thermal_stress_vals,
-            shape=(nrow, int(ntemp)),
-            dtype=dtype,
-        ),
-        thermal_strain_constant=np.asarray(thermal_strain_constant, dtype=dtype),
-        thermal_stress_constant=np.asarray(thermal_stress_constant, dtype=dtype),
-        nq_per_element=int(nq_per_element),
-        ndof=int(ndof),
-        ntemp=int(ntemp),
-    )
-
-
-def assemble_axisymmetric_model(
+def assemble_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
     material_ids: ArrayLike,
@@ -1223,23 +1023,11 @@ def assemble_axisymmetric_model(
     pressure_faces: ArrayLike | None = None,
     traction_faces: ArrayLike | None = None,
     thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
+    prescribed: Mapping[int, float] | None = None,
     quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> AxisymmetricFEMModel:
-    """
-    Assemble a reusable axisymmetric FEM model for repeated load cases.
-
-    The stiffness matrix and linear load operators are assembled once through the
-    Rust backend. The returned load operators map per-element body-force data and
-    reusable pressure-load amplitudes to the global right-hand side through sparse
-    matrix-vector products on the Python side.
-
-    Notes:
-        `pressure_faces` defines the ordering of the reusable pressure load vector.
-        `traction_faces` defines the ordering of the reusable traction vector list.
-        Repeated solves may vary `pressure_values` and `traction_values`, but not
-        the face lists themselves.
-    """
+    """Assemble a reduced axisymmetric FEM model with fixed load topology and Dirichlet data."""
 
     elements_arr = _normalize_elements(elements)
     dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
@@ -1253,220 +1041,115 @@ def assemble_axisymmetric_model(
     )
     pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
     traction_faces_arr = _normalize_traction_faces(traction_faces)
+    prescribed_dofs, prescribed_values = _normalize_prescribed_dirichlet(prescribed, dtype)
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
     _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
     analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
         nodes_arr, elements_arr, normalized_element_type
     )
-    rows, cols, vals, ndof = _assemble_stiffness_rust(
+    low_level = _dispatch_pair(
+        dtype,
+        _dispatch_by_element_type(
+            normalized_element_type,
+            _assemble_model_axisymmetric_quad4_f32,
+            _assemble_model_axisymmetric_quad9_f32,
+        ),
+        _dispatch_by_element_type(
+            normalized_element_type,
+            _assemble_model_axisymmetric_quad4_f64,
+            _assemble_model_axisymmetric_quad9_f64,
+        ),
+    )
+    backend = low_level(
         analysis_nodes,
         analysis_elements,
         material_ids_arr,
         material_table_arr,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    stiffness = _coo_operator_from_triplets(rows, cols, vals, shape=(ndof, ndof), dtype=dtype)
-    body_force_to_rhs = _assemble_body_force_operator(
-        analysis_nodes,
-        analysis_elements,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    pressure_to_rhs = _assemble_pressure_operator(
-        analysis_nodes,
-        analysis_elements,
         pressure_faces_arr,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-    traction_to_rhs = _assemble_traction_operator(
-        analysis_nodes,
-        analysis_elements,
         traction_faces_arr,
+        _empty_thermal_material_table(dtype)
+        if thermal_material_table_arr is None
+        else thermal_material_table_arr,
+        prescribed_dofs,
+        prescribed_values,
         quadrature_code,
-        dtype,
-        normalized_element_type,
     )
-    analysis_temperature_to_rhs, thermal_reference_rhs = _assemble_temperature_operator(
-        analysis_nodes,
-        analysis_elements,
-        material_ids_arr,
-        material_table_arr,
-        thermal_material_table_arr,
-        quadrature_code,
+
+    stiffness = _csc_matrix_from_binding(backend.stiffness_csc(), dtype)
+    body_force_to_rhs = _csr_matrix_from_binding(backend.body_force_to_rhs_csr(), dtype)
+    pressure_to_rhs = _csr_matrix_from_binding(backend.pressure_to_rhs_csr(), dtype)
+    traction_to_rhs = _csr_matrix_from_binding(backend.traction_to_rhs_csr(), dtype)
+    analysis_temperature_to_rhs = _csr_matrix_from_binding(backend.temperature_to_rhs_csr(), dtype)
+    strain_operator = _csr_matrix_from_binding(backend.strain_operator_csr(), dtype)
+    stress_operator = _csr_matrix_from_binding(backend.stress_operator_csr(), dtype)
+    analysis_thermal_strain_operator = _csr_matrix_from_binding(
+        backend.thermal_strain_operator_csr(),
         dtype,
-        normalized_element_type,
+    )
+    analysis_thermal_stress_operator = _csr_matrix_from_binding(
+        backend.thermal_stress_operator_csr(),
+        dtype,
     )
     if thermal_material_table_arr is None:
-        temperature_to_rhs = sp.csr_matrix((ndof, 0), dtype=dtype)
-        thermal_reference_rhs = np.zeros((ndof,), dtype=dtype)
+        temperature_to_rhs = sp.csr_matrix((int(backend.ndof_reduced), 0), dtype=dtype)
+        thermal_strain_operator = sp.csr_matrix((strain_operator.shape[0], 0), dtype=dtype)
+        thermal_stress_operator = sp.csr_matrix((stress_operator.shape[0], 0), dtype=dtype)
         n_temperature_nodes = 0
     else:
         if elevated is None:
             temperature_to_rhs = analysis_temperature_to_rhs
+            thermal_strain_operator = analysis_thermal_strain_operator
+            thermal_stress_operator = analysis_thermal_stress_operator
         else:
-            temperature_to_rhs = _to_csr_matrix(
-                analysis_temperature_to_rhs @ _temperature_elevation_operator(elevated, dtype)
+            temperature_elevation = _temperature_elevation_operator(elevated, dtype)
+            temperature_to_rhs = _to_csr_matrix(analysis_temperature_to_rhs @ temperature_elevation)
+            thermal_strain_operator = _to_csr_matrix(
+                analysis_thermal_strain_operator @ temperature_elevation
+            )
+            thermal_stress_operator = _to_csr_matrix(
+                analysis_thermal_stress_operator @ temperature_elevation
             )
         n_temperature_nodes = nodes_arr.shape[0]
 
     return AxisymmetricFEMModel(
+        backend=backend,
+        dtype=dtype,
+        input_nodes=nodes_arr,
+        input_elements=elements_arr,
+        analysis_nodes=analysis_nodes,
+        analysis_elements=analysis_elements,
+        elevated=elevated,
+        pressure_faces=pressure_faces_arr,
+        traction_faces=traction_faces_arr,
+        element_type=normalized_element_type,
         stiffness=stiffness,
         body_force_to_rhs=body_force_to_rhs,
         pressure_to_rhs=pressure_to_rhs,
         traction_to_rhs=traction_to_rhs,
         temperature_to_rhs=_to_csr_matrix(temperature_to_rhs),
-        thermal_reference_rhs=np.asarray(thermal_reference_rhs, dtype=dtype),
-        pressure_faces=pressure_faces_arr,
-        traction_faces=traction_faces_arr,
-        analysis_nodes=analysis_nodes,
-        analysis_elements=analysis_elements,
-        element_type=normalized_element_type,
-        ndof=ndof,
+        constant_rhs=np.asarray(backend.constant_rhs(), dtype=dtype),
+        quadrature_points_rz=np.asarray(
+            backend.quadrature_points_flat(),
+            dtype=dtype,
+        ).reshape(analysis_elements.shape[0], int(backend.nq_per_element), 2),
+        strain_operator=strain_operator,
+        stress_operator=stress_operator,
+        thermal_strain_operator=_to_csr_matrix(thermal_strain_operator),
+        thermal_stress_operator=_to_csr_matrix(thermal_stress_operator),
+        strain_constant=np.asarray(backend.strain_constant(), dtype=dtype),
+        stress_constant=np.asarray(backend.stress_constant(), dtype=dtype),
+        thermal_strain_constant=np.asarray(backend.thermal_strain_constant(), dtype=dtype),
+        thermal_stress_constant=np.asarray(backend.thermal_stress_constant(), dtype=dtype),
+        free_dofs=np.asarray(backend.free_dofs(), dtype=np.int64),
+        fixed_dofs=np.asarray(backend.fixed_dofs(), dtype=np.int64),
+        fixed_values=np.asarray(backend.fixed_values(), dtype=dtype),
+        ndof_full=int(backend.ndof_full),
+        ndof_reduced=int(backend.ndof_reduced),
         nelem=elements_arr.shape[0],
+        nq_per_element=int(backend.nq_per_element),
         n_temperature_nodes=n_temperature_nodes,
-        dtype=dtype,
-    )
-
-
-def quadrature_field_operators_axisymmetric(
-    nodes: ArrayLike,
-    elements: ArrayLike,
-    material_ids: ArrayLike,
-    material_table: ArrayLike | Mapping[int, ArrayLike],
-    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
-    quadrature: str | int = "gl3",
-    element_type: str = "quad4",
-) -> QuadratureFieldOperators:
-    """
-    Build sparse operators that map nodal displacements to quadrature strain/stress samples.
-
-    The returned operators act on the global displacement vector ordered as
-    `[u_r(0), u_z(0), u_r(1), u_z(1), ...]` and produce quadrature samples stacked in
-    element-major order with four consecutive rows per sample:
-    `[e_rr, e_zz, e_tt, g_rz]` for `strain_operator` and
-    `[s_rr, s_zz, s_tt, t_rz]` for `stress_operator`.
-    """
-
-    dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
-    nodes_arr = _normalize_nodes(nodes, dtype)
-    elements_arr = _normalize_elements(elements)
-    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    _thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
-        material_ids,
-        thermal_material_table,
-        dtype,
-        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
-    )
-    if material_ids_arr.shape[0] != elements_arr.shape[0]:
-        raise ValueError(
-            f"material_ids has length {material_ids_arr.shape[0]}, "
-            f"but elements has {elements_arr.shape[0]} rows"
-        )
-    quadrature_code = _quadrature_code(quadrature)
-    normalized_element_type = _normalize_element_type(element_type)
-    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
-        nodes_arr, elements_arr, normalized_element_type
-    )
-    return _quadrature_field_operators_rust(
-        analysis_nodes,
-        analysis_elements,
-        material_ids_arr,
-        material_table_arr,
-        thermal_material_table_arr,
-        quadrature_code,
-        dtype,
-        normalized_element_type,
-    )
-
-
-def element_measures_axisymmetric(
-    nodes: ArrayLike,
-    elements: ArrayLike,
-    quadrature: str | int = "gl3",
-    element_type: str = "quad4",
-) -> ElementMeasures:
-    """Return per-element meridian areas and swept axisymmetric volumes."""
-
-    dtype = _resolve_float_dtype(nodes)
-    nodes_arr = _normalize_nodes(nodes, dtype)
-    elements_arr = _normalize_elements(elements)
-    quadrature_code = _quadrature_code(quadrature)
-    normalized_element_type = _normalize_element_type(element_type)
-    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
-        nodes_arr, elements_arr, normalized_element_type
-    )
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _element_measures_axisymmetric_quad4_f32,
-            _element_measures_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _element_measures_axisymmetric_quad4_f64,
-            _element_measures_axisymmetric_quad9_f64,
-        ),
-    )
-    areas, swept_volumes = low_level(analysis_nodes, analysis_elements, quadrature_code)
-    return ElementMeasures(
-        areas=np.asarray(areas, dtype=dtype),
-        swept_volumes=np.asarray(swept_volumes, dtype=dtype),
-    )
-
-
-def element_quadrature_axisymmetric(
-    nodes: ArrayLike,
-    elements: ArrayLike,
-    quadrature: str | int = "gl3",
-    element_type: str = "quad4",
-) -> ElementQuadrature:
-    """Return physical quadrature points and mapped area/volume weights per element."""
-
-    dtype = _resolve_float_dtype(nodes)
-    nodes_arr = _normalize_nodes(nodes, dtype)
-    elements_arr = _normalize_elements(elements)
-    quadrature_code = _quadrature_code(quadrature)
-    normalized_element_type = _normalize_element_type(element_type)
-    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, _elevated = _analysis_mesh_for_element_type(
-        nodes_arr, elements_arr, normalized_element_type
-    )
-    low_level = _dispatch_pair(
-        dtype,
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _element_quadrature_axisymmetric_quad4_f32,
-            _element_quadrature_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _element_quadrature_axisymmetric_quad4_f64,
-            _element_quadrature_axisymmetric_quad9_f64,
-        ),
-    )
-    points_flat, weights_area, weights_volume, nq_per_element = low_level(
-        analysis_nodes,
-        analysis_elements,
-        quadrature_code,
-    )
-    nelem = analysis_elements.shape[0]
-    points_rz = np.asarray(points_flat, dtype=dtype).reshape(nelem, nq_per_element, 2)
-    weights_area_arr = np.asarray(weights_area, dtype=dtype).reshape(nelem, nq_per_element)
-    weights_volume_arr = np.asarray(weights_volume, dtype=dtype).reshape(nelem, nq_per_element)
-    return ElementQuadrature(
-        points_rz=points_rz,
-        weights_area=weights_area_arr,
-        weights_volume=weights_volume_arr,
-        nq_per_element=int(nq_per_element),
+        quadrature_code=quadrature_code,
     )
 
 
@@ -1549,43 +1232,6 @@ def cfsem_radial_material(
     )
 
 
-def apply_dirichlet(
-    matrix: sp.spmatrix,
-    rhs: ArrayLike,
-    prescribed: Mapping[int, float] | None = None,
-) -> ReducedSystem:
-    """Eliminate prescribed degrees of freedom by free-dof partitioning."""
-
-    csr = _to_csr_matrix(matrix)
-    nrow, ncol = _sparse_shape(csr)
-    rhs_arr = np.asarray(rhs, dtype=csr.dtype).reshape(-1)
-    assert nrow == ncol, f"matrix must be square; got {(nrow, ncol)}"
-    assert rhs_arr.shape[0] == nrow, f"rhs length {rhs_arr.shape[0]} does not match matrix size {nrow}"
-    prescribed = {} if prescribed is None else dict(prescribed)
-    if prescribed:
-        fixed_dofs = np.asarray(sorted(int(dof) for dof in prescribed), dtype=np.int64)
-        fixed_values = np.asarray([prescribed[int(dof)] for dof in fixed_dofs], dtype=rhs_arr.dtype)
-    else:
-        fixed_dofs = np.zeros((0,), dtype=np.int64)
-        fixed_values = np.zeros((0,), dtype=rhs_arr.dtype)
-    assert not (
-        fixed_dofs.size and ((fixed_dofs < 0).any() or (fixed_dofs >= nrow).any())
-    ), "prescribed DOF index is out of bounds"
-    free_dofs = np.setdiff1d(np.arange(nrow, dtype=np.int64), fixed_dofs, assume_unique=True)
-    reduced_rhs = rhs_arr[free_dofs].copy()
-    if fixed_dofs.size:
-        reduced_rhs -= csr[free_dofs][:, fixed_dofs] @ fixed_values
-    reduced_matrix = _to_csr_matrix(csr[free_dofs][:, free_dofs])
-    return ReducedSystem(
-        matrix=reduced_matrix,
-        rhs=reduced_rhs,
-        free_dofs=free_dofs,
-        fixed_dofs=fixed_dofs,
-        fixed_values=fixed_values,
-        ndof=nrow,
-    )
-
-
 def _gauss_1d(code: int) -> list[tuple[float, float]]:
     if code == 3:
         a = np.sqrt(3.0 / 5.0)
@@ -1634,98 +1280,14 @@ def _normalize_displacements(
     raise ValueError(f"displacements must have shape (2*nnode,) or (nnode, 2); got {arr.shape}")
 
 
-def evaluate_axisymmetric_strain_stress_at_quadrature(
-    nodes: ArrayLike,
-    elements: ArrayLike,
-    material_ids: ArrayLike,
-    material_table: ArrayLike | Mapping[int, ArrayLike],
-    displacements: ArrayLike,
-    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
-    nodal_temperature: ArrayLike | None = None,
-    quadrature: str | int = "gl3",
-    element_type: str = "quad4",
-) -> QuadratureFieldSamples:
-    """
-    Recover strain and stress at element quadrature points from nodal displacements.
-
-    The recovery uses the same family-specific shape functions, Jacobian map, and
-    axisymmetric `B` matrix used by the assembler, so the samples align directly
-    with the discrete formulation from [1]-[3].
-    """
-
-    dtype = _resolve_float_dtype(nodes, material_table, displacements, nodal_temperature)
-    operators = quadrature_field_operators_axisymmetric(
-        nodes,
-        elements,
-        material_ids,
-        material_table,
-        thermal_material_table=thermal_material_table,
-        quadrature=quadrature,
-        element_type=element_type,
-    )
-    displacements_arr = _normalize_displacements(displacements, operators.ndof // 2, dtype)
-    u_flat = displacements_arr.reshape(-1)
-    if operators.ntemp == 0:
-        temperature_flat = np.zeros((0,), dtype=dtype)
-    else:
-        if nodal_temperature is None:
-            raise ValueError("nodal_temperature is required because thermal_material_table was provided")
-        nodes_arr = _normalize_nodes(nodes, dtype)
-        elements_arr = _normalize_elements(elements)
-        normalized_element_type = _normalize_element_type(element_type)
-        _analysis_nodes, _analysis_elements, elevated = _analysis_mesh_for_element_type(
-            nodes_arr,
-            elements_arr,
-            normalized_element_type,
-        )
-        temperature_flat = _analysis_temperature_for_element_type(
-            nodal_temperature,
-            nodes_arr.shape[0],
-            normalized_element_type,
-            elevated,
-            dtype,
-        )
-    nelem = operators.points_rz.shape[0]
-    nq = operators.nq_per_element
-    strain = np.asarray(operators.strain_operator @ u_flat, dtype=dtype).reshape(nelem, nq, 4)
-    thermal_strain = (
-        np.asarray(operators.thermal_strain_operator @ temperature_flat, dtype=dtype)
-        + operators.thermal_strain_constant
-    ).reshape(nelem, nq, 4)
-    stress = (
-        np.asarray(operators.stress_operator @ u_flat, dtype=dtype)
-        - (
-            np.asarray(operators.thermal_stress_operator @ temperature_flat, dtype=dtype)
-            + operators.thermal_stress_constant
-        )
-    ).reshape(nelem, nq, 4)
-    elastic_strain = strain - thermal_strain
-    return QuadratureFieldSamples(
-        points_rz=operators.points_rz,
-        strain=strain,
-        thermal_strain=thermal_strain,
-        elastic_strain=elastic_strain,
-        stress=stress,
-    )
-
-
 __all__ = [
     "AxisymmetricFEMModel",
     "ElevatedQuad9Mesh",
-    "ElementMeasures",
-    "ElementQuadrature",
-    "QuadratureFieldOperators",
     "QuadratureFieldSamples",
-    "ReducedSystem",
-    "apply_dirichlet",
-    "assemble_axisymmetric_model",
+    "assemble_axisymmetric",
     "cfsem_radial_material",
-    "element_measures_axisymmetric",
-    "element_quadrature_axisymmetric",
-    "evaluate_axisymmetric_strain_stress_at_quadrature",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
     "isotropic_axisymmetric_thermal_material",
     "orthotropic_axisymmetric_thermal_material",
-    "quadrature_field_operators_axisymmetric",
 ]

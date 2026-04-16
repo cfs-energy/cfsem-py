@@ -448,25 +448,12 @@ mod assembly;
 mod axisym;
 mod geometry;
 mod loads;
+mod model;
 mod recovery;
 mod types;
 
-pub use crate::mesh::elements::quad2d::{quad4, quad9};
-pub use crate::mesh::{MeshView, QuadratureRule};
-pub use assembly::{assemble_stiffness_quad4, assemble_stiffness_quad9};
-pub use geometry::{
-    ElementMeasures, ElementQuadrature, element_measures_quad4, element_measures_quad9,
-    element_quadrature_quad4, element_quadrature_quad9,
+pub use crate::mesh::QuadratureRule;
+pub use model::{
+    AxisymmetricElementType, AxisymmetricElements, AxisymmetricModel, AxisymmetricModelBuilder,
 };
-pub use loads::{
-    SparseOperator, ThermalLoadOperator, body_force_operator_quad4, body_force_operator_quad9,
-    pressure_operator_quad4, pressure_operator_quad9, temperature_operator_quad4,
-    temperature_operator_quad9, traction_operator_quad4, traction_operator_quad9,
-};
-pub use recovery::{
-    QuadratureFieldOperators, quadrature_field_operators_quad4, quadrature_field_operators_quad9,
-};
-pub use types::{
-    DOF_PER_NODE, PressureLoad, Real, StiffnessTriplets, ThermalMaterial, TractionLoad,
-    dof_per_element,
-};
+pub use types::{DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element};

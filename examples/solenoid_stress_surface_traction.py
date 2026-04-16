@@ -6,9 +6,8 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 from cfsem.solenoid_stress import (
-    apply_dirichlet,
-    assemble_axisymmetric_model,
-    evaluate_axisymmetric_strain_stress_at_quadrature,
+    assemble_axisymmetric,
+    infer_quad9_mesh,
     isotropic_axisymmetric_material,
     isotropic_axisymmetric_thermal_material,
 )
@@ -125,14 +124,6 @@ def make_temperature_field(
 def summarize_case(
     name: str,
     model,
-    solve_free,
-    input_nodes: np.ndarray,
-    elements: np.ndarray,
-    material: np.ndarray,
-    thermal_material: np.ndarray,
-    quadrature: str,
-    element_type: str,
-    prescribed: dict[int, float],
     body_force: np.ndarray,
     pressure_values: np.ndarray,
     traction_values: np.ndarray,
@@ -142,37 +133,28 @@ def summarize_case(
     rhs_pressure = np.asarray(model.pressure_to_rhs @ pressure_values, dtype=np.float64)
     rhs_traction = np.asarray(model.traction_to_rhs @ traction_values.reshape(-1), dtype=np.float64)
     rhs_temperature = np.asarray(model.temperature_to_rhs @ nodal_temperature, dtype=np.float64)
-    rhs_manual = (
-        model.thermal_reference_rhs
-        + rhs_body
-        + rhs_pressure
-        + rhs_traction
-        + rhs_temperature
-    )
-    rhs_full = model.rhs(
+    rhs_manual = model.constant_rhs + rhs_body + rhs_pressure + rhs_traction + rhs_temperature
+    rhs_reduced = model.build_rhs(
         body_force=body_force,
         pressure_values=pressure_values,
         traction_values=traction_values,
         nodal_temperature=nodal_temperature,
     )
-    reduced = apply_dirichlet(model.stiffness, rhs_full, prescribed=prescribed)
-    displacement = reduced.recover(solve_free(reduced.rhs))
-    samples = evaluate_axisymmetric_strain_stress_at_quadrature(
-        input_nodes,
-        elements,
-        np.zeros(elements.shape[0], dtype=np.uint64),
-        np.asarray([material]),
-        displacement,
-        thermal_material_table=np.asarray([thermal_material]),
-        nodal_temperature=nodal_temperature,
-        quadrature=quadrature,
-        element_type=element_type,
+    scipy_reduced = (
+        np.zeros((0,), dtype=np.float64)
+        if model.stiffness.shape[0] == 0
+        else spla.factorized(model.stiffness)(rhs_reduced)
     )
+    displacement = model.solve(rhs_reduced)
+    scipy_displacement = model.recover_full(scipy_reduced)
+    samples = model.evaluate_quadrature(displacement, nodal_temperature=nodal_temperature)
     vm = von_mises(samples.stress)
     displacement_2d = displacement.reshape(-1, 2)
 
-    if not np.allclose(rhs_manual, rhs_full):
-        raise AssertionError(f"{name}: operator sum did not match model.rhs(...)")
+    if not np.allclose(rhs_manual, rhs_reduced):
+        raise AssertionError(f"{name}: operator sum did not match model.build_rhs(...)")
+    if not np.allclose(displacement, scipy_displacement):
+        raise AssertionError(f"{name}: Rust solve did not match SciPy reduced solve")
 
     print(name)
     print(
@@ -181,12 +163,12 @@ def summarize_case(
         f" ||pressure||={np.linalg.norm(rhs_pressure):.3e},"
         f" ||traction||={np.linalg.norm(rhs_traction):.3e},"
         f" ||thermal||={np.linalg.norm(rhs_temperature):.3e},"
-        f" ||reference||={np.linalg.norm(model.thermal_reference_rhs):.3e}"
+        f" ||constant||={np.linalg.norm(model.constant_rhs):.3e}"
     )
     print(
         "  checks:"
-        f" manual-vs-model={np.linalg.norm(rhs_manual - rhs_full):.3e},"
-        f" reduced-rhs={np.linalg.norm(reduced.rhs):.3e}"
+        f" manual-vs-model={np.linalg.norm(rhs_manual - rhs_reduced):.3e},"
+        f" rust-vs-scipy={np.linalg.norm(displacement - scipy_displacement):.3e}"
     )
     print(
         "  response:"
@@ -214,7 +196,9 @@ def main() -> None:
         dtype=np.float64,
     )
 
-    model = assemble_axisymmetric_model(
+    analysis_nodes = nodes if element_type == "quad4" else infer_quad9_mesh(nodes, elements).analysis_nodes
+    prescribed = prescribed_dofs(analysis_nodes)
+    model = assemble_axisymmetric(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -222,18 +206,17 @@ def main() -> None:
         pressure_faces=outer_faces,
         traction_faces=top_faces,
         thermal_material_table=np.asarray([thermal_material]),
+        prescribed=prescribed,
         quadrature=quadrature,
         element_type=element_type,
     )
-    prescribed = prescribed_dofs(model.analysis_nodes)
-    reduced_zero = apply_dirichlet(model.stiffness, np.zeros(model.ndof, dtype=np.float64), prescribed=prescribed)
-    solve_free = spla.factorized(reduced_zero.matrix.tocsc())
 
     print("Reusable axisymmetric FEM model")
     print(
         "  mesh:"
         f" nelem={model.nelem},"
-        f" ndof={model.ndof},"
+        f" ndof_full={model.ndof_full},"
+        f" ndof_reduced={model.ndof_reduced},"
         f" element_type={model.element_type},"
         f" quadrature={quadrature}"
     )
@@ -279,14 +262,6 @@ def main() -> None:
     summarize_case(
         "Case 1: outward pressure, top traction, moderate thermal gradient",
         model,
-        solve_free,
-        nodes,
-        elements,
-        material,
-        thermal_material,
-        quadrature,
-        element_type,
-        prescribed,
         case_1_body_force,
         case_1_pressure,
         case_1_traction,
@@ -295,14 +270,6 @@ def main() -> None:
     summarize_case(
         "Case 2: updated load values reusing the same operators and factorization",
         model,
-        solve_free,
-        nodes,
-        elements,
-        material,
-        thermal_material,
-        quadrature,
-        element_type,
-        prescribed,
         case_2_body_force,
         case_2_pressure,
         case_2_traction,

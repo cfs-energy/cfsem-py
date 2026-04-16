@@ -3,7 +3,7 @@
 This package includes three complementary layers:
 
 - a 1D finite-difference radial stress solver for winding-pack models with zero `rz` shear,
-- a 2D axisymmetric quadrilateral FEM solver with reusable sparse load operators,
+- a 2D axisymmetric quadrilateral FEM solver with a constrained reduced model, reusable sparse load operators, and a cached Rust-side LU solve,
 - analytic reference formulas used for validation and convergence studies.
 
 ## 1D Finite-Difference Solver
@@ -22,15 +22,16 @@ The FEM path supports:
 
 - `quad4` and inferred `quad9` elements,
 - `gl3` and `gl4` quadrature,
-- reusable sparse load operators for body force, pressure, traction, and nodal-temperature thermal strain,
-- quadrature-point recovery operators for strain and stress.
+- reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,
+- reduced quadrature-point recovery operators for strain and stress,
+- model-owned Dirichlet constraints applied during assembly.
 
 The intended workflow is:
 
-1. call `assemble_axisymmetric_model(...)` once,
-2. build each load vector with `model.rhs(...)` or the exposed sparse operators,
-3. apply boundary conditions with `apply_dirichlet(...)`,
-4. solve the reduced sparse system with your solver of choice.
+1. call `assemble_axisymmetric(...)` once with mesh, materials, load topology, and prescribed Dirichlet values,
+2. build each reduced load vector with `model.build_rhs(...)` or the exposed sparse operators,
+3. solve with `model.solve(rhs)`, which reuses a cached LU factorization,
+4. recover quadrature strain and stress with `model.evaluate_quadrature(...)`.
 
 ::: cfsem.solenoid_stress.axisymmetric_fem
 

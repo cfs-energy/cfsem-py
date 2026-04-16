@@ -690,18 +690,17 @@ fn assemble_axisymmetric_model_low_level_quad4<F: physics::solenoid_stress::Real
     let prescribed = read_axisym_prescribed(prescribed_dofs, prescribed_values)?;
     let thermal_material_table =
         (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice());
-    physics::solenoid_stress::AxisymmetricModelBuilder::new(
+    physics::solenoid_stress::assemble_axisymmetric(
         &nodes,
         physics::solenoid_stress::AxisymmetricElements::Quad4(&elements),
         &material_ids,
         &material_table,
+        &pressure_faces,
+        &traction_faces,
+        thermal_material_table,
+        &prescribed,
+        quadrature,
     )
-    .quadrature(quadrature)
-    .pressure_faces(&pressure_faces)
-    .traction_faces(&traction_faces)
-    .thermal_material_table(thermal_material_table)
-    .prescribed_dirichlet(&prescribed)
-    .build()
     .map_err(|msg| PyInteropError::ValueError { msg }.into())
 }
 
@@ -729,18 +728,17 @@ fn assemble_axisymmetric_model_low_level_quad9<F: physics::solenoid_stress::Real
     let prescribed = read_axisym_prescribed(prescribed_dofs, prescribed_values)?;
     let thermal_material_table =
         (!thermal_material_table.is_empty()).then_some(thermal_material_table.as_slice());
-    physics::solenoid_stress::AxisymmetricModelBuilder::new(
+    physics::solenoid_stress::assemble_axisymmetric(
         &nodes,
         physics::solenoid_stress::AxisymmetricElements::Quad9(&elements),
         &material_ids,
         &material_table,
+        &pressure_faces,
+        &traction_faces,
+        thermal_material_table,
+        &prescribed,
+        quadrature,
     )
-    .quadrature(quadrature)
-    .pressure_faces(&pressure_faces)
-    .traction_faces(&traction_faces)
-    .thermal_material_table(thermal_material_table)
-    .prescribed_dirichlet(&prescribed)
-    .build()
     .map_err(|msg| PyInteropError::ValueError { msg }.into())
 }
 

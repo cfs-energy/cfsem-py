@@ -454,6 +454,7 @@ mod types;
 
 pub use crate::mesh::QuadratureRule;
 pub use model::{
-    AxisymmetricElementType, AxisymmetricElements, AxisymmetricModel, AxisymmetricModelBuilder,
+    AxisymmetricElementType, AxisymmetricElements, AxisymmetricModel, ReducedRecoveryOperators,
+    assemble_axisymmetric,
 };
 pub use types::{DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element};

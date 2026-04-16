@@ -40,43 +40,41 @@ pub enum AxisymmetricElements<'a> {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub struct ReducedRecoveryOperators<F: Real> {
-    pub(crate) points_rz: Vec<[F; 2]>,
-    pub(crate) strain_operator: SparseRowMat<usize, F>,
-    pub(crate) stress_operator: SparseRowMat<usize, F>,
-    pub(crate) thermal_strain_operator: SparseRowMat<usize, F>,
-    pub(crate) thermal_stress_operator: SparseRowMat<usize, F>,
-    pub(crate) strain_constant: Vec<F>,
-    pub(crate) stress_constant: Vec<F>,
-    pub(crate) thermal_strain_constant: Vec<F>,
-    pub(crate) thermal_stress_constant: Vec<F>,
-    pub(crate) nq_per_element: usize,
-    pub(crate) n_temperature_nodes: usize,
+    pub points_rz: Vec<[F; 2]>,
+    pub strain_operator: SparseRowMat<usize, F>,
+    pub stress_operator: SparseRowMat<usize, F>,
+    pub thermal_strain_operator: SparseRowMat<usize, F>,
+    pub thermal_stress_operator: SparseRowMat<usize, F>,
+    pub strain_constant: Vec<F>,
+    pub stress_constant: Vec<F>,
+    pub thermal_strain_constant: Vec<F>,
+    pub thermal_stress_constant: Vec<F>,
+    pub nq_per_element: usize,
+    pub n_temperature_nodes: usize,
 }
 
 #[derive(Debug)]
-#[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub struct AxisymmetricModel<F: Real> {
-    pub(crate) stiffness: SparseColMat<usize, F>,
-    pub(crate) body_force_to_rhs: SparseRowMat<usize, F>,
-    pub(crate) pressure_to_rhs: SparseRowMat<usize, F>,
-    pub(crate) traction_to_rhs: SparseRowMat<usize, F>,
-    pub(crate) temperature_to_rhs: SparseRowMat<usize, F>,
-    pub(crate) constant_rhs: Vec<F>,
-    pub(crate) recovery: ReducedRecoveryOperators<F>,
-    pub(crate) pressure_faces: Vec<[usize; 2]>,
-    pub(crate) traction_faces: Vec<[usize; 2]>,
-    pub(crate) analysis_nodes: Vec<[F; 2]>,
-    pub(crate) analysis_elements_flat: Vec<usize>,
-    pub(crate) nodes_per_element: usize,
-    pub(crate) element_type: AxisymmetricElementType,
-    pub(crate) ndof_full: usize,
-    pub(crate) ndof_reduced: usize,
-    pub(crate) nelem: usize,
-    pub(crate) free_dofs: Vec<usize>,
-    pub(crate) fixed_dofs: Vec<usize>,
-    pub(crate) fixed_values: Vec<F>,
+    pub stiffness: SparseColMat<usize, F>,
+    pub body_force_to_rhs: SparseRowMat<usize, F>,
+    pub pressure_to_rhs: SparseRowMat<usize, F>,
+    pub traction_to_rhs: SparseRowMat<usize, F>,
+    pub temperature_to_rhs: SparseRowMat<usize, F>,
+    pub constant_rhs: Vec<F>,
+    pub recovery: ReducedRecoveryOperators<F>,
+    pub pressure_faces: Vec<[usize; 2]>,
+    pub traction_faces: Vec<[usize; 2]>,
+    pub analysis_nodes: Vec<[F; 2]>,
+    pub analysis_elements_flat: Vec<usize>,
+    pub nodes_per_element: usize,
+    pub element_type: AxisymmetricElementType,
+    pub ndof_full: usize,
+    pub ndof_reduced: usize,
+    pub nelem: usize,
+    pub free_dofs: Vec<usize>,
+    pub fixed_dofs: Vec<usize>,
+    pub fixed_values: Vec<F>,
     lu: Option<Lu<usize, F>>,
 }
 
@@ -172,7 +170,7 @@ impl<F: Real> AxisymmetricModel<F> {
     }
 }
 
-pub struct AxisymmetricModelBuilder<'a, F: Real> {
+pub(crate) struct AxisymmetricModelBuilder<'a, F: Real> {
     nodes_rz: &'a [[F; 2]],
     elements: AxisymmetricElements<'a>,
     material_ids: &'a [usize],
@@ -272,6 +270,27 @@ impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
             ),
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn assemble_axisymmetric<'a, F: Real>(
+    nodes_rz: &'a [[F; 2]],
+    elements: AxisymmetricElements<'a>,
+    material_ids: &'a [usize],
+    material_table: &'a [[[F; 4]; 4]],
+    pressure_faces: &'a [PressureLoad<F>],
+    traction_faces: &'a [TractionLoad<F>],
+    thermal_material_table: Option<&'a [ThermalMaterial<F>]>,
+    prescribed: &'a [(usize, F)],
+    quadrature: QuadratureRule,
+) -> Result<AxisymmetricModel<F>, String> {
+    AxisymmetricModelBuilder::new(nodes_rz, elements, material_ids, material_table)
+        .pressure_faces(pressure_faces)
+        .traction_faces(traction_faces)
+        .thermal_material_table(thermal_material_table)
+        .prescribed_dirichlet(prescribed)
+        .quadrature(quadrature)
+        .build()
 }
 
 type AssembleStiffnessFn<F, const NODES: usize> =

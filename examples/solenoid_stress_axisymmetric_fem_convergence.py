@@ -55,7 +55,8 @@ POISSON_RATIO = 0.27  # [-]
 CURRENT_DENSITY = 0.2 * 390.0e6  # [A/m^2]
 BZ_INNER = 27.0  # [T]
 QUADRATURE = "gl3"
-ELEMENT_TYPE = "quad9"
+ELEMENT_TYPES = ("quad4", "quad9")
+DISCRETIZATION_PANEL_ELEMENT_TYPE = "quad9"
 NUDGE = 1.0e-6  # [m]
 LEGEND_RIGHT_PAD_POINTS = 50.0
 REPRESENTATIVE_DISCRETIZATION_NZ = 1
@@ -74,6 +75,7 @@ class Profile:
 
 @dataclass(frozen=True, slots=True)
 class SweepResult:
+    element_type: str
     nr: int
     dr_mm: float
     ndof: int
@@ -304,10 +306,13 @@ def max_normalized_error_percent(values: np.ndarray, reference: np.ndarray) -> f
     return 100.0 * float(np.max(np.abs(values - reference))) / scale
 
 
-def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, float]:
+def solve_fem_midplane_profile(
+    nr: int,
+    element_type: str,
+) -> tuple[Profile, int, float, float, float]:
     build_start = perf_counter()
     nodes, elements = build_annulus_strip_mesh(RI, RO, HEIGHT, nr=nr, nz=1)
-    elevated = infer_quad9_mesh(nodes, elements) if ELEMENT_TYPE == "quad9" else None
+    elevated = infer_quad9_mesh(nodes, elements) if element_type == "quad9" else None
     analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
     analysis_elements = elevated.analysis_elements if elevated is not None else elements
     nelem = elements.shape[0]
@@ -320,7 +325,7 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
         material_table=np.asarray([material]),
         prescribed=prescribed,
         quadrature=QUADRATURE,
-        element_type=ELEMENT_TYPE,
+        element_type=element_type,
     )
     quadrature_data = model.element_quadrature()
     points = quadrature_data.points_rz.reshape(-1, 2)
@@ -365,54 +370,56 @@ def solve_fem_midplane_profile(nr: int) -> tuple[Profile, int, float, float, flo
     )
 
 
-def run_study() -> list[SweepResult]:
-    results: list[SweepResult] = []
+def run_study() -> dict[str, list[SweepResult]]:
+    results_by_type: dict[str, list[SweepResult]] = {element_type: [] for element_type in ELEMENT_TYPES}
 
-    for nr in NR_SWEEP:
-        fem_profile, ndof, fem_build_seconds, fem_factorize_seconds, fem_solve_seconds = (
-            solve_fem_midplane_profile(int(nr))
-        )
-        coarse_1d = solve_1d_field(build_1d_grid((RO - RI) / int(nr)))
-        fd_profile = sample_profile(coarse_1d, fem_profile.radius)
-        analytic_profile = analytic_stress_profile(fem_profile.radius)
-
-        fd_errors_pct = {
-            "s_rr": max_normalized_error_percent(fd_profile.s_rr, analytic_profile.s_rr),
-            "s_tt": max_normalized_error_percent(fd_profile.s_tt, analytic_profile.s_tt),
-        }
-        fem_errors_pct = {
-            "s_rr": max_normalized_error_percent(fem_profile.s_rr, analytic_profile.s_rr),
-            "s_tt": max_normalized_error_percent(fem_profile.s_tt, analytic_profile.s_tt),
-        }
-        parity_errors_pct = {
-            "u_r": max_normalized_error_percent(fem_profile.u_r, fd_profile.u_r),
-            "s_rr": max_normalized_error_percent(fem_profile.s_rr, fd_profile.s_rr),
-            "s_tt": max_normalized_error_percent(fem_profile.s_tt, fd_profile.s_tt),
-        }
-
-        results.append(
-            SweepResult(
-                nr=int(nr),
-                dr_mm=1.0e3 * (RO - RI) / int(nr),
-                ndof=ndof,
-                fem_build_seconds=fem_build_seconds,
-                fem_factorize_seconds=fem_factorize_seconds,
-                fem_solve_seconds=fem_solve_seconds,
-                fd_profile=fd_profile,
-                fem_profile=fem_profile,
-                analytic_profile=analytic_profile,
-                fd_errors_pct=fd_errors_pct,
-                fem_errors_pct=fem_errors_pct,
-                parity_errors_pct=parity_errors_pct,
+    for element_type in ELEMENT_TYPES:
+        for nr in NR_SWEEP:
+            fem_profile, ndof, fem_build_seconds, fem_factorize_seconds, fem_solve_seconds = (
+                solve_fem_midplane_profile(int(nr), element_type)
             )
-        )
+            coarse_1d = solve_1d_field(build_1d_grid((RO - RI) / int(nr)))
+            fd_profile = sample_profile(coarse_1d, fem_profile.radius)
+            analytic_profile = analytic_stress_profile(fem_profile.radius)
 
-    return results
+            fd_errors_pct = {
+                "s_rr": max_normalized_error_percent(fd_profile.s_rr, analytic_profile.s_rr),
+                "s_tt": max_normalized_error_percent(fd_profile.s_tt, analytic_profile.s_tt),
+            }
+            fem_errors_pct = {
+                "s_rr": max_normalized_error_percent(fem_profile.s_rr, analytic_profile.s_rr),
+                "s_tt": max_normalized_error_percent(fem_profile.s_tt, analytic_profile.s_tt),
+            }
+            parity_errors_pct = {
+                "u_r": max_normalized_error_percent(fem_profile.u_r, fd_profile.u_r),
+                "s_rr": max_normalized_error_percent(fem_profile.s_rr, fd_profile.s_rr),
+                "s_tt": max_normalized_error_percent(fem_profile.s_tt, fd_profile.s_tt),
+            }
+
+            results_by_type[element_type].append(
+                SweepResult(
+                    element_type=element_type,
+                    nr=int(nr),
+                    dr_mm=1.0e3 * (RO - RI) / int(nr),
+                    ndof=ndof,
+                    fem_build_seconds=fem_build_seconds,
+                    fem_factorize_seconds=fem_factorize_seconds,
+                    fem_solve_seconds=fem_solve_seconds,
+                    fd_profile=fd_profile,
+                    fem_profile=fem_profile,
+                    analytic_profile=analytic_profile,
+                    fd_errors_pct=fd_errors_pct,
+                    fem_errors_pct=fem_errors_pct,
+                    parity_errors_pct=parity_errors_pct,
+                )
+            )
+
+    return results_by_type
 
 
-def plot_discretization_panel(ax, nr: int, nz: int) -> None:
+def plot_discretization_panel(ax, nr: int, nz: int, element_type: str) -> None:
     nodes, elements = build_annulus_strip_mesh(RI, RO, HEIGHT, nr=nr, nz=nz)
-    elevated = infer_quad9_mesh(nodes, elements) if ELEMENT_TYPE == "quad9" else None
+    elevated = infer_quad9_mesh(nodes, elements) if element_type == "quad9" else None
     analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
     analysis_elements = elevated.analysis_elements if elevated is not None else elements
     model = assemble_axisymmetric(
@@ -422,7 +429,7 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
         material_table=np.asarray([cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO)]),
         prescribed=prescribed_z_dofs(analysis_nodes.shape[0]),
         quadrature=QUADRATURE,
-        element_type=ELEMENT_TYPE,
+        element_type=element_type,
     )
     quadrature_data = model.element_quadrature()
     quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
@@ -447,14 +454,14 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
                 linewidth=0.9,
                 alpha=0.9,
             )
-    ax.plot([], [], color="0.78", linewidth=0.9, label=f"FEM mesh ({ELEMENT_TYPE})")
+    ax.plot([], [], color="0.78", linewidth=0.9, label=f"FEM mesh ({element_type})")
     ax.scatter(
         quadrature_points[:, 0],
         quadrature_points[:, 1],
         s=quadrature_marker_size,
         color="tab:red",
         alpha=0.85,
-        label=f"FEM quadrature points ({ELEMENT_TYPE}, {QUADRATURE})",
+        label=f"FEM quadrature points ({element_type}, {QUADRATURE})",
         rasterized=quadrature_points.shape[0] > 5_000,
     )
     ax.scatter(
@@ -468,7 +475,9 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
         label="1D FD physical grid",
         rasterized=fd_grid.size > 5_000,
     )
-    ax.set_title(f"Representative matched-grid discretization ({ELEMENT_TYPE}, nr={nr}, nz={nz})")
+    ax.set_title(
+        f"Representative matched-grid discretization ({element_type}, nr={nr}, nz={nz})"
+    )
     ax.set_xlabel("r [m]")
     ax.set_ylabel("z [m]")
     ax.set_xlim(RI - 0.01 * (RO - RI), RO + 0.01 * (RO - RI))
@@ -478,7 +487,7 @@ def plot_discretization_panel(ax, nr: int, nz: int) -> None:
     ax.legend(loc="upper right", frameon=True)
 
 
-def build_figure(results: list[SweepResult]):
+def build_figure(results_by_type: dict[str, list[SweepResult]]):
     fig = plt.figure(figsize=(14.5, 10.0))
     right_pad_fraction = LEGEND_RIGHT_PAD_POINTS / (72.0 * fig.get_size_inches()[0])
     layout_right = max(0.0, 0.86 - right_pad_fraction)
@@ -486,8 +495,13 @@ def build_figure(results: list[SweepResult]):
     profile_axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1])]
     error_axes = [fig.add_subplot(grid[1, 0]), fig.add_subplot(grid[1, 1])]
     discretization_ax = fig.add_subplot(grid[2, :])
-    finest = results[-1]
-    xconv = np.array([result.dr_mm for result in results], dtype=np.float64)
+    finest_results = {element_type: results[-1] for element_type, results in results_by_type.items()}
+    finest_reference = finest_results["quad9"]
+    xconv = np.array([result.dr_mm for result in results_by_type["quad4"]], dtype=np.float64)
+    element_plot_specs = {
+        "quad4": {"color": "tab:red", "marker": "s"},
+        "quad9": {"color": "tab:green", "marker": "o"},
+    }
 
     profile_specs = [
         ("s_rr", "Radial stress $s_{rr}$ [Pa]"),
@@ -495,29 +509,32 @@ def build_figure(results: list[SweepResult]):
     ]
     for ax, (field_name, title) in zip(profile_axes, profile_specs, strict=True):
         ax.plot(
-            finest.analytic_profile.radius,
-            getattr(finest.analytic_profile, field_name),
+            finest_reference.analytic_profile.radius,
+            getattr(finest_reference.analytic_profile, field_name),
             color="black",
             linewidth=1.8,
             label="Analytic long-solenoid stress",
         )
         ax.plot(
-            finest.fd_profile.radius,
-            getattr(finest.fd_profile, field_name),
+            finest_reference.fd_profile.radius,
+            getattr(finest_reference.fd_profile, field_name),
             color="tab:blue",
             linestyle="--",
             linewidth=1.4,
-            label=f"1D matched grid (nr={finest.nr})",
+            label=f"1D matched grid (nr={finest_reference.nr})",
         )
-        ax.plot(
-            finest.fem_profile.radius,
-            getattr(finest.fem_profile, field_name),
-            color="tab:red",
-            marker="o",
-            markersize=3.2,
-            linewidth=1.2,
-            label=f"FEM midplane (nr={finest.nr})",
-        )
+        for element_type in ELEMENT_TYPES:
+            finest = finest_results[element_type]
+            spec = element_plot_specs[element_type]
+            ax.plot(
+                finest.fem_profile.radius,
+                getattr(finest.fem_profile, field_name),
+                color=spec["color"],
+                marker=spec["marker"],
+                markersize=3.2,
+                linewidth=1.2,
+                label=f"{element_type.upper()} FEM midplane (nr={finest.nr})",
+            )
         ax.set_title(title)
         ax.set_xlabel("r [m]")
         ax.grid(True, linestyle=":", linewidth=0.7)
@@ -529,20 +546,22 @@ def build_figure(results: list[SweepResult]):
     for ax, (field_name, title) in zip(error_axes, error_specs, strict=True):
         ax.loglog(
             xconv,
-            [result.fd_errors_pct[field_name] for result in results],
+            [result.fd_errors_pct[field_name] for result in results_by_type["quad4"]],
             color="tab:blue",
             marker="s",
             linewidth=1.4,
             label="1D FD vs. analytic",
         )
-        ax.loglog(
-            xconv,
-            [result.fem_errors_pct[field_name] for result in results],
-            color="tab:red",
-            marker="o",
-            linewidth=1.4,
-            label="FEM vs. analytic",
-        )
+        for element_type in ELEMENT_TYPES:
+            spec = element_plot_specs[element_type]
+            ax.loglog(
+                xconv,
+                [result.fem_errors_pct[field_name] for result in results_by_type[element_type]],
+                color=spec["color"],
+                marker=spec["marker"],
+                linewidth=1.4,
+                label=f"{element_type.upper()} FEM vs. analytic",
+            )
         ax.set_title(title)
         ax.set_xlabel("Radial element size [mm]")
         ax.grid(True, which="both", linestyle=":", linewidth=0.7)
@@ -552,6 +571,7 @@ def build_figure(results: list[SweepResult]):
         discretization_ax,
         REPRESENTATIVE_DISCRETIZATION_NR,
         REPRESENTATIVE_DISCRETIZATION_NZ,
+        DISCRETIZATION_PANEL_ELEMENT_TYPE,
     )
 
     handles, labels = profile_axes[0].get_legend_handles_labels()
@@ -567,66 +587,70 @@ def build_figure(results: list[SweepResult]):
     fig.suptitle(
         "Axisymmetric FEM vs. 1D FD convergence study\n"
         "Analytic truth: linear-$B_z$ long-solenoid stress; parity setup: reduced radial material, "
-        f"z-DOFs fixed, radial body force only, {ELEMENT_TYPE.upper()} + {QUADRATURE} Gauss",
+        f"z-DOFs fixed, radial body force only, QUAD4/QUAD9 + {QUADRATURE} Gauss",
         y=0.98,
     )
     fig.tight_layout(rect=[0.0, 0.0, layout_right, 0.94])
     return fig
 
 
-def print_results(results: list[SweepResult]) -> None:
+def print_results(results_by_type: dict[str, list[SweepResult]]) -> None:
     print(
         "Study configuration: "
         f"ri={RI:.3f} m, ro={RO:.3f} m, height={HEIGHT:.3f} m, "
         f"E={ELASTICITY_MODULUS / 1.0e9:.1f} GPa, nu={POISSON_RATIO:.3f}, "
         f"J_theta={CURRENT_DENSITY:.3e} A/m^2, "
-        f"Bz(ri)={BZ_INNER:.1f} T, Bz(ro)=0.0 T, element_type={ELEMENT_TYPE}, quadrature={QUADRATURE}"
+        f"Bz(ri)={BZ_INNER:.1f} T, Bz(ro)=0.0 T, element_types={','.join(ELEMENT_TYPES)}, quadrature={QUADRATURE}"
     )
-    print(
-        "Columns: nr, dr_mm, ndof, fem_build_ms, fem_factorize_ms, fem_solve_ms, "
-        "1D-vs-analytic[s_rr,s_tt] %, FEM-vs-analytic[s_rr,s_tt] %, FEM-vs-1D[u_r,s_rr,s_tt] %"
-    )
-    for result in results:
+    for element_type in ELEMENT_TYPES:
+        results = results_by_type[element_type]
+        print()
+        print(f"Element family: {element_type}")
         print(
-            f"nr={result.nr:5d}, dr={result.dr_mm:8.4f} mm, ndof={result.ndof:6d}, "
-            f"build={1.0e3 * result.fem_build_seconds:8.4f} ms, "
-            f"factorize={1.0e3 * result.fem_factorize_seconds:8.4f} ms, "
-            f"solve={1.0e3 * result.fem_solve_seconds:8.4f} ms | "
-            f"1D=({result.fd_errors_pct['s_rr']:8.4f}, "
-            f"{result.fd_errors_pct['s_tt']:8.4f}) | "
-            f"FEM=({result.fem_errors_pct['s_rr']:8.4f}, "
-            f"{result.fem_errors_pct['s_tt']:8.4f}) | "
-            f"parity=({result.parity_errors_pct['u_r']:8.4f}, "
-            f"{result.parity_errors_pct['s_rr']:8.4f}, "
-            f"{result.parity_errors_pct['s_tt']:8.4f})"
+            "Columns: nr, dr_mm, ndof, fem_build_ms, fem_factorize_ms, fem_solve_ms, "
+            "1D-vs-analytic[s_rr,s_tt] %, FEM-vs-analytic[s_rr,s_tt] %, FEM-vs-1D[u_r,s_rr,s_tt] %"
         )
+        for result in results:
+            print(
+                f"nr={result.nr:5d}, dr={result.dr_mm:8.4f} mm, ndof={result.ndof:6d}, "
+                f"build={1.0e3 * result.fem_build_seconds:8.4f} ms, "
+                f"factorize={1.0e3 * result.fem_factorize_seconds:8.4f} ms, "
+                f"solve={1.0e3 * result.fem_solve_seconds:8.4f} ms | "
+                f"1D=({result.fd_errors_pct['s_rr']:8.4f}, "
+                f"{result.fd_errors_pct['s_tt']:8.4f}) | "
+                f"FEM=({result.fem_errors_pct['s_rr']:8.4f}, "
+                f"{result.fem_errors_pct['s_tt']:8.4f}) | "
+                f"parity=({result.parity_errors_pct['u_r']:8.4f}, "
+                f"{result.parity_errors_pct['s_rr']:8.4f}, "
+                f"{result.parity_errors_pct['s_tt']:8.4f})"
+            )
 
-    finest = results[-1]
-    fem_fom = max(finest.fem_errors_pct.values())
-    fd_fom = max(finest.fd_errors_pct.values())
-    parity_fom = max(finest.parity_errors_pct.values())
-    print(
-        f"Primary figure-of-merit: finest FEM max normalized midplane stress error "
-        f"vs. analytic = {fem_fom:.6f} %"
-    )
-    print(
-        f"Finest 1D FD max normalized midplane stress error "
-        f"vs. analytic = {fd_fom:.6f} %"
-    )
-    print(
-        f"Finest matched-grid parity max normalized midplane error "
-        f"(FEM vs. 1D) = {parity_fom:.6f} %"
-    )
-    print(f"Finest FEM system build time = {1.0e3 * finest.fem_build_seconds:.4f} ms")
-    print(f"Finest FEM factorization time = {1.0e3 * finest.fem_factorize_seconds:.4f} ms")
-    print(f"Finest FEM linear solve time = {1.0e3 * finest.fem_solve_seconds:.4f} ms")
+        finest = results[-1]
+        fem_fom = max(finest.fem_errors_pct.values())
+        fd_fom = max(finest.fd_errors_pct.values())
+        parity_fom = max(finest.parity_errors_pct.values())
+        print(
+            f"Primary figure-of-merit: finest FEM max normalized midplane stress error "
+            f"vs. analytic = {fem_fom:.6f} %"
+        )
+        print(
+            f"Finest 1D FD max normalized midplane stress error "
+            f"vs. analytic = {fd_fom:.6f} %"
+        )
+        print(
+            f"Finest matched-grid parity max normalized midplane error "
+            f"(FEM vs. 1D) = {parity_fom:.6f} %"
+        )
+        print(f"Finest FEM system build time = {1.0e3 * finest.fem_build_seconds:.4f} ms")
+        print(f"Finest FEM factorization time = {1.0e3 * finest.fem_factorize_seconds:.4f} ms")
+        print(f"Finest FEM linear solve time = {1.0e3 * finest.fem_solve_seconds:.4f} ms")
 
 
 def main() -> None:
     args = parse_args()
-    results = run_study()
-    print_results(results)
-    fig = build_figure(results)
+    results_by_type = run_study()
+    print_results(results_by_type)
+    fig = build_figure(results_by_type)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.output, dpi=300)
     print(f"Saved plot to {args.output}")

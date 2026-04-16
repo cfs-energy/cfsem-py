@@ -554,6 +554,55 @@ def test_pressure_matches_equivalent_normal_traction_on_straight_faces(
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_zero_surface_traction_matches_natural_free_boundary(
+    quadrature: str,
+    element_type: str,
+) -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
+    bottom_faces, top_faces = horizontal_faces_for_strip(nr=3, nz=2)
+    boundary_faces = np.vstack([inner_faces, outer_faces, bottom_faces, top_faces])
+    zero_traction = np.zeros((boundary_faces.shape[0], 2), dtype=dtype)
+    body_force = np.column_stack(
+        [
+            np.linspace(2.0e4, 6.0e4, elements.shape[0], dtype=dtype),
+            np.linspace(-1.5e4, 1.5e4, elements.shape[0], dtype=dtype),
+        ]
+    )
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    prescribed = {1: 0.0}
+
+    free_model, free_rhs = assemble_model_and_rhs(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=body_force,
+        prescribed=prescribed,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    zero_traction_model, zero_traction_rhs = assemble_model_and_rhs(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=body_force,
+        traction_faces=boundary_faces,
+        traction_values=zero_traction,
+        prescribed=prescribed,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+
+    assert np.allclose(free_model.stiffness.toarray(), zero_traction_model.stiffness.toarray())
+    assert np.allclose(free_rhs, zero_traction_rhs)
+    assert np.allclose(free_model.solve(free_rhs), zero_traction_model.solve(zero_traction_rhs))
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
 def test_factorized_solve_reuses_stiffness_with_varying_traction(
     quadrature: str, element_type: str
 ) -> None:

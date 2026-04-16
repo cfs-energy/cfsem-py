@@ -142,6 +142,7 @@ class ElevatedQuad9Mesh:
     midside_node_indices: npt.NDArray[np.int64]
     center_node_indices: npt.NDArray[np.int64]
 
+
 class AxisymmetricFEMModel:
     """Reduced axisymmetric FEM model assembled once and reused for load cases."""
 
@@ -252,9 +253,7 @@ class AxisymmetricFEMModel:
             ):
                 points_rz[element_index, sample_index] = point
                 weights_area[element_index, sample_index] = det_j * weight
-                weights_volume[element_index, sample_index] = det_j * weight * (
-                    2.0 * np.pi * point[0]
-                )
+                weights_volume[element_index, sample_index] = det_j * weight * (2.0 * np.pi * point[0])
         cache = ElementQuadrature(
             points_rz=points_rz,
             weights_area=weights_area,
@@ -287,14 +286,10 @@ class AxisymmetricFEMModel:
                 if nodal_temperature is None
                 else np.asarray(nodal_temperature, dtype=self.dtype).reshape(-1)
             )
-            assert (
-                values.size == 0
-            ), "nodal_temperature was provided, but this model has no thermal operator"
+            assert values.size == 0, "nodal_temperature was provided, but this model has no thermal operator"
             return None
         if nodal_temperature is None:
-            raise ValueError(
-                "nodal_temperature is required because this model includes thermal materials"
-            )
+            raise ValueError("nodal_temperature is required because this model includes thermal materials")
         return _analysis_temperature_for_element_type(
             nodal_temperature,
             self._input_nodes.shape[0],
@@ -1028,8 +1023,8 @@ def assemble_axisymmetric(
     )
     if thermal_material_table_arr is None:
         temperature_to_rhs = sp.csr_matrix((int(backend.ndof_reduced), 0), dtype=dtype)
-        thermal_strain_operator = sp.csr_matrix((strain_operator.shape[0], 0), dtype=dtype)
-        thermal_stress_operator = sp.csr_matrix((stress_operator.shape[0], 0), dtype=dtype)
+        thermal_strain_operator = sp.csr_matrix((_sparse_shape(strain_operator)[0], 0), dtype=dtype)
+        thermal_stress_operator = sp.csr_matrix((_sparse_shape(stress_operator)[0], 0), dtype=dtype)
         n_temperature_nodes = 0
     else:
         if elevated is None:
@@ -1039,12 +1034,8 @@ def assemble_axisymmetric(
         else:
             temperature_elevation = _temperature_elevation_operator(elevated, dtype)
             temperature_to_rhs = _to_csr_matrix(analysis_temperature_to_rhs @ temperature_elevation)
-            thermal_strain_operator = _to_csr_matrix(
-                analysis_thermal_strain_operator @ temperature_elevation
-            )
-            thermal_stress_operator = _to_csr_matrix(
-                analysis_thermal_stress_operator @ temperature_elevation
-            )
+            thermal_strain_operator = _to_csr_matrix(analysis_thermal_strain_operator @ temperature_elevation)
+            thermal_stress_operator = _to_csr_matrix(analysis_thermal_stress_operator @ temperature_elevation)
         n_temperature_nodes = nodes_arr.shape[0]
 
     return AxisymmetricFEMModel(

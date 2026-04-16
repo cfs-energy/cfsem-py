@@ -219,6 +219,8 @@ class AxisymmetricFEMModel:
         self._quadrature_code = int(quadrature_code)
         self._element_quadrature_cache: ElementQuadrature | None = None
         self._element_measures_cache: ElementMeasures | None = None
+        self.nodes = input_nodes
+        self.elements = input_elements
 
     @property
     def dtype(self) -> np.dtype[Any]:
@@ -229,22 +231,15 @@ class AxisymmetricFEMModel:
         return self.ndof_full
 
     @property
-    def nodes(self) -> npt.NDArray[np.floating[Any]]:
-        return self._input_nodes
-
-    @property
-    def elements(self) -> npt.NDArray[np.uint64]:
-        return self._input_elements
-
-    @property
     def thermal_reference_rhs(self) -> npt.NDArray[np.floating[Any]]:
         return self.constant_rhs
 
     def element_quadrature(self) -> ElementQuadrature:
         """Return physical quadrature points and mapped area/volume weights per element."""
 
-        if self._element_quadrature_cache is not None:
-            return self._element_quadrature_cache
+        cache = self._element_quadrature_cache
+        if cache is not None:
+            return cache
         nelem = self.analysis_elements.shape[0]
         nq = self.nq_per_element
         points_rz = np.zeros((nelem, nq, 2), dtype=self.dtype)
@@ -260,38 +255,41 @@ class AxisymmetricFEMModel:
                 weights_volume[element_index, sample_index] = det_j * weight * (
                     2.0 * np.pi * point[0]
                 )
-        self._element_quadrature_cache = ElementQuadrature(
+        cache = ElementQuadrature(
             points_rz=points_rz,
             weights_area=weights_area,
             weights_volume=weights_volume,
             nq_per_element=nq,
         )
-        return self._element_quadrature_cache
+        self._element_quadrature_cache = cache
+        return cache
 
     def element_measures(self) -> ElementMeasures:
         """Return per-element meridian area and swept axisymmetric volume."""
 
-        if self._element_measures_cache is not None:
-            return self._element_measures_cache
-        quadrature = self.element_quadrature()
-        self._element_measures_cache = ElementMeasures(
-            areas=np.sum(quadrature.weights_area, axis=1),
-            swept_volumes=np.sum(quadrature.weights_volume, axis=1),
-        )
-        return self._element_measures_cache
+        cache = self._element_measures_cache
+        if cache is None:
+            quadrature = self.element_quadrature()
+            cache = ElementMeasures(
+                areas=np.sum(quadrature.weights_area, axis=1),
+                swept_volumes=np.sum(quadrature.weights_volume, axis=1),
+            )
+            self._element_measures_cache = cache
+        return cache
 
     def _normalize_temperature_for_backend(
         self,
         nodal_temperature: ArrayLike | None,
     ) -> npt.NDArray[np.floating[Any]] | None:
         if self.n_temperature_nodes == 0:
-            if nodal_temperature is None:
-                return None
-            values = np.asarray(nodal_temperature, dtype=self.dtype).reshape(-1)
-            if values.size:
-                raise ValueError(
-                    "nodal_temperature was provided, but this model has no thermal operator"
-                )
+            values = (
+                np.zeros((0,), dtype=self.dtype)
+                if nodal_temperature is None
+                else np.asarray(nodal_temperature, dtype=self.dtype).reshape(-1)
+            )
+            assert (
+                values.size == 0
+            ), "nodal_temperature was provided, but this model has no thermal operator"
             return None
         if nodal_temperature is None:
             raise ValueError(
@@ -762,25 +760,6 @@ def _normalize_pressure_values(
     return np.ascontiguousarray(values)
 
 
-def _normalize_pressure_loads(
-    pressure_faces: ArrayLike | None,
-    pressure_values: ArrayLike | None,
-    dtype: np.dtype[Any],
-) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
-    if pressure_faces is None and pressure_values is None:
-        return _normalize_pressure_faces(None), _normalize_pressure_values(None, 0, dtype)
-    assert (
-        pressure_faces is not None and pressure_values is not None
-    ), "pressure_faces and pressure_values must either both be provided or both be omitted"
-    faces = _normalize_pressure_faces(pressure_faces)
-    values = np.asarray(pressure_values, dtype=dtype)
-    assert values.ndim == 1, f"pressure_values must have shape (nload,); got {values.shape}"
-    assert (
-        faces.shape[0] == values.shape[0]
-    ), f"pressure_faces has {faces.shape[0]} rows, but pressure_values has {values.shape[0]} entries"
-    return faces, np.ascontiguousarray(values)
-
-
 def _normalize_traction_faces(traction_faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
     if traction_faces is None:
         return np.zeros((0, 2), dtype=np.uint64)
@@ -808,21 +787,6 @@ def _normalize_traction_values(
     return np.ascontiguousarray(values)
 
 
-def _normalize_traction_loads(
-    traction_faces: ArrayLike | None,
-    traction_values: ArrayLike | None,
-    dtype: np.dtype[Any],
-) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
-    if traction_faces is None and traction_values is None:
-        return _normalize_traction_faces(None), _normalize_traction_values(None, 0, dtype)
-    assert (
-        traction_faces is not None and traction_values is not None
-    ), "traction_faces and traction_values must either both be provided or both be omitted"
-    faces = _normalize_traction_faces(traction_faces)
-    values = _normalize_traction_values(traction_values, faces.shape[0], dtype)
-    return faces, values
-
-
 def _normalize_prescribed_dirichlet(
     prescribed: Mapping[int, float] | None,
     dtype: np.dtype[Any],
@@ -830,8 +794,6 @@ def _normalize_prescribed_dirichlet(
     if prescribed is None:
         return np.zeros((0,), dtype=np.uint64), np.zeros((0,), dtype=dtype)
     items = sorted((int(dof), float(value)) for dof, value in prescribed.items())
-    if not items:
-        return np.zeros((0,), dtype=np.uint64), np.zeros((0,), dtype=dtype)
     return (
         np.asarray([dof for dof, _ in items], dtype=np.uint64),
         np.asarray([value for _, value in items], dtype=dtype),
@@ -988,33 +950,6 @@ def _volume_samples(
             yield n, grad_phys, det_j, np.asarray(point, dtype=dtype), dtype.type(wx * wy)
 
 
-def _face_samples(
-    coords: npt.NDArray[np.floating[Any]],
-    element_type: str,
-    local_face: int,
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-):
-    for s, weight in _gauss_1d(quadrature_code):
-        xi, eta, ds_reference = _quad_face_reference(local_face, s)
-        n = _element_shape(element_type, xi, eta).astype(dtype, copy=False)
-        grad_ref = _element_grad_ref(element_type, xi, eta).astype(dtype, copy=False)
-        jac = _element_jacobian(coords, grad_ref, dtype)
-        point = n @ coords
-        assert point[0] >= 0.0, f"face quadrature point has negative radius {float(point[0])!r}"
-        tangent = np.array(
-            [
-                jac[0, 0] * ds_reference[0] + jac[0, 1] * ds_reference[1],
-                jac[1, 0] * ds_reference[0] + jac[1, 1] * ds_reference[1],
-            ],
-            dtype=dtype,
-        )
-        tangent_norm_sq = tangent[0] * tangent[0] + tangent[1] * tangent[1]
-        assert tangent_norm_sq > 0.0, (
-            f"degenerate face tangent on local face {local_face}; "
-            f"tangent squared norm is {float(tangent_norm_sq)!r}"
-        )
-        yield n, tangent, np.asarray(point, dtype=dtype), dtype.type(weight)
 def assemble_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,

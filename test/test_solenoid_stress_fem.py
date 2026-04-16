@@ -910,10 +910,6 @@ def test_axisymmetric_fem_helper_validation_branches() -> None:
     body_force = fem._normalize_body_force(np.array([1.0, 2.0]), 3, np.dtype(np.float64))
     assert body_force.shape == (3, 2)
 
-    faces, values = fem._normalize_pressure_loads(None, None, np.dtype(np.float64))
-    assert faces.shape == (0, 2)
-    assert values.shape == (0,)
-
     traction = fem._normalize_traction_values(np.array([1.0, 2.0]), 3, np.dtype(np.float64))
     assert traction.shape == (3, 2)
 

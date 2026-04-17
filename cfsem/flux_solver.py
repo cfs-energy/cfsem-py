@@ -193,7 +193,7 @@ def _validate_flux_mesh_inputs(
             and zmesh.shape == transposed_shape
             and current_density.shape == transposed_shape
         ), "meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')"
-        assert False, f"meshes and current_density must all have shape {expected_shape}"
+        raise AssertionError(f"meshes and current_density must all have shape {expected_shape}")
 
     # If the two axes have different lengths, the expected `indexing="ij"` layout
     # is no longer ambiguous, so we can validate the mesh-axis content directly.

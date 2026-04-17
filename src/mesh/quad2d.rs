@@ -3,17 +3,11 @@
 /// Borrowed view of a 2D quadrilateral mesh with fixed nodes per element.
 #[derive(Clone, Copy)]
 pub struct QuadMeshView2d<'a, F: Copy, const NODES_PER_ELEMENT: usize> {
-    /// Node coordinates stored as a 2D pair understood by the caller.
-    ///
-    /// The historical field name `nodes_rz` is preserved for backward compatibility with the
-    /// axisymmetric FEM backend and the Python bindings.
+    /// Node coordinates stored as a caller-defined 2D pair.
     pub nodes_rz: &'a [[F; 2]],
     /// Element connectivity in family-specific local-node order.
     pub elements: &'a [[usize; NODES_PER_ELEMENT]],
 }
-
-/// Backward-compatible alias for code that still uses the shorter historical name.
-pub type MeshView<'a, F, const NODES_PER_ELEMENT: usize> = QuadMeshView2d<'a, F, NODES_PER_ELEMENT>;
 
 impl<'a, F: Copy, const NODES_PER_ELEMENT: usize> QuadMeshView2d<'a, F, NODES_PER_ELEMENT> {
     /// Number of mesh nodes.

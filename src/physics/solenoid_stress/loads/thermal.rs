@@ -1,5 +1,5 @@
 use crate::mesh::elements::quad2d::{quad4, quad9};
-use crate::mesh::{MeshView, QuadratureRule};
+use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     accumulate_b_transpose_vector, build_b_matrix, constitutive_times_strain,
 };
@@ -85,7 +85,7 @@ fn temperature_operator_impl<
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: &[ThermalMaterial<F>],
@@ -155,7 +155,7 @@ fn temperature_operator_impl<
 }
 
 pub fn temperature_operator_quad4<F: Real>(
-    mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: &[ThermalMaterial<F>],
@@ -176,7 +176,7 @@ pub fn temperature_operator_quad4<F: Real>(
 }
 
 pub fn temperature_operator_quad9<F: Real>(
-    mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: &[ThermalMaterial<F>],

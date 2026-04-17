@@ -14,7 +14,7 @@ pub mod sampling;
 pub mod triangle3d;
 
 pub use elements::quad2d::QuadratureRule;
-pub use quad2d::{MeshView, QuadMeshView2d};
+pub use quad2d::QuadMeshView2d;
 pub use quadrature::GaussLegendreRule;
 pub use sampling::{FaceSample, VolumeSample};
 pub use triangle3d::TriangleMeshView;

@@ -5,7 +5,7 @@ use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::Lu;
 use faer::sparse::{SparseColMat, SparseRowMat, Triplet};
 
-use crate::mesh::{MeshView, QuadratureRule};
+use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::{
     assemble_stiffness_quad4, assemble_stiffness_quad9,
 };
@@ -295,20 +295,20 @@ pub fn assemble_axisymmetric<'a, F: Real>(
 
 type AssembleStiffnessFn<F, const NODES: usize> =
     fn(
-        MeshView<'_, F, NODES>,
+        QuadMeshView2d<'_, F, NODES>,
         &[usize],
         &[[[F; 4]; 4]],
         QuadratureRule,
     ) -> Result<crate::physics::solenoid_stress::types::StiffnessTriplets<F>, String>;
 
 type BodyForceOperatorFn<F, const NODES: usize> =
-    fn(MeshView<'_, F, NODES>, QuadratureRule) -> Result<SparseOperator<F>, String>;
+    fn(QuadMeshView2d<'_, F, NODES>, QuadratureRule) -> Result<SparseOperator<F>, String>;
 
 type FaceOperatorFn<F, const NODES: usize, Load> =
-    fn(MeshView<'_, F, NODES>, &[Load], QuadratureRule) -> Result<SparseOperator<F>, String>;
+    fn(QuadMeshView2d<'_, F, NODES>, &[Load], QuadratureRule) -> Result<SparseOperator<F>, String>;
 
 type TemperatureOperatorFn<F, const NODES: usize> = fn(
-    MeshView<'_, F, NODES>,
+    QuadMeshView2d<'_, F, NODES>,
     &[usize],
     &[[[F; 4]; 4]],
     &[ThermalMaterial<F>],
@@ -316,7 +316,7 @@ type TemperatureOperatorFn<F, const NODES: usize> = fn(
 ) -> Result<ThermalLoadOperator<F>, String>;
 
 type RecoveryOperatorFn<F, const NODES: usize> = fn(
-    MeshView<'_, F, NODES>,
+    QuadMeshView2d<'_, F, NODES>,
     &[usize],
     &[[[F; 4]; 4]],
     Option<&[ThermalMaterial<F>]>,
@@ -344,7 +344,7 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
     temperature_operator_fn: TemperatureOperatorFn<F, NODES_PER_ELEMENT>,
     recovery_operator_fn: RecoveryOperatorFn<F, NODES_PER_ELEMENT>,
 ) -> Result<AxisymmetricModel<F>, String> {
-    let mesh = MeshView { nodes_rz, elements };
+    let mesh = QuadMeshView2d { nodes_rz, elements };
     let ndof_full = nodes_rz.len() * 2;
     let nelem = elements.len();
     let (free_dofs, fixed_dofs, fixed_values, global_to_reduced, fixed_lookup) =

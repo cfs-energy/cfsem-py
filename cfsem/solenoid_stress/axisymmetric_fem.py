@@ -410,29 +410,9 @@ class QuadratureFieldSamples:
 
 
 def _quadrature_code(quadrature: str | int) -> int:
-    if quadrature in (
-        3,
-        "3",
-        "gl3",
-        "GL3",
-        "gausslegendre3",
-        "GaussLegendre3",
-        "3x3",
-        "gauss3x3",
-        "Gauss3x3",
-    ):
+    if quadrature in (3, "3", "gl3", "GL3"):
         return 3
-    if quadrature in (
-        4,
-        "4",
-        "gl4",
-        "GL4",
-        "gausslegendre4",
-        "GaussLegendre4",
-        "4x4",
-        "gauss4x4",
-        "Gauss4x4",
-    ):
+    if quadrature in (4, "4", "gl4", "GL4"):
         return 4
     raise ValueError(f"unsupported quadrature {quadrature!r}; use 'gl3' or 'gl4'")
 

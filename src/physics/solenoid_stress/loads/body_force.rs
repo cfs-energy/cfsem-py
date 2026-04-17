@@ -1,5 +1,5 @@
 use crate::mesh::elements::quad2d::{quad4, quad9};
-use crate::mesh::{MeshView, QuadratureRule};
+use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::geometry::{
     VolumeSample, validate_axisymmetric_mesh, volume_samples_quad4, volume_samples_quad9,
 };
@@ -51,7 +51,7 @@ fn body_force_operator_impl<
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     quadrature: QuadratureRule,
     volume_samples_fn: fn(
         &[[F; 2]; NODES_PER_ELEMENT],
@@ -95,7 +95,7 @@ fn body_force_operator_impl<
 }
 
 pub fn body_force_operator_quad4<F: Real>(
-    mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
     body_force_operator_impl::<
@@ -106,7 +106,7 @@ pub fn body_force_operator_quad4<F: Real>(
 }
 
 pub fn body_force_operator_quad9<F: Real>(
-    mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
     body_force_operator_impl::<

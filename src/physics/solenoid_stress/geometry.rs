@@ -6,13 +6,13 @@
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::sampling;
-use crate::mesh::{MeshView, QuadratureRule};
+use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::types::Real;
 
 pub use crate::mesh::{FaceSample, VolumeSample};
 
 pub(crate) fn validate_axisymmetric_nodes<F: Real, const NODES_PER_ELEMENT: usize>(
-    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
 ) -> Result<(), String> {
     for (index, node) in mesh.nodes_rz.iter().enumerate() {
         if node[0] < F::zero() {
@@ -26,7 +26,7 @@ pub(crate) fn validate_axisymmetric_nodes<F: Real, const NODES_PER_ELEMENT: usiz
 }
 
 pub(crate) fn validate_axisymmetric_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
-    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
 ) -> Result<(), String> {
     validate_axisymmetric_nodes(mesh)?;
     mesh.validate_connectivity()

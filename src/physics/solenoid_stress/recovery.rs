@@ -1,7 +1,7 @@
 //! Sparse strain/stress recovery operators at element quadrature points.
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
-use crate::mesh::{MeshView, QuadratureRule};
+use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     build_b_matrix, constitutive_times_b, constitutive_times_strain,
 };
@@ -147,7 +147,7 @@ fn quadrature_field_operators_impl<
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
@@ -286,7 +286,7 @@ fn quadrature_field_operators_impl<
 
 /// Assemble sparse quadrature-point strain and stress operators for the Quad4 mesh.
 pub fn quadrature_field_operators_quad4<F: Real>(
-    mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
@@ -308,7 +308,7 @@ pub fn quadrature_field_operators_quad4<F: Real>(
 
 /// Assemble sparse quadrature-point strain and stress operators for the Quad9 mesh.
 pub fn quadrature_field_operators_quad9<F: Real>(
-    mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
@@ -331,7 +331,7 @@ pub fn quadrature_field_operators_quad9<F: Real>(
 #[cfg(test)]
 mod tests {
     use super::quadrature_field_operators_quad4;
-    use crate::mesh::{MeshView, QuadratureRule};
+    use crate::mesh::{QuadMeshView2d, QuadratureRule};
     use crate::physics::solenoid_stress::axisym::{build_b_matrix, constitutive_times_b};
     use crate::physics::solenoid_stress::geometry::volume_samples_quad4;
 
@@ -364,7 +364,7 @@ mod tests {
     fn quadrature_field_operators_match_direct_b_and_db_application() {
         let nodes = [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]];
         let elements = [[0usize, 1, 2, 3]];
-        let mesh = MeshView {
+        let mesh = QuadMeshView2d {
             nodes_rz: &nodes,
             elements: &elements,
         };

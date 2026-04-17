@@ -1,5 +1,5 @@
 use crate::mesh::elements::quad2d::{quad4, quad9};
-use crate::mesh::{MeshView, QuadratureRule};
+use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::geometry::{
     FaceSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_mesh,
 };
@@ -46,7 +46,7 @@ fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
 }
 
 fn traction_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
-    mesh: MeshView<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     traction_faces: &[TractionLoad<F>],
     quadrature: QuadratureRule,
     face_samples_fn: fn(
@@ -99,7 +99,7 @@ fn traction_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
 }
 
 pub fn traction_operator_quad4<F: Real>(
-    mesh: MeshView<'_, F, { quad4::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
     traction_faces: &[TractionLoad<F>],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {
@@ -111,7 +111,7 @@ pub fn traction_operator_quad4<F: Real>(
 }
 
 pub fn traction_operator_quad9<F: Real>(
-    mesh: MeshView<'_, F, { quad9::NODES_PER_ELEMENT }>,
+    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
     traction_faces: &[TractionLoad<F>],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String> {

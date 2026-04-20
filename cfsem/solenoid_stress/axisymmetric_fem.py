@@ -911,9 +911,7 @@ def orthotropic_axisymmetric_thermal_material(
         _orthotropic_axisymmetric_thermal_material_f32,
         _orthotropic_axisymmetric_thermal_material_f64,
     )
-    return _as_float_array(
-        binding(alpha_r, alpha_z, alpha_t, reference_temperature), resolved_dtype
-    )
+    return _as_float_array(binding(alpha_r, alpha_z, alpha_t, reference_temperature), resolved_dtype)
 
 
 def cfsem_radial_material(

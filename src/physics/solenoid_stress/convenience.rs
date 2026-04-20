@@ -228,31 +228,7 @@ mod tests {
         orthotropic_axisymmetric_thermal_material,
     };
 
-    #[test]
-    fn isotropic_material_is_symmetric() {
-        let d = isotropic_axisymmetric_material(200.0e9_f64, 0.3_f64);
-        for row in 0..4 {
-            for col in 0..4 {
-                assert!((d[row][col] - d[col][row]).abs() < 1.0e-12);
-            }
-        }
-    }
-
-    #[test]
-    fn radial_material_preserves_axial_entry() {
-        let d = cfsem_radial_material(200.0e9_f64, 0.3_f64);
-        assert_eq!(d[1][1], 200.0e9_f64);
-    }
-
-    #[test]
-    fn orthotropic_thermal_material_keeps_zero_shear_entry() {
-        let thermal = orthotropic_axisymmetric_thermal_material(1.0_f64, 2.0_f64, 3.0_f64, 4.0);
-        assert_eq!(thermal.alpha, [1.0, 2.0, 3.0, 0.0]);
-        assert_eq!(thermal.reference_temperature, 4.0);
-    }
-
-    #[test]
-    fn infer_quad9_mesh_reuses_shared_edge_midpoints() {
+    fn two_element_strip_mesh() -> (Vec<[f64; 2]>, Vec<[usize; 4]>) {
         let nodes = vec![
             [0.5_f64, 0.0],
             [0.75, 0.0],
@@ -262,6 +238,29 @@ mod tests {
             [1.0, 0.2],
         ];
         let elements = vec![[0usize, 1, 4, 3], [1usize, 2, 5, 4]];
+        (nodes, elements)
+    }
+
+    #[test]
+    fn material_convenience_helpers_preserve_expected_invariants() {
+        let isotropic = isotropic_axisymmetric_material(200.0e9_f64, 0.3_f64);
+        for row in 0..4 {
+            for col in 0..4 {
+                assert!((isotropic[row][col] - isotropic[col][row]).abs() < 1.0e-12);
+            }
+        }
+
+        let radial = cfsem_radial_material(200.0e9_f64, 0.3_f64);
+        assert_eq!(radial[1][1], 200.0e9_f64);
+
+        let thermal = orthotropic_axisymmetric_thermal_material(1.0_f64, 2.0_f64, 3.0_f64, 4.0);
+        assert_eq!(thermal.alpha, [1.0, 2.0, 3.0, 0.0]);
+        assert_eq!(thermal.reference_temperature, 4.0);
+    }
+
+    #[test]
+    fn infer_quad9_mesh_reuses_shared_edge_midpoints() {
+        let (nodes, elements) = two_element_strip_mesh();
         let elevated = infer_quad9_mesh(&nodes, &elements).expect("quad9 elevation");
         assert_eq!(elevated.analysis_elements.len(), 2);
         assert_eq!(

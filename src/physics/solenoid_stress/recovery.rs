@@ -166,6 +166,16 @@ fn quadrature_sample_kernel<
     Ok(local)
 }
 
+/// Assemble quadrature-point strain/stress recovery operators for one quadrilateral family.
+///
+/// Output shapes:
+/// - `strain_*` and `stress_*`: `(4 * nq_per_element * mesh.num_elements(), 2 * mesh.num_nodes())`
+/// - `thermal_*`: `(4 * nq_per_element * mesh.num_elements(), mesh.num_nodes())`
+/// - `*_constant`: `(4 * nq_per_element * mesh.num_elements(),)`
+///
+/// Row meaning:
+/// - rows `4*q .. 4*q + 3` correspond to quadrature point `q` in element-major order,
+/// - within each quadrature point the row components are ordered `[rr, zz, tt, rz]`.
 pub(crate) fn quadrature_field_operators_for_family<
     F: Real,
     Family,

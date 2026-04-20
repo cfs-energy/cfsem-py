@@ -42,6 +42,19 @@ fn body_force_element_kernel<
     local
 }
 
+/// Assemble the global body-force-to-RHS operator for one quadrilateral family.
+///
+/// Output shape: `(2 * mesh.num_nodes(), 2 * mesh.num_elements())`.
+///
+/// Row meaning:
+/// - row `2*a` is the radial generalized-force equation for node `a`,
+/// - row `2*a + 1` is the axial generalized-force equation for node `a`.
+///
+/// Column meaning:
+/// - column `2*e` is unit radial body-force density on element `e`,
+/// - column `2*e + 1` is unit axial body-force density on element `e`.
+///
+/// Entry units: `[volume]`.
 pub(crate) fn body_force_operator_for_family<
     F: Real,
     Family,

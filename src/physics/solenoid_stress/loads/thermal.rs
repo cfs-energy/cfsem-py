@@ -78,6 +78,22 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
     Ok(local)
 }
 
+/// Assemble the global temperature-to-RHS operator and reference-temperature offset.
+///
+/// Output shapes:
+/// - `temperature_to_rhs`: `(2 * mesh.num_nodes(), mesh.num_nodes())`
+/// - `reference_rhs`: `(2 * mesh.num_nodes(),)`
+///
+/// Row meaning:
+/// - row `2*a` is the radial generalized-force equation for node `a`,
+/// - row `2*a + 1` is the axial generalized-force equation for node `a`.
+///
+/// Column meaning:
+/// - column `j` is nodal temperature at node `j`.
+///
+/// Entry units:
+/// - `temperature_to_rhs`: `[generalized force / temperature] = [energy / (distance * temperature)]`
+/// - `reference_rhs`: `[generalized force] = [energy / distance]`
 pub(crate) fn temperature_operator_for_family<
     F: Real,
     Family,

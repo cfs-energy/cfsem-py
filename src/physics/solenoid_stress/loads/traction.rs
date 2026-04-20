@@ -43,6 +43,19 @@ fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
     local
 }
 
+/// Assemble the global traction-to-RHS operator for one quadrilateral family.
+///
+/// Output shape: `(2 * mesh.num_nodes(), 2 * traction_faces.len())`.
+///
+/// Row meaning:
+/// - row `2*a` is the radial generalized-force equation for node `a`,
+/// - row `2*a + 1` is the axial generalized-force equation for node `a`.
+///
+/// Column meaning:
+/// - column `2*j` is unit radial traction on `traction_faces[j]`,
+/// - column `2*j + 1` is unit axial traction on `traction_faces[j]`.
+///
+/// Entry units: `[area]`.
 pub(crate) fn traction_operator_for_family<
     F: Real,
     Family,

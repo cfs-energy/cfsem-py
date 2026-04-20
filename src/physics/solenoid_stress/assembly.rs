@@ -86,6 +86,7 @@ mod tests {
     use crate::physics::solenoid_stress::family::Quad4Family;
     use crate::physics::solenoid_stress::types::dof_per_element;
 
+    /// Build one isotropic constitutive matrix for stiffness-assembly regression tests.
     fn isotropic_material(e: f64, nu: f64) -> [[f64; 4]; 4] {
         let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
         let mu = e / (2.0 * (1.0 + nu));
@@ -98,6 +99,7 @@ mod tests {
     }
 
     #[test]
+    /// Check that one assembled element produces a symmetric stiffness matrix.
     fn single_element_has_symmetric_stiffness() {
         let nodes = [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]];
         let elements = [[0usize, 1, 2, 3]];

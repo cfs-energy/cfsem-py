@@ -34,6 +34,7 @@ pub(crate) fn validate_axisymmetric_mesh<F: Real, const NODES_PER_ELEMENT: usize
     mesh.validate_connectivity()
 }
 
+/// Reject volume quadrature samples whose evaluated radius is invalid for axisymmetry.
 fn validate_axisymmetric_volume_samples<F: Real, const NODES_PER_ELEMENT: usize>(
     samples: Vec<VolumeSample<F, NODES_PER_ELEMENT>>,
 ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String> {
@@ -48,6 +49,7 @@ fn validate_axisymmetric_volume_samples<F: Real, const NODES_PER_ELEMENT: usize>
     Ok(samples)
 }
 
+/// Reject face quadrature samples whose evaluated radius is invalid for axisymmetry.
 fn validate_axisymmetric_face_samples<F: Real, const NODES_PER_ELEMENT: usize>(
     samples: Vec<FaceSample<F, NODES_PER_ELEMENT>>,
 ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String> {

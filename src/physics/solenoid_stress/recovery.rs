@@ -93,6 +93,7 @@ struct LocalQuadratureSampleKernel<
     thermal_stress_constant: [F; 4],
 }
 
+/// Scatter one dense local block into triplet storage for a sparse recovery operator.
 fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
     rows: &mut Vec<usize>,
     cols: &mut Vec<usize>,
@@ -113,6 +114,11 @@ fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
     }
 }
 
+/// Build the dense recovery blocks for one quadrature point.
+///
+/// This helper evaluates the local strain and stress maps with the element's constitutive matrix,
+/// and, when thermal data is present, also builds the local thermal operators and constant offsets
+/// associated with the material reference temperature.
 fn quadrature_sample_kernel<
     F: Real,
     const NODES_PER_ELEMENT: usize,
@@ -327,6 +333,7 @@ mod tests {
     use crate::physics::solenoid_stress::geometry::volume_samples_quad4;
     use crate::physics::solenoid_stress::types::dof_per_element;
 
+    /// Build one isotropic constitutive matrix for recovery regression tests.
     fn isotropic_material(e: f64, nu: f64) -> [[f64; 4]; 4] {
         let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
         let mu = e / (2.0 * (1.0 + nu));
@@ -338,6 +345,7 @@ mod tests {
         ]
     }
 
+    /// Apply one triplet operator to a dense vector for direct-reference comparison in tests.
     fn apply_triplets(
         rows: &[usize],
         cols: &[usize],
@@ -353,6 +361,7 @@ mod tests {
     }
 
     #[test]
+    /// Check that the sparse recovery operators reproduce direct `B` and `D B` evaluation.
     fn quadrature_field_operators_match_direct_b_and_db_application() {
         let nodes = [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]];
         let elements = [[0usize, 1, 2, 3]];

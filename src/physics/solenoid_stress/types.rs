@@ -52,6 +52,7 @@ pub fn local_dofs<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     local_dofs
 }
 
+/// One scalar normal-pressure load applied to one element face.
 #[derive(Clone, Copy, Debug)]
 pub struct PressureLoad<F: Real> {
     /// Element index receiving the load.
@@ -64,6 +65,7 @@ pub struct PressureLoad<F: Real> {
     pub value: F,
 }
 
+/// One constant traction-vector load applied to one element face.
 #[derive(Clone, Copy, Debug)]
 pub struct TractionLoad<F: Real> {
     /// Element index receiving the load.
@@ -76,6 +78,7 @@ pub struct TractionLoad<F: Real> {
     pub value: [F; 2],
 }
 
+/// Per-material thermal-expansion data for the axisymmetric thermoelastic model.
 #[derive(Clone, Copy, Debug)]
 pub struct ThermalMaterial<F: Real> {
     /// Thermal strain coefficients in axisymmetric strain order `[rr, zz, tt, rz]`.

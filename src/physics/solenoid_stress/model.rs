@@ -289,6 +289,10 @@ impl<F: Real> AxisymmetricModel<F> {
     }
 }
 
+/// Internal staging object used to assemble the public reduced model.
+///
+/// This remains `pub(crate)` so the family-dispatch assembly path can stay readable while the
+/// public Rust API is narrowed to the single free `assemble_axisymmetric(...)` function.
 pub(crate) struct AxisymmetricModelBuilder<'a, F: Real> {
     nodes_rz: &'a [[F; 2]],
     elements: AxisymmetricElements<'a>,
@@ -302,6 +306,7 @@ pub(crate) struct AxisymmetricModelBuilder<'a, F: Real> {
 }
 
 impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
+    /// Start a builder from mesh topology and constitutive data.
     pub fn new(
         nodes_rz: &'a [[F; 2]],
         elements: AxisymmetricElements<'a>,
@@ -321,21 +326,25 @@ impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
         }
     }
 
+    /// Override the quadrature rule used for stiffness, load, and recovery assembly.
     pub fn quadrature(mut self, quadrature: QuadratureRule) -> Self {
         self.quadrature = quadrature;
         self
     }
 
+    /// Attach the pressure-load topology that defines the pressure-operator columns.
     pub fn pressure_faces(mut self, pressure_faces: &'a [PressureLoad<F>]) -> Self {
         self.pressure_faces = pressure_faces.to_vec();
         self
     }
 
+    /// Attach the traction-load topology that defines the traction-operator columns.
     pub fn traction_faces(mut self, traction_faces: &'a [TractionLoad<F>]) -> Self {
         self.traction_faces = traction_faces.to_vec();
         self
     }
 
+    /// Attach per-material thermal-expansion data, enabling thermal load and recovery operators.
     pub fn thermal_material_table(
         mut self,
         thermal_material_table: Option<&'a [ThermalMaterial<F>]>,
@@ -344,11 +353,13 @@ impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
         self
     }
 
+    /// Attach prescribed Dirichlet displacement values for model reduction.
     pub fn prescribed_dirichlet(mut self, prescribed: &'a [(usize, F)]) -> Self {
         self.prescribed = prescribed.to_vec();
         self
     }
 
+    /// Finalize the builder by dispatching to the appropriate quadrilateral family.
     pub fn build(self) -> Result<AxisymmetricModel<F>, String> {
         match self.elements {
             AxisymmetricElements::Quad4(elements) => build_model_for_family::<
@@ -417,9 +428,22 @@ pub fn assemble_axisymmetric<'a, F: Real>(
         .build()
 }
 
+/// Internal bundle returned by `reduce_layout`.
+///
+/// The tuple stores, in order:
+/// - the reduced-to-full free DOF mapping,
+/// - fixed DOF indices,
+/// - fixed DOF values,
+/// - the full-to-reduced lookup table,
+/// - and a dense lookup of fixed values by full DOF index.
 type ReducedLayout<F> = (Vec<usize>, Vec<usize>, Vec<F>, Vec<usize>, Vec<Option<F>>);
 
 #[allow(clippy::too_many_arguments)]
+/// Assemble the full set of reduced operators for one specific quadrilateral family.
+///
+/// This is the family-generic core of the public assembly path.  It builds the unreduced
+/// operators, applies Dirichlet reduction, compresses the final sparse matrices, and packages the
+/// result into the public `AxisymmetricModel`.
 fn build_model_for_family<
     F: Real,
     Family,
@@ -598,6 +622,7 @@ where
     })
 }
 
+/// Partition full-system displacement DOFs into free and fixed sets for Dirichlet reduction.
 fn reduce_layout<F: Real>(
     ndof_full: usize,
     prescribed: &[(usize, F)],
@@ -646,6 +671,9 @@ fn reduce_layout<F: Real>(
     ))
 }
 
+/// Reduce full-system stiffness triplets to the free DOF subspace.
+///
+/// This helper also accumulates the Dirichlet offset `-K_fc u_c` into `constant_rhs`.
 fn reduce_square_triplets<F: Real>(
     rows: &[usize],
     cols: &[usize],
@@ -669,6 +697,7 @@ fn reduce_square_triplets<F: Real>(
     triplets
 }
 
+/// Drop rows belonging to fixed displacement DOFs from one full-system load operator.
 fn reduce_row_operator<F: Real>(
     operator: SparseOperator<F>,
     global_to_reduced: &[usize],
@@ -699,6 +728,7 @@ fn reduce_row_operator<F: Real>(
     }
 }
 
+/// Reduce one full-system load operator and compress it into CSR form.
 fn reduce_row_operator_to_csr<F: Real>(
     operator: SparseOperator<F>,
     global_to_reduced: &[usize],
@@ -714,6 +744,9 @@ fn reduce_row_operator_to_csr<F: Real>(
     )
 }
 
+/// Reduce a full-space recovery operator by eliminating fixed displacement columns.
+///
+/// The eliminated fixed-value contributions are accumulated into the returned constant vector.
 fn reduce_column_operator<F: Real>(
     rows: Vec<usize>,
     cols: Vec<usize>,
@@ -743,6 +776,7 @@ fn reduce_column_operator<F: Real>(
     ))
 }
 
+/// Compress triplet data into a CSR matrix with checked shape and index validity.
 fn csr_from_parts<F: Real>(
     nrow: usize,
     ncol: usize,
@@ -760,6 +794,7 @@ fn csr_from_parts<F: Real>(
         .map_err(|err| format!("failed to build CSR operator: {err:?}"))
 }
 
+/// Compress stiffness triplets into the CSC format used by the cached sparse LU factorization.
 fn csc_from_triplets<F: Real>(
     nrow: usize,
     ncol: usize,
@@ -769,6 +804,7 @@ fn csc_from_triplets<F: Real>(
         .map_err(|err| format!("failed to build CSC operator: {err:?}"))
 }
 
+/// Apply one reduced CSR load operator to a dense load-amplitude vector and accumulate the result.
 fn apply_csr_operator<F: Real>(
     operator: &SparseRowMat<usize, F>,
     input: Option<&[F]>,

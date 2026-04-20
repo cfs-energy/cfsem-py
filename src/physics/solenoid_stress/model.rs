@@ -289,115 +289,6 @@ impl<F: Real> AxisymmetricModel<F> {
     }
 }
 
-/// Internal staging object used to assemble the public reduced model.
-///
-/// This remains `pub(crate)` so the family-dispatch assembly path can stay readable while the
-/// public Rust API is narrowed to the single free `assemble_axisymmetric(...)` function.
-pub(crate) struct AxisymmetricModelBuilder<'a, F: Real> {
-    nodes_rz: &'a [[F; 2]],
-    elements: AxisymmetricElements<'a>,
-    material_ids: &'a [usize],
-    material_table: &'a [[[F; 4]; 4]],
-    pressure_faces: Vec<PressureLoad<F>>,
-    traction_faces: Vec<TractionLoad<F>>,
-    thermal_material_table: Option<&'a [ThermalMaterial<F>]>,
-    prescribed: Vec<(usize, F)>,
-    quadrature: QuadratureRule,
-}
-
-impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
-    /// Start a builder from mesh topology and constitutive data.
-    pub fn new(
-        nodes_rz: &'a [[F; 2]],
-        elements: AxisymmetricElements<'a>,
-        material_ids: &'a [usize],
-        material_table: &'a [[[F; 4]; 4]],
-    ) -> Self {
-        Self {
-            nodes_rz,
-            elements,
-            material_ids,
-            material_table,
-            pressure_faces: Vec::new(),
-            traction_faces: Vec::new(),
-            thermal_material_table: None,
-            prescribed: Vec::new(),
-            quadrature: QuadratureRule::GaussLegendre3,
-        }
-    }
-
-    /// Override the quadrature rule used for stiffness, load, and recovery assembly.
-    pub fn quadrature(mut self, quadrature: QuadratureRule) -> Self {
-        self.quadrature = quadrature;
-        self
-    }
-
-    /// Attach the pressure-load topology that defines the pressure-operator columns.
-    pub fn pressure_faces(mut self, pressure_faces: &'a [PressureLoad<F>]) -> Self {
-        self.pressure_faces = pressure_faces.to_vec();
-        self
-    }
-
-    /// Attach the traction-load topology that defines the traction-operator columns.
-    pub fn traction_faces(mut self, traction_faces: &'a [TractionLoad<F>]) -> Self {
-        self.traction_faces = traction_faces.to_vec();
-        self
-    }
-
-    /// Attach per-material thermal-expansion data, enabling thermal load and recovery operators.
-    pub fn thermal_material_table(
-        mut self,
-        thermal_material_table: Option<&'a [ThermalMaterial<F>]>,
-    ) -> Self {
-        self.thermal_material_table = thermal_material_table;
-        self
-    }
-
-    /// Attach prescribed Dirichlet displacement values for model reduction.
-    pub fn prescribed_dirichlet(mut self, prescribed: &'a [(usize, F)]) -> Self {
-        self.prescribed = prescribed.to_vec();
-        self
-    }
-
-    /// Finalize the builder by dispatching to the appropriate quadrilateral family.
-    pub fn build(self) -> Result<AxisymmetricModel<F>, String> {
-        match self.elements {
-            AxisymmetricElements::Quad4(elements) => build_model_for_family::<
-                F,
-                Quad4Family,
-                { quad4::NODES_PER_ELEMENT },
-                { dof_per_element(quad4::NODES_PER_ELEMENT) },
-            >(
-                self.nodes_rz,
-                elements,
-                self.material_ids,
-                self.material_table,
-                &self.pressure_faces,
-                &self.traction_faces,
-                self.thermal_material_table,
-                &self.prescribed,
-                self.quadrature,
-            ),
-            AxisymmetricElements::Quad9(elements) => build_model_for_family::<
-                F,
-                Quad9Family,
-                { quad9::NODES_PER_ELEMENT },
-                { dof_per_element(quad9::NODES_PER_ELEMENT) },
-            >(
-                self.nodes_rz,
-                elements,
-                self.material_ids,
-                self.material_table,
-                &self.pressure_faces,
-                &self.traction_faces,
-                self.thermal_material_table,
-                &self.prescribed,
-                self.quadrature,
-            ),
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 /// Assemble the reduced axisymmetric structural model and all associated operators.
 ///
@@ -419,13 +310,40 @@ pub fn assemble_axisymmetric<'a, F: Real>(
     prescribed: &'a [(usize, F)],
     quadrature: QuadratureRule,
 ) -> Result<AxisymmetricModel<F>, String> {
-    AxisymmetricModelBuilder::new(nodes_rz, elements, material_ids, material_table)
-        .pressure_faces(pressure_faces)
-        .traction_faces(traction_faces)
-        .thermal_material_table(thermal_material_table)
-        .prescribed_dirichlet(prescribed)
-        .quadrature(quadrature)
-        .build()
+    match elements {
+        AxisymmetricElements::Quad4(elements) => build_model_for_family::<
+            F,
+            Quad4Family,
+            { quad4::NODES_PER_ELEMENT },
+            { dof_per_element(quad4::NODES_PER_ELEMENT) },
+        >(
+            nodes_rz,
+            elements,
+            material_ids,
+            material_table,
+            pressure_faces,
+            traction_faces,
+            thermal_material_table,
+            prescribed,
+            quadrature,
+        ),
+        AxisymmetricElements::Quad9(elements) => build_model_for_family::<
+            F,
+            Quad9Family,
+            { quad9::NODES_PER_ELEMENT },
+            { dof_per_element(quad9::NODES_PER_ELEMENT) },
+        >(
+            nodes_rz,
+            elements,
+            material_ids,
+            material_table,
+            pressure_faces,
+            traction_faces,
+            thermal_material_table,
+            prescribed,
+            quadrature,
+        ),
+    }
 }
 
 /// Internal bundle returned by `reduce_layout`.
@@ -466,10 +384,16 @@ where
     let mesh = QuadMeshView2d { nodes_rz, elements };
     let ndof_full = nodes_rz.len() * 2;
     let nelem = elements.len();
+    // Build the full-space -> reduced-space maps once. Every stored operator after this point will
+    // live in the constrained reduced system, while `fixed_lookup` carries the prescribed values
+    // needed to fold eliminated DOFs back into constant RHS terms.
     let (free_dofs, fixed_dofs, fixed_values, global_to_reduced, fixed_lookup) =
         reduce_layout(ndof_full, prescribed)?;
     let ndof_reduced = free_dofs.len();
 
+    // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
+    // This keeps the element kernels simple and pushes all constraint handling into the common
+    // reduction helpers below.
     let stiffness_full = assemble_stiffness_for_family::<
         F,
         Family,
@@ -486,11 +410,15 @@ where
         &mut constant_rhs,
     );
     let stiffness = csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)?;
+    // Most load operators are naturally assembled in full nodal space and then reduced by
+    // dropping rows associated with prescribed displacement DOFs.
     let reduce_operator =
         |operator| reduce_row_operator_to_csr(operator, &global_to_reduced, ndof_reduced);
 
     let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) =
         if let Some(thermal_material_table) = thermal_material_table {
+            // Thermal loading has both a temperature-dependent operator and a constant offset from
+            // per-material reference temperature, so keep those two pieces separate until the end.
             let thermal_full =
                 temperature_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
                     mesh,
@@ -515,10 +443,14 @@ where
                 0,
             )
         };
+    // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
+    // reference-temperature contribution so all load-independent terms live in one vector.
     for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
         *dst = *dst + *src;
     }
 
+    // These operators are stored directly in reduced row space because `build_rhs(...)` and
+    // `solve(...)` work only with the constrained system.
     let body_force_to_rhs = reduce_operator(body_force_operator_for_family::<
         F,
         Family,
@@ -538,6 +470,8 @@ where
         DOF_PER_ELEMENT,
     >(mesh, traction_faces, quadrature)?)?;
 
+    // Recovery is assembled in full displacement space, then its displacement columns are reduced.
+    // Eliminated fixed-displacement columns become constant strain/stress offsets.
     let recovery_full =
         quadrature_field_operators_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,

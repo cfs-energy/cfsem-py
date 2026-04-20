@@ -157,6 +157,8 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
     )
     measures = model.element_measures()
     quadrature_data = model.element_quadrature()
+    assert model.element_measures() is measures
+    assert model.element_quadrature() is quadrature_data
 
     expected_area = dtype(1.0)
     expected_volume = dtype(np.pi * (2.0**2 - 1.0**2))
@@ -843,9 +845,28 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
         thermal_material_table=np.asarray([thermal_material]),
     )
     nodal_temperature = np.full(nodes.shape[0], 300.0, dtype=dtype)
+    assert np.array_equal(model.thermal_reference_rhs, model.constant_rhs)
     assert model.build_rhs(nodal_temperature=nodal_temperature).shape == (model.ndof_reduced,)
     with pytest.raises(ValueError, match="nodal_temperature is required"):
         model.build_rhs()
+
+    mapped_model = fem.assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.array([0], dtype=np.uint64),
+        material_table={0: material},
+        thermal_material_table={0: thermal_material},
+    )
+    mapped_rhs = mapped_model.build_rhs(nodal_temperature=nodal_temperature)
+    assert mapped_rhs.shape == (mapped_model.ndof_reduced,)
+
+    with pytest.raises(ValueError, match="missing from material_table"):
+        fem.assemble_axisymmetric(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.array([1], dtype=np.uint64),
+            material_table={0: material},
+        )
 
     with pytest.raises(ValueError, match="missing from thermal_material_table"):
         fem.assemble_axisymmetric(
@@ -859,6 +880,12 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
     with pytest.raises(ValueError, match="nodal_temperature is required"):
         zero_displacement = np.zeros((model.ndof_reduced,), dtype=dtype)
         model.evaluate_quadrature(zero_displacement)
+
+    samples = model.evaluate_quadrature(
+        np.zeros((model.analysis_nodes.shape[0], 2), dtype=dtype),
+        nodal_temperature=nodal_temperature,
+    )
+    assert samples.stress.shape[-1] == 4
 
 
 def test_python_convenience_wrappers_preserve_dtype_and_shapes() -> None:

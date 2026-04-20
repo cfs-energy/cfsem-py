@@ -489,12 +489,9 @@ def _analysis_mesh_for_element_type(
 
 
 def _temperature_elevation_operator(
-    elevated: ElevatedQuad9Mesh | None,
+    elevated: ElevatedQuad9Mesh,
     dtype: np.dtype[Any],
 ) -> sp.csr_matrix:
-    if elevated is None:
-        nnode = 0
-        return sp.csr_matrix((nnode, nnode), dtype=dtype)
     n_input_nodes = elevated.input_nodes.shape[0]
     n_analysis_nodes = elevated.analysis_nodes.shape[0]
     rows: list[int] = []

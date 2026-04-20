@@ -3,18 +3,22 @@
 //! The element system matrix is assembled in Galerkin form
 //! `K_e = integral(B^T D B 2*pi*r dA)`.
 
-use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
-use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, validate_axisymmetric_mesh, volume_samples_quad4, volume_samples_quad9,
-};
+use crate::physics::solenoid_stress::family::QuadElementFamily;
+use crate::physics::solenoid_stress::geometry::validate_axisymmetric_mesh;
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, StiffnessTriplets, dof_per_element, local_dofs, two_pi,
+    DOF_PER_NODE, Real, StiffnessTriplets, local_dofs, two_pi,
 };
 
-fn assemble_axisymmetric_impl<
+/// Assemble the full unconstrained stiffness matrix for one quadrilateral family.
+///
+/// The returned triplets describe the global structural stiffness operator before Dirichlet
+/// reduction and CSC compression.  Its entries have units
+/// `[generalized nodal force / displacement] = [energy / distance^2]`.
+pub(crate) fn assemble_stiffness_for_family<
     F: Real,
+    Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
@@ -22,11 +26,10 @@ fn assemble_axisymmetric_impl<
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     quadrature: QuadratureRule,
-    volume_samples_fn: fn(
-        &[[F; 2]; NODES_PER_ELEMENT],
-        QuadratureRule,
-    ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
-) -> Result<StiffnessTriplets<F>, String> {
+) -> Result<StiffnessTriplets<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
@@ -52,7 +55,7 @@ fn assemble_axisymmetric_impl<
         })?;
         let mut ke = [[F::zero(); DOF_PER_ELEMENT]; DOF_PER_ELEMENT];
 
-        for sample in volume_samples_fn(&coords, quadrature)? {
+        for sample in Family::volume_samples::<F>(&coords, quadrature)? {
             let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
                 &sample.n,
                 &sample.grad_phys,
@@ -76,50 +79,12 @@ fn assemble_axisymmetric_impl<
     Ok(StiffnessTriplets { rows, cols, vals })
 }
 
-/// Assemble the global axisymmetric Quad4 stiffness operator in COO triplet form.
-pub fn assemble_stiffness_quad4<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
-    material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    quadrature: QuadratureRule,
-) -> Result<StiffnessTriplets<F>, String> {
-    assemble_axisymmetric_impl::<
-        F,
-        { quad4::NODES_PER_ELEMENT },
-        { dof_per_element(quad4::NODES_PER_ELEMENT) },
-    >(
-        mesh,
-        material_ids,
-        material_table,
-        quadrature,
-        volume_samples_quad4::<F>,
-    )
-}
-
-/// Assemble the global axisymmetric Quad9 stiffness operator in COO triplet form.
-pub fn assemble_stiffness_quad9<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
-    material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    quadrature: QuadratureRule,
-) -> Result<StiffnessTriplets<F>, String> {
-    assemble_axisymmetric_impl::<
-        F,
-        { quad9::NODES_PER_ELEMENT },
-        { dof_per_element(quad9::NODES_PER_ELEMENT) },
-    >(
-        mesh,
-        material_ids,
-        material_table,
-        quadrature,
-        volume_samples_quad9::<F>,
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::assemble_stiffness_quad4;
+    use super::assemble_stiffness_for_family;
     use crate::mesh::{QuadMeshView2d, QuadratureRule};
+    use crate::physics::solenoid_stress::family::Quad4Family;
+    use crate::physics::solenoid_stress::types::dof_per_element;
 
     fn isotropic_material(e: f64, nu: f64) -> [[f64; 4]; 4] {
         let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
@@ -142,7 +107,7 @@ mod tests {
         };
         let material_ids = [0usize];
         let material_table = [isotropic_material(200.0e9, 0.27)];
-        let result = assemble_stiffness_quad4(
+        let result = assemble_stiffness_for_family::<f64, Quad4Family, 4, { dof_per_element(4) }>(
             mesh,
             &material_ids,
             &material_table,

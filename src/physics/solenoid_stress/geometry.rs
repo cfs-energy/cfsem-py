@@ -11,6 +11,7 @@ use crate::physics::solenoid_stress::types::Real;
 
 pub use crate::mesh::{FaceSample, VolumeSample};
 
+/// Validate that every node radius is admissible for an axisymmetric structural mesh.
 pub(crate) fn validate_axisymmetric_nodes<F: Real, const NODES_PER_ELEMENT: usize>(
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
 ) -> Result<(), String> {
@@ -25,6 +26,7 @@ pub(crate) fn validate_axisymmetric_nodes<F: Real, const NODES_PER_ELEMENT: usiz
     Ok(())
 }
 
+/// Validate mesh connectivity and the axisymmetric radius constraint together.
 pub(crate) fn validate_axisymmetric_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
 ) -> Result<(), String> {
@@ -60,6 +62,9 @@ fn validate_axisymmetric_face_samples<F: Real, const NODES_PER_ELEMENT: usize>(
     Ok(samples)
 }
 
+/// Evaluate axisymmetric volume quadrature samples for one `quad4` element.
+///
+/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
 pub fn volume_samples_quad4<F: Real>(
     coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
     quadrature: QuadratureRule,
@@ -67,6 +72,9 @@ pub fn volume_samples_quad4<F: Real>(
     validate_axisymmetric_volume_samples(sampling::volume_samples_quad4(coords, quadrature)?)
 }
 
+/// Evaluate axisymmetric volume quadrature samples for one `quad9` element.
+///
+/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
 pub fn volume_samples_quad9<F: Real>(
     coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
     quadrature: QuadratureRule,
@@ -74,6 +82,9 @@ pub fn volume_samples_quad9<F: Real>(
     validate_axisymmetric_volume_samples(sampling::volume_samples_quad9(coords, quadrature)?)
 }
 
+/// Evaluate axisymmetric face quadrature samples for one `quad4` element face.
+///
+/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
 pub fn face_samples_quad4<F: Real>(
     coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
     local_face: u8,
@@ -84,6 +95,9 @@ pub fn face_samples_quad4<F: Real>(
     )?)
 }
 
+/// Evaluate axisymmetric face quadrature samples for one `quad9` element face.
+///
+/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
 pub fn face_samples_quad9<F: Real>(
     coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
     local_face: u8,

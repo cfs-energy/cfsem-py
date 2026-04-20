@@ -1,10 +1,8 @@
-use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
-use crate::physics::solenoid_stress::geometry::{
-    FaceSample, face_samples_quad4, face_samples_quad9, validate_axisymmetric_mesh,
-};
+use crate::physics::solenoid_stress::family::QuadElementFamily;
+use crate::physics::solenoid_stress::geometry::{FaceSample, validate_axisymmetric_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, PressureLoad, Real, dof_per_element, local_dofs, two_pi,
+    DOF_PER_NODE, PressureLoad, Real, local_dofs, two_pi,
 };
 
 use super::{SparseOperator, scatter_local_vector};
@@ -41,16 +39,19 @@ fn pressure_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
     local
 }
 
-fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+pub(crate) fn pressure_operator_for_family<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     pressure_faces: &[PressureLoad<F>],
     quadrature: QuadratureRule,
-    face_samples_fn: fn(
-        &[[F; 2]; NODES_PER_ELEMENT],
-        u8,
-        QuadratureRule,
-    ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>,
-) -> Result<SparseOperator<F>, String> {
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
@@ -71,7 +72,7 @@ fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
-        let samples = face_samples_fn(&coords, load.local_face, quadrature)?;
+        let samples = Family::face_samples::<F>(&coords, load.local_face, quadrature)?;
         let local = pressure_face_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples);
         let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
         scatter_local_vector(
@@ -91,28 +92,4 @@ fn pressure_operator_impl<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         nrow: ndof,
         ncol,
     })
-}
-
-pub fn pressure_operator_quad4<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
-    pressure_faces: &[PressureLoad<F>],
-    quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String> {
-    pressure_operator_impl::<
-        F,
-        { quad4::NODES_PER_ELEMENT },
-        { dof_per_element(quad4::NODES_PER_ELEMENT) },
-    >(mesh, pressure_faces, quadrature, face_samples_quad4::<F>)
-}
-
-pub fn pressure_operator_quad9<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
-    pressure_faces: &[PressureLoad<F>],
-    quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String> {
-    pressure_operator_impl::<
-        F,
-        { quad9::NODES_PER_ELEMENT },
-        { dof_per_element(quad9::NODES_PER_ELEMENT) },
-    >(mesh, pressure_faces, quadrature, face_samples_quad9::<F>)
 }

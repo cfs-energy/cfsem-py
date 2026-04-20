@@ -1,48 +1,70 @@
 //! Sparse strain/stress recovery operators at element quadrature points.
 
-use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     build_b_matrix, constitutive_times_b, constitutive_times_strain,
 };
-use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, validate_axisymmetric_mesh, volume_samples_quad4, volume_samples_quad9,
-};
-use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, ThermalMaterial, dof_per_element, local_dofs,
-};
+use crate::physics::solenoid_stress::family::QuadElementFamily;
+use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_axisymmetric_mesh};
+use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, ThermalMaterial, local_dofs};
 
+/// Sparse quadrature-point recovery operators before reduction into the model-owned CSR form.
+///
+/// Rows are stored in quadrature-point-major order with axisymmetric component ordering
+/// `[rr, zz, tt, rz]`, so rows `4*q .. 4*q + 3` correspond to one quadrature point.
 #[derive(Debug, Clone)]
 pub struct QuadratureFieldOperators<F: Real> {
     /// Quadrature-point coordinates `(r, z)` in element-major order.
+    ///
+    /// Units: `[length]`.
     pub points_rz: Vec<[F; 2]>,
     /// Sparse row indices for the strain operator triplets.
     pub strain_rows: Vec<usize>,
     /// Sparse column indices for the strain operator triplets.
+    ///
+    /// Columns index full displacement DOFs `[u_r1, u_z1, ...]`.
     pub strain_cols: Vec<usize>,
     /// Sparse values for the strain operator triplets.
+    ///
+    /// Units: `[strain / displacement] = [1 / length]`.
     pub strain_vals: Vec<F>,
     /// Sparse row indices for the stress operator triplets.
     pub stress_rows: Vec<usize>,
     /// Sparse column indices for the stress operator triplets.
+    ///
+    /// Columns index full displacement DOFs `[u_r1, u_z1, ...]`.
     pub stress_cols: Vec<usize>,
     /// Sparse values for the stress operator triplets.
+    ///
+    /// Units: `[stress / displacement] = [pressure / length]`.
     pub stress_vals: Vec<F>,
     /// Sparse row indices for the thermal-strain operator triplets.
     pub thermal_strain_rows: Vec<usize>,
     /// Sparse column indices for the thermal-strain operator triplets.
+    ///
+    /// Columns index nodal temperatures `[temperature]`.
     pub thermal_strain_cols: Vec<usize>,
     /// Sparse values for the thermal-strain operator triplets.
+    ///
+    /// Units: `[strain / temperature]`.
     pub thermal_strain_vals: Vec<F>,
     /// Sparse row indices for the thermal-stress operator triplets.
     pub thermal_stress_rows: Vec<usize>,
     /// Sparse column indices for the thermal-stress operator triplets.
+    ///
+    /// Columns index nodal temperatures `[temperature]`.
     pub thermal_stress_cols: Vec<usize>,
     /// Sparse values for the thermal-stress operator triplets.
+    ///
+    /// Units: `[stress / temperature]`.
     pub thermal_stress_vals: Vec<F>,
     /// Constant quadrature-point thermal strain contribution from per-material reference temperature.
+    ///
+    /// Units: `[strain]`.
     pub thermal_strain_constant: Vec<F>,
     /// Constant quadrature-point thermal stress contribution from per-material reference temperature.
+    ///
+    /// Units: `[stress]`.
     pub thermal_stress_constant: Vec<F>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
@@ -142,8 +164,9 @@ fn quadrature_sample_kernel<
     Ok(local)
 }
 
-fn quadrature_field_operators_impl<
+pub(crate) fn quadrature_field_operators_for_family<
     F: Real,
+    Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
@@ -152,11 +175,10 @@ fn quadrature_field_operators_impl<
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
     quadrature: QuadratureRule,
-    volume_samples_fn: fn(
-        &[[F; 2]; NODES_PER_ELEMENT],
-        QuadratureRule,
-    ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
-) -> Result<QuadratureFieldOperators<F>, String> {
+) -> Result<QuadratureFieldOperators<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
@@ -207,7 +229,7 @@ fn quadrature_field_operators_impl<
         let thermal_stress_unit =
             thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
 
-        for (q_local, sample) in volume_samples_fn(&coords, quadrature)?
+        for (q_local, sample) in Family::volume_samples::<F>(&coords, quadrature)?
             .into_iter()
             .enumerate()
         {
@@ -284,56 +306,14 @@ fn quadrature_field_operators_impl<
     })
 }
 
-/// Assemble sparse quadrature-point strain and stress operators for the Quad4 mesh.
-pub fn quadrature_field_operators_quad4<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
-    material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    quadrature: QuadratureRule,
-) -> Result<QuadratureFieldOperators<F>, String> {
-    quadrature_field_operators_impl::<
-        F,
-        { quad4::NODES_PER_ELEMENT },
-        { dof_per_element(quad4::NODES_PER_ELEMENT) },
-    >(
-        mesh,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        volume_samples_quad4::<F>,
-    )
-}
-
-/// Assemble sparse quadrature-point strain and stress operators for the Quad9 mesh.
-pub fn quadrature_field_operators_quad9<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
-    material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    quadrature: QuadratureRule,
-) -> Result<QuadratureFieldOperators<F>, String> {
-    quadrature_field_operators_impl::<
-        F,
-        { quad9::NODES_PER_ELEMENT },
-        { dof_per_element(quad9::NODES_PER_ELEMENT) },
-    >(
-        mesh,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        volume_samples_quad9::<F>,
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::quadrature_field_operators_quad4;
+    use super::quadrature_field_operators_for_family;
     use crate::mesh::{QuadMeshView2d, QuadratureRule};
     use crate::physics::solenoid_stress::axisym::{build_b_matrix, constitutive_times_b};
+    use crate::physics::solenoid_stress::family::Quad4Family;
     use crate::physics::solenoid_stress::geometry::volume_samples_quad4;
+    use crate::physics::solenoid_stress::types::dof_per_element;
 
     fn isotropic_material(e: f64, nu: f64) -> [[f64; 4]; 4] {
         let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
@@ -370,14 +350,15 @@ mod tests {
         };
         let material_ids = [0usize];
         let material_table = [isotropic_material(200.0e9, 0.27)];
-        let operators = quadrature_field_operators_quad4(
-            mesh,
-            &material_ids,
-            &material_table,
-            None,
-            QuadratureRule::GaussLegendre3,
-        )
-        .expect("operator assembly should succeed");
+        let operators =
+            quadrature_field_operators_for_family::<f64, Quad4Family, 4, { dof_per_element(4) }>(
+                mesh,
+                &material_ids,
+                &material_table,
+                None,
+                QuadratureRule::GaussLegendre3,
+            )
+            .expect("operator assembly should succeed");
 
         let u = [0.01, -0.02, 0.03, 0.01, 0.02, -0.01, -0.04, 0.02];
         let strain = apply_triplets(

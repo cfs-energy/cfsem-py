@@ -43,18 +43,8 @@ import scipy.sparse as sp
 
 import cfsem.cfsem as _cfsem_bindings
 
-_assemble_model_axisymmetric_quad4_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad4_f32
-)
-_assemble_model_axisymmetric_quad4_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad4_f64
-)
-_assemble_model_axisymmetric_quad9_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad9_f32
-)
-_assemble_model_axisymmetric_quad9_f64 = (
-    _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_quad9_f64
-)
+_assemble_model_axisymmetric_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_f32
+_assemble_model_axisymmetric_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_f64
 
 ArrayLike = npt.ArrayLike
 ElementType = str
@@ -426,6 +416,13 @@ def _normalize_element_type(element_type: str) -> str:
     return normalized
 
 
+def _element_type_code(element_type: str) -> int:
+    normalized = _normalize_element_type(element_type)
+    if normalized == "quad4":
+        return 4
+    return 9
+
+
 def _validate_element_quadrature_combo(element_type: str, quadrature_code: int) -> None:
     assert quadrature_code in {3, 4}, f"unsupported quadrature code {quadrature_code}; use 3 or 4"
     _normalize_element_type(element_type)
@@ -781,17 +778,6 @@ def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     return f64
 
 
-def _dispatch_by_element_type(
-    element_type: str,
-    quad4_impl: Any,
-    quad9_impl: Any,
-) -> Any:
-    normalized_type = _normalize_element_type(element_type)
-    if normalized_type == "quad4":
-        return quad4_impl
-    return quad9_impl
-
-
 def _element_jacobian(
     coords: npt.NDArray[np.floating[Any]],
     grad_ref: npt.NDArray[np.floating[Any]],
@@ -960,16 +946,8 @@ def assemble_axisymmetric(
     )
     low_level = _dispatch_pair(
         dtype,
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _assemble_model_axisymmetric_quad4_f32,
-            _assemble_model_axisymmetric_quad9_f32,
-        ),
-        _dispatch_by_element_type(
-            normalized_element_type,
-            _assemble_model_axisymmetric_quad4_f64,
-            _assemble_model_axisymmetric_quad9_f64,
-        ),
+        _assemble_model_axisymmetric_f32,
+        _assemble_model_axisymmetric_f64,
     )
     backend = low_level(
         analysis_nodes,
@@ -983,6 +961,7 @@ def assemble_axisymmetric(
         else thermal_material_table_arr,
         prescribed_dofs,
         prescribed_values,
+        _element_type_code(normalized_element_type),
         quadrature_code,
     )
 

@@ -5,80 +5,189 @@ use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::Lu;
 use faer::sparse::{SparseColMat, SparseRowMat, Triplet};
 
+use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
-use crate::physics::solenoid_stress::assembly::{
-    assemble_stiffness_quad4, assemble_stiffness_quad9,
-};
+use crate::physics::solenoid_stress::assembly::assemble_stiffness_for_family;
+use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
-    SparseOperator, ThermalLoadOperator, body_force_operator_quad4, body_force_operator_quad9,
-    pressure_operator_quad4, pressure_operator_quad9, temperature_operator_quad4,
-    temperature_operator_quad9, traction_operator_quad4, traction_operator_quad9,
+    SparseOperator, body_force_operator_for_family, pressure_operator_for_family,
+    temperature_operator_for_family, traction_operator_for_family,
 };
-use crate::physics::solenoid_stress::recovery::{
-    QuadratureFieldOperators, quadrature_field_operators_quad4, quadrature_field_operators_quad9,
+use crate::physics::solenoid_stress::recovery::quadrature_field_operators_for_family;
+use crate::physics::solenoid_stress::types::{
+    PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element,
 };
-use crate::physics::solenoid_stress::types::{PressureLoad, Real, ThermalMaterial, TractionLoad};
 
+/// Public element-family selector for the axisymmetric structural solver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisymmetricElementType {
+    /// Bilinear four-node quadrilateral in the meridian plane.
     Quad4,
+    /// Quadratic nine-node quadrilateral in the meridian plane.
     Quad9,
 }
 
 impl AxisymmetricElementType {
+    /// Return the canonical public string spelling used by the Python wrapper and docs.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Quad4 => "quad4",
             Self::Quad9 => "quad9",
         }
     }
+
+    /// Parse the compact numeric element code used by the low-level Python binding.
+    pub fn from_code(code: u8) -> Result<Self, String> {
+        match code {
+            4 => Ok(Self::Quad4),
+            9 => Ok(Self::Quad9),
+            _ => Err(format!(
+                "unsupported axisymmetric FEM element code {code}; use 4 or 9"
+            )),
+        }
+    }
 }
 
+/// Borrowed element-connectivity input for model assembly.
+///
+/// Each variant stores element-node connectivity in the node ordering expected by the
+/// corresponding quadrilateral family.
 pub enum AxisymmetricElements<'a> {
     Quad4(&'a [[usize; 4]]),
     Quad9(&'a [[usize; 9]]),
 }
 
+/// Reduced-space recovery operators and constants stored on the assembled model.
+///
+/// All sparse operators in this struct act on the reduced displacement vector produced by the
+/// constrained solve, except for the thermal operators, which act on the nodal temperature field.
 #[derive(Debug, Clone)]
 pub struct ReducedRecoveryOperators<F: Real> {
+    /// Quadrature-point coordinates `(r, z)` in element-major order.
+    ///
+    /// Units: `[length]`.
     pub points_rz: Vec<[F; 2]>,
+    /// CSR operator mapping reduced displacements `[length]` to quadrature-point strains
+    /// `[dimensionless]`.
+    ///
+    /// Entry units: `[strain / displacement] = [1 / length]`.
     pub strain_operator: SparseRowMat<usize, F>,
+    /// CSR operator mapping reduced displacements `[length]` to quadrature-point stresses.
+    ///
+    /// Entry units: `[stress / displacement] = [pressure / length]`.
     pub stress_operator: SparseRowMat<usize, F>,
+    /// CSR operator mapping nodal temperatures `[temperature]` to quadrature-point thermal strain.
+    ///
+    /// Entry units: `[strain / temperature]`.
     pub thermal_strain_operator: SparseRowMat<usize, F>,
+    /// CSR operator mapping nodal temperatures `[temperature]` to quadrature-point thermal stress.
+    ///
+    /// Entry units: `[stress / temperature]`.
     pub thermal_stress_operator: SparseRowMat<usize, F>,
+    /// Constant strain offset induced by nonzero prescribed Dirichlet values.
+    ///
+    /// Units: `[strain]`.
     pub strain_constant: Vec<F>,
+    /// Constant stress offset induced by nonzero prescribed Dirichlet values.
+    ///
+    /// Units: `[stress]`.
     pub stress_constant: Vec<F>,
+    /// Constant thermal-strain offset induced by per-material reference temperature.
+    ///
+    /// Units: `[strain]`.
     pub thermal_strain_constant: Vec<F>,
+    /// Constant thermal-stress offset induced by per-material reference temperature.
+    ///
+    /// Units: `[stress]`.
     pub thermal_stress_constant: Vec<F>,
+    /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
+    /// Number of nodal temperatures expected by the thermal recovery operators.
     pub n_temperature_nodes: usize,
 }
 
+/// Fully assembled reduced axisymmetric structural model.
+///
+/// The public system stored here is the Dirichlet-reduced system.  `stiffness`, the load
+/// operators, and `constant_rhs` all live in reduced displacement space, while the recovery
+/// operators map reduced displacements back to quadrature-point strain and stress fields.
 #[derive(Debug)]
 pub struct AxisymmetricModel<F: Real> {
+    /// Reduced structural stiffness matrix in CSC form.
+    ///
+    /// This matrix maps reduced displacements `[length]` to reduced generalized nodal forces
+    /// `[energy / distance]`.
+    ///
+    /// Entry units: `[generalized force / displacement] = [energy / distance^2]`.
     pub stiffness: SparseColMat<usize, F>,
+    /// Reduced RHS operator for per-element body-force density amplitudes.
+    ///
+    /// Columns are grouped by element as `[b_r, b_z]`.
+    /// Entry units: `[volume]`.
     pub body_force_to_rhs: SparseRowMat<usize, F>,
+    /// Reduced RHS operator for scalar pressure amplitudes on `pressure_faces`.
+    ///
+    /// One column per loaded face.
+    /// Entry units: `[area]`.
     pub pressure_to_rhs: SparseRowMat<usize, F>,
+    /// Reduced RHS operator for vector traction amplitudes on `traction_faces`.
+    ///
+    /// Columns are grouped by face as `[t_r, t_z]`.
+    /// Entry units: `[area]`.
     pub traction_to_rhs: SparseRowMat<usize, F>,
+    /// Reduced RHS operator for nodal temperatures.
+    ///
+    /// Entry units: `[generalized force / temperature] = [energy / (distance * temperature)]`.
     pub temperature_to_rhs: SparseRowMat<usize, F>,
+    /// Constant reduced RHS contribution from prescribed displacements and thermal reference state.
+    ///
+    /// Units: `[energy / distance]`.
     pub constant_rhs: Vec<F>,
+    /// Quadrature-point recovery operators and constants associated with this reduced model.
     pub recovery: ReducedRecoveryOperators<F>,
+    /// Metadata listing the loaded pressure faces as `[element_index, local_face]`.
     pub pressure_faces: Vec<[usize; 2]>,
+    /// Metadata listing the loaded traction faces as `[element_index, local_face]`.
     pub traction_faces: Vec<[usize; 2]>,
+    /// Analysis mesh nodes `(r, z)` used by the backend.
+    ///
+    /// Units: `[length]`.
     pub analysis_nodes: Vec<[F; 2]>,
+    /// Flattened analysis connectivity in element-major order.
     pub analysis_elements_flat: Vec<usize>,
+    /// Number of nodes per analysis element.
     pub nodes_per_element: usize,
+    /// Analysis element family used by the backend.
     pub element_type: AxisymmetricElementType,
+    /// Number of displacement DOFs in the unreduced full system.
     pub ndof_full: usize,
+    /// Number of displacement DOFs remaining after Dirichlet reduction.
     pub ndof_reduced: usize,
+    /// Number of analysis elements.
     pub nelem: usize,
+    /// Mapping from reduced displacement index to full-system DOF index.
     pub free_dofs: Vec<usize>,
+    /// Full-system DOF indices removed by Dirichlet reduction.
     pub fixed_dofs: Vec<usize>,
+    /// Prescribed displacement values for `fixed_dofs`.
+    ///
+    /// Units: `[length]`.
     pub fixed_values: Vec<F>,
     lu: Option<Lu<usize, F>>,
 }
 
 impl<F: Real> AxisymmetricModel<F> {
+    /// Build the reduced right-hand side for one specific load state.
+    ///
+    /// Each optional input vector is interpreted in the column layout of the corresponding stored
+    /// operator:
+    /// - `body_force`: `[b_r, b_z]` per element with units `[force / volume]`,
+    /// - `pressure_values`: one scalar pressure per `pressure_faces` entry with units
+    ///   `[force / area]`,
+    /// - `traction_values`: `[t_r, t_z]` per `traction_faces` entry with units `[force / area]`,
+    /// - `nodal_temperature`: one temperature per analysis node.
+    ///
+    /// The returned vector has length `ndof_reduced` and units `[energy / distance]`.
     pub fn build_rhs(
         &self,
         body_force: Option<&[F]>,
@@ -122,6 +231,13 @@ impl<F: Real> AxisymmetricModel<F> {
         Ok(rhs)
     }
 
+    /// Solve the reduced structural system and return the recovered full displacement vector.
+    ///
+    /// The model caches the sparse LU factorization of `stiffness` on first use, so repeated calls
+    /// reuse the same factorization.
+    ///
+    /// Input units: `rhs` has units `[energy / distance]`.
+    /// Output units: displacements `[length]`.
     pub fn solve(&mut self, rhs: &[F]) -> Result<Vec<F>, String> {
         if rhs.len() != self.ndof_reduced {
             return Err(format!(
@@ -152,6 +268,9 @@ impl<F: Real> AxisymmetricModel<F> {
         Ok(self.recover_full(&reduced_solution))
     }
 
+    /// Reinsert prescribed Dirichlet values into a reduced solution vector.
+    ///
+    /// Input and output units: displacement `[length]`.
     pub fn recover_full(&self, reduced_solution: &[F]) -> Vec<F> {
         assert!(
             reduced_solution.len() == self.ndof_reduced,
@@ -232,10 +351,14 @@ impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
 
     pub fn build(self) -> Result<AxisymmetricModel<F>, String> {
         match self.elements {
-            AxisymmetricElements::Quad4(elements) => build_model_for_mesh(
+            AxisymmetricElements::Quad4(elements) => build_model_for_family::<
+                F,
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(
                 self.nodes_rz,
                 elements,
-                AxisymmetricElementType::Quad4,
                 self.material_ids,
                 self.material_table,
                 &self.pressure_faces,
@@ -243,17 +366,15 @@ impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
                 self.thermal_material_table,
                 &self.prescribed,
                 self.quadrature,
-                assemble_stiffness_quad4::<F>,
-                body_force_operator_quad4::<F>,
-                pressure_operator_quad4::<F>,
-                traction_operator_quad4::<F>,
-                temperature_operator_quad4::<F>,
-                quadrature_field_operators_quad4::<F>,
             ),
-            AxisymmetricElements::Quad9(elements) => build_model_for_mesh(
+            AxisymmetricElements::Quad9(elements) => build_model_for_family::<
+                F,
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(
                 self.nodes_rz,
                 elements,
-                AxisymmetricElementType::Quad9,
                 self.material_ids,
                 self.material_table,
                 &self.pressure_faces,
@@ -261,18 +382,21 @@ impl<'a, F: Real> AxisymmetricModelBuilder<'a, F> {
                 self.thermal_material_table,
                 &self.prescribed,
                 self.quadrature,
-                assemble_stiffness_quad9::<F>,
-                body_force_operator_quad9::<F>,
-                pressure_operator_quad9::<F>,
-                traction_operator_quad9::<F>,
-                temperature_operator_quad9::<F>,
-                quadrature_field_operators_quad9::<F>,
             ),
         }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Assemble the reduced axisymmetric structural model and all associated operators.
+///
+/// This is the single public Rust entry point for the axisymmetric FEM backend.  It accepts the
+/// analysis mesh, material data, optional load topology, optional thermal material data, and
+/// prescribed Dirichlet displacement values, then returns a reduced model containing:
+/// - the reduced stiffness matrix,
+/// - reduced RHS operators for all supported load types,
+/// - cached metadata describing the analysis mesh and load faces, and
+/// - reduced recovery operators for quadrature-point postprocessing.
 pub fn assemble_axisymmetric<'a, F: Real>(
     nodes_rz: &'a [[F; 2]],
     elements: AxisymmetricElements<'a>,
@@ -293,43 +417,17 @@ pub fn assemble_axisymmetric<'a, F: Real>(
         .build()
 }
 
-type AssembleStiffnessFn<F, const NODES: usize> =
-    fn(
-        QuadMeshView2d<'_, F, NODES>,
-        &[usize],
-        &[[[F; 4]; 4]],
-        QuadratureRule,
-    ) -> Result<crate::physics::solenoid_stress::types::StiffnessTriplets<F>, String>;
-
-type BodyForceOperatorFn<F, const NODES: usize> =
-    fn(QuadMeshView2d<'_, F, NODES>, QuadratureRule) -> Result<SparseOperator<F>, String>;
-
-type FaceOperatorFn<F, const NODES: usize, Load> =
-    fn(QuadMeshView2d<'_, F, NODES>, &[Load], QuadratureRule) -> Result<SparseOperator<F>, String>;
-
-type TemperatureOperatorFn<F, const NODES: usize> = fn(
-    QuadMeshView2d<'_, F, NODES>,
-    &[usize],
-    &[[[F; 4]; 4]],
-    &[ThermalMaterial<F>],
-    QuadratureRule,
-) -> Result<ThermalLoadOperator<F>, String>;
-
-type RecoveryOperatorFn<F, const NODES: usize> = fn(
-    QuadMeshView2d<'_, F, NODES>,
-    &[usize],
-    &[[[F; 4]; 4]],
-    Option<&[ThermalMaterial<F>]>,
-    QuadratureRule,
-) -> Result<QuadratureFieldOperators<F>, String>;
-
 type ReducedLayout<F> = (Vec<usize>, Vec<usize>, Vec<F>, Vec<usize>, Vec<Option<F>>);
 
 #[allow(clippy::too_many_arguments)]
-fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
+fn build_model_for_family<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
     nodes_rz: &[[F; 2]],
     elements: &[[usize; NODES_PER_ELEMENT]],
-    element_type: AxisymmetricElementType,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     pressure_faces: &[PressureLoad<F>],
@@ -337,13 +435,10 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
     prescribed: &[(usize, F)],
     quadrature: QuadratureRule,
-    assemble_stiffness_fn: AssembleStiffnessFn<F, NODES_PER_ELEMENT>,
-    body_force_operator_fn: BodyForceOperatorFn<F, NODES_PER_ELEMENT>,
-    pressure_operator_fn: FaceOperatorFn<F, NODES_PER_ELEMENT, PressureLoad<F>>,
-    traction_operator_fn: FaceOperatorFn<F, NODES_PER_ELEMENT, TractionLoad<F>>,
-    temperature_operator_fn: TemperatureOperatorFn<F, NODES_PER_ELEMENT>,
-    recovery_operator_fn: RecoveryOperatorFn<F, NODES_PER_ELEMENT>,
-) -> Result<AxisymmetricModel<F>, String> {
+) -> Result<AxisymmetricModel<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     let mesh = QuadMeshView2d { nodes_rz, elements };
     let ndof_full = nodes_rz.len() * 2;
     let nelem = elements.len();
@@ -351,7 +446,12 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
         reduce_layout(ndof_full, prescribed)?;
     let ndof_reduced = free_dofs.len();
 
-    let stiffness_full = assemble_stiffness_fn(mesh, material_ids, material_table, quadrature)?;
+    let stiffness_full = assemble_stiffness_for_family::<
+        F,
+        Family,
+        NODES_PER_ELEMENT,
+        DOF_PER_ELEMENT,
+    >(mesh, material_ids, material_table, quadrature)?;
     let mut constant_rhs = vec![F::zero(); ndof_reduced];
     let stiffness_reduced = reduce_square_triplets(
         &stiffness_full.rows,
@@ -367,13 +467,14 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
 
     let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) =
         if let Some(thermal_material_table) = thermal_material_table {
-            let thermal_full = temperature_operator_fn(
-                mesh,
-                material_ids,
-                material_table,
-                thermal_material_table,
-                quadrature,
-            )?;
+            let thermal_full =
+                temperature_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    mesh,
+                    material_ids,
+                    material_table,
+                    thermal_material_table,
+                    quadrature,
+                )?;
             let reduced_reference_rhs = free_dofs
                 .iter()
                 .map(|&dof| thermal_full.reference_rhs[dof])
@@ -394,17 +495,33 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
         *dst = *dst + *src;
     }
 
-    let body_force_to_rhs = reduce_operator(body_force_operator_fn(mesh, quadrature)?)?;
-    let pressure_to_rhs = reduce_operator(pressure_operator_fn(mesh, pressure_faces, quadrature)?)?;
-    let traction_to_rhs = reduce_operator(traction_operator_fn(mesh, traction_faces, quadrature)?)?;
+    let body_force_to_rhs = reduce_operator(body_force_operator_for_family::<
+        F,
+        Family,
+        NODES_PER_ELEMENT,
+        DOF_PER_ELEMENT,
+    >(mesh, quadrature)?)?;
+    let pressure_to_rhs = reduce_operator(pressure_operator_for_family::<
+        F,
+        Family,
+        NODES_PER_ELEMENT,
+        DOF_PER_ELEMENT,
+    >(mesh, pressure_faces, quadrature)?)?;
+    let traction_to_rhs = reduce_operator(traction_operator_for_family::<
+        F,
+        Family,
+        NODES_PER_ELEMENT,
+        DOF_PER_ELEMENT,
+    >(mesh, traction_faces, quadrature)?)?;
 
-    let recovery_full = recovery_operator_fn(
-        mesh,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-    )?;
+    let recovery_full =
+        quadrature_field_operators_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            material_ids,
+            material_table,
+            thermal_material_table,
+            quadrature,
+        )?;
     let nq_row_count = recovery_full.points_rz.len() * 4;
     let (strain_operator, strain_constant) = reduce_column_operator(
         recovery_full.strain_rows,
@@ -439,11 +556,6 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
         recovery_full.thermal_stress_vals,
     )?;
 
-    let mut analysis_elements_flat = Vec::with_capacity(nelem * NODES_PER_ELEMENT);
-    for conn in elements {
-        analysis_elements_flat.extend_from_slice(conn);
-    }
-
     Ok(AxisymmetricModel {
         stiffness,
         body_force_to_rhs,
@@ -473,9 +585,9 @@ fn build_model_for_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
             .map(|face| [face.element, usize::from(face.local_face)])
             .collect(),
         analysis_nodes: nodes_rz.to_vec(),
-        analysis_elements_flat,
+        analysis_elements_flat: Family::flatten_elements(elements),
         nodes_per_element: NODES_PER_ELEMENT,
-        element_type,
+        element_type: Family::element_type(),
         ndof_full,
         ndof_reduced,
         nelem,

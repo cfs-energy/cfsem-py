@@ -1,13 +1,11 @@
-use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     accumulate_b_transpose_vector, build_b_matrix, constitutive_times_strain,
 };
-use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, validate_axisymmetric_mesh, volume_samples_quad4, volume_samples_quad9,
-};
+use crate::physics::solenoid_stress::family::QuadElementFamily;
+use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_axisymmetric_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, ThermalMaterial, dof_per_element, local_dofs, two_pi,
+    DOF_PER_NODE, Real, ThermalMaterial, local_dofs, two_pi,
 };
 
 use super::{SparseOperator, ThermalLoadOperator, scatter_local_matrix};
@@ -80,8 +78,9 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
     Ok(local)
 }
 
-fn temperature_operator_impl<
+pub(crate) fn temperature_operator_for_family<
     F: Real,
+    Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
@@ -90,11 +89,10 @@ fn temperature_operator_impl<
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: &[ThermalMaterial<F>],
     quadrature: QuadratureRule,
-    volume_samples_fn: fn(
-        &[[F; 2]; NODES_PER_ELEMENT],
-        QuadratureRule,
-    ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
-) -> Result<ThermalLoadOperator<F>, String> {
+) -> Result<ThermalLoadOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
@@ -123,7 +121,7 @@ fn temperature_operator_impl<
         let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
             format!("thermal material_id {material_id} on element {element_index} is out of range")
         })?;
-        let samples = volume_samples_fn(&coords, quadrature)?;
+        let samples = Family::volume_samples::<F>(&coords, quadrature)?;
         let local = thermal_element_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             &samples, material, thermal,
         )?;
@@ -152,46 +150,4 @@ fn temperature_operator_impl<
         },
         reference_rhs,
     })
-}
-
-pub fn temperature_operator_quad4<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
-    material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: &[ThermalMaterial<F>],
-    quadrature: QuadratureRule,
-) -> Result<ThermalLoadOperator<F>, String> {
-    temperature_operator_impl::<
-        F,
-        { quad4::NODES_PER_ELEMENT },
-        { dof_per_element(quad4::NODES_PER_ELEMENT) },
-    >(
-        mesh,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        volume_samples_quad4::<F>,
-    )
-}
-
-pub fn temperature_operator_quad9<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
-    material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: &[ThermalMaterial<F>],
-    quadrature: QuadratureRule,
-) -> Result<ThermalLoadOperator<F>, String> {
-    temperature_operator_impl::<
-        F,
-        { quad9::NODES_PER_ELEMENT },
-        { dof_per_element(quad9::NODES_PER_ELEMENT) },
-    >(
-        mesh,
-        material_ids,
-        material_table,
-        thermal_material_table,
-        quadrature,
-        volume_samples_quad9::<F>,
-    )
 }

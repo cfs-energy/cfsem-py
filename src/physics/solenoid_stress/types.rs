@@ -59,6 +59,8 @@ pub struct PressureLoad<F: Real> {
     /// Local face index in the element-family numbering used by `face_reference`.
     pub local_face: u8,
     /// Pressure magnitude, taken positive in the inward normal direction.
+    ///
+    /// Units: `[force / area]`.
     pub value: F,
 }
 
@@ -69,17 +71,28 @@ pub struct TractionLoad<F: Real> {
     /// Local face index in the element-family numbering used by `face_reference`.
     pub local_face: u8,
     /// Constant traction vector in global meridian coordinates `[t_r, t_z]`.
+    ///
+    /// Units: `[force / area]`.
     pub value: [F; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct ThermalMaterial<F: Real> {
     /// Thermal strain coefficients in axisymmetric strain order `[rr, zz, tt, rz]`.
+    ///
+    /// Units: `[strain / temperature]`.
     pub alpha: [F; 4],
     /// Stress-free reference temperature for this material.
+    ///
+    /// Units: `[temperature]`.
     pub reference_temperature: F,
 }
 
+/// Sparse triplets for the assembled structural stiffness matrix before CSC compression.
+///
+/// Each entry has units
+/// `[generalized nodal force / displacement] = [energy / distance^2]`,
+/// which is the axisymmetric analogue of stiffness.
 #[derive(Debug, Clone)]
 pub struct StiffnessTriplets<F: Real> {
     /// Sparse row indices for the assembled stiffness-operator triplets.

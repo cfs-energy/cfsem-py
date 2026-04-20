@@ -446,6 +446,7 @@
 
 mod assembly;
 mod axisym;
+mod family;
 mod geometry;
 mod loads;
 mod model;

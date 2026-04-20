@@ -1,11 +1,7 @@
-use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
-use crate::physics::solenoid_stress::geometry::{
-    VolumeSample, validate_axisymmetric_mesh, volume_samples_quad4, volume_samples_quad9,
-};
-use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, dof_per_element, local_dofs, two_pi,
-};
+use crate::physics::solenoid_stress::family::QuadElementFamily;
+use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_axisymmetric_mesh};
+use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, local_dofs, two_pi};
 
 use super::{SparseOperator, scatter_local_matrix};
 
@@ -46,18 +42,18 @@ fn body_force_element_kernel<
     local
 }
 
-fn body_force_operator_impl<
+pub(crate) fn body_force_operator_for_family<
     F: Real,
+    Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     quadrature: QuadratureRule,
-    volume_samples_fn: fn(
-        &[[F; 2]; NODES_PER_ELEMENT],
-        QuadratureRule,
-    ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>,
-) -> Result<SparseOperator<F>, String> {
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
@@ -71,7 +67,7 @@ fn body_force_operator_impl<
     for element_index in 0..mesh.num_elements() {
         let coords = mesh.element_coords(element_index)?;
         let nodes = mesh.element_nodes(element_index)?;
-        let samples = volume_samples_fn(&coords, quadrature)?;
+        let samples = Family::volume_samples::<F>(&coords, quadrature)?;
         let local = body_force_element_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples);
         let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
         let global_cols = [2 * element_index, 2 * element_index + 1];
@@ -92,26 +88,4 @@ fn body_force_operator_impl<
         nrow: ndof,
         ncol,
     })
-}
-
-pub fn body_force_operator_quad4<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad4::NODES_PER_ELEMENT }>,
-    quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String> {
-    body_force_operator_impl::<
-        F,
-        { quad4::NODES_PER_ELEMENT },
-        { dof_per_element(quad4::NODES_PER_ELEMENT) },
-    >(mesh, quadrature, volume_samples_quad4::<F>)
-}
-
-pub fn body_force_operator_quad9<F: Real>(
-    mesh: QuadMeshView2d<'_, F, { quad9::NODES_PER_ELEMENT }>,
-    quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String> {
-    body_force_operator_impl::<
-        F,
-        { quad9::NODES_PER_ELEMENT },
-        { dof_per_element(quad9::NODES_PER_ELEMENT) },
-    >(mesh, quadrature, volume_samples_quad9::<F>)
 }

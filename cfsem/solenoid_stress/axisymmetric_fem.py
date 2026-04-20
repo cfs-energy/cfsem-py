@@ -3,8 +3,10 @@
 
 This module provides a small displacement-based axisymmetric finite-element solver
 for the `(r, z)` meridian plane. The Rust backend assembles the reduced constrained
-model, stores the sparse operators, caches the LU factorization, and runs the solve.
-Python wraps that model, normalizes load data, and handles postprocessing workflows.
+model, stores the sparse operators, caches the LU factorization, runs the solve,
+and provides the shared material, mesh-elevation, and quadrature-recovery
+conveniences. Python wraps that model, normalizes NumPy-facing inputs, and reshapes
+the returned arrays.
 
 The element formulation follows the standard small-strain Galerkin construction
 
@@ -45,6 +47,24 @@ import cfsem.cfsem as _cfsem_bindings
 
 _assemble_model_axisymmetric_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_f32
 _assemble_model_axisymmetric_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_f64
+_cfsem_radial_material_f32 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f32
+_cfsem_radial_material_f64 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f64
+_infer_quad9_mesh_f32 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f32
+_infer_quad9_mesh_f64 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f64
+_isotropic_axisymmetric_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f32
+_isotropic_axisymmetric_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f64
+_isotropic_axisymmetric_thermal_material_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32
+)
+_isotropic_axisymmetric_thermal_material_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64
+)
+_orthotropic_axisymmetric_thermal_material_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32
+)
+_orthotropic_axisymmetric_thermal_material_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f64
+)
 
 ArrayLike = npt.ArrayLike
 ElementType = str
@@ -66,6 +86,12 @@ def _sparse_shape(matrix: Any) -> tuple[int, int]:
     """Return a concrete 2D sparse shape for pyright and runtime callers."""
 
     return cast(tuple[int, int], matrix.shape)
+
+
+def _as_float_array(data: Any, dtype: np.dtype[Any]) -> npt.NDArray[np.floating[Any]]:
+    """Convert binding output to a NumPy floating array with an explicit static type."""
+
+    return cast(npt.NDArray[np.floating[Any]], np.asarray(data, dtype=dtype))
 
 
 def _csr_matrix_from_binding(
@@ -172,7 +198,6 @@ class AxisymmetricFEMModel:
         nelem: int,
         nq_per_element: int,
         n_temperature_nodes: int,
-        quadrature_code: int,
     ) -> None:
         self._backend = backend
         self._dtype = dtype
@@ -207,7 +232,6 @@ class AxisymmetricFEMModel:
         self.nelem = int(nelem)
         self.nq_per_element = int(nq_per_element)
         self.n_temperature_nodes = int(n_temperature_nodes)
-        self._quadrature_code = int(quadrature_code)
         self._element_quadrature_cache: ElementQuadrature | None = None
         self._element_measures_cache: ElementMeasures | None = None
         self.nodes = input_nodes
@@ -231,24 +255,16 @@ class AxisymmetricFEMModel:
         cache = self._element_quadrature_cache
         if cache is not None:
             return cache
+        points_flat, weights_area_flat, weights_volume_flat, nq = self._backend.element_quadrature()
         nelem = self.analysis_elements.shape[0]
-        nq = self.nq_per_element
-        points_rz = np.zeros((nelem, nq, 2), dtype=self.dtype)
-        weights_area = np.zeros((nelem, nq), dtype=self.dtype)
-        weights_volume = np.zeros((nelem, nq), dtype=self.dtype)
-        for element_index, conn in enumerate(self.analysis_elements):
-            coords = self.analysis_nodes[conn]
-            for sample_index, (_n, _grad_phys, det_j, point, weight) in enumerate(
-                _volume_samples(coords, self.element_type, self._quadrature_code, self.dtype)
-            ):
-                points_rz[element_index, sample_index] = point
-                weights_area[element_index, sample_index] = det_j * weight
-                weights_volume[element_index, sample_index] = det_j * weight * (2.0 * np.pi * point[0])
+        points_rz = np.asarray(points_flat, dtype=self.dtype).reshape(nelem, int(nq), 2)
+        weights_area = np.asarray(weights_area_flat, dtype=self.dtype).reshape(nelem, int(nq))
+        weights_volume = np.asarray(weights_volume_flat, dtype=self.dtype).reshape(nelem, int(nq))
         cache = ElementQuadrature(
             points_rz=points_rz,
             weights_area=weights_area,
             weights_volume=weights_volume,
-            nq_per_element=nq,
+            nq_per_element=int(nq),
         )
         self._element_quadrature_cache = cache
         return cache
@@ -257,13 +273,14 @@ class AxisymmetricFEMModel:
         """Return per-element meridian area and swept axisymmetric volume."""
 
         cache = self._element_measures_cache
-        if cache is None:
-            quadrature = self.element_quadrature()
-            cache = ElementMeasures(
-                areas=np.sum(quadrature.weights_area, axis=1),
-                swept_volumes=np.sum(quadrature.weights_volume, axis=1),
-            )
-            self._element_measures_cache = cache
+        if cache is not None:
+            return cache
+        areas, swept_volumes = self._backend.element_measures()
+        cache = ElementMeasures(
+            areas=np.asarray(areas, dtype=self.dtype),
+            swept_volumes=np.asarray(swept_volumes, dtype=self.dtype),
+        )
+        self._element_measures_cache = cache
         return cache
 
     def _normalize_temperature_for_backend(
@@ -330,57 +347,35 @@ class AxisymmetricFEMModel:
         full[self.free_dofs] = reduced_arr
         return full
 
-    def _normalize_reduced_solution(
-        self,
-        displacements: ArrayLike,
-    ) -> npt.NDArray[np.floating[Any]]:
-        arr = np.asarray(displacements, dtype=self.dtype)
-        if arr.ndim == 1 and arr.shape == (self.ndof_reduced,):
-            return np.ascontiguousarray(arr)
-        full = _normalize_displacements(displacements, self.analysis_nodes.shape[0], self.dtype).reshape(-1)
-        return np.ascontiguousarray(full[self.free_dofs], dtype=self.dtype)
-
     def evaluate_quadrature(
         self,
         displacements: ArrayLike,
         nodal_temperature: ArrayLike | None = None,
     ) -> QuadratureFieldSamples:
-        reduced = self._normalize_reduced_solution(displacements)
-        if self.n_temperature_nodes == 0:
-            temperature_arr = np.zeros((0,), dtype=self.dtype)
+        arr = np.asarray(displacements, dtype=self.dtype)
+        if arr.ndim == 1 and arr.shape == (self.ndof_reduced,):
+            displacements_full = self.recover_full(arr)
         else:
-            if nodal_temperature is None:
-                raise ValueError(
-                    "nodal_temperature is required because this model includes thermal materials"
-                )
-            temperature_arr = _normalize_nodal_temperature(
-                nodal_temperature,
-                self.n_temperature_nodes,
-                self.dtype,
-            )
+            displacements_full = _normalize_displacements(
+                displacements, self.analysis_nodes.shape[0], self.dtype
+            ).reshape(-1)
+        temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
+        (
+            points_flat,
+            strain_flat,
+            thermal_strain_flat,
+            elastic_strain_flat,
+            stress_flat,
+            nq,
+        ) = self._backend.evaluate_quadrature(displacements_full, temperature_arr)
         nelem = self.analysis_elements.shape[0]
-        nq = self.nq_per_element
-        strain = (
-            np.asarray(self.strain_operator @ reduced, dtype=self.dtype) + self.strain_constant
-        ).reshape(nelem, nq, 4)
-        thermal_strain = (
-            np.asarray(self.thermal_strain_operator @ temperature_arr, dtype=self.dtype)
-            + self.thermal_strain_constant
-        ).reshape(nelem, nq, 4)
-        stress = (
-            np.asarray(self.stress_operator @ reduced, dtype=self.dtype)
-            + self.stress_constant
-            - (
-                np.asarray(self.thermal_stress_operator @ temperature_arr, dtype=self.dtype)
-                + self.thermal_stress_constant
-            )
-        ).reshape(nelem, nq, 4)
+        nq = int(nq)
         return QuadratureFieldSamples(
-            points_rz=self.quadrature_points_rz,
-            strain=strain,
-            thermal_strain=thermal_strain,
-            elastic_strain=strain - thermal_strain,
-            stress=stress,
+            points_rz=np.asarray(points_flat, dtype=self.dtype).reshape(nelem, nq, 2),
+            strain=np.asarray(strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
+            thermal_strain=np.asarray(thermal_strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
+            elastic_strain=np.asarray(elastic_strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
+            stress=np.asarray(stress_flat, dtype=self.dtype).reshape(nelem, nq, 4),
         )
 
 
@@ -461,54 +456,23 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
     dtype = _resolve_float_dtype(nodes)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
-    node_list = [nodes_arr[i].copy() for i in range(nodes_arr.shape[0])]
-    analysis_elements = np.zeros((elements_arr.shape[0], 9), dtype=np.uint64)
-    analysis_elements[:, :4] = elements_arr
-
-    edge_to_midpoint: dict[tuple[int, int], int] = {}
-    midside_indices: list[int] = []
-    center_indices = np.zeros((elements_arr.shape[0],), dtype=np.int64)
-    next_node_index = nodes_arr.shape[0]
-
-    midside_parametric_points = ((0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0))
-    edge_nodes = ((0, 1), (1, 2), (2, 3), (3, 0))
-
-    for element_index, conn in enumerate(elements_arr):
-        coords = nodes_arr[conn]
-        for local_edge, ((local_a, local_b), (xi, eta)) in enumerate(
-            zip(edge_nodes, midside_parametric_points, strict=True)
-        ):
-            node_a = int(conn[local_a])
-            node_b = int(conn[local_b])
-            edge_key = (node_a, node_b) if node_a < node_b else (node_b, node_a)
-            midpoint_index = edge_to_midpoint.get(edge_key)
-            if midpoint_index is None:
-                midpoint = (_quad4_shape(xi, eta).astype(dtype, copy=False) @ coords).astype(
-                    dtype,
-                    copy=False,
-                )
-                midpoint_index = next_node_index
-                next_node_index += 1
-                edge_to_midpoint[edge_key] = midpoint_index
-                midside_indices.append(midpoint_index)
-                node_list.append(np.asarray(midpoint, dtype=dtype))
-            analysis_elements[element_index, 4 + local_edge] = midpoint_index
-
-        center = (_quad4_shape(0.0, 0.0).astype(dtype, copy=False) @ coords).astype(dtype, copy=False)
-        center_index = next_node_index
-        next_node_index += 1
-        node_list.append(np.asarray(center, dtype=dtype))
-        center_indices[element_index] = center_index
-        analysis_elements[element_index, 8] = center_index
+    binding = _dispatch_pair(dtype, _infer_quad9_mesh_f32, _infer_quad9_mesh_f64)
+    (
+        analysis_nodes_flat,
+        analysis_elements_flat,
+        corner_node_indices,
+        midside_node_indices,
+        center_node_indices,
+    ) = binding(nodes_arr, elements_arr)
 
     return ElevatedQuad9Mesh(
         input_nodes=nodes_arr,
         input_elements=elements_arr,
-        analysis_nodes=np.asarray(node_list, dtype=dtype),
-        analysis_elements=analysis_elements,
-        corner_node_indices=np.arange(nodes_arr.shape[0], dtype=np.int64),
-        midside_node_indices=np.asarray(midside_indices, dtype=np.int64),
-        center_node_indices=center_indices,
+        analysis_nodes=np.asarray(analysis_nodes_flat, dtype=dtype).reshape(-1, 2),
+        analysis_elements=np.asarray(analysis_elements_flat, dtype=np.uint64).reshape(-1, 9),
+        corner_node_indices=np.asarray(corner_node_indices, dtype=np.int64),
+        midside_node_indices=np.asarray(midside_node_indices, dtype=np.int64),
+        center_node_indices=np.asarray(center_node_indices, dtype=np.int64),
     )
 
 
@@ -778,139 +742,6 @@ def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     return f64
 
 
-def _element_jacobian(
-    coords: npt.NDArray[np.floating[Any]],
-    grad_ref: npt.NDArray[np.floating[Any]],
-    dtype: np.dtype[Any],
-) -> npt.NDArray[np.floating[Any]]:
-    return np.array(
-        [
-            [np.dot(coords[:, 0], grad_ref[:, 0]), np.dot(coords[:, 0], grad_ref[:, 1])],
-            [np.dot(coords[:, 1], grad_ref[:, 0]), np.dot(coords[:, 1], grad_ref[:, 1])],
-        ],
-        dtype=dtype,
-    )
-
-
-def _quad_face_reference(local_face: int, s: float) -> tuple[float, float, tuple[float, float]]:
-    if local_face == 0:
-        return s, -1.0, (1.0, 0.0)
-    if local_face == 1:
-        return 1.0, s, (0.0, 1.0)
-    if local_face == 2:
-        return -s, 1.0, (-1.0, 0.0)
-    if local_face == 3:
-        return -1.0, -s, (0.0, -1.0)
-    raise ValueError(f"invalid local face {local_face}; expected 0, 1, 2, or 3")
-
-
-def _q2_lagrange_1d(x: float) -> npt.NDArray[np.float64]:
-    return np.array([0.5 * x * (x - 1.0), 1.0 - x * x, 0.5 * x * (x + 1.0)], dtype=np.float64)
-
-
-def _q2_lagrange_grad_1d(x: float) -> npt.NDArray[np.float64]:
-    return np.array([x - 0.5, -2.0 * x, x + 0.5], dtype=np.float64)
-
-
-def _quad9_shape(xi: float, eta: float) -> npt.NDArray[np.float64]:
-    lx = _q2_lagrange_1d(xi)
-    ly = _q2_lagrange_1d(eta)
-    return np.array(
-        [
-            lx[0] * ly[0],
-            lx[2] * ly[0],
-            lx[2] * ly[2],
-            lx[0] * ly[2],
-            lx[1] * ly[0],
-            lx[2] * ly[1],
-            lx[1] * ly[2],
-            lx[0] * ly[1],
-            lx[1] * ly[1],
-        ],
-        dtype=np.float64,
-    )
-
-
-def _quad9_grad_ref(xi: float, eta: float) -> npt.NDArray[np.float64]:
-    lx = _q2_lagrange_1d(xi)
-    ly = _q2_lagrange_1d(eta)
-    dlx = _q2_lagrange_grad_1d(xi)
-    dly = _q2_lagrange_grad_1d(eta)
-    return np.array(
-        [
-            [dlx[0] * ly[0], lx[0] * dly[0]],
-            [dlx[2] * ly[0], lx[2] * dly[0]],
-            [dlx[2] * ly[2], lx[2] * dly[2]],
-            [dlx[0] * ly[2], lx[0] * dly[2]],
-            [dlx[1] * ly[0], lx[1] * dly[0]],
-            [dlx[2] * ly[1], lx[2] * dly[1]],
-            [dlx[1] * ly[2], lx[1] * dly[2]],
-            [dlx[0] * ly[1], lx[0] * dly[1]],
-            [dlx[1] * ly[1], lx[1] * dly[1]],
-        ],
-        dtype=np.float64,
-    )
-
-
-def _element_shape(element_type: str, xi: float, eta: float) -> npt.NDArray[np.float64]:
-    normalized_type = _normalize_element_type(element_type)
-    if normalized_type == "quad4":
-        return _quad4_shape(xi, eta)
-    return _quad9_shape(xi, eta)
-
-
-def _element_grad_ref(element_type: str, xi: float, eta: float) -> npt.NDArray[np.float64]:
-    normalized_type = _normalize_element_type(element_type)
-    if normalized_type == "quad4":
-        return _quad4_grad_ref(xi, eta)
-    return _quad9_grad_ref(xi, eta)
-
-
-def _axisymmetric_b_matrix(
-    n: npt.NDArray[np.floating[Any]],
-    grad_phys: npt.NDArray[np.floating[Any]],
-    radius: float,
-    dtype: np.dtype[Any],
-) -> npt.NDArray[np.floating[Any]]:
-    assert radius > np.finfo(dtype).eps, f"quadrature radius {radius} is too close to zero"
-    nnodes = int(n.shape[0])
-    b = np.zeros((4, 2 * nnodes), dtype=dtype)
-    for i in range(nnodes):
-        col_r = 2 * i
-        col_z = col_r + 1
-        b[0, col_r] = grad_phys[i, 0]
-        b[1, col_z] = grad_phys[i, 1]
-        b[2, col_r] = n[i] / dtype.type(radius)
-        b[3, col_r] = grad_phys[i, 1]
-        b[3, col_z] = grad_phys[i, 0]
-    return b
-
-
-def _volume_samples(
-    coords: npt.NDArray[np.floating[Any]],
-    element_type: str,
-    quadrature_code: int,
-    dtype: np.dtype[Any],
-):
-    for xi, wx in _gauss_1d(quadrature_code):
-        for eta, wy in _gauss_1d(quadrature_code):
-            n = _element_shape(element_type, xi, eta).astype(dtype, copy=False)
-            grad_ref = _element_grad_ref(element_type, xi, eta).astype(dtype, copy=False)
-            jac = _element_jacobian(coords, grad_ref, dtype)
-            det_j = jac[0, 0] * jac[1, 1] - jac[0, 1] * jac[1, 0]
-            assert det_j > 0.0, f"encountered non-positive element Jacobian determinant {float(det_j)!r}"
-            point = n @ coords
-            assert point[0] >= 0.0, f"quadrature point has negative radius {float(point[0])!r}"
-            inv_j = np.linalg.inv(jac)
-            grad_phys = np.column_stack(
-                [
-                    inv_j[0, 0] * grad_ref[:, 0] + inv_j[1, 0] * grad_ref[:, 1],
-                    inv_j[0, 1] * grad_ref[:, 0] + inv_j[1, 1] * grad_ref[:, 1],
-                ]
-            )
-            yield n, grad_phys, det_j, np.asarray(point, dtype=dtype), dtype.type(wx * wy)
-
-
 def assemble_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
@@ -1034,7 +865,6 @@ def assemble_axisymmetric(
         nelem=elements_arr.shape[0],
         nq_per_element=int(backend.nq_per_element),
         n_temperature_nodes=n_temperature_nodes,
-        quadrature_code=quadrature_code,
     )
 
 
@@ -1043,26 +873,15 @@ def isotropic_axisymmetric_material(
     poisson_ratio: float,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """
-    Construct the full 3D isotropic axisymmetric constitutive matrix.
+    """Construct the full 3D isotropic axisymmetric constitutive matrix."""
 
-    This is the conventional small-strain isotropic matrix specialized to the
-    axisymmetric strain ordering `[rr, zz, tt, rz]`; see [1]-[3].
-    """
-
-    e = float(youngs_modulus)
-    nu = float(poisson_ratio)
-    lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
-    mu = e / (2.0 * (1.0 + nu))
-    return np.array(
-        [
-            [lam + 2.0 * mu, lam, lam, 0.0],
-            [lam, lam + 2.0 * mu, lam, 0.0],
-            [lam, lam, lam + 2.0 * mu, 0.0],
-            [0.0, 0.0, 0.0, mu],
-        ],
-        dtype=dtype,
+    resolved_dtype = np.dtype(dtype)
+    binding = _dispatch_pair(
+        resolved_dtype,
+        _isotropic_axisymmetric_material_f32,
+        _isotropic_axisymmetric_material_f64,
     )
+    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
 
 
 def isotropic_axisymmetric_thermal_material(
@@ -1070,10 +889,13 @@ def isotropic_axisymmetric_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    return np.array(
-        [alpha, alpha, alpha, 0.0, reference_temperature],
-        dtype=dtype,
+    resolved_dtype = np.dtype(dtype)
+    binding = _dispatch_pair(
+        resolved_dtype,
+        _isotropic_axisymmetric_thermal_material_f32,
+        _isotropic_axisymmetric_thermal_material_f64,
     )
+    return _as_float_array(binding(alpha, reference_temperature), resolved_dtype)
 
 
 def orthotropic_axisymmetric_thermal_material(
@@ -1083,9 +905,14 @@ def orthotropic_axisymmetric_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    return np.array(
-        [alpha_r, alpha_z, alpha_t, 0.0, reference_temperature],
-        dtype=dtype,
+    resolved_dtype = np.dtype(dtype)
+    binding = _dispatch_pair(
+        resolved_dtype,
+        _orthotropic_axisymmetric_thermal_material_f32,
+        _orthotropic_axisymmetric_thermal_material_f64,
+    )
+    return _as_float_array(
+        binding(alpha_r, alpha_z, alpha_t, reference_temperature), resolved_dtype
     )
 
 
@@ -1094,62 +921,15 @@ def cfsem_radial_material(
     poisson_ratio: float,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """
-    Construct the reduced isotropic constitutive matrix matching `SolenoidStress1D`.
+    """Construct the reduced isotropic constitutive matrix matching `SolenoidStress1D`."""
 
-    This matrix is chosen so that radial/hoop response in `u_r` agrees with the
-    assumptions used by `cfsem.solenoid_stress.solenoid_1d.SolenoidStress1D`
-    for the pressure-vessel validation cases.
-    """
-
-    e = float(youngs_modulus)
-    nu = float(poisson_ratio)
-    factor = e / (1.0 - nu**2)
-    shear = e / (2.0 * (1.0 + nu))
-    return np.array(
-        [
-            [factor, 0.0, factor * nu, 0.0],
-            [0.0, e, 0.0, 0.0],
-            [factor * nu, 0.0, factor, 0.0],
-            [0.0, 0.0, 0.0, shear],
-        ],
-        dtype=dtype,
+    resolved_dtype = np.dtype(dtype)
+    binding = _dispatch_pair(
+        resolved_dtype,
+        _cfsem_radial_material_f32,
+        _cfsem_radial_material_f64,
     )
-
-
-def _gauss_1d(code: int) -> list[tuple[float, float]]:
-    if code == 3:
-        a = np.sqrt(3.0 / 5.0)
-        return [(-a, 5.0 / 9.0), (0.0, 8.0 / 9.0), (a, 5.0 / 9.0)]
-    if code == 4:
-        a = np.sqrt((3.0 + 2.0 * np.sqrt(6.0 / 5.0)) / 7.0)
-        b = np.sqrt((3.0 - 2.0 * np.sqrt(6.0 / 5.0)) / 7.0)
-        w_a = (18.0 - np.sqrt(30.0)) / 36.0
-        w_b = (18.0 + np.sqrt(30.0)) / 36.0
-        return [(-a, w_a), (-b, w_b), (b, w_b), (a, w_a)]
-    raise ValueError(f"unsupported quadrature code {code}")
-
-
-def _quad4_shape(xi: float, eta: float) -> npt.NDArray[np.float64]:
-    return 0.25 * np.array(
-        [
-            (1.0 - xi) * (1.0 - eta),
-            (1.0 + xi) * (1.0 - eta),
-            (1.0 + xi) * (1.0 + eta),
-            (1.0 - xi) * (1.0 + eta),
-        ]
-    )
-
-
-def _quad4_grad_ref(xi: float, eta: float) -> npt.NDArray[np.float64]:
-    return 0.25 * np.array(
-        [
-            [-(1.0 - eta), -(1.0 - xi)],
-            [1.0 - eta, -(1.0 + xi)],
-            [1.0 + eta, 1.0 + xi],
-            [-(1.0 + eta), 1.0 - xi],
-        ]
-    )
+    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
 
 
 def _normalize_displacements(

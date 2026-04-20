@@ -456,6 +456,7 @@
 
 mod assembly;
 mod axisym;
+mod convenience;
 mod family;
 mod geometry;
 mod loads;
@@ -464,6 +465,12 @@ mod recovery;
 mod types;
 
 pub use crate::mesh::QuadratureRule;
+pub use convenience::{
+    AxisymmetricElementMeasures, AxisymmetricElementQuadrature, ElevatedQuad9Mesh,
+    QuadratureFieldSamples, cfsem_radial_material, infer_quad9_mesh,
+    isotropic_axisymmetric_material, isotropic_axisymmetric_thermal_material,
+    orthotropic_axisymmetric_thermal_material,
+};
 pub use model::{
     AxisymmetricElementType, AxisymmetricElements, AxisymmetricModel, ReducedRecoveryOperators,
     assemble_axisymmetric,

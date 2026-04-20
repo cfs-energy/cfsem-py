@@ -962,11 +962,6 @@ def test_axisymmetric_fem_helper_validation_branches() -> None:
     traction = fem._normalize_traction_values(np.array([1.0, 2.0]), 3, np.dtype(np.float64))
     assert traction.shape == (3, 2)
 
-    assert len(fem._gauss_1d(3)) == 3
-    assert len(fem._gauss_1d(4)) == 4
-    with pytest.raises(ValueError, match="unsupported quadrature code"):
-        fem._gauss_1d(2)
-
 
 def test_model_recovery_and_fixed_dof_branches() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=np.float64)
@@ -1037,6 +1032,42 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 def test_quad4_quadrature_field_operators_match_manual_recovery(dtype: DType) -> None:
+    def gauss_1d_gl3() -> list[tuple[float, float]]:
+        a = np.sqrt(3.0 / 5.0)
+        return [(-a, 5.0 / 9.0), (0.0, 8.0 / 9.0), (a, 5.0 / 9.0)]
+
+    def quad4_shape(xi: float, eta: float) -> np.ndarray:
+        return 0.25 * np.array(
+            [
+                (1.0 - xi) * (1.0 - eta),
+                (1.0 + xi) * (1.0 - eta),
+                (1.0 + xi) * (1.0 + eta),
+                (1.0 - xi) * (1.0 + eta),
+            ]
+        )
+
+    def quad4_grad_ref(xi: float, eta: float) -> np.ndarray:
+        return 0.25 * np.array(
+            [
+                [-(1.0 - eta), -(1.0 - xi)],
+                [1.0 - eta, -(1.0 + xi)],
+                [1.0 + eta, 1.0 + xi],
+                [-(1.0 + eta), 1.0 - xi],
+            ]
+        )
+
+    def axisymmetric_b_matrix(n: np.ndarray, grad_phys: np.ndarray, radius: float) -> np.ndarray:
+        b = np.zeros((4, 2 * n.shape[0]), dtype=dtype_res)
+        for i in range(n.shape[0]):
+            col_r = 2 * i
+            col_z = col_r + 1
+            b[0, col_r] = grad_phys[i, 0]
+            b[1, col_z] = grad_phys[i, 1]
+            b[2, col_r] = n[i] / radius
+            b[3, col_r] = grad_phys[i, 1]
+            b[3, col_z] = grad_phys[i, 0]
+        return b
+
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
@@ -1066,13 +1097,31 @@ def test_quad4_quadrature_field_operators_match_manual_recovery(dtype: DType) ->
         coords = nodes_arr[conn]
         u_local = displacements_arr[conn].reshape(-1)
         material_local = material_table_arr[int(material_ids_arr[element_index])]
-        for n, grad_phys, _det_j, point, _weight in fem._volume_samples(coords, "quad4", 3, dtype_res):
-            b = fem._axisymmetric_b_matrix(n, grad_phys, float(point[0]), dtype_res)
-            eps = b @ u_local
-            sig = material_local @ eps
-            manual_points.append(np.asarray(point, dtype=dtype_res))
-            manual_strain.append(np.asarray(eps, dtype=dtype_res))
-            manual_stress.append(np.asarray(sig, dtype=dtype_res))
+        for xi, wx in gauss_1d_gl3():
+            for eta, wy in gauss_1d_gl3():
+                n = quad4_shape(xi, eta).astype(dtype_res, copy=False)
+                grad_ref = quad4_grad_ref(xi, eta).astype(dtype_res, copy=False)
+                jac = np.array(
+                    [
+                        [np.dot(coords[:, 0], grad_ref[:, 0]), np.dot(coords[:, 0], grad_ref[:, 1])],
+                        [np.dot(coords[:, 1], grad_ref[:, 0]), np.dot(coords[:, 1], grad_ref[:, 1])],
+                    ],
+                    dtype=dtype_res,
+                )
+                point = np.asarray(n @ coords, dtype=dtype_res)
+                inv_j = np.linalg.inv(jac)
+                grad_phys = np.column_stack(
+                    [
+                        inv_j[0, 0] * grad_ref[:, 0] + inv_j[1, 0] * grad_ref[:, 1],
+                        inv_j[0, 1] * grad_ref[:, 0] + inv_j[1, 1] * grad_ref[:, 1],
+                    ]
+                )
+                b = axisymmetric_b_matrix(n, grad_phys, float(point[0]))
+                eps = b @ u_local
+                sig = material_local @ eps
+                manual_points.append(np.asarray(point, dtype=dtype_res))
+                manual_strain.append(np.asarray(eps, dtype=dtype_res))
+                manual_stress.append(np.asarray(sig, dtype=dtype_res))
 
     actual_strain = np.asarray(model.strain_operator @ displacement, dtype=dtype_res).reshape(-1, 4)
     actual_stress = np.asarray(model.stress_operator @ displacement, dtype=dtype_res).reshape(-1, 4)
@@ -1284,7 +1333,7 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
         model.evaluate_quadrature(zero_displacement)
 
 
-def test_private_helper_and_validation_branches_not_hit_by_public_paths() -> None:
+def test_remaining_helper_and_convenience_branches_not_hit_by_public_paths() -> None:
     dtype = np.dtype(np.float64)
 
     assert fem._resolve_float_dtype({"a": np.array([1.0], dtype=np.float64)}) == np.dtype(np.float64)
@@ -1298,20 +1347,13 @@ def test_private_helper_and_validation_branches_not_hit_by_public_paths() -> Non
     assert np.array_equal(normalized_ids, np.array([1, 0, 1], dtype=np.uint64))
     assert thermal_table.shape == (2, 5)
 
-    assert fem._quad_face_reference(0, 0.25) == (0.25, -1.0, (1.0, 0.0))
-    assert fem._quad_face_reference(1, 0.25) == (1.0, 0.25, (0.0, 1.0))
-    assert fem._quad_face_reference(2, 0.25) == (-0.25, 1.0, (-1.0, 0.0))
-    assert fem._quad_face_reference(3, 0.25) == (-1.0, -0.25, (0.0, -1.0))
-    with pytest.raises(ValueError, match="invalid local face"):
-        fem._quad_face_reference(4, 0.0)
+    iso = fem.isotropic_axisymmetric_material(200.0e9, 0.3, dtype=dtype)
+    assert iso.shape == (4, 4)
+    assert np.allclose(iso, iso.T)
 
-    shape = fem._quad9_shape(0.0, 0.0)
-    grad = fem._quad9_grad_ref(0.0, 0.0)
-    assert shape.shape == (9,)
-    assert np.isclose(shape.sum(), 1.0)
-    assert grad.shape == (9, 2)
-    assert fem._element_shape("quad9", 0.0, 0.0).shape == (9,)
-    assert fem._element_grad_ref("quad9", 0.0, 0.0).shape == (9, 2)
+    reduced = fem.cfsem_radial_material(200.0e9, 0.3, dtype=dtype)
+    assert reduced.shape == (4, 4)
+    assert reduced[1, 1] == pytest.approx(200.0e9)
 
     ortho = fem.orthotropic_axisymmetric_thermal_material(1.0, 2.0, 3.0, reference_temperature=4.0, dtype=dtype)
     assert np.allclose(ortho, np.array([1.0, 2.0, 3.0, 0.0, 4.0], dtype=dtype))

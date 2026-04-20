@@ -8,6 +8,9 @@ use faer::sparse::{SparseColMat, SparseRowMat, Triplet};
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::assemble_stiffness_for_family;
+use crate::physics::solenoid_stress::convenience::{
+    AxisymmetricElementMeasures, AxisymmetricElementQuadrature, QuadratureFieldSamples,
+};
 use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
     SparseOperator, body_force_operator_for_family, pressure_operator_for_family,
@@ -15,7 +18,7 @@ use crate::physics::solenoid_stress::loads::{
 };
 use crate::physics::solenoid_stress::recovery::quadrature_field_operators_for_family;
 use crate::physics::solenoid_stress::types::{
-    PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element,
+    PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element, two_pi,
 };
 
 /// Public element-family selector for the axisymmetric structural solver.
@@ -159,6 +162,8 @@ pub struct AxisymmetricModel<F: Real> {
     pub nodes_per_element: usize,
     /// Analysis element family used by the backend.
     pub element_type: AxisymmetricElementType,
+    /// Volume and face quadrature rule used to assemble the stored operators.
+    pub quadrature: QuadratureRule,
     /// Number of displacement DOFs in the unreduced full system.
     pub ndof_full: usize,
     /// Number of displacement DOFs remaining after Dirichlet reduction.
@@ -286,6 +291,118 @@ impl<F: Real> AxisymmetricModel<F> {
             full[dof] = value;
         }
         full
+    }
+
+    /// Recompute the physical quadrature points and mapped weights for the stored analysis mesh.
+    pub fn element_quadrature(&self) -> Result<AxisymmetricElementQuadrature<F>, String> {
+        match self.element_type {
+            AxisymmetricElementType::Quad4 => {
+                element_quadrature_for_family::<F, Quad4Family, { quad4::NODES_PER_ELEMENT }>(
+                    &self.analysis_nodes,
+                    &self.analysis_elements_flat,
+                    self.nelem,
+                    self.quadrature,
+                )
+            }
+            AxisymmetricElementType::Quad9 => {
+                element_quadrature_for_family::<F, Quad9Family, { quad9::NODES_PER_ELEMENT }>(
+                    &self.analysis_nodes,
+                    &self.analysis_elements_flat,
+                    self.nelem,
+                    self.quadrature,
+                )
+            }
+        }
+    }
+
+    /// Return per-element meridian area and swept volume from the model quadrature data.
+    pub fn element_measures(&self) -> Result<AxisymmetricElementMeasures<F>, String> {
+        let quadrature = self.element_quadrature()?;
+        let mut areas = vec![F::zero(); self.nelem];
+        let mut swept_volumes = vec![F::zero(); self.nelem];
+        for element in 0..self.nelem {
+            let start = element * quadrature.nq_per_element;
+            let end = start + quadrature.nq_per_element;
+            for &weight in &quadrature.weights_area[start..end] {
+                areas[element] = areas[element] + weight;
+            }
+            for &weight in &quadrature.weights_volume[start..end] {
+                swept_volumes[element] = swept_volumes[element] + weight;
+            }
+        }
+        Ok(AxisymmetricElementMeasures {
+            areas,
+            swept_volumes,
+        })
+    }
+
+    /// Recover strain and stress fields at element quadrature points from a full displacement
+    /// vector and optional nodal temperatures.
+    pub fn evaluate_quadrature(
+        &self,
+        displacements_full: &[F],
+        nodal_temperature: Option<&[F]>,
+    ) -> Result<QuadratureFieldSamples<F>, String> {
+        if displacements_full.len() != self.ndof_full {
+            return Err(format!(
+                "displacements_full has length {}, but full system has {} DOFs",
+                displacements_full.len(),
+                self.ndof_full
+            ));
+        }
+
+        let reduced = self
+            .free_dofs
+            .iter()
+            .map(|&dof| displacements_full[dof])
+            .collect::<Vec<_>>();
+        let temperature = normalize_temperature(
+            nodal_temperature,
+            self.recovery.n_temperature_nodes,
+            "nodal_temperature",
+        )?;
+
+        let strain = add_constant(
+            csr_matvec(&self.recovery.strain_operator, &reduced),
+            &self.recovery.strain_constant,
+        );
+        let stress_from_displacement = add_constant(
+            csr_matvec(&self.recovery.stress_operator, &reduced),
+            &self.recovery.stress_constant,
+        );
+        let thermal_strain = add_constant(
+            csr_matvec(&self.recovery.thermal_strain_operator, temperature),
+            &self.recovery.thermal_strain_constant,
+        );
+        let thermal_stress = add_constant(
+            csr_matvec(&self.recovery.thermal_stress_operator, temperature),
+            &self.recovery.thermal_stress_constant,
+        );
+        let stress = subtract_vectors(&stress_from_displacement, &thermal_stress)?;
+        let strain = pack_rank4_field(strain)?;
+        let thermal_strain = pack_rank4_field(thermal_strain)?;
+        let stress = pack_rank4_field(stress)?;
+        let elastic_strain = strain
+            .iter()
+            .zip(&thermal_strain)
+            .map(|(total, thermal)| {
+                [
+                    total[0] - thermal[0],
+                    total[1] - thermal[1],
+                    total[2] - thermal[2],
+                    total[3] - thermal[3],
+                ]
+            })
+            .collect();
+
+        Ok(QuadratureFieldSamples {
+            points_rz: self.recovery.points_rz.clone(),
+            strain,
+            thermal_strain,
+            elastic_strain,
+            stress,
+            nq_per_element: self.recovery.nq_per_element,
+        })
     }
 }
 
@@ -546,6 +663,7 @@ where
         analysis_elements_flat: Family::flatten_elements(elements),
         nodes_per_element: NODES_PER_ELEMENT,
         element_type: Family::element_type(),
+        quadrature,
         ndof_full,
         ndof_reduced,
         nelem,
@@ -773,4 +891,151 @@ fn apply_csr_operator<F: Real>(
         output[row] = output[row] + sum;
     }
     Ok(())
+}
+
+/// Gather one element's node coordinates from the flattened analysis connectivity.
+fn element_coords_from_flat<F: Real, const NODES_PER_ELEMENT: usize>(
+    analysis_nodes: &[[F; 2]],
+    analysis_elements_flat: &[usize],
+    element_index: usize,
+) -> Result<[[F; 2]; NODES_PER_ELEMENT], String> {
+    let start = element_index * NODES_PER_ELEMENT;
+    let end = start + NODES_PER_ELEMENT;
+    let conn = analysis_elements_flat
+        .get(start..end)
+        .ok_or_else(|| format!("element index {element_index} out of bounds"))?;
+    let mut coords = [[F::zero(); 2]; NODES_PER_ELEMENT];
+    for (local_node, &node) in conn.iter().enumerate() {
+        coords[local_node] = *analysis_nodes.get(node).ok_or_else(|| {
+            format!(
+                "element {element_index} references node {node}, but analysis mesh has only {} nodes",
+                analysis_nodes.len()
+            )
+        })?;
+    }
+    Ok(coords)
+}
+
+/// Recompute physical quadrature points and mapped weights for one stored element family.
+fn element_quadrature_for_family<F: Real, Family, const NODES_PER_ELEMENT: usize>(
+    analysis_nodes: &[[F; 2]],
+    analysis_elements_flat: &[usize],
+    nelem: usize,
+    quadrature: QuadratureRule,
+) -> Result<AxisymmetricElementQuadrature<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    let mut points_rz = Vec::new();
+    let mut weights_area = Vec::new();
+    let mut weights_volume = Vec::new();
+    let mut nq_per_element = None;
+    for element_index in 0..nelem {
+        let coords = element_coords_from_flat::<F, NODES_PER_ELEMENT>(
+            analysis_nodes,
+            analysis_elements_flat,
+            element_index,
+        )?;
+        let samples = Family::volume_samples(&coords, quadrature)?;
+        if let Some(nq) = nq_per_element {
+            if samples.len() != nq {
+                return Err(format!(
+                    "element {element_index} produced {} quadrature points, expected {nq}",
+                    samples.len()
+                ));
+            }
+        } else {
+            nq_per_element = Some(samples.len());
+        }
+        for sample in samples {
+            let area_weight = sample.det_j * sample.weight;
+            points_rz.push(sample.point);
+            weights_area.push(area_weight);
+            weights_volume.push(area_weight * two_pi::<F>() * sample.point[0]);
+        }
+    }
+    Ok(AxisymmetricElementQuadrature {
+        points_rz,
+        weights_area,
+        weights_volume,
+        nq_per_element: nq_per_element.unwrap_or(0),
+    })
+}
+
+/// Multiply one CSR operator by a dense input vector.
+fn csr_matvec<F: Real>(operator: &SparseRowMat<usize, F>, input: &[F]) -> Vec<F> {
+    let mut output = vec![F::zero(); operator.nrows()];
+    for row in 0..operator.nrows() {
+        let start = operator.row_ptr()[row];
+        let end = operator.row_ptr()[row + 1];
+        let mut sum = F::zero();
+        for index in start..end {
+            sum = sum + operator.val()[index] * input[operator.col_idx()[index]];
+        }
+        output[row] = sum;
+    }
+    output
+}
+
+/// Validate one optional temperature vector against the model's thermal operator width.
+fn normalize_temperature<'a, F: Real>(
+    temperature: Option<&'a [F]>,
+    expected_len: usize,
+    name: &str,
+) -> Result<&'a [F], String> {
+    match (expected_len, temperature) {
+        (0, Some(values)) if !values.is_empty() => Err(format!(
+            "{name} was provided, but this model has no thermal operator"
+        )),
+        (0, _) => Ok(&[]),
+        (_, None) => Err(format!(
+            "{name} is required because this model includes thermal materials"
+        )),
+        (expected, Some(values)) if values.len() != expected => Err(format!(
+            "{name} has length {}, but thermal operators expect {expected} values",
+            values.len()
+        )),
+        (_, Some(values)) => Ok(values),
+    }
+}
+
+/// Add one constant vector to a dense field vector.
+fn add_constant<F: Real>(mut values: Vec<F>, constant: &[F]) -> Vec<F> {
+    assert!(
+        values.len() == constant.len(),
+        "cannot add vectors of lengths {} and {}",
+        values.len(),
+        constant.len()
+    );
+    for (dst, src) in values.iter_mut().zip(constant) {
+        *dst = *dst + *src;
+    }
+    values
+}
+
+/// Subtract one dense vector from another.
+fn subtract_vectors<F: Real>(lhs: &[F], rhs: &[F]) -> Result<Vec<F>, String> {
+    if lhs.len() != rhs.len() {
+        return Err(format!(
+            "cannot subtract vectors of lengths {} and {}",
+            lhs.len(),
+            rhs.len()
+        ));
+    }
+    Ok(lhs.iter().zip(rhs).map(|(&a, &b)| a - b).collect())
+}
+
+/// Pack a flattened quadrature field into one `[rr, zz, tt, rz]` sample per point.
+fn pack_rank4_field<F: Real>(flat: Vec<F>) -> Result<Vec<[F; 4]>, String> {
+    if flat.len() % 4 != 0 {
+        return Err(format!(
+            "quadrature field has {} entries, which is not divisible by 4",
+            flat.len()
+        ));
+    }
+    let mut packed = Vec::with_capacity(flat.len() / 4);
+    for chunk in flat.chunks_exact(4) {
+        packed.push([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    }
+    Ok(packed)
 }

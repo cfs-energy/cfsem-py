@@ -1,4 +1,34 @@
 //! Sparse strain/stress recovery operators at element quadrature points.
+//!
+//! The displacement derivatives used in strain and stress recovery are implemented analytically
+//! from the element shape functions, then mapped from reference-element coordinates into physical
+//! meridian coordinates `(r, z)` with the element Jacobian. There is no finite-difference
+//! approximation of the displacement field.
+//!
+//! The chain is:
+//! 1. Each element family defines closed-form shape functions `N_i(\xi,\eta)` and closed-form
+//!    reference gradients.
+//! 2. At each quadrature point, those reference gradients are mapped into physical-space
+//!    gradients with the inverse Jacobian according to
+//!    `partial N / partial (r, z) = J^{-T} partial N / partial (\xi, \eta)`.
+//! 3. Those physical derivatives are stored in each [`VolumeSample`] as `grad_phys`.
+//! 4. The axisymmetric strain-displacement matrix `B` is then built from those physical
+//!    derivatives.
+//!
+//! In that `B` matrix:
+//! - `e_rr = partial u_r / partial r`,
+//! - `e_zz = partial u_z / partial z`,
+//! - `g_rz = partial u_r / partial z + partial u_z / partial r`,
+//! so those rows use the entries of `grad_phys` directly.
+//!
+//! The hoop term is slightly different:
+//! - `e_tt = u_r / r`,
+//! so that row uses `N_i / r`, not a spatial derivative.
+//!
+//! 5. Recovery then uses that same `B`:
+//!    - strain recovery uses `B`,
+//!    - stress recovery uses `D B`,
+//!    where `D` is the local per-material `4 x 4` constitutive matrix.
 
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{

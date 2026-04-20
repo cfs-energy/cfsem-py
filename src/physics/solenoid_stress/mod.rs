@@ -22,7 +22,8 @@
 //!   physical coordinates `(r, z)`, so it converts reference-space gradients and differential area
 //!   into physical-space gradients and area through `dA = det(J) d\xi d\eta`,
 //! - `B` maps nodal displacements to the axisymmetric strain vector,
-//! - `D` maps strain to stress through the material law,
+//! - `D` is the constitutive matrix, a per-material `4 x 4` tensor in axisymmetric stress/strain
+//!   ordering, and it maps strain to stress through the material law,
 //! - `epsilon` is the strain vector at a point,
 //! - `sigma` is the stress vector at a point,
 //! - `B^T` maps stress back to equivalent nodal forces,
@@ -133,7 +134,8 @@
 //! - evaluates the shape functions `N_i(\xi, \eta)`,
 //! - maps their reference gradients into physical gradients with the element Jacobian `J`,
 //! - builds the axisymmetric strain-displacement matrix `B`,
-//! - forms `B^T D B` for the local stiffness contribution, and
+//! - applies the per-material `4 x 4` constitutive matrix `D` locally to form `B^T D B` for the
+//!   local stiffness contribution, and
 //! - scales the contribution by the area weight `det(J) w` and by the additional
 //!   axisymmetric revolution factor `2*pi*r`.
 //!
@@ -174,9 +176,10 @@
 //! and the constitutive law becomes
 //! `sigma = D (epsilon - epsilon_th)`.
 //! The matrix `D` therefore maps strain-like quantities in that axisymmetric ordering into the
-//! corresponding stress-like quantities in the same ordering.  The same `D` is used in both
-//! stiffness assembly and stress recovery, so the stiffness matrix and the reported stresses are
-//! built from one constitutive model.
+//! corresponding stress-like quantities in the same ordering.  In the implementation `D` is not
+//! assembled into any global constitutive operator.  Instead, each quadrature point applies the
+//! relevant per-material `4 x 4` matrix directly, so stiffness assembly and stress recovery use
+//! the same constitutive law in a matrix-free local form.
 //!
 //! From an energy viewpoint, the strain-energy density is
 //! `1/2 epsilon^T D epsilon`
@@ -203,6 +206,10 @@
 //! From these it builds the strain-displacement matrix `B_q` and then forms the dense
 //! quadrature-point kernel
 //! `scale_q B_q^T D B_q`.
+//! The important implementation detail is that `D` is applied only as this local `4 x 4`
+//! contribution.  There is no assembled global constitutive matrix; the backend computes `D B_q`
+//! directly for each quadrature point and accumulates the resulting `B_q^T (D B_q)` contribution
+//! into the element stiffness matrix.
 //!
 //! Entry by entry, this means that each local matrix coefficient receives
 //! `K_e[a, b] += scale_q sum_m B_q[m, a] (D B_q)[m, b]`.
@@ -226,7 +233,10 @@
 //!
 //! The stress and strain recovery operators in [`recovery`] use the same quadrature-point objects.
 //! The strain operator stores the action of `B_q`, while the stress operator stores the action of
-//! `D B_q`.  Applying those operators to the global displacement vector therefore recovers
+//! the local constitutive product `D B_q`.  As in stiffness assembly, this is done matrix-free
+//! with the individual per-material `4 x 4` constitutive matrix at each quadrature point rather
+//! than through any assembled global `D` operator.  Applying those operators to the global
+//! displacement vector therefore recovers
 //! `epsilon_q = B_q u_e` and `sigma_q = D epsilon_q`, or `sigma_q = D (epsilon_q - epsilon_th,q)`
 //! when thermal strain is present.
 //!

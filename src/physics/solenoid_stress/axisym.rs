@@ -54,7 +54,9 @@ pub fn build_b_matrix<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELE
 /// Accumulate `scale * B^T D B` into the element stiffness matrix.
 ///
 /// The caller supplies `scale = 2*pi*r*det(J)*w`, so this routine is purely the dense local
-/// linear-algebra kernel for one quadrature point.
+/// linear-algebra kernel for one quadrature point.  The constitutive action is applied directly
+/// through the supplied per-material `4 x 4` matrix `d`; no global constitutive operator is ever
+/// assembled.
 ///
 /// # References
 /// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
@@ -83,6 +85,10 @@ pub fn accumulate_stiffness<F: Real, const DOF_PER_ELEMENT: usize>(
 ///
 /// The returned matrix maps element displacement DOFs directly to stresses:
 /// `sigma = (D B) u_e`.
+///
+/// This is the local matrix-free constitutive application used in both stiffness assembly and
+/// stress recovery.  `D` is the per-material `4 x 4` constitutive matrix; it is not assembled
+/// into any larger global matrix.
 pub fn constitutive_times_b<F: Real, const DOF_PER_ELEMENT: usize>(
     d: &[[F; 4]; 4],
     b: &[[F; DOF_PER_ELEMENT]; 4],
@@ -101,6 +107,9 @@ pub fn constitutive_times_b<F: Real, const DOF_PER_ELEMENT: usize>(
 }
 
 /// Multiply the constitutive matrix `D` by one strain vector.
+///
+/// This is the local matrix-free constitutive application used for thermal stress construction and
+/// other quadrature-point stress calculations.
 pub fn constitutive_times_strain<F: Real>(d: &[[F; 4]; 4], strain: &[F; 4]) -> [F; 4] {
     let mut out = [F::zero(); 4];
     for row in 0..4 {

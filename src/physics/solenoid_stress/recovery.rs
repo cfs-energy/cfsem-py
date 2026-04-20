@@ -132,7 +132,9 @@ fn quadrature_sample_kernel<
         &sample.grad_phys,
         sample.point[0],
     )?;
-    // `D B` maps nodal displacements `[length]` to stress `[pressure]`.
+    // `D B` maps nodal displacements `[length]` to stress `[pressure]`. The constitutive action
+    // is applied here with the local per-material `4 x 4` matrix; there is no assembled global
+    // constitutive operator.
     let stress = constitutive_times_b(material, &strain);
     let mut local = LocalQuadratureSampleKernel {
         strain,

@@ -2105,13 +2105,13 @@ def create_app():
                                     html.Div(
                                         dcc.Loading(
                                             type="circle",
-                                            children=dcc.Graph(id="overview-mesh-figure"),
+                                            children=dcc.Graph(id="overview-vm-1d-figure"),
                                         )
                                     ),
                                     html.Div(
                                         dcc.Loading(
                                             type="circle",
-                                            children=dcc.Graph(id="overview-vm-1d-figure"),
+                                            children=dcc.Graph(id="overview-mesh-figure"),
                                         )
                                     ),
                                 ],

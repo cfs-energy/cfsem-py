@@ -2,9 +2,10 @@
 2D-axisymmetric elasticity finite-element assembly for solenoid stress problems.
 
 This module provides a small displacement-based axisymmetric finite-element solver
-for the `(r, z)` meridian plane. The Rust backend assembles the reduced constrained
-model, stores the sparse operators, caches the LU factorization, runs the solve,
-and provides the shared material, mesh-elevation, and quadrature-recovery
+for the `(r, z)` meridian plane. The primary backend abstraction is an assembled,
+reusable model that stores sparse load operators, sparse quadrature-recovery
+operators, and the reduced stiffness matrix. The Rust backend also caches the LU
+factorization and provides shared material, mesh-elevation, and quadrature-recovery
 conveniences. Python wraps that model, normalizes NumPy-facing inputs, and reshapes
 the returned arrays.
 
@@ -130,7 +131,10 @@ def _csc_matrix_from_binding(
 
 @dataclass(frozen=True, slots=True)
 class ElementMeasures:
-    """Per-element meridian area and swept volume."""
+    """Per-element meridian area and swept volume.
+
+    `areas` and `swept_volumes` both have shape `(nelem,)`.
+    """
 
     areas: npt.NDArray[np.floating[Any]]
     swept_volumes: npt.NDArray[np.floating[Any]]
@@ -138,7 +142,11 @@ class ElementMeasures:
 
 @dataclass(frozen=True, slots=True)
 class ElementQuadrature:
-    """Per-element physical quadrature points and mapped weights."""
+    """Per-element physical quadrature points and mapped weights.
+
+    `points_rz` has shape `(nelem, nq_per_element, 2)`.
+    `weights_area` and `weights_volume` have shape `(nelem, nq_per_element)`.
+    """
 
     points_rz: npt.NDArray[np.floating[Any]]
     weights_area: npt.NDArray[np.floating[Any]]
@@ -148,7 +156,7 @@ class ElementQuadrature:
 
 @dataclass(frozen=True, slots=True)
 class ElevatedQuad9Mesh:
-    """Explicit 9-node analysis mesh inferred from a corner-only quad mesh."""
+    """Explicit 9-node analysis mesh inferred from a corner-only quad4 mesh."""
 
     input_nodes: npt.NDArray[np.floating[Any]]
     input_elements: npt.NDArray[np.uint64]
@@ -160,7 +168,22 @@ class ElevatedQuad9Mesh:
 
 
 class AxisymmetricFEMModel:
-    """Reduced axisymmetric FEM model assembled once and reused for load cases."""
+    """Reusable axisymmetric FEM model with sparse operators and reduced solve state.
+
+    The stored sparse operators are the primary reusable objects:
+    - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
+      map load amplitudes to the reduced structural right-hand side,
+    - `strain_operator`, `stress_operator`, `thermal_strain_operator`, and
+      `thermal_stress_operator` map solved displacements or nodal temperatures to quadrature-point
+      fields.
+
+    `build_rhs(...)`, `solve(...)`, `element_quadrature()`, `element_measures()`, and
+    `evaluate_quadrature(...)` are convenience methods layered on top of those stored operators
+    and the reduced stiffness matrix.
+
+    `input_nodes` and `input_elements` expose the original corner-node mesh. `nodes` and
+    `elements` remain as compatibility aliases for those same arrays.
+    """
 
     def __init__(
         self,
@@ -239,15 +262,27 @@ class AxisymmetricFEMModel:
 
     @property
     def dtype(self) -> np.dtype[Any]:
+        """Floating dtype used by the assembled operators and convenience methods."""
+
         return self._dtype
 
     @property
     def ndof(self) -> int:
+        """Compatibility alias for `ndof_full`."""
+
         return self.ndof_full
 
     @property
-    def thermal_reference_rhs(self) -> npt.NDArray[np.floating[Any]]:
-        return self.constant_rhs
+    def input_nodes(self) -> npt.NDArray[np.floating[Any]]:
+        """Corner-node input mesh coordinates with shape `(nnode, 2)`."""
+
+        return self._input_nodes
+
+    @property
+    def input_elements(self) -> npt.NDArray[np.uint64]:
+        """Input mesh connectivity with shape `(nelem, 4)`."""
+
+        return self._input_elements
 
     def element_quadrature(self) -> ElementQuadrature:
         """Return physical quadrature points and mapped area/volume weights per element."""
@@ -312,6 +347,11 @@ class AxisymmetricFEMModel:
         traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
+        """Build one reduced right-hand side from the stored sparse load operators.
+
+        The returned vector has shape `(ndof_reduced,)`.
+        """
+
         body_force_arr = _normalize_body_force_or_zero(body_force, self.nelem, self.dtype)
         _, nload = _sparse_shape(self.pressure_to_rhs)
         pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
@@ -331,6 +371,8 @@ class AxisymmetricFEMModel:
         return np.asarray(rhs, dtype=self.dtype)
 
     def solve(self, rhs: ArrayLike) -> npt.NDArray[np.floating[Any]]:
+        """Solve the reduced system for one right-hand side and recover the full displacement."""
+
         rhs_arr = np.asarray(rhs, dtype=self.dtype).reshape(-1)
         assert (
             rhs_arr.shape[0] == self.ndof_reduced
@@ -338,6 +380,8 @@ class AxisymmetricFEMModel:
         return np.asarray(self._backend.solve(rhs_arr), dtype=self.dtype)
 
     def recover_full(self, reduced_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
+        """Reinsert prescribed Dirichlet values into a reduced displacement vector."""
+
         reduced_arr = np.asarray(reduced_solution, dtype=self.dtype).reshape(-1)
         assert (
             reduced_arr.shape[0] == self.ndof_reduced
@@ -352,6 +396,13 @@ class AxisymmetricFEMModel:
         displacements: ArrayLike,
         nodal_temperature: ArrayLike | None = None,
     ) -> QuadratureFieldSamples:
+        """Evaluate quadrature-point strain and stress fields from displacements.
+
+        `displacements` may be either the reduced solution with shape `(ndof_reduced,)` or the
+        full analysis displacement field with shape `(2 * n_analysis_nodes,)` or
+        `(n_analysis_nodes, 2)`.
+        """
+
         arr = np.asarray(displacements, dtype=self.dtype)
         if arr.ndim == 1 and arr.shape == (self.ndof_reduced,):
             displacements_full = self.recover_full(arr)
@@ -381,7 +432,11 @@ class AxisymmetricFEMModel:
 
 @dataclass(frozen=True, slots=True)
 class QuadratureFieldSamples:
-    """Recovered strain and stress at element quadrature points."""
+    """Recovered strain and stress at element quadrature points.
+
+    Each field has shape `(nelem, nq_per_element, 4)` with component ordering
+    `[rr, zz, tt, rz]`. `points_rz` has shape `(nelem, nq_per_element, 2)`.
+    """
 
     points_rz: npt.NDArray[np.floating[Any]]
     strain: npt.NDArray[np.floating[Any]]
@@ -391,6 +446,8 @@ class QuadratureFieldSamples:
 
     @property
     def total_strain(self) -> npt.NDArray[np.floating[Any]]:
+        """Alias for `strain`."""
+
         return self.strain
 
 
@@ -751,7 +808,16 @@ def assemble_axisymmetric(
     quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> AxisymmetricFEMModel:
-    """Assemble a reduced axisymmetric FEM model with fixed load topology and Dirichlet data."""
+    """Assemble the reusable axisymmetric FEM model.
+
+    The returned model stores the reduced stiffness matrix, the sparse load operators, the sparse
+    quadrature-recovery operators, and the fixed load topology associated with `pressure_faces`,
+    `traction_faces`, and `thermal_material_table`.
+
+    `element_type="quad4"` uses the input mesh directly. `element_type="quad9"` elevates the
+    corner-only input mesh to an explicit 9-node analysis mesh for the backend while keeping the
+    Python-side load and temperature inputs on the original corner nodes.
+    """
 
     elements_arr = _normalize_elements(elements)
     dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
@@ -886,6 +952,8 @@ def isotropic_axisymmetric_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
+    """Construct isotropic thermal-expansion data `[alpha_r, alpha_z, alpha_t, 0, T_ref]`."""
+
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
         resolved_dtype,
@@ -902,6 +970,8 @@ def orthotropic_axisymmetric_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
+    """Construct orthotropic thermal-expansion data `[alpha_r, alpha_z, alpha_t, 0, T_ref]`."""
+
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
         resolved_dtype,
@@ -942,6 +1012,8 @@ def _normalize_displacements(
 
 __all__ = [
     "AxisymmetricFEMModel",
+    "ElementMeasures",
+    "ElementQuadrature",
     "ElevatedQuad9Mesh",
     "QuadratureFieldSamples",
     "assemble_axisymmetric",

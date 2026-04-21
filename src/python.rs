@@ -349,6 +349,11 @@ struct SolenoidStressAxisymmetricModelF32 {
     inner: physics::solenoid_stress::AxisymmetricModel<f32>,
 }
 
+/// Low-level PyO3 wrapper for the reusable axisymmetric FEM model.
+///
+/// The public Python API lives in `cfsem.solenoid_stress.axisymmetric_fem`. This wrapper exposes
+/// raw arrays and sparse storage tuples so the higher-level Python module can normalize inputs,
+/// build SciPy sparse matrices, and present a cleaner user-facing surface.
 macro_rules! impl_solenoid_stress_model_pyclass {
     ($name:ident, $ty:ty) => {
         #[pymethods]
@@ -802,6 +807,7 @@ fn assemble_axisymmetric_model_low_level<F: physics::solenoid_stress::Real + Num
     }
 }
 
+/// Low-level binding for `physics::solenoid_stress::assemble_axisymmetric` using `f64`.
 #[pyfunction]
 fn solenoid_stress_fem_assemble_model_axisymmetric_f64(
     nodes: PyReadonlyArray2<'_, f64>,
@@ -833,6 +839,7 @@ fn solenoid_stress_fem_assemble_model_axisymmetric_f64(
     })
 }
 
+/// Low-level binding for `physics::solenoid_stress::assemble_axisymmetric` using `f32`.
 #[pyfunction]
 fn solenoid_stress_fem_assemble_model_axisymmetric_f32(
     nodes: PyReadonlyArray2<'_, f32>,
@@ -864,6 +871,7 @@ fn solenoid_stress_fem_assemble_model_axisymmetric_f32(
     })
 }
 
+/// Low-level binding for the isotropic constitutive helper returning a flattened `4 x 4` matrix.
 #[pyfunction]
 fn solenoid_stress_fem_isotropic_axisymmetric_material_f64<'py>(
     py: Python<'py>,
@@ -879,6 +887,7 @@ fn solenoid_stress_fem_isotropic_axisymmetric_material_f64<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for the isotropic constitutive helper returning a flattened `4 x 4` matrix.
 #[pyfunction]
 fn solenoid_stress_fem_isotropic_axisymmetric_material_f32<'py>(
     py: Python<'py>,
@@ -894,6 +903,7 @@ fn solenoid_stress_fem_isotropic_axisymmetric_material_f32<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for the isotropic thermal-material helper returning `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`.
 #[pyfunction]
 fn solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64<'py>(
     py: Python<'py>,
@@ -910,6 +920,7 @@ fn solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for the isotropic thermal-material helper returning `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`.
 #[pyfunction]
 fn solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32<'py>(
     py: Python<'py>,
@@ -926,6 +937,7 @@ fn solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for the orthotropic thermal-material helper returning `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`.
 #[pyfunction]
 fn solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f64<'py>(
     py: Python<'py>,
@@ -946,6 +958,7 @@ fn solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f64<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for the orthotropic thermal-material helper returning `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`.
 #[pyfunction]
 fn solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32<'py>(
     py: Python<'py>,
@@ -966,6 +979,7 @@ fn solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for the reduced constitutive helper returning a flattened `4 x 4` matrix.
 #[pyfunction]
 fn solenoid_stress_fem_cfsem_radial_material_f64<'py>(
     py: Python<'py>,
@@ -980,6 +994,7 @@ fn solenoid_stress_fem_cfsem_radial_material_f64<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for the reduced constitutive helper returning a flattened `4 x 4` matrix.
 #[pyfunction]
 fn solenoid_stress_fem_cfsem_radial_material_f32<'py>(
     py: Python<'py>,
@@ -994,6 +1009,7 @@ fn solenoid_stress_fem_cfsem_radial_material_f32<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
+/// Low-level binding for elevating a quad4 input mesh to an explicit quad9 analysis mesh.
 #[pyfunction]
 fn solenoid_stress_fem_infer_quad9_mesh_f64<'py>(
     py: Python<'py>,
@@ -1048,6 +1064,7 @@ fn solenoid_stress_fem_infer_quad9_mesh_f64<'py>(
     ))
 }
 
+/// Low-level binding for elevating a quad4 input mesh to an explicit quad9 analysis mesh.
 #[pyfunction]
 fn solenoid_stress_fem_infer_quad9_mesh_f32<'py>(
     py: Python<'py>,

@@ -845,7 +845,8 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
         thermal_material_table=np.asarray([thermal_material]),
     )
     nodal_temperature = np.full(nodes.shape[0], 300.0, dtype=dtype)
-    assert np.array_equal(model.thermal_reference_rhs, model.constant_rhs)
+    assert np.array_equal(model.input_nodes, model.nodes)
+    assert np.array_equal(model.input_elements, model.elements)
     assert model.build_rhs(nodal_temperature=nodal_temperature).shape == (model.ndof_reduced,)
     with pytest.raises(ValueError, match="nodal_temperature is required"):
         model.build_rhs()

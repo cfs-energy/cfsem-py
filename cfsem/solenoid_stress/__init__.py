@@ -3,7 +3,9 @@
 This subpackage includes three complementary toolsets:
 
 - a 1D finite-difference radial stress solver for deck-of-cards winding-pack models,
-- a 2D axisymmetric quadrilateral FEM implementation with reusable sparse load operators,
+- a 2D axisymmetric quadrilateral FEM implementation centered on reusable sparse load and
+  recovery operators, with convenience methods for `build_rhs(...)`, `solve(...)`, and
+  quadrature-field recovery,
 - analytic reference formulas used for validation and convergence studies.
 """
 
@@ -20,6 +22,8 @@ from .thick_wall_cylinder_handcalc import (
 )
 from .axisymmetric_fem import (
     AxisymmetricFEMModel,
+    ElementMeasures,
+    ElementQuadrature,
     ElevatedQuad9Mesh,
     QuadratureFieldSamples,
     assemble_axisymmetric,
@@ -32,6 +36,8 @@ from .axisymmetric_fem import (
 
 __all__ = [
     "AxisymmetricFEMModel",
+    "ElementMeasures",
+    "ElementQuadrature",
     "ElevatedQuad9Mesh",
     "QuadratureFieldSamples",
     "SolenoidStress1D",

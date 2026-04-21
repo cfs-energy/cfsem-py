@@ -1070,6 +1070,15 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
             thermal_material_table={1: thermal_material, 2: thermal_material},
         )
 
+    with pytest.raises(AssertionError, match="alpha_rz"):
+        fem.assemble_axisymmetric(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.array([0], dtype=np.uint64),
+            material_table=np.asarray([material]),
+            thermal_material_table=np.asarray([[1.2e-5, 1.2e-5, 1.2e-5, 1.0e-9, 293.15]], dtype=dtype),
+        )
+
     with pytest.raises(ValueError, match="nodal_temperature is required"):
         zero_displacement = np.zeros((model.ndof_reduced,), dtype=dtype)
         model.evaluate_quadrature(zero_displacement)

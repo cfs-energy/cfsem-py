@@ -654,9 +654,7 @@ def _normalize_thermal_material_table(
             table.ndim == 2 and table.shape[1] == 5
         ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
         table = np.ascontiguousarray(table)
-    assert np.allclose(
-        table[:, 3], 0.0
-    ), "thermal_material_table shear thermal expansion must be zero in phase 1"
+    assert not np.any(table[:, 3] != 0.0), "shear thermal expansion (alpha_rz) is not yet supported"
     return table
 
 

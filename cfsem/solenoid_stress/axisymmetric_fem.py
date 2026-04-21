@@ -68,7 +68,6 @@ _orthotropic_axisymmetric_thermal_material_f64 = (
 )
 
 ArrayLike = npt.ArrayLike
-ElementType = str
 
 
 def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:
@@ -181,8 +180,7 @@ class AxisymmetricFEMModel:
     `evaluate_quadrature(...)` are convenience methods layered on top of those stored operators
     and the reduced stiffness matrix.
 
-    `input_nodes` and `input_elements` expose the original corner-node mesh. `nodes` and
-    `elements` remain as compatibility aliases for those same arrays.
+    `input_nodes` and `input_elements` expose the original corner-node mesh.
     """
 
     def __init__(
@@ -257,8 +255,6 @@ class AxisymmetricFEMModel:
         self.n_temperature_nodes = int(n_temperature_nodes)
         self._element_quadrature_cache: ElementQuadrature | None = None
         self._element_measures_cache: ElementMeasures | None = None
-        self.nodes = input_nodes
-        self.elements = input_elements
 
     @property
     def dtype(self) -> np.dtype[Any]:
@@ -335,7 +331,6 @@ class AxisymmetricFEMModel:
         return _analysis_temperature_for_element_type(
             nodal_temperature,
             self._input_nodes.shape[0],
-            self.element_type,
             self._elevated,
             self.dtype,
         )
@@ -352,7 +347,11 @@ class AxisymmetricFEMModel:
         The returned vector has shape `(ndof_reduced,)`.
         """
 
-        body_force_arr = _normalize_body_force_or_zero(body_force, self.nelem, self.dtype)
+        body_force_arr = (
+            np.zeros((self.nelem, 2), dtype=self.dtype)
+            if body_force is None
+            else _normalize_body_force(body_force, self.nelem, self.dtype)
+        )
         _, nload = _sparse_shape(self.pressure_to_rhs)
         pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
         _, ntraction_cols = _sparse_shape(self.traction_to_rhs)
@@ -468,18 +467,6 @@ def _normalize_element_type(element_type: str) -> str:
     return normalized
 
 
-def _element_type_code(element_type: str) -> int:
-    normalized = _normalize_element_type(element_type)
-    if normalized == "quad4":
-        return 4
-    return 9
-
-
-def _validate_element_quadrature_combo(element_type: str, quadrature_code: int) -> None:
-    assert quadrature_code in {3, 4}, f"unsupported quadrature code {quadrature_code}; use 3 or 4"
-    _normalize_element_type(element_type)
-
-
 def _resolve_float_dtype(*values: object) -> np.dtype[np.float32] | np.dtype[np.float64]:
     arrays: list[np.ndarray[Any, Any]] = []
     for value in values:
@@ -533,18 +520,6 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
     )
 
 
-def _analysis_mesh_for_element_type(
-    nodes: npt.NDArray[np.floating[Any]],
-    elements: npt.NDArray[np.uint64],
-    element_type: str,
-) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.uint64], ElevatedQuad9Mesh | None]:
-    normalized_type = _normalize_element_type(element_type)
-    if normalized_type == "quad4":
-        return nodes, elements, None
-    elevated = infer_quad9_mesh(nodes, elements)
-    return elevated.analysis_nodes, elevated.analysis_elements, elevated
-
-
 def _temperature_elevation_operator(
     elevated: ElevatedQuad9Mesh,
     dtype: np.dtype[Any],
@@ -593,11 +568,9 @@ def _temperature_elevation_operator(
 def _analysis_temperature_for_element_type(
     nodal_temperature: ArrayLike,
     n_input_nodes: int,
-    element_type: str,
     elevated: ElevatedQuad9Mesh | None,
     dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
-    del element_type
     if elevated is None:
         return _normalize_nodal_temperature(nodal_temperature, n_input_nodes, dtype)
     input_temperature = _normalize_nodal_temperature(
@@ -686,10 +659,6 @@ def _normalize_thermal_material_table(
     return normalized_ids, table
 
 
-def _empty_thermal_material_table(dtype: np.dtype[Any]) -> npt.NDArray[np.floating[Any]]:
-    return np.zeros((0, 5), dtype=dtype)
-
-
 def _normalize_nodal_temperature(
     nodal_temperature: ArrayLike,
     nnode: int,
@@ -717,23 +686,11 @@ def _normalize_body_force(
     return np.ascontiguousarray(arr)
 
 
-def _normalize_body_force_or_zero(
-    body_force: ArrayLike | None,
-    nelem: int,
-    dtype: np.dtype[Any],
-) -> npt.NDArray[np.floating[Any]]:
-    if body_force is None:
-        return np.zeros((nelem, 2), dtype=dtype)
-    return _normalize_body_force(body_force, nelem, dtype)
-
-
-def _normalize_pressure_faces(pressure_faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
-    if pressure_faces is None:
+def _normalize_face_pairs(name: str, faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
+    if faces is None:
         return np.zeros((0, 2), dtype=np.uint64)
-    faces = np.asarray(pressure_faces, dtype=np.uint64)
-    assert (
-        faces.ndim == 2 and faces.shape[1] == 2
-    ), f"pressure_faces must have shape (nload, 2); got {faces.shape}"
+    faces = np.asarray(faces, dtype=np.uint64)
+    assert faces.ndim == 2 and faces.shape[1] == 2, f"{name} must have shape (nload, 2); got {faces.shape}"
     return np.ascontiguousarray(faces)
 
 
@@ -748,16 +705,6 @@ def _normalize_pressure_values(
     assert values.ndim == 1, f"pressure_values must have shape (nload,); got {values.shape}"
     assert values.shape[0] == nload, f"pressure_values has {values.shape[0]} entries, but expected {nload}"
     return np.ascontiguousarray(values)
-
-
-def _normalize_traction_faces(traction_faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
-    if traction_faces is None:
-        return np.zeros((0, 2), dtype=np.uint64)
-    faces = np.asarray(traction_faces, dtype=np.uint64)
-    assert (
-        faces.ndim == 2 and faces.shape[1] == 2
-    ), f"traction_faces must have shape (nload, 2); got {faces.shape}"
-    return np.ascontiguousarray(faces)
 
 
 def _normalize_traction_values(
@@ -829,15 +776,16 @@ def assemble_axisymmetric(
         dtype,
         require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
     )
-    pressure_faces_arr = _normalize_pressure_faces(pressure_faces)
-    traction_faces_arr = _normalize_traction_faces(traction_faces)
+    pressure_faces_arr = _normalize_face_pairs("pressure_faces", pressure_faces)
+    traction_faces_arr = _normalize_face_pairs("traction_faces", traction_faces)
     prescribed_dofs, prescribed_values = _normalize_prescribed_dirichlet(prescribed, dtype)
     quadrature_code = _quadrature_code(quadrature)
     normalized_element_type = _normalize_element_type(element_type)
-    _validate_element_quadrature_combo(normalized_element_type, quadrature_code)
-    analysis_nodes, analysis_elements, elevated = _analysis_mesh_for_element_type(
-        nodes_arr, elements_arr, normalized_element_type
-    )
+    if normalized_element_type == "quad4":
+        analysis_nodes, analysis_elements, elevated = nodes_arr, elements_arr, None
+    else:
+        elevated = infer_quad9_mesh(nodes_arr, elements_arr)
+        analysis_nodes, analysis_elements = elevated.analysis_nodes, elevated.analysis_elements
     low_level = _dispatch_pair(
         dtype,
         _assemble_model_axisymmetric_f32,
@@ -850,12 +798,10 @@ def assemble_axisymmetric(
         material_table_arr,
         pressure_faces_arr,
         traction_faces_arr,
-        _empty_thermal_material_table(dtype)
-        if thermal_material_table_arr is None
-        else thermal_material_table_arr,
+        np.zeros((0, 5), dtype=dtype) if thermal_material_table_arr is None else thermal_material_table_arr,
         prescribed_dofs,
         prescribed_values,
-        _element_type_code(normalized_element_type),
+        4 if normalized_element_type == "quad4" else 9,
         quadrature_code,
     )
 

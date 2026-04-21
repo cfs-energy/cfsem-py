@@ -1,4 +1,7 @@
 //! Reference-element definitions for bilinear 4-node quadrilateral elements.
+//!
+//! This is the 4-node quadrilateral interpolation listed in Bower's *Applied Mechanics of
+//! Solids*, Section 8.1, Table 8.3.
 
 use crate::mesh::{Scalar, cast};
 

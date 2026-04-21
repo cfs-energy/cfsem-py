@@ -1,4 +1,7 @@
 //! Reference-element definitions and element-local geometry helpers for 3-node triangles.
+//!
+//! This is the 3-node triangle interpolation listed in Bower's *Applied Mechanics of Solids*,
+//! Section 8.1, Table 8.3.
 
 use crate::math::{add_scaled3, dot3_arr, sub3};
 use crate::mesh::Scalar;

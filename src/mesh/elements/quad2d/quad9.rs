@@ -1,4 +1,9 @@
 //! Reference-element definitions for 9-node biquadratic quadrilateral elements.
+//!
+//! This module uses the same isoparametric interpolation framework summarized by Bower in
+//! *Applied Mechanics of Solids*, especially Section 8.1 and the quadrilateral interpolation
+//! conventions summarized around Table 8.3.  The implementation here is the full tensor-product
+//! biquadratic quadrilateral, with a center node in addition to the corner and midside nodes.
 
 use crate::mesh::{Scalar, cast};
 

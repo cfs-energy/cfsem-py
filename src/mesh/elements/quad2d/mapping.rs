@@ -20,6 +20,11 @@
 //!
 //! `det(J)` is the local area scaling from reference space to physical space, while `J^{-1}` is
 //! the chain-rule map used to convert reference-coordinate gradients into physical gradients.
+//!
+//! # References
+//!
+//! - Allan F. Bower, *Applied Mechanics of Solids*, CRC Press, 2009, Section 8.1.11 and
+//!   Section 8.1.13.
 
 use crate::mesh::Scalar;
 

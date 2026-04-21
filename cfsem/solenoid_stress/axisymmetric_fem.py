@@ -17,21 +17,24 @@ with consistent body-force, surface-pressure, and surface-traction load vectors.
 engineering-strain vector is ordered as `[e_rr, e_zz, e_tt, g_rz]`.
 
 References:
-    [1] Thomas J. R. Hughes,
-        *The Finite Element Method: Linear Static and Dynamic Finite Element Analysis*,
-        Prentice-Hall, 1987.
+    [1] Allan F. Bower,
+        *Applied Mechanics of Solids*,
+        CRC Press, 2009.
+        See especially Section 8.1 and Table 8.3 for the general displacement-based
+        finite-element construction and 2D interpolation functions.
 
-    [2] Klaus-Juergen Bathe,
-        *Finite Element Procedures*,
-        Prentice Hall, 1996.
+    [2] E. L. Wilson,
+        "Structural Analysis of Axisymmetric Solids,"
+        *AIAA Journal*, 3(12), pp. 2269-2274, 1965.
 
-    [3] J. N. Reddy,
-        *An Introduction to the Finite Element Method*, 3rd ed.,
-        McGraw-Hill, 2005.
+    [3] R. A. Mitchell, R. M. Woolley, and C. R. Fisher,
+        "Formulation and experimental verification of an axisymmetric finite-element structural
+        analysis,"
+        *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
 
-    [4] Stephen P. Timoshenko and J. N. Goodier,
-        *Theory of Elasticity*, 3rd ed.,
-        McGraw-Hill, 1970.
+    [4] I. Fried,
+        "Notes on the finite element analysis of the axisymmetric elastic solid,"
+        *International Journal of Solids and Structures*, 10(3), 1974.
 """
 
 from __future__ import annotations

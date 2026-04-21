@@ -452,12 +452,12 @@
 //! - [`recovery`] builds sparse operators for quadrature-point strain and stress recovery.
 //!
 //! References:
+//! - Allan F. Bower, *Applied Mechanics of Solids*, CRC Press, 2009.  See especially Section 8.1
+//!   for the displacement-based finite-element formulation and Table 8.3 for 2D interpolation
+//!   functions.
 //! - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
 //! - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
 //! - I. Fried, "Notes on the finite element analysis of the axisymmetric elastic solid," *International Journal of Solids and Structures*, 10(3), 1974.
-//! - Thomas J. R. Hughes, *The Finite Element Method: Linear Static and Dynamic Finite Element Analysis*, 1987.
-//! - Klaus-Juergen Bathe, *Finite Element Procedures*, 1996.
-//! - J. N. Reddy, *An Introduction to the Finite Element Method*, 3rd ed., 2005.
 
 mod assembly;
 mod axisym;

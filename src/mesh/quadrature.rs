@@ -6,6 +6,8 @@
 //!
 //! # References
 //!
+//! - Allan F. Bower, *Applied Mechanics of Solids*, CRC Press, 2009, Section 8.1.12, for the use
+//!   of Gauss quadrature in finite-element integration.
 //! - NIST Digital Library of Mathematical Functions, §3.5(v) "Gauss Quadrature", especially
 //!   Eqs. 3.5.18-3.5.21 for the general Gauss quadrature formula and the Gauss-Legendre
 //!   specialization.

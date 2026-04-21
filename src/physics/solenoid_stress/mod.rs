@@ -1,10 +1,15 @@
-//! Axisymmetric finite-element elasticity helpers for solenoid stress problems.
+//! Axisymmetric finite-element elasticity with anisotropic materials, surface traction/pressure,
+//! body force loads, and thermal strain.
 //!
 //! The 2D-axisymmetric small-strain formulation implemented here uses the
-//! displacement-based Galerkin finite-element construction
+//! displacement-based Galerkin finite-element stiffness construction
 //! `K_e = integral(B^T D B 2*pi*r dA)`.
 //!
-//! This formula is best read from right to left.  For one element with nodal displacement vector
+//! Starting with this relatively general framing, the axisymmetry is essentially entirely contained in
+//! the factor of `2*pi*r` and the relation `epsilon_tt = u_r/r` which ties hoop strain to radial displacement
+//! in order to eliminate the independence of the 3rd dimension.
+//!
+//! The stiffness formula is best read from right to left.  For one element with nodal displacement vector
 //! `u_e = [u_r1, u_z1, u_r2, u_z2, ...]^T`, the strain at a quadrature point is
 //! `epsilon = B u_e`, and the constitutive law gives `sigma = D epsilon = D B u_e`.  Converting
 //! that pointwise stress field back into equivalent nodal forces by virtual work gives

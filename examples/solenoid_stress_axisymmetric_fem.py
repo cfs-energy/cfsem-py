@@ -66,6 +66,8 @@ SECTION_DASHES = ("solid", "dashdot", "dot")
 
 DEFAULT_FEM_SPATIAL_RESOLUTION_MM = 17.0 if TESTING else 8.5
 FEM_SPATIAL_RESOLUTION_RANGE_MM = (1.0, 20.0)
+DEFAULT_MESH_DISTORTION = 0.0
+MESH_DISTORTION_RANGE = (0.0, 0.3)
 FIELD_GRID_LONG_SIDE_POINTS = 141 if TESTING else 281
 FIELD_GRID_MIN_SHORT_SIDE_POINTS = 41 if TESTING else 81
 FD_REFERENCE_SPACING = 1.0e-3  # [m]
@@ -108,6 +110,7 @@ class CaseResult:
     quadrature: str
     element_type: str
     fem_resolution: float
+    mesh_distortion: float
     material_model: str
     fem_material_label: str
     reference_material_label: str
@@ -125,6 +128,8 @@ class CaseResult:
     nz: int
     ndof: int
     stiffness_nnz: int
+    analysis_nodes: np.ndarray
+    analysis_elements: np.ndarray
     field_r: np.ndarray
     field_z: np.ndarray
     bmag_field: np.ndarray
@@ -250,6 +255,44 @@ def build_annulus_strip_mesh(
             )
 
     return nodes, np.asarray(elements, dtype=np.uint64), radii, zs
+
+
+def distort_annulus_strip_mesh(
+    nodes: np.ndarray,
+    ri: float,
+    ro: float,
+    z_min: float,
+    z_max: float,
+    nr: int,
+    nz: int,
+    distortion: float,
+) -> np.ndarray:
+    distortion = float(np.clip(float(distortion), *MESH_DISTORTION_RANGE))
+    if distortion <= 0.0 or nr <= 0 or nz <= 0:
+        return np.asarray(nodes, dtype=np.float64).copy()
+
+    width = max(ro - ri, 1.0e-12)
+    height = max(z_max - z_min, 1.0e-12)
+    dr_cell = width / max(nr, 1)
+    dz_cell = height / max(nz, 1)
+
+    xi = (nodes[:, 0] - ri) / width
+    eta = (nodes[:, 1] - z_min) / height
+    interior_mode = np.sin(np.pi * xi) * np.sin(2.0 * np.pi * eta)
+
+    distorted = np.asarray(nodes, dtype=np.float64).copy()
+    distorted[:, 0] += distortion * dr_cell * interior_mode * np.cos(np.pi * xi)
+    distorted[:, 1] += distortion * dz_cell * interior_mode * np.sin(np.pi * xi)
+
+    pinned = (
+        np.isclose(nodes[:, 0], ri)
+        | np.isclose(nodes[:, 0], ro)
+        | np.isclose(nodes[:, 1], z_min)
+        | np.isclose(nodes[:, 1], z_max)
+        | np.isclose(nodes[:, 1], 0.0)
+    )
+    distorted[pinned] = nodes[pinned]
+    return distorted
 
 
 def section_style(label: str) -> dict[str, object]:
@@ -856,6 +899,7 @@ def solve_case(
     quadrature: str,
     element_type: str,
     fem_resolution: float,
+    mesh_distortion: float,
     material_model: str,
     iso_youngs_modulus_gpa: float,
     iso_poisson_ratio: float,
@@ -880,6 +924,7 @@ def solve_case(
     if element_type not in {"quad4", "quad9"}:
         raise ValueError(f"Unsupported element type {element_type!r}.")
     fem_resolution = normalize_float(fem_resolution, FEM_SPATIAL_RESOLUTION_RANGE_MM)
+    mesh_distortion = normalize_float(mesh_distortion, MESH_DISTORTION_RANGE)
     if material_model not in {"isotropic", "orthotropic"}:
         raise ValueError(f"Unsupported material model {material_model!r}.")
     current_density = 1.0e6 * normalize_float(current_density_ma, CURRENT_DENSITY_RANGE_MA)
@@ -908,6 +953,7 @@ def solve_case(
 
     nr, nz = choose_mesh_counts(width, height, 1.0e-3 * fem_resolution)
     nodes, elements, radii, zs = build_annulus_strip_mesh(ri, ro, height, nr, nz)
+    nodes = distort_annulus_strip_mesh(nodes, ri, ro, z_min, z_max, nr, nz, mesh_distortion)
     if element_type == "quad9":
         elevated_mesh = infer_quad9_mesh(nodes, elements)
         analysis_nodes = elevated_mesh.analysis_nodes
@@ -1073,6 +1119,7 @@ def solve_case(
         quadrature=quadrature,
         element_type=element_type,
         fem_resolution=fem_resolution,
+        mesh_distortion=mesh_distortion,
         material_model=material_model,
         fem_material_label=fem_material_label,
         reference_material_label=reference_material_label,
@@ -1088,8 +1135,10 @@ def solve_case(
         z_max=z_max,
         nr=nr,
         nz=nz,
-            ndof=model.ndof_full,
-            stiffness_nnz=model.stiffness.nnz,
+        ndof=model.ndof_full,
+        stiffness_nnz=model.stiffness.nnz,
+        analysis_nodes=analysis_nodes,
+        analysis_elements=analysis_elements,
         field_r=field_r,
         field_z=field_z,
         bmag_field=bmag_field,
@@ -1241,6 +1290,111 @@ def build_heatmap_figure(
         height=430,
         title={
             "text": title,
+            "pad": {"b": 18},
+            "y": 0.985,
+            "yanchor": "top",
+            "x": 0.5,
+            "xanchor": "center",
+        },
+        margin={"l": 60, "r": 20, "t": 110, "b": 50},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 1.01,
+            "yanchor": "bottom",
+            "bgcolor": "rgba(255,255,255,0.8)",
+        },
+    )
+    return fig
+
+
+def build_mesh_figure(case: CaseResult):
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    nodes = np.asarray(case.analysis_nodes, dtype=np.float64)
+    elements = np.asarray(case.analysis_elements, dtype=np.uint64)
+    if case.element_type == "quad9":
+        edge_paths = (
+            (0, 4, 1),
+            (1, 5, 2),
+            (2, 6, 3),
+            (3, 7, 0),
+        )
+    else:
+        edge_paths = (
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+        )
+
+    edge_r: list[float | None] = []
+    edge_z: list[float | None] = []
+    for conn in elements:
+        for path in edge_paths:
+            for local_node in path:
+                node = nodes[int(conn[local_node])]
+                edge_r.append(float(node[0]))
+                edge_z.append(float(node[1]))
+            edge_r.append(None)
+            edge_z.append(None)
+
+    fig.add_trace(
+        go.Scatter(
+            x=edge_r,
+            y=edge_z,
+            mode="lines",
+            line={"color": "black", "width": 1.2},
+            name="Element edges",
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=case.outline_r,
+            y=case.outline_z,
+            mode="lines",
+            line={"color": "firebrick", "width": 2.5},
+            name="Solenoid section",
+            hoverinfo="skip",
+        )
+    )
+    for section in case.sections:
+        fig.add_trace(
+            go.Scatter(
+                x=np.array([case.ri, case.ro], dtype=np.float64),
+                y=np.array([section.z_value, section.z_value], dtype=np.float64),
+                mode="lines",
+                line={"color": section.color, "width": 2, "dash": "dot"},
+                name=f"{section.label} section",
+                hoverinfo="skip",
+            )
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=[case.source_radius],
+            y=[case.source_z],
+            mode="markers",
+            marker={
+                "size": 11,
+                "color": "cyan",
+                "line": {"color": "black", "width": 1},
+                "symbol": "circle",
+            },
+            name="Loop source",
+        )
+    )
+    fig.update_xaxes(title_text="r [m]")
+    fig.update_yaxes(title_text="z [m]", scaleanchor="x", scaleratio=1.0)
+    fig.update_layout(
+        height=430,
+        title={
+            "text": f"Analysis mesh geometry ({case.element_type}, distortion={case.mesh_distortion:.2f})",
             "pad": {"b": 18},
             "y": 0.985,
             "yanchor": "top",
@@ -1472,6 +1626,7 @@ def build_summary(case: CaseResult) -> str:
         f"element={case.element_type} | "
         f"quadrature={case.quadrature} | "
         f"target cell size={case.fem_resolution:.1f} mm | "
+        f"mesh distortion={case.mesh_distortion:.2f} | "
         f"{case.fem_material_label} | "
         f"{case.reference_material_label} | "
         f"J_theta={case.current_density:.3e} A/m^2 | "
@@ -1609,6 +1764,23 @@ def create_app():
                                 step=0.5,
                                 value=DEFAULT_FEM_SPATIAL_RESOLUTION_MM,
                                 marks={1: "1", 2: "2", 5: "5", 10: "10", 15: "15", 20: "20"},
+                                tooltip={"placement": "bottom", "always_visible": True},
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.P(
+                                "Mesh distortion [-]",
+                                style={"marginTop": "0.25rem", "marginBottom": "0.25rem"},
+                            ),
+                            dcc.Slider(
+                                id="mesh-distortion",
+                                min=MESH_DISTORTION_RANGE[0],
+                                max=MESH_DISTORTION_RANGE[1],
+                                step=0.01,
+                                value=DEFAULT_MESH_DISTORTION,
+                                marks={0.0: "0.00", 0.1: "0.10", 0.2: "0.20", 0.3: "0.30"},
                                 tooltip={"placement": "bottom", "always_visible": True},
                             ),
                         ]
@@ -1933,6 +2105,12 @@ def create_app():
                                     html.Div(
                                         dcc.Loading(
                                             type="circle",
+                                            children=dcc.Graph(id="overview-mesh-figure"),
+                                        )
+                                    ),
+                                    html.Div(
+                                        dcc.Loading(
+                                            type="circle",
                                             children=dcc.Graph(id="overview-vm-1d-figure"),
                                         )
                                     ),
@@ -1988,6 +2166,7 @@ def create_app():
         Output("overview-force-r-figure", "figure"),
         Output("overview-force-z-figure", "figure"),
         Output("overview-vm-fem-figure", "figure"),
+        Output("overview-mesh-figure", "figure"),
         Output("overview-vm-1d-figure", "figure"),
         Output("profile-figure", "figure"),
         Output("error-figure", "figure"),
@@ -1996,6 +2175,7 @@ def create_app():
         Input("fem-quadrature", "value"),
         Input("fem-element-type", "value"),
         Input("fem-resolution", "value"),
+        Input("mesh-distortion", "value"),
         Input("material-model", "value"),
         Input("iso-youngs-modulus", "value"),
         Input("iso-poisson-ratio", "value"),
@@ -2019,6 +2199,7 @@ def create_app():
         quadrature: str,
         element_type: str,
         fem_resolution: float,
+        mesh_distortion: float,
         material_model: str,
         iso_youngs_modulus: float,
         iso_poisson_ratio: float,
@@ -2043,6 +2224,7 @@ def create_app():
                 quadrature,
                 element_type,
                 fem_resolution,
+                mesh_distortion,
                 material_model,
                 iso_youngs_modulus,
                 iso_poisson_ratio,
@@ -2063,7 +2245,7 @@ def create_app():
         except ValueError as exc:
             message = str(exc)
             fig = message_figure("Invalid source placement", message)
-            return message, fig, fig, fig, fig, fig, fig, fig, fig
+            return message, fig, fig, fig, fig, fig, fig, fig, fig, fig
 
         bmag = np.asarray(case.bmag_field, dtype=np.float64)
         bmag_finite = bmag[np.isfinite(bmag)]
@@ -2170,6 +2352,7 @@ def create_app():
                 show_contours=True,
                 contour_color="black",
             ),
+            build_mesh_figure(case),
             build_heatmap_figure(
                 case,
                 case.elem_r_centers,
@@ -2205,6 +2388,7 @@ def main() -> None:
         DEFAULT_QUADRATURE,
         DEFAULT_ELEMENT_TYPE,
         DEFAULT_FEM_SPATIAL_RESOLUTION_MM,
+        DEFAULT_MESH_DISTORTION,
         DEFAULT_MATERIAL_MODEL,
         DEFAULT_ISO_YOUNGS_MODULUS_GPA,
         DEFAULT_ISO_POISSON_RATIO,

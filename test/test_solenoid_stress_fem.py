@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import scipy.interpolate as spi
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
@@ -55,8 +56,46 @@ def build_annulus_strip_mesh(
                     node_id(i + 1, j + 1),
                     node_id(i, j + 1),
                 ]
-            )
+    )
     return nodes, np.asarray(elements, dtype=np.uint64)
+
+
+def distort_annulus_strip_mesh(
+    nodes: np.ndarray,
+    ri: float,
+    ro: float,
+    height: float,
+    nr: int,
+    nz: int,
+    distortion: float,
+) -> np.ndarray:
+    distortion = float(distortion)
+    if distortion <= 0.0 or nr <= 0 or nz <= 0:
+        return np.asarray(nodes, dtype=np.float64).copy()
+
+    z_min = 0.0
+    z_max = height
+    width = max(ro - ri, 1.0e-12)
+    dr_cell = width / max(nr, 1)
+    dz_cell = max(height, 1.0e-12) / max(nz, 1)
+
+    xi = (nodes[:, 0] - ri) / width
+    eta = (nodes[:, 1] - z_min) / max(z_max - z_min, 1.0e-12)
+    interior_mode = np.sin(np.pi * xi) * np.sin(2.0 * np.pi * eta)
+
+    distorted = np.asarray(nodes, dtype=np.float64).copy()
+    distorted[:, 0] += distortion * dr_cell * interior_mode * np.cos(np.pi * xi)
+    distorted[:, 1] += distortion * dz_cell * interior_mode * np.sin(np.pi * xi)
+
+    pinned = (
+        np.isclose(nodes[:, 0], ri)
+        | np.isclose(nodes[:, 0], ro)
+        | np.isclose(nodes[:, 1], z_min)
+        | np.isclose(nodes[:, 1], z_max)
+        | np.isclose(nodes[:, 1], 0.5 * height)
+    )
+    distorted[pinned] = nodes[pinned]
+    return distorted.astype(nodes.dtype, copy=False)
 
 
 def pressure_faces_for_strip(nr: int, nz: int) -> tuple[np.ndarray, np.ndarray]:
@@ -96,6 +135,45 @@ def solve_with_factorized_model(
         return model.recover_full(np.zeros((0,), dtype=rhs.dtype))
     reduced_solution = spla.factorized(model.stiffness)(rhs)
     return model.recover_full(reduced_solution)
+
+
+def prescribed_bottom_supports(analysis_nodes: np.ndarray) -> dict[int, float]:
+    bottom_z = float(np.min(analysis_nodes[:, 1]))
+    bottom_nodes = np.flatnonzero(np.isclose(analysis_nodes[:, 1], bottom_z))
+    anchor = int(bottom_nodes[np.argmin(analysis_nodes[bottom_nodes, 0])])
+    prescribed = {2 * int(node) + 1: 0.0 for node in bottom_nodes}
+    prescribed[2 * anchor] = 0.0
+    return prescribed
+
+
+def interpolate_field(
+    points: np.ndarray,
+    values: np.ndarray,
+    sample_points: np.ndarray,
+) -> np.ndarray:
+    values_arr = np.asarray(values, dtype=np.float64)
+    if values_arr.ndim == 1:
+        interpolator = spi.LinearNDInterpolator(points, values_arr, fill_value=np.nan)
+        out = np.asarray(interpolator(sample_points), dtype=np.float64)
+        assert np.all(np.isfinite(out))
+        return out
+
+    columns = []
+    for component in range(values_arr.shape[1]):
+        interpolator = spi.LinearNDInterpolator(
+            points,
+            values_arr[:, component],
+            fill_value=np.nan,
+        )
+        column = np.asarray(interpolator(sample_points), dtype=np.float64)
+        assert np.all(np.isfinite(column))
+        columns.append(column)
+    return np.column_stack(columns)
+
+
+def normalized_peak_error(test: np.ndarray, reference: np.ndarray) -> float:
+    scale = max(float(np.max(np.abs(reference))), 1.0e-30)
+    return float(np.max(np.abs(np.asarray(test) - np.asarray(reference))) / scale)
 
 
 def assemble_model_and_rhs(
@@ -732,6 +810,127 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
     else:
         rtol, atol = 3.0e-2, 2.0e-7
     assert np.allclose(radial_fe, radial_cfsem, rtol=rtol, atol=atol)
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
+    quadrature: str,
+    element_type: str,
+) -> None:
+    dtype = np.float64
+    ri, ro, height = 0.5, 1.0, 0.24
+    nr, nz = 36, 12
+    regular_nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
+    distorted_nodes = distort_annulus_strip_mesh(
+        regular_nodes, ri, ro, height, nr=nr, nz=nz, distortion=0.05
+    )
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=nz)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=nr, nz=nz)
+    pressure_faces = np.vstack([inner_faces, outer_faces])
+    pressure_values = np.concatenate(
+        [
+            np.full(inner_faces.shape[0], 1.2e6, dtype=dtype),
+            np.full(outer_faces.shape[0], 0.25e6, dtype=dtype),
+        ]
+    )
+    face_coordinate = np.linspace(0.0, 1.0, top_faces.shape[0], dtype=dtype)
+    traction_values = np.column_stack(
+        [
+            1.8e5 * np.sin(np.pi * face_coordinate),
+            -2.2e5 * (0.4 + 0.6 * np.cos(0.5 * np.pi * face_coordinate)),
+        ]
+    )
+    element_i = np.tile(np.arange(nr, dtype=dtype), nz)
+    element_j = np.repeat(np.arange(nz, dtype=dtype), nr)
+    xi = (element_i + 0.5) / nr
+    eta = (element_j + 0.5) / nz
+    body_force = np.column_stack(
+        [
+            4.0e4 * (0.5 + eta),
+            -3.0e4 * np.cos(np.pi * xi) * np.sin(np.pi * eta),
+        ]
+    )
+    material = isotropic_axisymmetric_material(205.0e9, 0.29, dtype=dtype)
+    regular_analysis_nodes = (
+        regular_nodes
+        if element_type == "quad4"
+        else fem.infer_quad9_mesh(regular_nodes, elements).analysis_nodes
+    )
+    prescribed = prescribed_bottom_supports(regular_analysis_nodes)
+
+    regular_model, regular_rhs = assemble_model_and_rhs(
+        nodes=regular_nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=body_force,
+        pressure_faces=pressure_faces,
+        pressure_values=pressure_values,
+        traction_faces=top_faces,
+        traction_values=traction_values,
+        prescribed=prescribed,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    distorted_model, distorted_rhs = assemble_model_and_rhs(
+        nodes=distorted_nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        body_force=body_force,
+        pressure_faces=pressure_faces,
+        pressure_values=pressure_values,
+        traction_faces=top_faces,
+        traction_values=traction_values,
+        prescribed=prescribed,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+
+    regular_u = regular_model.solve(regular_rhs).reshape(
+        regular_model.analysis_nodes.shape[0], 2
+    )
+    distorted_u = distorted_model.solve(distorted_rhs).reshape(
+        distorted_model.analysis_nodes.shape[0], 2
+    )
+    regular_samples = regular_model.evaluate_quadrature(regular_u)
+    distorted_samples = distorted_model.evaluate_quadrature(distorted_u)
+
+    dr = (ro - ri) / nr
+    dz = height / nz
+    sample_r = np.linspace(ri + 3.5 * dr, ro - 3.5 * dr, 5)
+    sample_z = np.linspace(2.5 * dz, height - 2.5 * dz, 3)
+    sample_rr, sample_zz = np.meshgrid(sample_r, sample_z, indexing="ij")
+    sample_points = np.column_stack([sample_rr.reshape(-1), sample_zz.reshape(-1)])
+
+    regular_displacement = interpolate_field(regular_model.analysis_nodes, regular_u, sample_points)
+    distorted_displacement = interpolate_field(
+        distorted_model.analysis_nodes, distorted_u, sample_points
+    )
+    regular_stress = interpolate_field(
+        regular_samples.points_rz.reshape(-1, 2),
+        regular_samples.stress.reshape(-1, 4),
+        sample_points,
+    )
+    distorted_stress = interpolate_field(
+        distorted_samples.points_rz.reshape(-1, 2),
+        distorted_samples.stress.reshape(-1, 4),
+        sample_points,
+    )
+
+    assert np.max(np.abs(regular_displacement[:, 0])) > 1.0e-8
+    assert np.max(np.abs(regular_displacement[:, 1])) > 1.0e-8
+    assert np.max(np.abs(regular_stress[:, 3])) > 1.0e3
+
+    assert normalized_peak_error(distorted_displacement[:, 0], regular_displacement[:, 0]) < 1.0e-2
+    # The axial displacement is smaller than the radial displacement in this mixed-load case,
+    # so the same absolute perturbation from mesh distortion shows up as a larger relative error.
+    assert normalized_peak_error(distorted_displacement[:, 1], regular_displacement[:, 1]) < 7.0e-2
+    assert normalized_peak_error(distorted_stress[:, 0], regular_stress[:, 0]) < 1.0e-2
+    assert normalized_peak_error(distorted_stress[:, 1], regular_stress[:, 1]) < 1.0e-2
+    assert normalized_peak_error(distorted_stress[:, 2], regular_stress[:, 2]) < 1.0e-2
+    assert normalized_peak_error(distorted_stress[:, 3], regular_stress[:, 3]) < 1.0e-2
 
 
 def test_model_recovery_and_fixed_dof_branches() -> None:

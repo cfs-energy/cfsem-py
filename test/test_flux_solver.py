@@ -194,6 +194,16 @@ def test_flux_solver_rejects_default_meshgrid_layout_when_unambiguous():
         cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density)
 
 
+def test_flux_solver_rejects_default_meshgrid_layout_for_square_grids():
+    rgrid = np.linspace(0.6, 1.4, 17)
+    zgrid = np.linspace(-0.4, 0.4, 17)
+    rmesh, zmesh = np.meshgrid(rgrid, zgrid)
+    current_density = np.zeros_like(rmesh)
+
+    with raises(ValidationError, match="consistent with grids|indexing='ij'"):
+        cfsem.solve_flux_axisymmetric((rgrid, zgrid), (rmesh, zmesh), current_density)
+
+
 def test_flux_solver_rejects_mesh_shape_and_axis_content_mismatches():
     rgrid = np.linspace(0.6, 1.4, 17)
     zgrid = np.linspace(-0.4, 0.4, 19)

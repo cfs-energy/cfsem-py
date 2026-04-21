@@ -195,14 +195,11 @@ def _validate_flux_mesh_inputs(
         ), "meshes and current_density appear transposed; use np.meshgrid(..., indexing='ij')"
         raise AssertionError(f"meshes and current_density must all have shape {expected_shape}")
 
-    # If the two axes have different lengths, the expected `indexing="ij"` layout
-    # is no longer ambiguous, so we can validate the mesh-axis content directly.
-    if rgrid.size != zgrid.size:
-        r_axis_matches = np.allclose(rmesh[:, 0], rgrid, rtol=tol, atol=tol)
-        z_axis_matches = np.allclose(zmesh[0, :], zgrid, rtol=tol, atol=tol)
-        assert (
-            r_axis_matches and z_axis_matches
-        ), "meshes must be consistent with grids and use np.meshgrid(..., indexing='ij')"
+    r_axis_matches = np.allclose(rmesh[:, 0], rgrid, rtol=tol, atol=tol)
+    z_axis_matches = np.allclose(zmesh[0, :], zgrid, rtol=tol, atol=tol)
+    assert (
+        r_axis_matches and z_axis_matches
+    ), "meshes must be consistent with grids and use np.meshgrid(..., indexing='ij')"
 
 
 def solve_flux_axisymmetric(

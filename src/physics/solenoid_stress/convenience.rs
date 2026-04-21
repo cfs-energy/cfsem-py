@@ -1,7 +1,8 @@
 //! Rust-native convenience helpers layered on top of the axisymmetric FEM backend.
 //!
 //! These helpers package common construction and postprocessing tasks so both Rust and Python can
-//! use the same domain-level operations without duplicating constitutive or mesh-elevation logic.
+//! use the same domain-level operations without duplicating elastic stress-strain matrix or
+//! mesh-elevation logic.
 
 use std::collections::HashMap;
 
@@ -95,7 +96,7 @@ pub struct ElevatedQuad9Mesh<F: Real> {
     pub center_node_indices: Vec<usize>,
 }
 
-/// Construct the full 3D isotropic axisymmetric constitutive matrix.
+/// Construct the full 3D isotropic axisymmetric elastic stress-strain matrix.
 pub fn isotropic_axisymmetric_material<F: Real>(
     youngs_modulus: F,
     poisson_ratio: F,
@@ -136,7 +137,7 @@ pub fn orthotropic_axisymmetric_thermal_material<F: Real>(
     }
 }
 
-/// Construct the reduced constitutive matrix matching the assumptions of the 1D radial solver.
+/// Construct the reduced elastic stress-strain matrix matching the assumptions of the 1D radial solver.
 pub fn cfsem_radial_material<F: Real>(youngs_modulus: F, poisson_ratio: F) -> [[F; 4]; 4] {
     let factor = youngs_modulus / (F::one() - poisson_ratio * poisson_ratio);
     let shear = youngs_modulus / (cast::<F>(2.0) * (F::one() + poisson_ratio));

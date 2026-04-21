@@ -14,7 +14,10 @@ The element formulation follows the standard small-strain Galerkin construction
 `K_e = integral(B^T D B 2*pi*r dA)`
 
 with consistent body-force, surface-pressure, and surface-traction load vectors. The axisymmetric
-engineering-strain vector is ordered as `[e_rr, e_zz, e_tt, g_rz]`.
+engineering-strain vector is ordered as `[e_rr, e_zz, e_tt, g_rz]`. In Bower's terminology, the
+underlying equations are the strain-displacement equation, the elastic stress-strain law, the
+equation of static equilibrium for stresses, and the boundary conditions on displacement and
+stress.
 
 References:
     [1] Allan F. Bower,
@@ -885,7 +888,7 @@ def isotropic_axisymmetric_material(
     poisson_ratio: float,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct the full 3D isotropic axisymmetric constitutive matrix."""
+    """Construct the full 3D isotropic axisymmetric elastic stress-strain matrix."""
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
@@ -935,7 +938,7 @@ def cfsem_radial_material(
     poisson_ratio: float,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct the reduced isotropic constitutive matrix matching `SolenoidStress1D`."""
+    """Construct the reduced isotropic elastic stress-strain matrix matching `SolenoidStress1D`."""
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(

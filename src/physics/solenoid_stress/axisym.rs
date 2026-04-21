@@ -58,9 +58,9 @@ pub fn build_b_matrix<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELE
 /// Accumulate `scale * B^T D B` into the element stiffness matrix.
 ///
 /// The caller supplies `scale = 2*pi*r*det(J)*w`, so this routine is purely the dense local
-/// linear-algebra kernel for one quadrature point.  The constitutive action is applied directly
-/// through the supplied per-material `4 x 4` matrix `d`; no global constitutive operator is ever
-/// assembled.
+/// linear-algebra kernel for one quadrature point.  The elastic stress-strain matrix is applied
+/// directly through the supplied per-material `4 x 4` matrix `d`; no global stress-strain matrix
+/// is ever assembled.
 ///
 /// # References
 /// - Allan F. Bower, *Applied Mechanics of Solids*, CRC Press, 2009, Section 8.1.
@@ -86,14 +86,14 @@ pub fn accumulate_stiffness<F: Real, const DOF_PER_ELEMENT: usize>(
     }
 }
 
-/// Multiply the constitutive matrix `D` by the axisymmetric strain operator `B`.
+/// Multiply the constitutive matrix `D` by the axisymmetric strain-displacement matrix `B`.
 ///
 /// The returned matrix maps element displacement DOFs directly to stresses:
 /// `sigma = (D B) u_e`.
 ///
-/// This is the local matrix-free constitutive application used in both stiffness assembly and
-/// stress recovery.  `D` is the per-material `4 x 4` constitutive matrix; it is not assembled
-/// into any larger global matrix.
+/// This is the local matrix-free application of the elastic stress-strain law used in both
+/// stiffness assembly and stress recovery.  `D` is the per-material `4 x 4` constitutive matrix;
+/// it is not assembled into any larger global matrix.
 pub fn constitutive_times_b<F: Real, const DOF_PER_ELEMENT: usize>(
     d: &[[F; 4]; 4],
     b: &[[F; DOF_PER_ELEMENT]; 4],
@@ -113,8 +113,8 @@ pub fn constitutive_times_b<F: Real, const DOF_PER_ELEMENT: usize>(
 
 /// Multiply the constitutive matrix `D` by one strain vector.
 ///
-/// This is the local matrix-free constitutive application used for thermal stress construction and
-/// other quadrature-point stress calculations.
+/// This is the local matrix-free application of the elastic stress-strain law used for thermal
+/// stress construction and other quadrature-point stress calculations.
 pub fn constitutive_times_strain<F: Real>(d: &[[F; 4]; 4], strain: &[F; 4]) -> [F; 4] {
     let mut out = [F::zero(); 4];
     for row in 0..4 {

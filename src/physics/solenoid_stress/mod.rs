@@ -11,7 +11,7 @@
 //!
 //! The stiffness formula is best read from right to left.  For one element with nodal displacement vector
 //! `u_e = [u_r1, u_z1, u_r2, u_z2, ...]^T`, the strain at a quadrature point is
-//! `epsilon = B u_e`, and the constitutive law gives `sigma = D epsilon = D B u_e`.  Converting
+//! `epsilon = B u_e`, and the elastic stress-strain law gives `sigma = D epsilon = D B u_e`.  Converting
 //! that pointwise stress field back into equivalent nodal forces by virtual work gives
 //! `f_int,e = integral(B^T sigma 2*pi*r dA) = integral(B^T D B u_e 2*pi*r dA) = K_e u_e`.
 //! So `K_e` is the element stiffness matrix: it maps one element displacement pattern to the
@@ -27,8 +27,8 @@
 //!   physical coordinates `(r, z)`, so it converts reference-space gradients and differential area
 //!   into physical-space gradients and area through `dA = det(J) d\xi d\eta`,
 //! - `B` maps nodal displacements to the axisymmetric strain vector,
-//! - `D` is the constitutive matrix, a per-material `4 x 4` tensor in axisymmetric stress/strain
-//!   ordering, and it maps strain to stress through the material law,
+//! - `D` is the constitutive matrix, the per-material `4 x 4` matrix for the elastic
+//!   stress-strain law in axisymmetric stress/strain ordering,
 //! - `epsilon` is the strain vector at a point,
 //! - `sigma` is the stress vector at a point,
 //! - `B^T` maps stress back to equivalent nodal forces,
@@ -74,13 +74,20 @@
 //! in equilibrium, then the internal stresses and the applied loads must do equal virtual work
 //! against every such perturbation.
 //!
-//! In axisymmetric small-strain elasticity, the virtual-work statement can be written schematically
-//! as
-//! - `delta W_int = integral((delta epsilon)^T sigma 2*pi*r dA)`,
-//! - `delta W_ext = integral((delta u)^T b 2*pi*r dA) + integral((delta u)^T t 2*pi*r ds)`,
-//! where `b` is body-force density and `t` is an applied surface traction.  Thermal strain enters
-//! through the constitutive law `sigma = D (epsilon - epsilon_th)` and can therefore be moved to
-//! the right-hand side as an equivalent load.
+//! Using Bower's terminology, the governing equations are the strain-displacement equation, the
+//! elastic stress-strain law, the equation of static equilibrium for stresses, and the boundary
+//! conditions on displacement and stress.  The finite-element formulation replaces the strong-form
+//! equilibrium equation with the weak form.
+//!
+//! In axisymmetric small-strain elasticity, the weak form is: find a displacement field `u`
+//! satisfying the prescribed displacement boundary conditions such that, for every admissible
+//! virtual displacement field `delta u`,
+//! `integral((delta epsilon)^T sigma 2*pi*r dA)
+//!  - integral((delta u)^T b 2*pi*r dA)
+//!  - integral((delta u)^T t 2*pi*r ds) = 0`.
+//! Here `b` is body-force density, `t` is an applied traction on the traction boundary, and
+//! `sigma = D (epsilon - epsilon_th)` if thermal strain is active.  When no traction or pressure
+//! load is prescribed on a boundary segment, that boundary is traction-free in this weak sense.
 //!
 //! After approximating the displacement field with element shape functions, one writes
 //! - `u = N u_e`,
@@ -139,8 +146,8 @@
 //! - evaluates the shape functions `N_i(\xi, \eta)`,
 //! - maps their reference gradients into physical gradients with the element Jacobian `J`,
 //! - builds the axisymmetric strain-displacement matrix `B`,
-//! - applies the per-material `4 x 4` constitutive matrix `D` locally to form `B^T D B` for the
-//!   local stiffness contribution, and
+//! - applies the per-material `4 x 4` elastic stress-strain matrix `D` locally to form
+//!   `B^T D B` for the local stiffness contribution, and
 //! - scales the contribution by the area weight `det(J) w` and by the additional
 //!   axisymmetric revolution factor `2*pi*r`.
 //!
@@ -154,7 +161,7 @@
 //!   `epsilon_th = alpha * (T - T_ref)`.
 //!
 //! The thermal term is an eigenstrain load, not an externally applied traction or body force.  It
-//! appears on the right-hand side because the constitutive law is evaluated as
+//! appears on the right-hand side because the elastic stress-strain law is evaluated as
 //! `sigma = D (epsilon - epsilon_th)`, so the `D epsilon_th` contribution is moved to the load
 //! vector as an equivalent nodal force.
 //!
@@ -174,17 +181,17 @@
 //!
 //! The stress vector is stored in the matching ordering
 //! `sigma = [sigma_rr, sigma_zz, sigma_tt, tau_rz]^T`.
-//! For a purely mechanical solve the constitutive law is
+//! For a purely mechanical solve the elastic stress-strain law is
 //! `sigma = D epsilon`.
 //! When thermal strain is active, the elastic strain is
 //! `epsilon_elastic = epsilon - epsilon_th`,
-//! and the constitutive law becomes
+//! and the elastic stress-strain law becomes
 //! `sigma = D (epsilon - epsilon_th)`.
 //! The matrix `D` therefore maps strain-like quantities in that axisymmetric ordering into the
 //! corresponding stress-like quantities in the same ordering.  In the implementation `D` is not
-//! assembled into any global constitutive operator.  Instead, each quadrature point applies the
+//! assembled into any global stress-strain operator.  Instead, each quadrature point applies the
 //! relevant per-material `4 x 4` matrix directly, so stiffness assembly and stress recovery use
-//! the same constitutive law in a matrix-free local form.
+//! the same elastic stress-strain law in a matrix-free local form.
 //!
 //! From an energy viewpoint, the strain-energy density is
 //! `1/2 epsilon^T D epsilon`
@@ -206,13 +213,13 @@
 //! - shape values `N_i(q)`,
 //! - physical shape gradients,
 //! - the local radius `r_q`,
-//! - the constitutive matrix `D`,
+//! - the elastic stress-strain matrix `D`,
 //! - and the axisymmetric scale `scale_q = 2*pi*r_q det(J_q) w_q`.
 //! From these it builds the strain-displacement matrix `B_q` and then forms the dense
 //! quadrature-point kernel
 //! `scale_q B_q^T D B_q`.
 //! The important implementation detail is that `D` is applied only as this local `4 x 4`
-//! contribution.  There is no assembled global constitutive matrix; the backend computes `D B_q`
+//! contribution.  There is no assembled global stress-strain matrix; the backend computes `D B_q`
 //! directly for each quadrature point and accumulates the resulting `B_q^T (D B_q)` contribution
 //! into the element stiffness matrix.
 //!
@@ -238,9 +245,9 @@
 //!
 //! The stress and strain recovery operators in [`recovery`] use the same quadrature-point objects.
 //! The strain operator stores the action of `B_q`, while the stress operator stores the action of
-//! the local constitutive product `D B_q`.  As in stiffness assembly, this is done matrix-free
-//! with the individual per-material `4 x 4` constitutive matrix at each quadrature point rather
-//! than through any assembled global `D` operator.  Applying those operators to the global
+//! the local stress product `D B_q`.  As in stiffness assembly, this is done matrix-free
+//! with the individual per-material `4 x 4` elastic stress-strain matrix at each quadrature point
+//! rather than through any assembled global `D` operator.  Applying those operators to the global
 //! displacement vector therefore recovers
 //! `epsilon_q = B_q u_e` and `sigma_q = D epsilon_q`, or `sigma_q = D (epsilon_q - epsilon_th,q)`
 //! when thermal strain is present.
@@ -320,7 +327,7 @@
 //! Thermal strain is fundamentally different from the previous three load types because it is not
 //! an externally applied force density.  Instead, it is an eigenstrain
 //! `epsilon_th = alpha * (T - T_ref)` representing the strain the material would adopt if it were
-//! free to expand or contract without mechanical constraint.  The constitutive law is written as
+//! free to expand or contract without mechanical constraint.  The elastic stress-strain law is written as
 //! `sigma = D (epsilon - epsilon_th)`, so the thermal part enters the weak form as
 //! `delta W_thermal = - integral((delta epsilon)^T D epsilon_th 2*pi*r dA)`.
 //! After interpolation this becomes

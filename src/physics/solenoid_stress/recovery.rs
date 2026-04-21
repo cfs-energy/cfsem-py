@@ -28,7 +28,7 @@
 //! 5. Recovery then uses that same `B`:
 //!    - strain recovery uses `B`,
 //!    - stress recovery uses `D B`,
-//!    where `D` is the local per-material `4 x 4` constitutive matrix.
+//!    where `D` is the local per-material `4 x 4` matrix for the elastic stress-strain law.
 
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
@@ -146,9 +146,9 @@ fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
 
 /// Build the dense recovery blocks for one quadrature point.
 ///
-/// This helper evaluates the local strain and stress maps with the element's constitutive matrix,
-/// and, when thermal data is present, also builds the local thermal operators and constant offsets
-/// associated with the material reference temperature.
+/// This helper evaluates the local strain and stress maps with the element's `4 x 4` elastic
+/// stress-strain matrix, and, when thermal data is present, also builds the local thermal
+/// operators and constant offsets associated with the material reference temperature.
 fn quadrature_sample_kernel<
     F: Real,
     const NODES_PER_ELEMENT: usize,
@@ -168,9 +168,9 @@ fn quadrature_sample_kernel<
         &sample.grad_phys,
         sample.point[0],
     )?;
-    // `D B` maps nodal displacements `[length]` to stress `[pressure]`. The constitutive action
-    // is applied here with the local per-material `4 x 4` matrix; there is no assembled global
-    // constitutive operator.
+    // `D B` maps nodal displacements `[length]` to stress `[pressure]`. The elastic stress-strain
+    // matrix is applied here with the local per-material `4 x 4` matrix; there is no assembled
+    // global stress-strain operator.
     let stress = constitutive_times_b(material, &strain);
     let mut local = LocalQuadratureSampleKernel {
         strain,

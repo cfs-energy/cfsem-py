@@ -764,8 +764,8 @@ fn assemble_axisymmetric_model_low_level<F: physics::solenoid_stress::Real + Num
     let nodes = read_axisym_nodes("nodes", nodes)?;
     let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
     let material_table = read_axisym_material_table("material_table", material_table)?;
-    let pressure_faces = read_axisym_pressure_faces::<F>(pressure_faces)?;
-    let traction_faces = read_axisym_traction_faces::<F>(traction_faces)?;
+    let pressure_faces = read_axisym_pressure_faces(pressure_faces)?;
+    let traction_faces = read_axisym_traction_faces(traction_faces)?;
     let thermal_material_table =
         read_axisym_thermal_material_table("thermal_material_table", thermal_material_table)?;
     let prescribed = read_axisym_prescribed(prescribed_dofs, prescribed_values)?;

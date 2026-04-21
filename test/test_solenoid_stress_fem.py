@@ -1111,3 +1111,32 @@ def test_python_convenience_wrappers_preserve_dtype_and_shapes() -> None:
     assert ortho.dtype == dtype
     assert elevated.analysis_elements.shape[1] == 9
     assert elevated.analysis_nodes.dtype == dtype
+
+
+def test_quad9_temperature_elevation_reproduces_affine_temperature_field() -> None:
+    dtype = np.dtype(np.float64)
+    nodes = np.asarray(
+        [
+            [0.52, 0.00],
+            [0.81, 0.04],
+            [1.07, -0.01],
+            [0.56, 0.27],
+            [0.84, 0.33],
+            [1.10, 0.29],
+        ],
+        dtype=dtype,
+    )
+    elements = np.asarray([[0, 1, 4, 3], [1, 2, 5, 4]], dtype=np.uint64)
+    elevated = fem.infer_quad9_mesh(nodes, elements)
+
+    a_r, b_z, c0 = 3.25, -1.75, 4.5
+    corner_temperature = a_r * nodes[:, 0] + b_z * nodes[:, 1] + c0
+    analysis_temperature = fem._analysis_temperature_for_element_type(
+        corner_temperature,
+        nodes.shape[0],
+        elevated,
+        dtype,
+    )
+    expected_temperature = a_r * elevated.analysis_nodes[:, 0] + b_z * elevated.analysis_nodes[:, 1] + c0
+
+    assert np.allclose(analysis_temperature, expected_temperature, rtol=0.0, atol=1.0e-14)

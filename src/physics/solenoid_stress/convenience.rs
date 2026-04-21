@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use crate::mesh::elements::quad2d::quad4;
 use crate::physics::solenoid_stress::types::{Real, ThermalMaterial, cast};
 
 /// Per-element quadrature data in element-major flattened form.
@@ -87,6 +88,11 @@ pub struct ElevatedQuad9Mesh<F: Real> {
     /// Units: `[length]`.
     pub analysis_nodes: Vec<[F; 2]>,
     /// Elevated quad9 connectivity.
+    ///
+    /// Each element stores nodes in the local quad9 order:
+    /// - corners `0..=3` in counter-clockwise order `[bottom-left, bottom-right, top-right, top-left]`
+    /// - midsides `4..=7` on faces `[bottom, right, top, left]`
+    /// - center node `8`
     pub analysis_elements: Vec<[usize; 9]>,
     /// Indices of the corner nodes in `analysis_nodes`.
     pub corner_node_indices: Vec<usize>,
@@ -150,6 +156,10 @@ pub fn cfsem_radial_material<F: Real>(youngs_modulus: F, poisson_ratio: F) -> [[
 }
 
 /// Elevate a corner-only quad4 mesh to an explicit quad9 analysis mesh.
+///
+/// The output `analysis_elements` use the standard local quad9 ordering documented on
+/// [`ElevatedQuad9Mesh::analysis_elements`]. In particular, midside nodes `4..=7` follow the
+/// quad local face numbering `[bottom, right, top, left]`.
 pub fn infer_quad9_mesh<F: Real>(
     nodes_rz: &[[F; 2]],
     elements: &[[usize; 4]],
@@ -174,9 +184,7 @@ pub fn infer_quad9_mesh<F: Real>(
     for (element_index, conn) in elements.iter().copied().enumerate() {
         analysis_elements[element_index][..4].copy_from_slice(&conn);
         let coords = conn.map(|node| nodes_rz[node]);
-        let edge_nodes = [(0usize, 1usize), (1, 2), (2, 3), (3, 0)];
-
-        for (local_edge, (local_a, local_b)) in edge_nodes.into_iter().enumerate() {
+        for (local_edge, (local_a, local_b)) in quad4::FACE_NODE_PAIRS.into_iter().enumerate() {
             let node_a = conn[local_a];
             let node_b = conn[local_b];
             let edge_key = if node_a < node_b {
@@ -260,17 +268,25 @@ mod tests {
     }
 
     #[test]
-    fn infer_quad9_mesh_reuses_shared_edge_midpoints() {
+    fn infer_quad9_mesh_reuses_shared_edge_midpoints_and_preserves_local_face_order() {
         let (nodes, elements) = two_element_strip_mesh();
         let elevated = infer_quad9_mesh(&nodes, &elements).expect("quad9 elevation");
         assert_eq!(elevated.analysis_elements.len(), 2);
+        assert_eq!(elevated.corner_node_indices, vec![0, 1, 2, 3, 4, 5]);
+
+        let first = elevated.analysis_elements[0];
+        assert_eq!(elevated.analysis_nodes[first[4]], [0.625, 0.0]);
+        assert_eq!(elevated.analysis_nodes[first[5]], [0.75, 0.1]);
+        assert_eq!(elevated.analysis_nodes[first[6]], [0.625, 0.2]);
+        assert_eq!(elevated.analysis_nodes[first[7]], [0.5, 0.1]);
+        assert_eq!(elevated.analysis_nodes[first[8]], [0.625, 0.1]);
         assert_eq!(
             elevated.analysis_elements[0][5],
             elevated.analysis_elements[1][7]
         );
         assert_eq!(
-            elevated.analysis_nodes[elevated.analysis_elements[0][8]],
-            [0.625, 0.1]
+            elevated.center_node_indices.len(),
+            elevated.analysis_elements.len()
         );
     }
 }

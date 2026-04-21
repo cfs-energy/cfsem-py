@@ -74,6 +74,7 @@ _orthotropic_axisymmetric_thermal_material_f64 = (
 )
 
 ArrayLike = npt.ArrayLike
+_QUAD_FACE_NODE_PAIRS: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 3), (3, 0))
 
 
 def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:
@@ -161,7 +162,13 @@ class ElementQuadrature:
 
 @dataclass(frozen=True, slots=True)
 class ElevatedQuad9Mesh:
-    """Explicit 9-node analysis mesh inferred from a corner-only quad4 mesh."""
+    """Explicit 9-node analysis mesh inferred from a corner-only quad4 mesh.
+
+    `analysis_elements` use the local quad9 ordering:
+    - corners `0..3` in counter-clockwise order `[bottom-left, bottom-right, top-right, top-left]`
+    - midsides `4..7` on faces `[bottom, right, top, left]`
+    - center node `8`
+    """
 
     input_nodes: npt.NDArray[np.floating[Any]]
     input_elements: npt.NDArray[np.uint64]
@@ -501,7 +508,11 @@ def _normalize_elements(elements: ArrayLike) -> npt.NDArray[np.uint64]:
 
 
 def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh:
-    """Elevate a corner-only quad mesh to an explicit 9-node Lagrange mesh."""
+    """Elevate a corner-only quad mesh to an explicit 9-node Lagrange mesh.
+
+    The input corner nodes must be ordered counter-clockwise in the `(r, z)` plane. The returned
+    `analysis_elements` follow the local quad9 ordering documented on `ElevatedQuad9Mesh`.
+    """
 
     dtype = _resolve_float_dtype(nodes)
     nodes_arr = _normalize_nodes(nodes, dtype)
@@ -542,9 +553,8 @@ def _temperature_elevation_operator(
         vals.append(1.0)
 
     edge_to_midpoint: dict[tuple[int, int], int] = {}
-    edge_nodes = ((0, 1), (1, 2), (2, 3), (3, 0))
     for element_index, conn in enumerate(elevated.input_elements):
-        for local_edge, (local_a, local_b) in enumerate(edge_nodes):
+        for local_edge, (local_a, local_b) in enumerate(_QUAD_FACE_NODE_PAIRS):
             node_a = int(conn[local_a])
             node_b = int(conn[local_b])
             edge_key = (node_a, node_b) if node_a < node_b else (node_b, node_a)

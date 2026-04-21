@@ -59,7 +59,8 @@ pub fn local_dofs<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
 pub struct PressureLoad {
     /// Element index receiving the load.
     pub element: usize,
-    /// Local face index in the element-family numbering used by `face_reference`.
+    /// Local face index in the element-family numbering used by `face_reference`:
+    /// `0 = bottom`, `1 = right`, `2 = top`, `3 = left`.
     pub local_face: u8,
 }
 
@@ -70,7 +71,8 @@ pub struct PressureLoad {
 pub struct TractionLoad {
     /// Element index receiving the load.
     pub element: usize,
-    /// Local face index in the element-family numbering used by `face_reference`.
+    /// Local face index in the element-family numbering used by `face_reference`:
+    /// `0 = bottom`, `1 = right`, `2 = top`, `3 = left`.
     pub local_face: u8,
 }
 

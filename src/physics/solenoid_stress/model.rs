@@ -54,7 +54,8 @@ impl AxisymmetricElementType {
 /// Borrowed element-connectivity input for model assembly.
 ///
 /// Each variant stores element-node connectivity in the node ordering expected by the
-/// corresponding quadrilateral family.
+/// corresponding quadrilateral family. Element corner nodes must be ordered
+/// counter-clockwise in the `(r, z)` meridian plane.
 pub enum AxisymmetricElements<'a> {
     Quad4(&'a [[usize; 4]]),
     Quad9(&'a [[usize; 9]]),

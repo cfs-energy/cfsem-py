@@ -56,7 +56,7 @@ def build_annulus_strip_mesh(
                     node_id(i + 1, j + 1),
                     node_id(i, j + 1),
                 ]
-    )
+            )
     return nodes, np.asarray(elements, dtype=np.uint64)
 
 
@@ -228,9 +228,7 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray(
-            [isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]
-        ),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]),
         quadrature=quadrature,
     )
     measures = model.element_measures()
@@ -274,9 +272,7 @@ def test_body_force_total_matches_requested_total_force(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray(
-            [isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]
-        ),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]),
         quadrature=quadrature,
     )
     measures = model.element_measures()
@@ -319,10 +315,13 @@ def test_model_dtype_resolution_includes_material_tables() -> None:
 
     assert model.dtype == np.dtype(np.float64)
     assert model.stiffness.dtype == np.float64
-    assert model.build_rhs(
-        body_force=np.array([0.0, 0.0], dtype=np.float32),
-        nodal_temperature=nodal_temperature,
-    ).dtype == np.float64
+    assert (
+        model.build_rhs(
+            body_force=np.array([0.0, 0.0], dtype=np.float32),
+            nodal_temperature=nodal_temperature,
+        ).dtype
+        == np.float64
+    )
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
@@ -542,15 +541,17 @@ def test_zero_surface_traction_matches_natural_free_boundary(
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
-def test_factorized_solve_reuses_stiffness_with_varying_traction(
-    quadrature: str, element_type: str
-) -> None:
+def test_factorized_solve_reuses_stiffness_with_varying_traction(quadrature: str, element_type: str) -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=3, nz=2)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    prescribed = prescribed_z_dofs(nodes.shape[0] if element_type == "quad4" else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0])
+    prescribed = prescribed_z_dofs(
+        nodes.shape[0]
+        if element_type == "quad4"
+        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
+    )
     model = fem.assemble_axisymmetric(
         nodes=nodes,
         elements=elements,
@@ -822,9 +823,7 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
     ri, ro, height = 0.5, 1.0, 0.24
     nr, nz = 36, 12
     regular_nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
-    distorted_nodes = distort_annulus_strip_mesh(
-        regular_nodes, ri, ro, height, nr=nr, nz=nz, distortion=0.05
-    )
+    distorted_nodes = distort_annulus_strip_mesh(regular_nodes, ri, ro, height, nr=nr, nz=nz, distortion=0.05)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=nz)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=nr, nz=nz)
     pressure_faces = np.vstack([inner_faces, outer_faces])
@@ -888,12 +887,8 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
         element_type=element_type,
     )
 
-    regular_u = regular_model.solve(regular_rhs).reshape(
-        regular_model.analysis_nodes.shape[0], 2
-    )
-    distorted_u = distorted_model.solve(distorted_rhs).reshape(
-        distorted_model.analysis_nodes.shape[0], 2
-    )
+    regular_u = regular_model.solve(regular_rhs).reshape(regular_model.analysis_nodes.shape[0], 2)
+    distorted_u = distorted_model.solve(distorted_rhs).reshape(distorted_model.analysis_nodes.shape[0], 2)
     regular_samples = regular_model.evaluate_quadrature(regular_u)
     distorted_samples = distorted_model.evaluate_quadrature(distorted_u)
 
@@ -905,9 +900,7 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
     sample_points = np.column_stack([sample_rr.reshape(-1), sample_zz.reshape(-1)])
 
     regular_displacement = interpolate_field(regular_model.analysis_nodes, regular_u, sample_points)
-    distorted_displacement = interpolate_field(
-        distorted_model.analysis_nodes, distorted_u, sample_points
-    )
+    distorted_displacement = interpolate_field(distorted_model.analysis_nodes, distorted_u, sample_points)
     regular_stress = interpolate_field(
         regular_samples.points_rz.reshape(-1, 2),
         regular_samples.stress.reshape(-1, 4),
@@ -1092,9 +1085,7 @@ def test_python_convenience_wrappers_preserve_dtype_and_shapes() -> None:
     dtype = np.dtype(np.float32)
     iso = fem.isotropic_axisymmetric_material(200.0e9, 0.3, dtype=dtype)
     reduced = fem.cfsem_radial_material(200.0e9, 0.3, dtype=dtype)
-    thermal = fem.isotropic_axisymmetric_thermal_material(
-        1.0e-5, reference_temperature=293.15, dtype=dtype
-    )
+    thermal = fem.isotropic_axisymmetric_thermal_material(1.0e-5, reference_temperature=293.15, dtype=dtype)
     ortho = fem.orthotropic_axisymmetric_thermal_material(
         1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=dtype
     )

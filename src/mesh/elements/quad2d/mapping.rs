@@ -83,7 +83,7 @@ pub fn inv_j<F: Scalar>(jac: &[[F; 2]; 2]) -> Result<[[F; 2]; 2], String> {
     let det = det_j(jac);
     if det <= F::zero() {
         return Err(format!(
-            "encountered non-positive element Jacobian determinant {det:?}"
+            "encountered non-positive element Jacobian determinant {det:?}; quadrilateral elements must be non-degenerate and use counter-clockwise corner ordering in the (r, z) plane"
         ));
     }
     let inv_det = F::one() / det;

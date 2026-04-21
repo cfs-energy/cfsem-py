@@ -641,9 +641,7 @@ def _normalize_thermal_material_table(
         assert mapping, "thermal_material_table mapping cannot be empty"
         keys = sorted(int(key) for key in mapping)
         if elastic_mapping_keys is not None and set(keys) != elastic_mapping_keys:
-            raise ValueError(
-                "thermal_material_table must have exactly the same keys as material_table"
-            )
+            raise ValueError("thermal_material_table must have exactly the same keys as material_table")
         dense_table = []
         for key in keys:
             row = np.asarray(mapping[key], dtype=dtype)
@@ -766,7 +764,8 @@ def assemble_axisymmetric(
 
     `element_type="quad4"` uses the input mesh directly. `element_type="quad9"` elevates the
     corner-only input mesh to an explicit 9-node analysis mesh for the backend while keeping the
-    Python-side load and temperature inputs on the original corner nodes.
+    Python-side load and temperature inputs on the original corner nodes. Element corner nodes
+    must be ordered counter-clockwise in the `(r, z)` meridian plane.
     """
 
     elements_arr = _normalize_elements(elements)

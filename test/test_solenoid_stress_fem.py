@@ -152,23 +152,15 @@ def interpolate_field(
     sample_points: np.ndarray,
 ) -> np.ndarray:
     values_arr = np.asarray(values, dtype=np.float64)
-    if values_arr.ndim == 1:
-        interpolator = spi.LinearNDInterpolator(points, values_arr, fill_value=np.nan)
-        out = np.asarray(interpolator(sample_points), dtype=np.float64)
-        assert np.all(np.isfinite(out))
-        return out
-
-    columns = []
-    for component in range(values_arr.shape[1]):
-        interpolator = spi.LinearNDInterpolator(
-            points,
-            values_arr[:, component],
-            fill_value=np.nan,
-        )
-        column = np.asarray(interpolator(sample_points), dtype=np.float64)
-        assert np.all(np.isfinite(column))
-        columns.append(column)
-    return np.column_stack(columns)
+    interpolator = spi.RBFInterpolator(
+        np.asarray(points, dtype=np.float64),
+        values_arr,
+        kernel="linear",
+        neighbors=4,
+    )
+    out = np.asarray(interpolator(np.asarray(sample_points, dtype=np.float64)), dtype=np.float64)
+    assert np.all(np.isfinite(out))
+    return out
 
 
 def normalized_peak_error(test: np.ndarray, reference: np.ndarray) -> float:

@@ -213,9 +213,9 @@ fn read_axisym_thermal_material_table<F: physics::solenoid_stress::Real + NumpyE
     Ok(out)
 }
 
-fn read_axisym_pressure_faces<F: physics::solenoid_stress::Real + NumpyElement>(
+fn read_axisym_pressure_faces(
     pressure_faces: PyReadonlyArray2<'_, u64>,
-) -> PyResult<Vec<physics::solenoid_stress::PressureLoad<F>>> {
+) -> PyResult<Vec<physics::solenoid_stress::PressureLoad>> {
     let faces_view = pressure_faces.as_array();
     let faces_shape = faces_view.shape();
     if faces_shape.len() != 2 || faces_shape[1] != 2 {
@@ -233,15 +233,14 @@ fn read_axisym_pressure_faces<F: physics::solenoid_stress::Real + NumpyElement>(
             local_face: u8::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
                 msg: "pressure_faces local face overflowed u8".to_string(),
             })?,
-            value: F::one(),
         });
     }
     Ok(out)
 }
 
-fn read_axisym_traction_faces<F: physics::solenoid_stress::Real + NumpyElement>(
+fn read_axisym_traction_faces(
     traction_faces: PyReadonlyArray2<'_, u64>,
-) -> PyResult<Vec<physics::solenoid_stress::TractionLoad<F>>> {
+) -> PyResult<Vec<physics::solenoid_stress::TractionLoad>> {
     let faces_view = traction_faces.as_array();
     let faces_shape = faces_view.shape();
     if faces_shape.len() != 2 || faces_shape[1] != 2 {
@@ -259,7 +258,6 @@ fn read_axisym_traction_faces<F: physics::solenoid_stress::Real + NumpyElement>(
             local_face: u8::try_from(row[1]).map_err(|_| PyInteropError::ValueError {
                 msg: "traction_faces local face overflowed u8".to_string(),
             })?,
-            value: [F::zero(), F::zero()],
         });
     }
     Ok(out)

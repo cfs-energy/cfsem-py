@@ -52,30 +52,26 @@ pub fn local_dofs<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     local_dofs
 }
 
-/// One scalar normal-pressure load applied to one element face.
+/// One scalar normal-pressure load topology entry for one element face.
+///
+/// The pressure amplitude is supplied later at `build_rhs(...)` time, not stored here.
 #[derive(Clone, Copy, Debug)]
-pub struct PressureLoad<F: Real> {
+pub struct PressureLoad {
     /// Element index receiving the load.
     pub element: usize,
     /// Local face index in the element-family numbering used by `face_reference`.
     pub local_face: u8,
-    /// Pressure magnitude, taken positive in the inward normal direction.
-    ///
-    /// Units: `[force / area]`.
-    pub value: F,
 }
 
-/// One constant traction-vector load applied to one element face.
+/// One traction-vector load topology entry for one element face.
+///
+/// The traction amplitudes are supplied later at `build_rhs(...)` time, not stored here.
 #[derive(Clone, Copy, Debug)]
-pub struct TractionLoad<F: Real> {
+pub struct TractionLoad {
     /// Element index receiving the load.
     pub element: usize,
     /// Local face index in the element-family numbering used by `face_reference`.
     pub local_face: u8,
-    /// Constant traction vector in global meridian coordinates `[t_r, t_z]`.
-    ///
-    /// Units: `[force / area]`.
-    pub value: [F; 2],
 }
 
 /// Per-material thermal-expansion data for the axisymmetric thermoelastic model.

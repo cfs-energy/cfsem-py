@@ -63,7 +63,7 @@ pub(crate) fn traction_operator_for_family<
     const DOF_PER_ELEMENT: usize,
 >(
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
-    traction_faces: &[TractionLoad<F>],
+    traction_faces: &[TractionLoad],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String>
 where

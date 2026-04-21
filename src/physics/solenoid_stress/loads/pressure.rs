@@ -58,7 +58,7 @@ pub(crate) fn pressure_operator_for_family<
     const DOF_PER_ELEMENT: usize,
 >(
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
-    pressure_faces: &[PressureLoad<F>],
+    pressure_faces: &[PressureLoad],
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String>
 where

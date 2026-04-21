@@ -1068,13 +1068,13 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
             material_table={0: material},
         )
 
-    with pytest.raises(ValueError, match="missing from thermal_material_table"):
+    with pytest.raises(ValueError, match="same keys as material_table"):
         fem.assemble_axisymmetric(
             nodes=nodes,
             elements=elements,
-            material_ids=np.array([0], dtype=np.uint64),
-            material_table={0: material},
-            thermal_material_table={1: thermal_material},
+            material_ids=np.array([1], dtype=np.uint64),
+            material_table={0: material, 1: material},
+            thermal_material_table={1: thermal_material, 2: thermal_material},
         )
 
     with pytest.raises(ValueError, match="nodal_temperature is required"):

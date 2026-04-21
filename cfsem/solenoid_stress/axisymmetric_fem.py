@@ -626,9 +626,10 @@ def _normalize_thermal_material_table(
     dtype: np.dtype[Any],
     *,
     require_mapping: bool | None = None,
-) -> tuple[npt.NDArray[np.uint64] | None, npt.NDArray[np.floating[Any]] | None]:
+    elastic_mapping_keys: set[int] | None = None,
+) -> npt.NDArray[np.floating[Any]] | None:
     if thermal_material_table is None:
-        return None, None
+        return None
     ids = np.asarray(material_ids, dtype=np.uint64)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     is_mapping = isinstance(thermal_material_table, Mapping)
@@ -639,30 +640,26 @@ def _normalize_thermal_material_table(
         mapping = thermal_material_table
         assert mapping, "thermal_material_table mapping cannot be empty"
         keys = sorted(int(key) for key in mapping)
+        if elastic_mapping_keys is not None and set(keys) != elastic_mapping_keys:
+            raise ValueError(
+                "thermal_material_table must have exactly the same keys as material_table"
+            )
         dense_table = []
-        tag_to_index = {key: index for index, key in enumerate(keys)}
         for key in keys:
             row = np.asarray(mapping[key], dtype=dtype)
             assert row.shape == (5,), f"thermal_material_table[{key}] must have shape (5,); got {row.shape}"
             dense_table.append(row)
-        try:
-            normalized_ids = np.asarray([tag_to_index[int(tag)] for tag in ids], dtype=np.uint64)
-        except KeyError as exc:
-            raise ValueError(
-                f"material_ids contains tag {exc.args[0]} that is missing from thermal_material_table"
-            ) from exc
         table = np.ascontiguousarray(np.stack(dense_table, axis=0), dtype=dtype)
     else:
         table = np.asarray(thermal_material_table, dtype=dtype)
         assert (
             table.ndim == 2 and table.shape[1] == 5
         ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
-        normalized_ids = np.ascontiguousarray(ids)
         table = np.ascontiguousarray(table)
     assert np.allclose(
         table[:, 3], 0.0
     ), "thermal_material_table shear thermal expansion must be zero in phase 1"
-    return normalized_ids, table
+    return table
 
 
 def _normalize_nodal_temperature(
@@ -776,11 +773,14 @@ def assemble_axisymmetric(
     dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
     nodes_arr = _normalize_nodes(nodes, dtype)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
-    _thermal_ids_arr, thermal_material_table_arr = _normalize_thermal_material_table(
+    thermal_material_table_arr = _normalize_thermal_material_table(
         material_ids,
         thermal_material_table,
         dtype,
         require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
+        elastic_mapping_keys=(
+            {int(key) for key in material_table} if isinstance(material_table, Mapping) else None
+        ),
     )
     pressure_faces_arr = _normalize_face_pairs("pressure_faces", pressure_faces)
     traction_faces_arr = _normalize_face_pairs("traction_faces", traction_faces)

@@ -813,7 +813,7 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
 ) -> None:
     dtype = np.float64
     ri, ro, height = 0.5, 1.0, 0.24
-    nr, nz = 36, 12
+    nr, nz = 42, 14
     regular_nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
     distorted_nodes = distort_annulus_strip_mesh(regular_nodes, ri, ro, height, nr=nr, nz=nz, distortion=0.05)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=nz)
@@ -909,9 +909,7 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
     assert np.max(np.abs(regular_stress[:, 3])) > 1.0e3
 
     assert normalized_peak_error(distorted_displacement[:, 0], regular_displacement[:, 0]) < 1.0e-2
-    # The axial displacement is smaller than the radial displacement in this mixed-load case,
-    # so the same absolute perturbation from mesh distortion shows up as a larger relative error.
-    assert normalized_peak_error(distorted_displacement[:, 1], regular_displacement[:, 1]) < 7.0e-2
+    assert normalized_peak_error(distorted_displacement[:, 1], regular_displacement[:, 1]) < 1.0e-2
     assert normalized_peak_error(distorted_stress[:, 0], regular_stress[:, 0]) < 1.0e-2
     assert normalized_peak_error(distorted_stress[:, 1], regular_stress[:, 1]) < 1.0e-2
     assert normalized_peak_error(distorted_stress[:, 2], regular_stress[:, 2]) < 1.0e-2

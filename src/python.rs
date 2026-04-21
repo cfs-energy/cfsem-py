@@ -100,7 +100,7 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
     }
 }
 
-fn read_axisym_nodes<F: physics::solenoid_stress::Real + NumpyElement>(
+fn read_axisym_nodes<F: NumpyElement + Copy>(
     name: &str,
     nodes: PyReadonlyArray2<'_, F>,
 ) -> PyResult<Vec<[F; 2]>> {
@@ -270,7 +270,7 @@ fn parse_solenoid_fem_quadrature(
         .map_err(|msg| PyInteropError::ValueError { msg }.into())
 }
 
-fn flatten_axisym_points<F: physics::solenoid_stress::Real>(points: Vec<[F; 2]>) -> Vec<F> {
+fn flatten_axisym_points<F: Copy>(points: Vec<[F; 2]>) -> Vec<F> {
     let mut points_flat = Vec::with_capacity(points.len() * 2);
     for point in points {
         points_flat.push(point[0]);
@@ -288,7 +288,7 @@ fn flatten_usize_pairs(pairs: &[[usize; 2]]) -> Vec<usize> {
     out
 }
 
-fn flatten_rank4_samples<F: physics::solenoid_stress::Real>(samples: Vec<[F; 4]>) -> Vec<F> {
+fn flatten_rank4_samples<F: Copy>(samples: Vec<[F; 4]>) -> Vec<F> {
     let mut out = Vec::with_capacity(samples.len() * 4);
     for sample in samples {
         out.extend_from_slice(&sample);
@@ -296,7 +296,7 @@ fn flatten_rank4_samples<F: physics::solenoid_stress::Real>(samples: Vec<[F; 4]>
     out
 }
 
-fn read_axisym_prescribed<F: physics::solenoid_stress::Real + NumpyElement>(
+fn read_axisym_prescribed<F: NumpyElement + Copy>(
     prescribed_dofs: PyReadonlyArray1<'_, u64>,
     prescribed_values: PyReadonlyArray1<'_, F>,
 ) -> PyResult<Vec<(usize, F)>> {

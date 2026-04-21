@@ -417,15 +417,15 @@ impl<F: Real> AxisymmetricModel<F> {
 /// - reduced RHS operators for all supported load types,
 /// - cached metadata describing the analysis mesh and load faces, and
 /// - reduced recovery operators for quadrature-point postprocessing.
-pub fn assemble_axisymmetric<'a, F: Real>(
-    nodes_rz: &'a [[F; 2]],
-    elements: AxisymmetricElements<'a>,
-    material_ids: &'a [usize],
-    material_table: &'a [[[F; 4]; 4]],
-    pressure_faces: &'a [PressureLoad],
-    traction_faces: &'a [TractionLoad],
-    thermal_material_table: Option<&'a [ThermalMaterial<F>]>,
-    prescribed: &'a [(usize, F)],
+pub fn assemble_axisymmetric<F: Real>(
+    nodes_rz: &[[F; 2]],
+    elements: AxisymmetricElements<'_>,
+    material_ids: &[usize],
+    material_table: &[[[F; 4]; 4]],
+    pressure_faces: &[PressureLoad],
+    traction_faces: &[TractionLoad],
+    thermal_material_table: Option<&[ThermalMaterial<F>]>,
+    prescribed: &[(usize, F)],
     quadrature: QuadratureRule,
 ) -> Result<AxisymmetricModel<F>, String> {
     match elements {

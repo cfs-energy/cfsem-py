@@ -12,19 +12,24 @@ use crate::physics::solenoid_stress::types::{Real, ThermalMaterial, cast};
 /// Per-element quadrature data in element-major flattened form.
 ///
 /// `points_rz`, `weights_area`, and `weights_volume` are stored in the same element-major order.
+/// `points_rz` has flattened shape `(nelem * nq_per_element, 2)`,
+/// `weights_area` and `weights_volume` have flattened shape `(nelem * nq_per_element,)`, and
 /// `nq_per_element` gives the number of consecutive quadrature entries belonging to each element.
 #[derive(Debug, Clone)]
 pub struct AxisymmetricElementQuadrature<F: Real> {
     /// Physical quadrature-point coordinates `(r, z)` in element-major order.
     ///
+    /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
     pub points_rz: Vec<[F; 2]>,
     /// Mapped meridian-area weights `det(J) w` in element-major order.
     ///
+    /// Flattened shape: `(nelem * nq_per_element,)`.
     /// Units: `[area]`.
     pub weights_area: Vec<F>,
     /// Mapped swept-volume weights `2*pi*r det(J) w` in element-major order.
     ///
+    /// Flattened shape: `(nelem * nq_per_element,)`.
     /// Units: `[volume]`.
     pub weights_volume: Vec<F>,
     /// Number of quadrature points contributed by each element.
@@ -32,14 +37,18 @@ pub struct AxisymmetricElementQuadrature<F: Real> {
 }
 
 /// Per-element meridian area and swept volume.
+///
+/// Both vectors have shape `(nelem,)`.
 #[derive(Debug, Clone)]
 pub struct AxisymmetricElementMeasures<F: Real> {
     /// Meridian-plane area of each element.
     ///
+    /// Shape: `(nelem,)`.
     /// Units: `[area]`.
     pub areas: Vec<F>,
     /// Swept 3D volume represented by each axisymmetric element.
     ///
+    /// Shape: `(nelem,)`.
     /// Units: `[volume]`.
     pub swept_volumes: Vec<F>,
 }
@@ -47,27 +56,34 @@ pub struct AxisymmetricElementMeasures<F: Real> {
 /// Recovered quadrature-point fields in element-major flattened form.
 ///
 /// Each field vector stores one `[rr, zz, tt, rz]` sample per quadrature point in element-major
-/// order. `nq_per_element` records how many consecutive samples belong to each element.
+/// order. `points_rz` has flattened shape `(nelem * nq_per_element, 2)`. Each tensor field has
+/// flattened shape `(nelem * nq_per_element, 4)`. `nq_per_element` records how many consecutive
+/// samples belong to each element.
 #[derive(Debug, Clone)]
 pub struct QuadratureFieldSamples<F: Real> {
     /// Physical quadrature-point coordinates `(r, z)` in element-major order.
     ///
+    /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
     pub points_rz: Vec<[F; 2]>,
     /// Total strain samples `[e_rr, e_zz, e_tt, g_rz]`.
     ///
+    /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[strain]`.
     pub strain: Vec<[F; 4]>,
     /// Thermal strain samples in the same ordering as `strain`.
     ///
+    /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[strain]`.
     pub thermal_strain: Vec<[F; 4]>,
     /// Elastic strain samples `strain - thermal_strain`.
     ///
+    /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[strain]`.
     pub elastic_strain: Vec<[F; 4]>,
     /// Stress samples `[sigma_rr, sigma_zz, sigma_tt, tau_rz]`.
     ///
+    /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[stress]`.
     pub stress: Vec<[F; 4]>,
     /// Number of quadrature points contributed by each element.
@@ -75,30 +91,45 @@ pub struct QuadratureFieldSamples<F: Real> {
 }
 
 /// Explicit 9-node analysis mesh inferred from a corner-only 4-node quadrilateral mesh.
+///
+/// `input_nodes` has shape `(nnode, 2)`, `input_elements` has shape `(nelem, 4)`,
+/// `analysis_nodes` has shape `(n_analysis_nodes, 2)`, and `analysis_elements` has shape
+/// `(nelem, 9)`.
 #[derive(Debug, Clone)]
 pub struct ElevatedQuad9Mesh<F: Real> {
     /// Input corner-node coordinates.
     ///
+    /// Shape: `(nnode, 2)`.
     /// Units: `[length]`.
     pub input_nodes: Vec<[F; 2]>,
     /// Input quad4 connectivity.
+    ///
+    /// Shape: `(nelem, 4)`.
     pub input_elements: Vec<[usize; 4]>,
     /// Elevated quad9 node coordinates.
     ///
+    /// Shape: `(n_analysis_nodes, 2)`.
     /// Units: `[length]`.
     pub analysis_nodes: Vec<[F; 2]>,
     /// Elevated quad9 connectivity.
     ///
+    /// Shape: `(nelem, 9)`.
     /// Each element stores nodes in the local quad9 order:
     /// - corners `0..=3` in counter-clockwise order `[bottom-left, bottom-right, top-right, top-left]`
     /// - midsides `4..=7` on faces `[bottom, right, top, left]`
     /// - center node `8`
     pub analysis_elements: Vec<[usize; 9]>,
     /// Indices of the corner nodes in `analysis_nodes`.
+    ///
+    /// Shape: `(nnode,)`.
     pub corner_node_indices: Vec<usize>,
     /// Indices of the unique midside nodes in `analysis_nodes`.
+    ///
+    /// Shape: `(n_midside_nodes,)`.
     pub midside_node_indices: Vec<usize>,
     /// Indices of the center nodes in `analysis_nodes`, one per element.
+    ///
+    /// Shape: `(nelem,)`.
     pub center_node_indices: Vec<usize>,
 }
 

@@ -140,6 +140,7 @@ class ElementMeasures:
     """Per-element meridian area and swept volume.
 
     `areas` and `swept_volumes` both have shape `(nelem,)`.
+    `areas` has units `[area]` and `swept_volumes` has units `[volume]`.
     """
 
     areas: npt.NDArray[np.floating[Any]]
@@ -152,6 +153,8 @@ class ElementQuadrature:
 
     `points_rz` has shape `(nelem, nq_per_element, 2)`.
     `weights_area` and `weights_volume` have shape `(nelem, nq_per_element)`.
+    `points_rz` has units `[length]`, `weights_area` has units `[area]`, and
+    `weights_volume` has units `[volume]`.
     """
 
     points_rz: npt.NDArray[np.floating[Any]]
@@ -168,6 +171,8 @@ class ElevatedQuad9Mesh:
     - corners `0..3` in counter-clockwise order `[bottom-left, bottom-right, top-right, top-left]`
     - midsides `4..7` on faces `[bottom, right, top, left]`
     - center node `8`
+
+    `input_nodes` and `analysis_nodes` have units `[length]`.
     """
 
     input_nodes: npt.NDArray[np.floating[Any]]
@@ -193,7 +198,18 @@ class AxisymmetricFEMModel:
     `evaluate_quadrature(...)` are convenience methods layered on top of those stored operators
     and the reduced stiffness matrix.
 
-    `input_nodes` and `input_elements` expose the original corner-node mesh.
+    Key public array shapes and units:
+    - `stiffness` has shape `(ndof_reduced, ndof_reduced)` with entry units
+      `[generalized force / displacement] = [energy / distance^2]`,
+    - `body_force_to_rhs` has shape `(ndof_reduced, 2 * nelem)` with entry units `[volume]`,
+    - `pressure_to_rhs` has shape `(ndof_reduced, n_pressure_faces)` with entry units `[area]`,
+    - `traction_to_rhs` has shape `(ndof_reduced, 2 * n_traction_faces)` with entry units
+      `[area]`,
+    - `temperature_to_rhs` has shape `(ndof_reduced, n_temperature_nodes)` with entry units
+      `[generalized force / temperature] = [energy / (distance * temperature)]`.
+
+    `input_nodes` and `analysis_nodes` have shape `(nnode, 2)` and units `[length]`.
+    `input_elements` and `analysis_elements` expose the original and analysis connectivity.
     """
 
     def __init__(
@@ -271,19 +287,19 @@ class AxisymmetricFEMModel:
 
     @property
     def dtype(self) -> np.dtype[Any]:
-        """Floating dtype used by the assembled operators and convenience methods."""
+        """Floating dtype used by all stored operators, arrays, and convenience-method outputs."""
 
         return self._dtype
 
     @property
     def ndof(self) -> int:
-        """Compatibility alias for `ndof_full`."""
+        """Compatibility alias for `ndof_full`, the full displacement-vector length `(ndof_full,)`."""
 
         return self.ndof_full
 
     @property
     def input_nodes(self) -> npt.NDArray[np.floating[Any]]:
-        """Corner-node input mesh coordinates with shape `(nnode, 2)`."""
+        """Corner-node input mesh coordinates with shape `(nnode, 2)` and units `[length]`."""
 
         return self._input_nodes
 
@@ -509,6 +525,8 @@ class QuadratureFieldSamples:
 
     Each field has shape `(nelem, nq_per_element, 4)` with component ordering
     `[rr, zz, tt, rz]`. `points_rz` has shape `(nelem, nq_per_element, 2)`.
+    `points_rz` has units `[length]`, `strain`, `thermal_strain`, and `elastic_strain`
+    have units `[strain]`, and `stress` has units `[stress]`.
     """
 
     points_rz: npt.NDArray[np.floating[Any]]
@@ -519,7 +537,7 @@ class QuadratureFieldSamples:
 
     @property
     def total_strain(self) -> npt.NDArray[np.floating[Any]]:
-        """Alias for `strain`."""
+        """Alias for `strain`, with shape `(nelem, nq_per_element, 4)` and units `[strain]`."""
 
         return self.strain
 

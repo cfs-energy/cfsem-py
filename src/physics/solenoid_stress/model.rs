@@ -65,10 +65,14 @@ pub enum AxisymmetricElements<'a> {
 ///
 /// All sparse operators in this struct act on the reduced displacement vector produced by the
 /// constrained solve, except for the thermal operators, which act on the nodal temperature field.
+/// `points_rz` has flattened shape `(nelem * nq_per_element, 2)`. Each operator and constant
+/// vector acts on or stores flattened quadrature-point blocks with row ordering
+/// `[rr, zz, tt, rz]`, so those arrays have flattened shape `(4 * nelem * nq_per_element,)`.
 #[derive(Debug, Clone)]
 pub struct ReducedRecoveryOperators<F: Real> {
     /// Quadrature-point coordinates `(r, z)` in element-major order.
     ///
+    /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
     pub points_rz: Vec<[F; 2]>,
     /// CSR operator mapping reduced displacements `[length]` to quadrature-point strains
@@ -90,18 +94,22 @@ pub struct ReducedRecoveryOperators<F: Real> {
     pub thermal_stress_operator: SparseRowMat<usize, F>,
     /// Constant strain offset induced by nonzero prescribed Dirichlet values.
     ///
+    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[strain]`.
     pub strain_constant: Vec<F>,
     /// Constant stress offset induced by nonzero prescribed Dirichlet values.
     ///
+    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[stress]`.
     pub stress_constant: Vec<F>,
     /// Constant thermal-strain offset induced by per-material reference temperature.
     ///
+    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[strain]`.
     pub thermal_strain_constant: Vec<F>,
     /// Constant thermal-stress offset induced by per-material reference temperature.
     ///
+    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[stress]`.
     pub thermal_stress_constant: Vec<F>,
     /// Number of quadrature points contributed by each element.
@@ -115,6 +123,9 @@ pub struct ReducedRecoveryOperators<F: Real> {
 /// The public system stored here is the Dirichlet-reduced system.  `stiffness`, the load
 /// operators, and `constant_rhs` all live in reduced displacement space, while the recovery
 /// operators map reduced displacements back to quadrature-point strain and stress fields.
+/// `analysis_nodes` has shape `(n_analysis_nodes, 2)`, `analysis_elements_flat` has shape
+/// `(nelem * nodes_per_element,)`, `pressure_faces` has shape `(n_pressure_faces, 2)`, and
+/// `traction_faces` has shape `(n_traction_faces, 2)`.
 #[derive(Debug)]
 pub struct AxisymmetricModel<F: Real> {
     /// Reduced structural stiffness matrix in CSC form.
@@ -126,38 +137,47 @@ pub struct AxisymmetricModel<F: Real> {
     pub stiffness: SparseColMat<usize, F>,
     /// Reduced RHS operator for per-element body-force density amplitudes.
     ///
-    /// Columns are grouped by element as `[b_r, b_z]`.
+    /// Shape: `(ndof_reduced, 2 * nelem)`. Columns are grouped by element as `[b_r, b_z]`.
     /// Entry units: `[volume]`.
     pub body_force_to_rhs: SparseRowMat<usize, F>,
     /// Reduced RHS operator for scalar pressure amplitudes on `pressure_faces`.
     ///
-    /// One column per loaded face.
+    /// Shape: `(ndof_reduced, n_pressure_faces)`. One column per loaded face.
     /// Entry units: `[area]`.
     pub pressure_to_rhs: SparseRowMat<usize, F>,
     /// Reduced RHS operator for vector traction amplitudes on `traction_faces`.
     ///
-    /// Columns are grouped by face as `[t_r, t_z]`.
+    /// Shape: `(ndof_reduced, 2 * n_traction_faces)`. Columns are grouped by face as `[t_r, t_z]`.
     /// Entry units: `[area]`.
     pub traction_to_rhs: SparseRowMat<usize, F>,
     /// Reduced RHS operator for nodal temperatures.
     ///
+    /// Shape: `(ndof_reduced, n_temperature_nodes)`.
     /// Entry units: `[generalized force / temperature] = [energy / (distance * temperature)]`.
     pub temperature_to_rhs: SparseRowMat<usize, F>,
     /// Constant reduced RHS contribution from prescribed displacements and thermal reference state.
     ///
+    /// Shape: `(ndof_reduced,)`.
     /// Units: `[energy / distance]`.
     pub constant_rhs: Vec<F>,
     /// Quadrature-point recovery operators and constants associated with this reduced model.
     pub recovery: ReducedRecoveryOperators<F>,
     /// Metadata listing the loaded pressure faces as `[element_index, local_face]`.
+    ///
+    /// Shape: `(n_pressure_faces, 2)`.
     pub pressure_faces: Vec<[usize; 2]>,
     /// Metadata listing the loaded traction faces as `[element_index, local_face]`.
+    ///
+    /// Shape: `(n_traction_faces, 2)`.
     pub traction_faces: Vec<[usize; 2]>,
     /// Analysis mesh nodes `(r, z)` used by the backend.
     ///
+    /// Shape: `(n_analysis_nodes, 2)`.
     /// Units: `[length]`.
     pub analysis_nodes: Vec<[F; 2]>,
     /// Flattened analysis connectivity in element-major order.
+    ///
+    /// Shape: `(nelem * nodes_per_element,)`.
     pub analysis_elements_flat: Vec<usize>,
     /// Number of nodes per analysis element.
     pub nodes_per_element: usize,
@@ -172,11 +192,16 @@ pub struct AxisymmetricModel<F: Real> {
     /// Number of analysis elements.
     pub nelem: usize,
     /// Mapping from reduced displacement index to full-system DOF index.
+    ///
+    /// Shape: `(ndof_reduced,)`.
     pub free_dofs: Vec<usize>,
     /// Full-system DOF indices removed by Dirichlet reduction.
+    ///
+    /// Shape: `(n_fixed,)`.
     pub fixed_dofs: Vec<usize>,
     /// Prescribed displacement values for `fixed_dofs`.
     ///
+    /// Shape: `(n_fixed,)`.
     /// Units: `[length]`.
     pub fixed_values: Vec<F>,
     lu: Option<Lu<usize, F>>,
@@ -484,7 +509,8 @@ impl<F: Real> AxisymmetricModel<F> {
 ///     - CSC stiffness with shape `(ndof_reduced, ndof_reduced)`
 ///     - CSR load operators mapping reusable load amplitudes into the reduced right-hand side
 ///     - CSR recovery operators for quadrature-point postprocessing
-///     - metadata for the reduced solve, analysis mesh, and load topology
+///     - `constant_rhs` with shape `(ndof_reduced,)` and units `[energy / distance]`
+///     - analysis mesh and load metadata with the shapes documented on [`AxisymmetricModel`]
 pub fn assemble_axisymmetric<F: Real>(
     nodes_rz: &[[F; 2]],
     elements: AxisymmetricElements<'_>,

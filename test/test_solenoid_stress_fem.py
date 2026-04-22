@@ -168,6 +168,90 @@ def normalized_peak_error(test: np.ndarray, reference: np.ndarray) -> float:
     return float(np.max(np.abs(np.asarray(test) - np.asarray(reference))) / scale)
 
 
+def solve_pressurized_region_1d(
+    r_actual: np.ndarray,
+    elasticity_modulus: float,
+    poisson_ratio: float,
+    pi: float,
+    po: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    dr_target = 1.0e-3
+    span = float(r_actual[-1] - r_actual[0])
+    nr_dense = max(int(np.ceil(span / dr_target)), 1) + 1
+    r_dense = np.linspace(float(r_actual[0]), float(r_actual[-1]), nr_dense)
+    dr_min = float(np.min(np.diff(r_dense)))
+    nudge = min(1.0e-6, 1.0e-3 * dr_min)
+    rgrid = np.concatenate([[r_dense[0] - nudge], r_dense, [r_dense[-1] + nudge]])
+    zeros = np.zeros_like(rgrid)
+    c = solenoid_1d_structural_factor(elasticity_modulus, poisson_ratio)
+    rhs = solenoid_1d_structural_rhs(c, zeros, zeros, pi, po)
+    model = SolenoidStress1D(
+        rgrid=rgrid,
+        elasticity_modulus=elasticity_modulus,
+        poisson_ratio=poisson_ratio,
+        direct_inverse=False,
+    )
+    displacement = np.asarray(model.displacement_solver(rhs))
+    strain = model.operators.a_eu @ displacement
+    stress = model.operators.a_se @ strain
+    nr = rgrid.shape[0]
+    stress_r = np.asarray(stress[:nr])[1:-1]
+    stress_t = np.asarray(stress[nr:])[1:-1]
+    return rgrid[1:-1], displacement[1:-1], stress_r, stress_t
+
+
+def solve_two_region_pressure_vessel_1d(
+    r_actual: np.ndarray,
+    interface_index: int,
+    inner_material: tuple[float, float],
+    outer_material: tuple[float, float],
+    pi: float,
+    po: float,
+) -> tuple[
+    float,
+    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+]:
+    r_inner = r_actual[: interface_index + 1]
+    r_outer = r_actual[interface_index:]
+    e_inner, nu_inner = inner_material
+    e_outer, nu_outer = outer_material
+
+    def interface_mismatch(interface_pressure: float) -> float:
+        _r0, u_inner, _sr0, _st0 = solve_pressurized_region_1d(
+            r_inner, e_inner, nu_inner, pi, interface_pressure
+        )
+        _r1, u_outer, _sr1, _st1 = solve_pressurized_region_1d(
+            r_outer, e_outer, nu_outer, interface_pressure, po
+        )
+        return float(u_inner[-1] - u_outer[0])
+
+    pressure_probe = max(abs(pi), abs(po), 1.0)
+    mismatch_0 = interface_mismatch(0.0)
+    mismatch_1 = interface_mismatch(pressure_probe)
+    interface_pressure = -mismatch_0 * pressure_probe / (mismatch_1 - mismatch_0)
+
+    inner_solution = solve_pressurized_region_1d(r_inner, e_inner, nu_inner, pi, interface_pressure)
+    outer_solution = solve_pressurized_region_1d(r_outer, e_outer, nu_outer, interface_pressure, po)
+    return interface_pressure, inner_solution, outer_solution
+
+
+def piecewise_interp_two_region(
+    sample_r: np.ndarray,
+    interface_radius: float,
+    inner_r: np.ndarray,
+    inner_values: np.ndarray,
+    outer_r: np.ndarray,
+    outer_values: np.ndarray,
+) -> np.ndarray:
+    sample_r = np.asarray(sample_r, dtype=np.float64)
+    out = np.empty_like(sample_r)
+    inner_mask = sample_r <= interface_radius
+    out[inner_mask] = np.interp(sample_r[inner_mask], inner_r, inner_values)
+    out[~inner_mask] = np.interp(sample_r[~inner_mask], outer_r, outer_values)
+    return out
+
+
 def assemble_model_and_rhs(
     *,
     nodes: np.ndarray,
@@ -803,6 +887,112 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
     else:
         rtol, atol = 3.0e-2, 2.0e-7
     assert np.allclose(radial_fe, radial_cfsem, rtol=rtol, atol=atol)
+
+
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_two_material_pressure_vessel_matches_chained_1d_solver(element_type: str) -> None:
+    dtype = np.float64
+    ri, rm, ro = 0.5, 0.525, 0.55
+    pin, pout = 1.0e7, 2.0e6
+    nr = 224
+    nodes, elements = build_annulus_strip_mesh(ri, ro, height=0.1, nr=nr, nz=1, dtype=dtype)
+    r_actual = nodes[: nr + 1, 0]
+    interface_index = int(np.argmin(np.abs(r_actual - rm)))
+    interface_radius = float(r_actual[interface_index])
+
+    inner_material = (205.0e9, 0.27)
+    outer_material = (135.0e9, 0.31)
+    material_table = np.asarray(
+        [
+            cfsem_radial_material(*inner_material, dtype=dtype),
+            cfsem_radial_material(*outer_material, dtype=dtype),
+        ]
+    )
+    material_ids = np.concatenate(
+        [
+            np.zeros(interface_index, dtype=np.uint64),
+            np.ones(nr - interface_index, dtype=np.uint64),
+        ]
+    )
+
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=1)
+    pressure_faces = np.vstack([inner_faces, outer_faces])
+    pressure_values = np.concatenate(
+        [
+            np.full(inner_faces.shape[0], pin, dtype=dtype),
+            np.full(outer_faces.shape[0], pout, dtype=dtype),
+        ]
+    )
+    analysis_nnode = (
+        nodes.shape[0]
+        if element_type == "quad4"
+        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
+    )
+    model_fe, rhs = assemble_model_and_rhs(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
+        body_force=np.array([0.0, 0.0], dtype=dtype),
+        pressure_faces=pressure_faces,
+        pressure_values=pressure_values,
+        prescribed=prescribed_z_dofs(analysis_nnode),
+        quadrature="gl4",
+        element_type=element_type,
+    )
+    displacement = solve_with_factorized_model(model_fe, rhs).reshape(model_fe.analysis_nodes.shape[0], 2)
+    corner_displacement = displacement[: nodes.shape[0], 0]
+    radial_fe = 0.5 * (corner_displacement[: nr + 1] + corner_displacement[nr + 1 :])
+    samples = model_fe.evaluate_quadrature(displacement)
+
+    (
+        interface_pressure,
+        (r_inner, u_inner, sr_inner, st_inner),
+        (r_outer, u_outer, sr_outer, st_outer),
+    ) = solve_two_region_pressure_vessel_1d(
+        r_actual,
+        interface_index,
+        inner_material,
+        outer_material,
+        pin,
+        pout,
+    )
+
+    assert pin >= interface_pressure >= pout
+
+    radial_1d = piecewise_interp_two_region(
+        r_actual,
+        interface_radius,
+        r_inner,
+        u_inner,
+        r_outer,
+        u_outer,
+    )
+    sample_r = samples.points_rz[..., 0]
+    stress_r_1d = piecewise_interp_two_region(
+        sample_r,
+        interface_radius,
+        r_inner,
+        sr_inner,
+        r_outer,
+        sr_outer,
+    )
+    stress_t_1d = piecewise_interp_two_region(
+        sample_r,
+        interface_radius,
+        r_inner,
+        st_inner,
+        r_outer,
+        st_outer,
+    )
+
+    radial_atol = 1.0e-6 * float(np.max(np.abs(radial_1d)))
+    stress_r_atol = 1.0e-6 * float(np.max(np.abs(stress_r_1d)))
+    stress_t_atol = 1.0e-6 * float(np.max(np.abs(stress_t_1d)))
+
+    assert np.allclose(radial_fe, radial_1d, rtol=1.0e-2, atol=radial_atol)
+    assert np.allclose(samples.stress[..., 0], stress_r_1d, rtol=1.0e-2, atol=stress_r_atol)
+    assert np.allclose(samples.stress[..., 2], stress_t_1d, rtol=1.0e-2, atol=stress_t_atol)
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)

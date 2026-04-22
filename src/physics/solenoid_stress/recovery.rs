@@ -428,6 +428,9 @@ mod tests {
                     sig += db[component][dof] * u[dof];
                 }
                 assert!((strain[row] - eps).abs() < 1.0e-12);
+                // Stress is recovered from the displacement-gradient field and
+                // picks up additional roundoff through the elastic stress-strain
+                // law, so it is less sharp than the direct strain check.
                 assert!((stress[row] - sig).abs() < 1.0e-3);
             }
         }

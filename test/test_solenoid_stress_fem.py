@@ -1137,6 +1137,8 @@ def test_pressure_vessel_stresses_match_lame_reference(
         radial_rtol, hoop_rtol, atol = 3.0e-2, 2.5e-2, 8.0e3
     else:
         radial_rtol, hoop_rtol, atol = 2.5e-2, 2.0e-2, 2.5e3
+    # Stress is a recovered field built from displacement gradients, so it
+    # carries more numerical error than the displacement comparison below.
     assert np.allclose(samples.stress[..., 0], radial_exact, rtol=radial_rtol, atol=atol)
     assert np.allclose(samples.stress[..., 2], hoop_exact, rtol=hoop_rtol, atol=atol)
 
@@ -1302,6 +1304,9 @@ def test_two_material_pressure_vessel_matches_chained_1d_solver(element_type: st
     stress_t_atol = 1.0e-6 * float(np.max(np.abs(stress_t_1d)))
 
     assert np.allclose(radial_fe, radial_1d, rtol=1.0e-2, atol=radial_atol)
+    # Stress recovery introduces more numerical error than the primary
+    # displacement solve, so the stress checks use their own field-scaled
+    # absolute tolerances.
     assert np.allclose(samples.stress[..., 0], stress_r_1d, rtol=1.0e-2, atol=stress_r_atol)
     assert np.allclose(samples.stress[..., 2], stress_t_1d, rtol=1.0e-2, atol=stress_t_atol)
 

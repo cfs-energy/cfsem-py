@@ -9,15 +9,18 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
-    rust: "1.70"
+    rust: "1.91"
   jobs:
+    pre_create_environment:
+      - asdf plugin add uv
+      - asdf install uv latest
+      - asdf global uv latest
+    create_environment:
+      - uv venv "${READTHEDOCS_VIRTUALENV_PATH}"
+    install:
+      - UV_PROJECT_ENVIRONMENT="${READTHEDOCS_VIRTUALENV_PATH}" uv sync --frozen --group docs
     pre_build:  # Generate plots for docs
       - MPLBACKEND="Agg" sh build_docs.sh
 
 mkdocs:
   configuration: mkdocs.yml
-
-# Optionally declare the Python requirements required to build your docs
-python:
-  install:
-  - requirements: docs/requirements.txt

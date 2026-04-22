@@ -63,6 +63,7 @@ REPRESENTATIVE_DISCRETIZATION_NZ = 1
 REPRESENTATIVE_DISCRETIZATION_NR = max(3, int(round((RO - RI) / HEIGHT)))
 TARGET_DR_SWEEP_MM = np.array([50.0, 25.0, 12.5, 6.25, 3.125, 1.5625, 1.0], dtype=np.float64)
 NR_SWEEP = np.asarray(np.ceil(1.0e3 * (RO - RI) / TARGET_DR_SWEEP_MM), dtype=int)
+MIN_EXPECTED_FEM_STRESS_CONVERGENCE_RATE = 1.8
 
 
 @dataclass(frozen=True, slots=True)
@@ -475,9 +476,7 @@ def plot_discretization_panel(ax, nr: int, nz: int, element_type: str) -> None:
         label="1D FD physical grid",
         rasterized=fd_grid.size > 5_000,
     )
-    ax.set_title(
-        f"Representative matched-grid discretization ({element_type}, nr={nr}, nz={nz})"
-    )
+    ax.set_title(f"Representative matched-grid discretization ({element_type}, nr={nr}, nz={nz})")
     ax.set_xlabel("r [m]")
     ax.set_ylabel("z [m]")
     ax.set_xlim(RI - 0.01 * (RO - RI), RO + 0.01 * (RO - RI))
@@ -554,13 +553,29 @@ def build_figure(results_by_type: dict[str, list[SweepResult]]):
         )
         for element_type in ELEMENT_TYPES:
             spec = element_plot_specs[element_type]
+            y_error = np.array(
+                [result.fem_errors_pct[field_name] for result in results_by_type[element_type]],
+                dtype=np.float64,
+            )
+            x_fit = xconv
+            y_fit = y_error
+            slope, intercept = np.polyfit(np.log(x_fit), np.log(y_fit), 1)
             ax.loglog(
                 xconv,
-                [result.fem_errors_pct[field_name] for result in results_by_type[element_type]],
+                y_error,
                 color=spec["color"],
                 marker=spec["marker"],
                 linewidth=1.4,
                 label=f"{element_type.upper()} FEM vs. analytic",
+            )
+            ax.loglog(
+                x_fit,
+                np.exp(intercept) * x_fit**slope,
+                color=spec["color"],
+                linestyle=":",
+                linewidth=1.1,
+                alpha=0.95,
+                label=f"{element_type.upper()} fit $O(h^{{{slope:.2f}}})$",
             )
         ax.set_title(title)
         ax.set_xlabel("Radial element size [mm]")
@@ -633,17 +648,26 @@ def print_results(results_by_type: dict[str, list[SweepResult]]) -> None:
             f"Primary figure-of-merit: finest FEM max normalized midplane stress error "
             f"vs. analytic = {fem_fom:.6f} %"
         )
+        print(f"Finest 1D FD max normalized midplane stress error " f"vs. analytic = {fd_fom:.6f} %")
         print(
-            f"Finest 1D FD max normalized midplane stress error "
-            f"vs. analytic = {fd_fom:.6f} %"
-        )
-        print(
-            f"Finest matched-grid parity max normalized midplane error "
-            f"(FEM vs. 1D) = {parity_fom:.6f} %"
+            f"Finest matched-grid parity max normalized midplane error " f"(FEM vs. 1D) = {parity_fom:.6f} %"
         )
         print(f"Finest FEM system build time = {1.0e3 * finest.fem_build_seconds:.4f} ms")
         print(f"Finest FEM factorization time = {1.0e3 * finest.fem_factorize_seconds:.4f} ms")
         print(f"Finest FEM linear solve time = {1.0e3 * finest.fem_solve_seconds:.4f} ms")
+        dr_mm = np.array([result.dr_mm for result in results], dtype=np.float64)
+        stress_fom_error = np.maximum(
+            np.array([result.fem_errors_pct["s_rr"] for result in results], dtype=np.float64),
+            np.array([result.fem_errors_pct["s_tt"] for result in results], dtype=np.float64),
+        )
+        x_fit = dr_mm
+        y_fit = stress_fom_error
+        slope, _ = np.polyfit(np.log(x_fit), np.log(y_fit), 1)
+        assert slope >= MIN_EXPECTED_FEM_STRESS_CONVERGENCE_RATE, (
+            f"{element_type} FEM stress convergence fit dropped below the expected polynomial rate: "
+            f"fitted slope={slope:.3f}, required>={MIN_EXPECTED_FEM_STRESS_CONVERGENCE_RATE:.3f}"
+        )
+        print("Fitted FEM convergence rate over the full radial sweep: " f"stress FOM~O(h^{slope:.3f})")
 
 
 def main() -> None:

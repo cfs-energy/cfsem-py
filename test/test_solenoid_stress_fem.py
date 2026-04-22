@@ -733,6 +733,207 @@ def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_multimaterial_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
+    quadrature: str,
+    element_type: str,
+) -> None:
+    dtype = np.float64
+    nr, nz = 5, 5
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.4, nr=nr, nz=nz, dtype=dtype)
+    analysis_nnode = (
+        nodes.shape[0]
+        if element_type == "quad4"
+        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
+    )
+
+    material_a = isotropic_axisymmetric_material(205.0e9, 0.28, dtype=dtype)
+    material_b = isotropic_axisymmetric_material(145.0e9, 0.32, dtype=dtype)
+    thermal_a = fem.isotropic_axisymmetric_thermal_material(1.1e-5, 293.15, dtype=dtype)
+    thermal_b = fem.isotropic_axisymmetric_thermal_material(1.9e-5, 315.0, dtype=dtype)
+    material_table = np.asarray([material_a, material_b])
+    thermal_material_table = np.asarray([thermal_a, thermal_b])
+
+    element_i = np.tile(np.arange(nr), nz)
+    element_j = np.repeat(np.arange(nz), nr)
+    material_ids = ((element_i + 2 * element_j) % 2).astype(np.uint64)
+
+    nodal_temperature = np.full(nodes.shape[0], 333.15, dtype=dtype)
+    all_fixed = {dof: 0.0 for dof in range(2 * analysis_nnode)}
+    model, rhs = assemble_model_and_rhs(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
+        body_force=np.array([0.0, 0.0], dtype=dtype),
+        thermal_material_table=thermal_material_table,
+        nodal_temperature=nodal_temperature,
+        prescribed=all_fixed,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+
+    displacement = model.solve(rhs)
+    samples = model.evaluate_quadrature(displacement, nodal_temperature=nodal_temperature)
+
+    expected_thermal_strain = np.zeros_like(samples.thermal_strain)
+    expected_stress = np.zeros_like(samples.stress)
+    for element_index, material_id in enumerate(material_ids):
+        thermal_row = thermal_material_table[int(material_id)]
+        material = material_table[int(material_id)]
+        delta_temperature = nodal_temperature[0] - thermal_row[4]
+        thermal_strain = thermal_row[:4] * delta_temperature
+        stress = -(material @ thermal_strain)
+        expected_thermal_strain[element_index, :, :] = thermal_strain
+        expected_stress[element_index, :, :] = stress
+
+    assert np.allclose(displacement, 0.0)
+    assert np.allclose(samples.total_strain, 0.0)
+    assert np.allclose(samples.thermal_strain, expected_thermal_strain)
+    assert np.allclose(samples.elastic_strain, -expected_thermal_strain)
+    assert np.allclose(samples.stress, expected_stress)
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_multimaterial_loads_superpose_linearly(
+    quadrature: str,
+    element_type: str,
+) -> None:
+    dtype = np.float64
+    nr, nz = 5, 5
+    ri, ro, height = 0.5, 1.0, 0.4
+    nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
+    analysis_nodes = (
+        nodes if element_type == "quad4" else fem.infer_quad9_mesh(nodes, elements).analysis_nodes
+    )
+
+    material_a = isotropic_axisymmetric_material(205.0e9, 0.28, dtype=dtype)
+    material_b = isotropic_axisymmetric_material(145.0e9, 0.32, dtype=dtype)
+    reference_temperature = 300.0
+    thermal_a = fem.isotropic_axisymmetric_thermal_material(1.1e-5, reference_temperature, dtype=dtype)
+    thermal_b = fem.isotropic_axisymmetric_thermal_material(1.9e-5, reference_temperature, dtype=dtype)
+    material_table = np.asarray([material_a, material_b])
+    thermal_material_table = np.asarray([thermal_a, thermal_b])
+
+    element_i = np.tile(np.arange(nr), nz)
+    element_j = np.repeat(np.arange(nz), nr)
+    material_ids = ((element_i + 2 * element_j) % 2).astype(np.uint64)
+
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=nz)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=nr, nz=nz)
+    pressure_faces = np.vstack([inner_faces, outer_faces])
+    pressure_values = np.concatenate(
+        [
+            np.linspace(6.0e5, 1.1e6, inner_faces.shape[0], dtype=dtype),
+            np.linspace(1.5e5, 4.5e5, outer_faces.shape[0], dtype=dtype),
+        ]
+    )
+    traction_coordinate = np.linspace(0.0, 1.0, top_faces.shape[0], dtype=dtype)
+    traction_values = np.column_stack(
+        [
+            1.2e5 * np.sin(np.pi * traction_coordinate),
+            -1.8e5 * (0.6 + 0.4 * np.cos(np.pi * traction_coordinate)),
+        ]
+    )
+    xi = (element_i + 0.5) / nr
+    eta = (element_j + 0.5) / nz
+    body_force = np.column_stack(
+        [
+            2.2e4 * (0.5 + eta),
+            -1.6e4 * np.cos(np.pi * xi) * (0.3 + eta),
+        ]
+    )
+    nodal_temperature_ref = np.full(nodes.shape[0], reference_temperature, dtype=dtype)
+    rfrac = (nodes[:, 0] - ri) / (ro - ri)
+    zfrac = nodes[:, 1] / height
+    nodal_temperature_hot = reference_temperature + 18.0 * rfrac + 11.0 * zfrac
+
+    model = fem.assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
+        pressure_faces=pressure_faces,
+        traction_faces=top_faces,
+        thermal_material_table=thermal_material_table,
+        prescribed=prescribed_bottom_supports(analysis_nodes),
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+
+    rhs_body = model.build_rhs(body_force=body_force, nodal_temperature=nodal_temperature_ref)
+    rhs_pressure = model.build_rhs(pressure_values=pressure_values, nodal_temperature=nodal_temperature_ref)
+    rhs_traction = model.build_rhs(traction_values=traction_values, nodal_temperature=nodal_temperature_ref)
+    rhs_thermal = model.build_rhs(nodal_temperature=nodal_temperature_hot)
+    rhs_combined = model.build_rhs(
+        body_force=body_force,
+        pressure_values=pressure_values,
+        traction_values=traction_values,
+        nodal_temperature=nodal_temperature_hot,
+    )
+
+    displacement_body = model.solve(rhs_body)
+    displacement_pressure = model.solve(rhs_pressure)
+    displacement_traction = model.solve(rhs_traction)
+    displacement_thermal = model.solve(rhs_thermal)
+    displacement_combined = model.solve(rhs_combined)
+
+    samples_body = model.evaluate_quadrature(displacement_body, nodal_temperature=nodal_temperature_ref)
+    samples_pressure = model.evaluate_quadrature(
+        displacement_pressure, nodal_temperature=nodal_temperature_ref
+    )
+    samples_traction = model.evaluate_quadrature(
+        displacement_traction, nodal_temperature=nodal_temperature_ref
+    )
+    samples_thermal = model.evaluate_quadrature(displacement_thermal, nodal_temperature=nodal_temperature_hot)
+    samples_combined = model.evaluate_quadrature(
+        displacement_combined, nodal_temperature=nodal_temperature_hot
+    )
+
+    rhs_sum = rhs_body + rhs_pressure + rhs_traction + rhs_thermal
+    displacement_sum = (
+        displacement_body + displacement_pressure + displacement_traction + displacement_thermal
+    )
+    strain_sum = (
+        samples_body.strain + samples_pressure.strain + samples_traction.strain + samples_thermal.strain
+    )
+    elastic_strain_sum = (
+        samples_body.elastic_strain
+        + samples_pressure.elastic_strain
+        + samples_traction.elastic_strain
+        + samples_thermal.elastic_strain
+    )
+    stress_sum = (
+        samples_body.stress + samples_pressure.stress + samples_traction.stress + samples_thermal.stress
+    )
+
+    rhs_atol = 1.0e-10 * float(np.max(np.abs(rhs_sum)))
+    displacement_atol = 1.0e-10 * float(np.max(np.abs(displacement_sum)))
+    strain_atol = 1.0e-10 * float(np.max(np.abs(strain_sum)))
+    elastic_strain_atol = 1.0e-10 * float(np.max(np.abs(elastic_strain_sum)))
+    thermal_strain_atol = 1.0e-10 * float(np.max(np.abs(samples_thermal.thermal_strain)))
+    stress_atol = 1.0e-10 * float(np.max(np.abs(stress_sum)))
+
+    assert np.allclose(rhs_combined, rhs_sum, rtol=1.0e-10, atol=rhs_atol)
+    assert np.allclose(displacement_combined, displacement_sum, rtol=1.0e-10, atol=displacement_atol)
+    assert np.allclose(samples_combined.strain, strain_sum, rtol=1.0e-10, atol=strain_atol)
+    assert np.allclose(
+        samples_combined.elastic_strain,
+        elastic_strain_sum,
+        rtol=1.0e-10,
+        atol=elastic_strain_atol,
+    )
+    assert np.allclose(
+        samples_combined.thermal_strain,
+        samples_thermal.thermal_strain,
+        rtol=1.0e-10,
+        atol=thermal_strain_atol,
+    )
+    assert np.allclose(samples_combined.stress, stress_sum, rtol=1.0e-10, atol=stress_atol)
+
+
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
 def test_quadrature_recovery_splits_total_elastic_and_thermal_strain_consistently(
     quadrature: str,
     element_type: str,

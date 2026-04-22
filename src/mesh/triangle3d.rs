@@ -17,6 +17,30 @@ fn triangle_area_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) 
     tri3::area(n0, n1, n2)
 }
 
+#[inline]
+/// Return a dimensionless triangle quality metric based on area and edge lengths.
+///
+/// The metric is
+/// `4 * sqrt(3) * area / sum(edge^2)`.
+/// It equals `1` for an equilateral triangle and tends to `0` for degenerate or
+/// sliver triangles, so it is a cheap way to detect extremely poor aspect ratio.
+fn triangle_quality_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) -> f64 {
+    let n0 = [nodes.0[idx[0]], nodes.1[idx[0]], nodes.2[idx[0]]];
+    let n1 = [nodes.0[idx[1]], nodes.1[idx[1]], nodes.2[idx[1]]];
+    let n2 = [nodes.0[idx[2]], nodes.1[idx[2]], nodes.2[idx[2]]];
+
+    let edge_sq = |a: [f64; 3], b: [f64; 3]| -> f64 {
+        let dx = a[0] - b[0];
+        let dy = a[1] - b[1];
+        let dz = a[2] - b[2];
+        dx * dx + dy * dy + dz * dz
+    };
+
+    let area = tri3::area(n0, n1, n2);
+    let edge_sum = edge_sq(n0, n1) + edge_sq(n1, n2) + edge_sq(n2, n0);
+    4.0 * 3.0_f64.sqrt() * area / edge_sum
+}
+
 fn validate_triangle_mesh_geometry(
     nodes: (&[f64], &[f64], &[f64]),
     triangles: (&[usize], &[usize], &[usize]),
@@ -43,8 +67,15 @@ fn validate_triangle_mesh_geometry(
 
     for i in 0..ntri {
         let idx = [triangles.0[i], triangles.1[i], triangles.2[i]];
-        if triangle_area_from_indices(nodes, idx) < 1e-14 {
+        let area = triangle_area_from_indices(nodes, idx);
+        if area < 1e-14 {
             return Err("Triangle has zero area");
+        }
+        let quality = triangle_quality_from_indices(nodes, idx);
+        if quality < 1e-3 {
+            eprintln!(
+                "warning: triangle {i} has very poor aspect ratio (quality={quality:.3e}, indices={idx:?})"
+            );
         }
     }
 

@@ -492,6 +492,8 @@ mod geometry;
 mod loads;
 mod model;
 mod recovery;
+#[cfg(test)]
+mod test_utils;
 mod types;
 
 pub use crate::mesh::QuadratureRule;

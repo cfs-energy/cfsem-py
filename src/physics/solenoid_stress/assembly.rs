@@ -82,33 +82,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::assemble_stiffness_for_family;
-    use crate::mesh::{QuadMeshView2d, QuadratureRule};
+    use crate::mesh::QuadratureRule;
+    use crate::physics::solenoid_stress::convenience::isotropic_axisymmetric_material;
     use crate::physics::solenoid_stress::family::Quad4Family;
+    use crate::physics::solenoid_stress::test_utils::single_element_quad4_mesh;
     use crate::physics::solenoid_stress::types::dof_per_element;
-
-    /// Build one isotropic constitutive matrix for stiffness-assembly regression tests.
-    fn isotropic_material(e: f64, nu: f64) -> [[f64; 4]; 4] {
-        let lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
-        let mu = e / (2.0 * (1.0 + nu));
-        [
-            [lam + 2.0 * mu, lam, lam, 0.0],
-            [lam, lam + 2.0 * mu, lam, 0.0],
-            [lam, lam, lam + 2.0 * mu, 0.0],
-            [0.0, 0.0, 0.0, mu],
-        ]
-    }
 
     #[test]
     /// Check that one assembled element produces a symmetric stiffness matrix.
     fn single_element_has_symmetric_stiffness() {
-        let nodes = [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]];
-        let elements = [[0usize, 1, 2, 3]];
-        let mesh = QuadMeshView2d {
-            nodes_rz: &nodes,
-            elements: &elements,
-        };
+        let mesh = single_element_quad4_mesh();
         let material_ids = [0usize];
-        let material_table = [isotropic_material(200.0e9, 0.27)];
+        let material_table = [isotropic_axisymmetric_material(200.0e9, 0.27)];
         let result = assemble_stiffness_for_family::<f64, Quad4Family, 4, { dof_per_element(4) }>(
             mesh,
             &material_ids,

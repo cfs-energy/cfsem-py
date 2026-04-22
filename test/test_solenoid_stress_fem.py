@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import numpy as np
 import pytest
 import scipy.interpolate as spi
@@ -29,6 +31,20 @@ AREA_VOLUME_MESHES = [(1, 1), (3, 2)]
 BODY_FORCE_MESHES = [(2, 1), (4, 2)]
 PRESSURE_NR_CASES = [24, 48]
 ELEMENT_TYPES = ["quad4", "quad9"]
+
+
+class MultiMaterialCheckerboardCase(NamedTuple):
+    nodes: np.ndarray
+    elements: np.ndarray
+    analysis_nodes: np.ndarray
+    material_ids: np.ndarray
+    material_table: np.ndarray
+    thermal_material_table: np.ndarray
+    ri: float
+    ro: float
+    height: float
+    nr: int
+    nz: int
 
 
 def build_annulus_strip_mesh(
@@ -119,6 +135,73 @@ def horizontal_faces_for_strip(nr: int, nz: int) -> tuple[np.ndarray, np.ndarray
 
 def prescribed_z_dofs(node_count: int) -> dict[int, float]:
     return {2 * node + 1: 0.0 for node in range(node_count)}
+
+
+def analysis_nodes_for_element_type(
+    nodes: np.ndarray,
+    elements: np.ndarray,
+    element_type: str,
+) -> np.ndarray:
+    return nodes if element_type == "quad4" else fem.infer_quad9_mesh(nodes, elements).analysis_nodes
+
+
+def analysis_node_count_for_element_type(
+    nodes: np.ndarray,
+    elements: np.ndarray,
+    element_type: str,
+) -> int:
+    return int(analysis_nodes_for_element_type(nodes, elements, element_type).shape[0])
+
+
+def checkerboard_material_ids(nr: int, nz: int) -> np.ndarray:
+    element_i = np.tile(np.arange(nr), nz)
+    element_j = np.repeat(np.arange(nz), nr)
+    return ((element_i + 2 * element_j) % 2).astype(np.uint64)
+
+
+def build_multimaterial_checkerboard_case(
+    *,
+    dtype: DType,
+    element_type: str,
+    thermal_reference_temperatures: tuple[float, float],
+    ri: float = 0.5,
+    ro: float = 1.0,
+    height: float = 0.4,
+    nr: int = 5,
+    nz: int = 5,
+) -> MultiMaterialCheckerboardCase:
+    nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
+    material_table = np.asarray(
+        [
+            isotropic_axisymmetric_material(205.0e9, 0.28, dtype=dtype),
+            isotropic_axisymmetric_material(145.0e9, 0.32, dtype=dtype),
+        ],
+        dtype=dtype,
+    )
+    thermal_material_table = np.asarray(
+        [
+            fem.isotropic_axisymmetric_thermal_material(
+                1.1e-5, thermal_reference_temperatures[0], dtype=dtype
+            ),
+            fem.isotropic_axisymmetric_thermal_material(
+                1.9e-5, thermal_reference_temperatures[1], dtype=dtype
+            ),
+        ],
+        dtype=dtype,
+    )
+    return MultiMaterialCheckerboardCase(
+        nodes=nodes,
+        elements=elements,
+        analysis_nodes=analysis_nodes_for_element_type(nodes, elements, element_type),
+        material_ids=checkerboard_material_ids(nr, nz),
+        material_table=material_table,
+        thermal_material_table=thermal_material_table,
+        ri=ri,
+        ro=ro,
+        height=height,
+        nr=nr,
+        nz=nz,
+    )
 
 
 def tolerance(dtype: DType) -> tuple[float, float]:
@@ -623,11 +706,7 @@ def test_factorized_solve_reuses_stiffness_with_varying_traction(quadrature: str
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=3, nz=2)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    prescribed = prescribed_z_dofs(
-        nodes.shape[0]
-        if element_type == "quad4"
-        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
-    )
+    prescribed = prescribed_z_dofs(analysis_node_count_for_element_type(nodes, elements, element_type))
     model = fem.assemble_axisymmetric(
         nodes=nodes,
         elements=elements,
@@ -691,19 +770,9 @@ def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
         dtype=dtype,
     )
     nodal_temperature = np.full(nodes.shape[0], reference_temperature + delta_temperature, dtype=dtype)
-    model, rhs = assemble_model_and_rhs(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
-        body_force=np.array([0.0, 0.0], dtype=dtype),
-        thermal_material_table=np.asarray([thermal_material]),
-        nodal_temperature=nodal_temperature,
-        prescribed={dof: 0.0 for dof in range(2 * model.analysis_nodes.shape[0])} if False else None,
-        quadrature=quadrature,
-        element_type=element_type,
-    )
-    all_fixed = {dof: 0.0 for dof in range(2 * model.analysis_nodes.shape[0])}
+    all_fixed = {
+        dof: 0.0 for dof in range(2 * analysis_node_count_for_element_type(nodes, elements, element_type))
+    }
     model, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
@@ -716,7 +785,7 @@ def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
         quadrature=quadrature,
         element_type=element_type,
     )
-    displacement = model.recover_full(np.zeros((0,), dtype=dtype))
+    displacement = model.solve(rhs)
     samples = model.evaluate_quadrature(displacement, nodal_temperature=nodal_temperature)
 
     expected_thermal_strain = np.asarray([alpha, alpha, alpha, 0.0], dtype=dtype) * delta_temperature
@@ -738,34 +807,20 @@ def test_multimaterial_uniform_temperature_recovery_matches_fully_constrained_th
     element_type: str,
 ) -> None:
     dtype = np.float64
-    nr, nz = 5, 5
-    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.4, nr=nr, nz=nz, dtype=dtype)
-    analysis_nnode = (
-        nodes.shape[0]
-        if element_type == "quad4"
-        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
+    case = build_multimaterial_checkerboard_case(
+        dtype=dtype,
+        element_type=element_type,
+        thermal_reference_temperatures=(293.15, 315.0),
     )
-
-    material_a = isotropic_axisymmetric_material(205.0e9, 0.28, dtype=dtype)
-    material_b = isotropic_axisymmetric_material(145.0e9, 0.32, dtype=dtype)
-    thermal_a = fem.isotropic_axisymmetric_thermal_material(1.1e-5, 293.15, dtype=dtype)
-    thermal_b = fem.isotropic_axisymmetric_thermal_material(1.9e-5, 315.0, dtype=dtype)
-    material_table = np.asarray([material_a, material_b])
-    thermal_material_table = np.asarray([thermal_a, thermal_b])
-
-    element_i = np.tile(np.arange(nr), nz)
-    element_j = np.repeat(np.arange(nz), nr)
-    material_ids = ((element_i + 2 * element_j) % 2).astype(np.uint64)
-
-    nodal_temperature = np.full(nodes.shape[0], 333.15, dtype=dtype)
-    all_fixed = {dof: 0.0 for dof in range(2 * analysis_nnode)}
+    nodal_temperature = np.full(case.nodes.shape[0], 333.15, dtype=dtype)
+    all_fixed = {dof: 0.0 for dof in range(2 * case.analysis_nodes.shape[0])}
     model, rhs = assemble_model_and_rhs(
-        nodes=nodes,
-        elements=elements,
-        material_ids=material_ids,
-        material_table=material_table,
+        nodes=case.nodes,
+        elements=case.elements,
+        material_ids=case.material_ids,
+        material_table=case.material_table,
         body_force=np.array([0.0, 0.0], dtype=dtype),
-        thermal_material_table=thermal_material_table,
+        thermal_material_table=case.thermal_material_table,
         nodal_temperature=nodal_temperature,
         prescribed=all_fixed,
         quadrature=quadrature,
@@ -777,9 +832,9 @@ def test_multimaterial_uniform_temperature_recovery_matches_fully_constrained_th
 
     expected_thermal_strain = np.zeros_like(samples.thermal_strain)
     expected_stress = np.zeros_like(samples.stress)
-    for element_index, material_id in enumerate(material_ids):
-        thermal_row = thermal_material_table[int(material_id)]
-        material = material_table[int(material_id)]
+    for element_index, material_id in enumerate(case.material_ids):
+        thermal_row = case.thermal_material_table[int(material_id)]
+        material = case.material_table[int(material_id)]
         delta_temperature = nodal_temperature[0] - thermal_row[4]
         thermal_strain = thermal_row[:4] * delta_temperature
         stress = -(material @ thermal_strain)
@@ -800,27 +855,15 @@ def test_multimaterial_loads_superpose_linearly(
     element_type: str,
 ) -> None:
     dtype = np.float64
-    nr, nz = 5, 5
-    ri, ro, height = 0.5, 1.0, 0.4
-    nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
-    analysis_nodes = (
-        nodes if element_type == "quad4" else fem.infer_quad9_mesh(nodes, elements).analysis_nodes
+    reference_temperature = 300.0
+    case = build_multimaterial_checkerboard_case(
+        dtype=dtype,
+        element_type=element_type,
+        thermal_reference_temperatures=(reference_temperature, reference_temperature),
     )
 
-    material_a = isotropic_axisymmetric_material(205.0e9, 0.28, dtype=dtype)
-    material_b = isotropic_axisymmetric_material(145.0e9, 0.32, dtype=dtype)
-    reference_temperature = 300.0
-    thermal_a = fem.isotropic_axisymmetric_thermal_material(1.1e-5, reference_temperature, dtype=dtype)
-    thermal_b = fem.isotropic_axisymmetric_thermal_material(1.9e-5, reference_temperature, dtype=dtype)
-    material_table = np.asarray([material_a, material_b])
-    thermal_material_table = np.asarray([thermal_a, thermal_b])
-
-    element_i = np.tile(np.arange(nr), nz)
-    element_j = np.repeat(np.arange(nz), nr)
-    material_ids = ((element_i + 2 * element_j) % 2).astype(np.uint64)
-
-    inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=nz)
-    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=nr, nz=nz)
+    inner_faces, outer_faces = pressure_faces_for_strip(nr=case.nr, nz=case.nz)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=case.nr, nz=case.nz)
     pressure_faces = np.vstack([inner_faces, outer_faces])
     pressure_values = np.concatenate(
         [
@@ -835,28 +878,30 @@ def test_multimaterial_loads_superpose_linearly(
             -1.8e5 * (0.6 + 0.4 * np.cos(np.pi * traction_coordinate)),
         ]
     )
-    xi = (element_i + 0.5) / nr
-    eta = (element_j + 0.5) / nz
+    element_i = np.tile(np.arange(case.nr, dtype=dtype), case.nz)
+    element_j = np.repeat(np.arange(case.nz, dtype=dtype), case.nr)
+    xi = (element_i + 0.5) / case.nr
+    eta = (element_j + 0.5) / case.nz
     body_force = np.column_stack(
         [
             2.2e4 * (0.5 + eta),
             -1.6e4 * np.cos(np.pi * xi) * (0.3 + eta),
         ]
     )
-    nodal_temperature_ref = np.full(nodes.shape[0], reference_temperature, dtype=dtype)
-    rfrac = (nodes[:, 0] - ri) / (ro - ri)
-    zfrac = nodes[:, 1] / height
+    nodal_temperature_ref = np.full(case.nodes.shape[0], reference_temperature, dtype=dtype)
+    rfrac = (case.nodes[:, 0] - case.ri) / (case.ro - case.ri)
+    zfrac = case.nodes[:, 1] / case.height
     nodal_temperature_hot = reference_temperature + 18.0 * rfrac + 11.0 * zfrac
 
     model = fem.assemble_axisymmetric(
-        nodes=nodes,
-        elements=elements,
-        material_ids=material_ids,
-        material_table=material_table,
+        nodes=case.nodes,
+        elements=case.elements,
+        material_ids=case.material_ids,
+        material_table=case.material_table,
         pressure_faces=pressure_faces,
         traction_faces=top_faces,
-        thermal_material_table=thermal_material_table,
-        prescribed=prescribed_bottom_supports(analysis_nodes),
+        thermal_material_table=case.thermal_material_table,
+        prescribed=prescribed_bottom_supports(case.analysis_nodes),
         quadrature=quadrature,
         element_type=element_type,
     )
@@ -946,11 +991,7 @@ def test_quadrature_recovery_splits_total_elastic_and_thermal_strain_consistentl
         reference_temperature=290.0,
         dtype=dtype,
     )
-    analysis_nnode = (
-        nodes.shape[0]
-        if element_type == "quad4"
-        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
-    )
+    analysis_nnode = analysis_node_count_for_element_type(nodes, elements, element_type)
     displacement = np.linspace(-2.0e-4, 3.0e-4, 2 * analysis_nnode, dtype=dtype)
     nodal_temperature = np.linspace(292.0, 307.0, nodes.shape[0], dtype=dtype)
 
@@ -988,11 +1029,7 @@ def test_pressure_vessel_stresses_match_lame_reference(
     )
 
     material = cfsem_radial_material(200.0e9, 0.27, dtype=dtype)
-    prescribed = prescribed_z_dofs(
-        nodes.shape[0]
-        if element_type == "quad4"
-        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
-    )
+    prescribed = prescribed_z_dofs(analysis_node_count_for_element_type(nodes, elements, element_type))
     model_fe, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
@@ -1051,11 +1088,7 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
                 np.full(outer_faces.shape[0], pout, dtype=dtype),
             ]
         ),
-        prescribed=prescribed_z_dofs(
-            nodes.shape[0]
-            if element_type == "quad4"
-            else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
-        ),
+        prescribed=prescribed_z_dofs(analysis_node_count_for_element_type(nodes, elements, element_type)),
         quadrature=quadrature,
         element_type=element_type,
     )
@@ -1124,11 +1157,7 @@ def test_two_material_pressure_vessel_matches_chained_1d_solver(element_type: st
             np.full(outer_faces.shape[0], pout, dtype=dtype),
         ]
     )
-    analysis_nnode = (
-        nodes.shape[0]
-        if element_type == "quad4"
-        else fem.infer_quad9_mesh(nodes, elements).analysis_nodes.shape[0]
-    )
+    analysis_nnode = analysis_node_count_for_element_type(nodes, elements, element_type)
     model_fe, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
@@ -1234,11 +1263,7 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
         ]
     )
     material = isotropic_axisymmetric_material(205.0e9, 0.29, dtype=dtype)
-    regular_analysis_nodes = (
-        regular_nodes
-        if element_type == "quad4"
-        else fem.infer_quad9_mesh(regular_nodes, elements).analysis_nodes
-    )
+    regular_analysis_nodes = analysis_nodes_for_element_type(regular_nodes, elements, element_type)
     prescribed = prescribed_bottom_supports(regular_analysis_nodes)
 
     regular_model, regular_rhs = assemble_model_and_rhs(

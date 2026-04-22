@@ -164,7 +164,7 @@ def test_solenoid_against_thick_wall_cylinder(pi, po, r0, r1):
 
     nr = int(np.ceil((r1 - r0) / dx_reqd)) + 1
     rgrid = np.linspace(r0, r1, nr)
-    nudge = 1e-6  # Pad with points just outside to avoid nulling any real current density
+    nudge = 1e-5  # Pad with points just outside to avoid nulling any real current density
     rgrid = np.array([r0 - nudge] + rgrid.tolist() + [r1 + nudge])
 
     r0, r1 = rgrid[0], rgrid[-1]  # Account for nudge in later calcs

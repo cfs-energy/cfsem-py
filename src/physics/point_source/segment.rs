@@ -418,6 +418,7 @@ mod test {
 
     use super::*;
     use crate::math::rss3;
+    use crate::mesh::quadrature::{GaussLegendreRule, gauss_legendre_unit_interval_table};
     use crate::physics::linear_filament::{
         inductance_piecewise_linear_filaments, vector_potential_linear_filament,
     };
@@ -612,17 +613,16 @@ mod test {
         let dlzfil2: Vec<f64> = (0..=NFIL - 2).map(|i| zfil2[i + 1] - zfil2[i]).collect();
         let dlxyzfil2 = (&dlxfil2[..], &dlyfil2[..], &dlzfil2[..]);
 
-        let gl3_unit_nodes = [0.11270166537925831, 0.5, 0.8872983346207417];
-        let gl3_unit_weights = [0.2777777777777778, 0.4444444444444444, 0.2777777777777778];
+        let gl3_unit = gauss_legendre_unit_interval_table(GaussLegendreRule::Gauss3);
         let mut xquad2 = vec![0.0; 3 * (NFIL - 1)];
         let mut yquad2 = vec![0.0; 3 * (NFIL - 1)];
         let mut zquad2 = vec![0.0; 3 * (NFIL - 1)];
         for i in 0..NFIL - 1 {
             let row = 3 * i;
-            for (iq, tq) in gl3_unit_nodes.iter().enumerate() {
-                xquad2[row + iq] = dlxfil2[i].mul_add(*tq, xfil2[i]);
-                yquad2[row + iq] = dlyfil2[i].mul_add(*tq, yfil2[i]);
-                zquad2[row + iq] = dlzfil2[i].mul_add(*tq, zfil2[i]);
+            for (iq, &[tq, _]) in gl3_unit.iter().enumerate() {
+                xquad2[row + iq] = dlxfil2[i].mul_add(tq, xfil2[i]);
+                yquad2[row + iq] = dlyfil2[i].mul_add(tq, yfil2[i]);
+                zquad2[row + iq] = dlzfil2[i].mul_add(tq, zfil2[i]);
             }
         }
 
@@ -651,7 +651,7 @@ mod test {
                 (0..3)
                     .map(|iq| {
                         let idx = row + iq;
-                        gl3_unit_weights[iq]
+                        gl3_unit[iq][1]
                             * (outx[idx] * dlxfil2[i]
                                 + outy[idx] * dlyfil2[i]
                                 + outz[idx] * dlzfil2[i])
@@ -679,7 +679,7 @@ mod test {
                 (0..3)
                     .map(|iq| {
                         let idx = row + iq;
-                        gl3_unit_weights[iq]
+                        gl3_unit[iq][1]
                             * (outx_ref[idx] * dlxfil2[i]
                                 + outy_ref[idx] * dlyfil2[i]
                                 + outz_ref[idx] * dlzfil2[i])

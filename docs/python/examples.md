@@ -48,6 +48,53 @@ as thin helical filaments.
 --8<-- "examples/inductance.py"
 ```
 
+## Axisymmetric FEM Solenoid Stress Explorer
+
+Explore the axisymmetric FEM stress solver in a Plotly Dash app. The example
+varies the solenoid cross-section, current density, element family, quadrature,
+material model, and loop-source position. It assembles the sparse FEM system,
+adds the external loop source plus smooth winding-pack self-field, and compares
+radial sections against row-matched 1D finite-difference reference profiles.
+
+Run it with `uv run --group dev examples/solenoid_stress_axisymmetric_fem.py`.
+
+## Axisymmetric FEM Solenoid Stress Convergence Study
+
+Run an explicit radial-refinement study that configures the 2D FEM model to
+match the 1D solver assumptions as closely as possible, then compares both
+against the analytic long-solenoid stress formula on the midplane. The current
+hardcoded sweep uses `quad9` elements with `gl3` quadrature and radial target
+spacings from `50 mm` down to `1 mm`.
+
+Run it with `uv run --group dev examples/solenoid_stress_axisymmetric_fem_convergence.py`
+or add `--no-plot` for CI-style execution.
+
+<figure markdown="span">
+  ![Axisymmetric FEM convergence example](example_outputs/solenoid_stress_axisymmetric_fem_convergence.png)
+  <figcaption>
+    Midplane stress convergence for the 1D FD and axisymmetric FEM solenoid solvers.
+  </figcaption>
+</figure>
+
+## Axisymmetric FEM Repeated-Load Operator Example
+
+Run a small non-GUI example that assembles the constrained reduced model once,
+then updates the load values to rebuild the reduced right-hand side for multiple
+cases. The script makes the operator construction explicit, applies all four
+supported load types,
+
+- body-force density
+- surface pressure
+- surface traction in global `(r, z)` components
+- nodal temperature with thermal strain
+
+and checks the Rust-side `model.solve(rhs)` result against a SciPy solve on the
+same reduced stiffness matrix. It uses the operators `body_force_to_rhs`,
+`pressure_to_rhs`, `traction_to_rhs`, `temperature_to_rhs`, and `constant_rhs`
+to rebuild the reduced load vector.
+
+Run it with `uv run --group dev examples/solenoid_stress_surface_traction.py`.
+
 ## Loop Inductance
 
 Estimate the (low-frequency) self-inductance of a finite-radius wire loop by different methods.

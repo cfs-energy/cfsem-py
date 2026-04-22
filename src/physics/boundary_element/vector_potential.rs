@@ -9,9 +9,11 @@ use super::{
 };
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
-use crate::mesh::{
-    TriangleMeshView, triangle_closest_point, triangle_max_edge_length_squared,
-    triangle_subdivide_about_point,
+use crate::mesh::TriangleMeshView;
+use crate::mesh::elements::tri::tri3::{
+    closest_point as triangle_closest_point,
+    max_edge_length_squared as triangle_max_edge_length_squared,
+    subdivide_about_point as triangle_subdivide_about_point,
 };
 use crate::physics::point_source::current_element::vector_potential_current_element_scalar;
 

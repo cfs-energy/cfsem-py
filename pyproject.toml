@@ -11,34 +11,33 @@ requires-python = ">=3.10, <3.14"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
     "numpy >= 2",
     "interpn[pydantic]>=0.8.2,<0.12",
-    "findiff >= 0.12.1",
-    "pydantic >= 2",
-    "pydantic-numpy >= 6"
+    "findiff ~= 0.13.1",
+    "pydantic ~= 2.0",
+    "pydantic-numpy ~= 6.0",
+    "scipy ~= 1.8",
 ]
 license = "MIT"
 
 [dependency-groups]
 dev = [
     # Tests
-    "pytest >= 9.0.2",
-    "pytest-cov >= 7.1.0",
-    "ruff >= 0.6.2",
+    "pytest == 9.0.2",
+    "pytest-cov == 7.1.0",
+    "ruff == 0.6.2",
     "pyright == 1.1.402",
-    "scipy >= 1.8",
     # Docs
-    "mkdocs >= 1.6.0",
-    "mkdocs-material >= 9.5.25",
-    "mkdocstrings[python] >= 1.0.3",
+    "mkdocs == 1.6.0",
+    "mkdocs-material == 9.5.25",
+    "mkdocstrings[python] == 1.0.3",
     # Examples
-    "matplotlib >= 3.9",
+    "matplotlib ~= 3.10",
     "plotly>=6.6.0,<7",
     "dash>=4.0.0,<5",
-    "griffe>=2.0.0",
+    "griffe==2.0.2",
 ]
 
 [tool.maturin]

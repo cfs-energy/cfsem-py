@@ -9,8 +9,15 @@
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
 //! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
 
-use crate::math::{cross3, rss3};
+use crate::math::rss3;
 use crate::mesh::TriangleMeshView;
+pub use crate::mesh::elements::tri::mapping::{
+    area as calc_tri_area, map_point as map_tri_uv, normal as calc_tri_normal,
+};
+pub use crate::mesh::elements::tri::quadrature::{QuadratureKind, triangle_quadrature_count};
+pub(crate) use crate::mesh::elements::tri::quadrature::{
+    TRIANGLE_MAX_QUADRATURE_POINTS, triangle_quadrature_points,
+};
 
 mod body_force_density;
 mod flux_density;
@@ -64,127 +71,9 @@ pub use vector_potential::{
     vector_potential_triangle_mesh_par,
 };
 
-/// Second-order quadrature integration weights on a triangular surface
-/// Format is [Weights, U, V]
-///
-/// References:
-/// * F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
-const TABLE_GAUSS_LEGENDRE_2: [[f64; 3]; 4] = [
-    [0.5283121635e-01, 0.1666666667e+00, 0.7886751346e+00],
-    [0.1971687836e+00, 0.6220084679e+00, 0.2113248654e+00],
-    [0.5283121635e-01, 0.4465819874e-01, 0.7886751346e+00],
-    [0.1971687836e+00, 0.1666666667e+00, 0.2113248654e+00],
-];
-
-/// Third-order quadrature integration weights on a triangular surface
-/// Format is [Weights, U, V]
-///
-/// References:
-/// * F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
-const TABLE_GAUSS_LEGENDRE_3: [[f64; 3]; 9] = [
-    [0.9876542474e-01, 0.2500000000e+00, 0.5000000000e+00],
-    [0.1391378575e-01, 0.5635083269e-01, 0.8872983346e+00],
-    [0.1095430035e+00, 0.4436491673e+00, 0.1127016654e+00],
-    [0.6172839460e-01, 0.4436491673e+00, 0.5000000000e+00],
-    [0.8696116674e-02, 0.1000000000e+00, 0.8872983346e+00],
-    [0.6846438175e-01, 0.7872983346e+00, 0.1127016654e+00],
-    [0.6172839460e-01, 0.5635083269e-01, 0.5000000000e+00],
-    [0.8696116674e-02, 0.1270166538e-01, 0.8872983346e+00],
-    [0.6846438175e-01, 0.1000000000e+00, 0.1127016654e+00],
-];
-
-/// Dunavant's 7-point degree-5 symmetric quadrature rule on a triangle.
-/// Format is [Weights, U, V].
-///
-/// The published rule is given in barycentric form and normalized so the
-/// weights sum to 1 over a physical triangle area factor. This backend stores
-/// quadrature weights in the same reference-triangle convention as the existing
-/// Gauss-Legendre tables, so the published weights are halved here.
-///
-/// References:
-/// * [7], Appendix II, rule with `p = 5`, `n_g = 7`.
-const TABLE_DUNAVANT_5: [[f64; 3]; 7] = [
-    [0.112500000000000, 0.333333333333333, 0.333333333333333],
-    [0.066197076394253, 0.470142064105115, 0.470142064105115],
-    [0.066197076394253, 0.059715871789770, 0.470142064105115],
-    [0.066197076394253, 0.470142064105115, 0.059715871789770],
-    [0.062969590272414, 0.101286507323456, 0.101286507323456],
-    [0.062969590272414, 0.797426985353087, 0.101286507323456],
-    [0.062969590272414, 0.101286507323456, 0.797426985353087],
-];
-
 /// Midpoint-rule samples used for the 1D edge integral in the Duffy-style
 /// triangle self kernel.
 const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
-
-/// Maximum number of quadrature points among the supported triangle rules.
-pub(crate) const TRIANGLE_MAX_QUADRATURE_POINTS: usize = TABLE_GAUSS_LEGENDRE_3.len();
-
-#[derive(Clone, Copy)]
-pub enum QuadratureKind {
-    GaussLegendre2,
-    GaussLegendre3,
-    Dunavant5,
-}
-
-/// Isoparametric mapping of a point on a 3D triangle
-/// from U-V coordinates on the triangle's surface.
-///
-/// Args:
-///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
-///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
-///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
-///     pin_uv: Reference-triangle coordinates `[u, v]` (dimensionless).
-///
-/// Returns:
-///     Cartesian point `[x, y, z]` on the triangle surface (m).
-#[inline]
-pub fn map_tri_uv(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], pin_uv: [f64; 2]) -> [f64; 3] {
-    let mut pout = [0.0; 3];
-    let w = 1.0 - pin_uv[0] - pin_uv[1];
-    pout[0] = n0[0] * w + n1[0] * pin_uv[0] + n2[0] * pin_uv[1];
-    pout[1] = n0[1] * w + n1[1] * pin_uv[0] + n2[1] * pin_uv[1];
-    pout[2] = n0[2] * w + n1[2] * pin_uv[0] + n2[2] * pin_uv[1];
-    pout
-}
-
-/// Area of a 3D triangle.
-///
-/// Args:
-///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
-///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
-///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
-///
-/// Returns:
-///     Triangle area (m^2).
-#[inline]
-pub fn calc_tri_area(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> f64 {
-    let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
-    let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
-    let cross = cross3(v01[0], v01[1], v01[2], v02[0], v02[1], v02[2]);
-    0.5 * rss3(cross.0, cross.1, cross.2)
-}
-
-/// Normal vector of a triangle.
-///
-/// Direction is non-unique; the order of the points determines whether
-/// the returned normal points "up" or "down" relative to the triangle.
-///
-/// Args:
-///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
-///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
-///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
-///
-/// Returns:
-///     Unit normal vector `[nx, ny, nz]` (dimensionless).
-#[inline]
-pub fn calc_tri_normal(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [f64; 3] {
-    let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
-    let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
-    let cross = cross3(v01[0], v01[1], v01[2], v02[0], v02[1], v02[2]);
-    let norm = rss3(cross.0, cross.1, cross.2);
-    [cross.0 / norm, cross.1 / norm, cross.2 / norm]
-}
 
 #[inline]
 fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (f64, [f64; 3]) {
@@ -228,27 +117,6 @@ pub fn triangle_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], s: [f6
         s[0] * basis[0][1] + s[1] * basis[1][1] + s[2] * basis[2][1], // [A/m]
         s[0] * basis[0][2] + s[1] * basis[1][2] + s[2] * basis[2][2], // [A/m]
     ]
-}
-
-#[inline]
-fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] {
-    match quad_kind {
-        QuadratureKind::GaussLegendre2 => &TABLE_GAUSS_LEGENDRE_2,
-        QuadratureKind::GaussLegendre3 => &TABLE_GAUSS_LEGENDRE_3,
-        QuadratureKind::Dunavant5 => &TABLE_DUNAVANT_5,
-    }
-}
-
-/// Number of quadrature points used by a given triangle rule.
-///
-/// Args:
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
-///
-/// Returns:
-///     Number of quadrature points in the selected rule (dimensionless).
-#[inline]
-pub fn triangle_quadrature_count(quad_kind: QuadratureKind) -> usize {
-    triangle_quadrature_points(quad_kind).len()
 }
 
 /// Extract the constant physical surface current density on each triangle of a mesh.

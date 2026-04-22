@@ -18,6 +18,9 @@ from cfsem.solenoid_stress.solenoid_1d import (
     solenoid_1d_structural_factor,
     solenoid_1d_structural_rhs,
 )
+from cfsem.solenoid_stress.thermal_handcalc import (
+    s_thermal_long_cylinder_linear_temperature,
+)
 from cfsem.solenoid_stress.thick_wall_cylinder_handcalc import (
     s_hoop_thick_wall_cylinder,
     s_radial_thick_wall_cylinder,
@@ -798,6 +801,84 @@ def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
     assert np.allclose(samples.thermal_strain, expected_thermal_strain_grid)
     assert np.allclose(samples.elastic_strain, -expected_thermal_strain_grid)
     assert np.allclose(samples.stress, expected_stress_grid)
+
+
+def test_linear_radial_temperature_long_cylinder_matches_analytic_midplane_stress() -> None:
+    dtype = np.float64
+    ri = 0.5
+    ro = 1.0
+    height = 10.0
+    nr = 24
+    nz = 81
+    quadrature = "gl4"
+    element_type = "quad9"
+    elasticity_modulus = 200.0e9
+    poisson_ratio = 0.27
+    alpha = 1.2e-5
+    reference_temperature = 0.0
+    temperature_inner = 80.0
+    temperature_outer = 20.0
+
+    nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
+    material = isotropic_axisymmetric_material(
+        elasticity_modulus,
+        poisson_ratio,
+        dtype=dtype,
+    )
+    thermal_material = fem.isotropic_axisymmetric_thermal_material(
+        alpha,
+        reference_temperature=reference_temperature,
+        dtype=dtype,
+    )
+    nodal_temperature = temperature_inner + (temperature_outer - temperature_inner) * (
+        (nodes[:, 0] - ri) / (ro - ri)
+    )
+
+    model = fem.assemble_axisymmetric(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        thermal_material_table=np.asarray([thermal_material]),
+        prescribed={1: 0.0},
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    rhs = model.build_rhs(nodal_temperature=nodal_temperature)
+    displacement = model.solve(rhs)
+    samples = model.evaluate_quadrature(displacement, nodal_temperature=nodal_temperature)
+
+    dz = height / nz
+    points = samples.points_rz.reshape(-1, 2)
+    stress = samples.stress.reshape(-1, 4)
+    center_band = np.abs(points[:, 1] - 0.5 * height) <= 0.5 * dz
+    assert np.count_nonzero(center_band) > 0
+
+    radius = points[center_band, 0]
+    sigma_rr_ref, sigma_tt_ref, sigma_zz_ref = s_thermal_long_cylinder_linear_temperature(
+        radius,
+        ri,
+        ro,
+        elasticity_modulus,
+        poisson_ratio,
+        alpha,
+        temperature_inner,
+        temperature_outer,
+    )
+
+    sigma_rr = stress[center_band, 0]
+    sigma_zz = stress[center_band, 1]
+    sigma_tt = stress[center_band, 2]
+    tau_rz = stress[center_band, 3]
+
+    assert normalized_peak_error(sigma_rr, sigma_rr_ref) < 1.0e-2
+    assert normalized_peak_error(sigma_tt, sigma_tt_ref) < 1.0e-2
+    assert normalized_peak_error(sigma_zz, sigma_zz_ref) < 1.0e-2
+    assert np.max(np.abs(tau_rz)) < 1.0e-3 * max(
+        float(np.max(np.abs(sigma_rr_ref))),
+        float(np.max(np.abs(sigma_tt_ref))),
+        float(np.max(np.abs(sigma_zz_ref))),
+    )
 
 
 @pytest.mark.parametrize("quadrature", QUADRATURES)

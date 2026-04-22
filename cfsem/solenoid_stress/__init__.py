@@ -16,6 +16,7 @@ from .solenoid_1d import (
     solenoid_1d_structural_rhs,
 )
 from .solenoid_handcalc import s_long_solenoid
+from .thermal_handcalc import s_thermal_long_cylinder_linear_temperature
 from .thick_wall_cylinder_handcalc import (
     s_hoop_thick_wall_cylinder,
     s_radial_thick_wall_cylinder,
@@ -53,6 +54,7 @@ __all__ = [
     "s_hoop_thick_wall_cylinder",
     "s_long_solenoid",
     "s_radial_thick_wall_cylinder",
+    "s_thermal_long_cylinder_linear_temperature",
     "solenoid_1d_structural_factor",
     "solenoid_1d_structural_rhs",
 ]

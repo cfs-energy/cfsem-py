@@ -294,7 +294,14 @@ class AxisymmetricFEMModel:
         return self._input_elements
 
     def element_quadrature(self) -> ElementQuadrature:
-        """Return physical quadrature points and mapped area/volume weights per element."""
+        """Return physical quadrature points and mapped weights for each element.
+
+        Returns:
+            ElementQuadrature: Quadrature data with:
+                `points_rz` of shape `(nelem, nq_per_element, 2)` and units `[length]`,
+                `weights_area` of shape `(nelem, nq_per_element)` and units `[area]`,
+                `weights_volume` of shape `(nelem, nq_per_element)` and units `[volume]`.
+        """
 
         cache = self._element_quadrature_cache
         if cache is not None:
@@ -314,7 +321,13 @@ class AxisymmetricFEMModel:
         return cache
 
     def element_measures(self) -> ElementMeasures:
-        """Return per-element meridian area and swept axisymmetric volume."""
+        """Return meridian area and swept volume for each element.
+
+        Returns:
+            ElementMeasures: Per-element measures with:
+                `areas` of shape `(nelem,)` and units `[area]`,
+                `swept_volumes` of shape `(nelem,)` and units `[volume]`.
+        """
 
         cache = self._element_measures_cache
         if cache is not None:
@@ -355,9 +368,25 @@ class AxisymmetricFEMModel:
         traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        """Build one reduced right-hand side from the stored sparse load operators.
+        """Build one reduced structural right-hand side.
 
-        The returned vector has shape `(ndof_reduced,)`.
+        Args:
+            body_force: Elementwise body-force amplitudes with shape `(2,)` or `(nelem, 2)`.
+                Components are `[b_r, b_z]` with units `[force / volume]`.
+            pressure_values: Pressure amplitudes with shape `(n_pressure_faces,)` and units
+                `[force / area]`. Positive values act in the inward normal direction.
+            traction_values: Surface traction amplitudes with shape `(2,)` or
+                `(n_traction_faces, 2)`. Components are `[t_r, t_z]` with units
+                `[force / area]`.
+            nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
+                `[temperature]`. Required only when the model includes thermal materials.
+
+        Returns:
+            NDArray: Reduced right-hand side with shape `(ndof_reduced,)` and units
+            `[generalized force] = [energy / distance]`.
+
+        Raises:
+            ValueError: If thermal materials are present but `nodal_temperature` is omitted.
         """
 
         body_force_arr = (
@@ -383,7 +412,16 @@ class AxisymmetricFEMModel:
         return np.asarray(rhs, dtype=self.dtype)
 
     def solve(self, rhs: ArrayLike) -> npt.NDArray[np.floating[Any]]:
-        """Solve the reduced system for one right-hand side and recover the full displacement."""
+        """Solve the reduced system and recover the full displacement field.
+
+        Args:
+            rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
+                `[generalized force] = [energy / distance]`.
+
+        Returns:
+            NDArray: Full displacement vector with shape `(ndof_full,)` and component ordering
+            `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
+        """
 
         rhs_arr = np.asarray(rhs, dtype=self.dtype).reshape(-1)
         assert (
@@ -392,7 +430,16 @@ class AxisymmetricFEMModel:
         return np.asarray(self._backend.solve(rhs_arr), dtype=self.dtype)
 
     def recover_full(self, reduced_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
-        """Reinsert prescribed Dirichlet values into a reduced displacement vector."""
+        """Reinsert prescribed Dirichlet values into a reduced displacement vector.
+
+        Args:
+            reduced_solution: Reduced displacement vector with shape `(ndof_reduced,)` and units
+                `[length]`.
+
+        Returns:
+            NDArray: Full displacement vector with shape `(ndof_full,)` and component ordering
+            `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
+        """
 
         reduced_arr = np.asarray(reduced_solution, dtype=self.dtype).reshape(-1)
         assert (
@@ -408,11 +455,25 @@ class AxisymmetricFEMModel:
         displacements: ArrayLike,
         nodal_temperature: ArrayLike | None = None,
     ) -> QuadratureFieldSamples:
-        """Evaluate quadrature-point strain and stress fields from displacements.
+        """Evaluate quadrature-point strain and stress fields.
 
-        `displacements` may be either the reduced solution with shape `(ndof_reduced,)` or the
-        full analysis displacement field with shape `(2 * n_analysis_nodes,)` or
-        `(n_analysis_nodes, 2)`.
+        Args:
+            displacements: Either the reduced displacement solution with shape
+                `(ndof_reduced,)`, or the full analysis displacement field with shape
+                `(2 * n_analysis_nodes,)` or `(n_analysis_nodes, 2)`. Displacement units are
+                `[length]`.
+            nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
+                `[temperature]`. Required only when the model includes thermal materials.
+
+        Returns:
+            QuadratureFieldSamples: Recovered quadrature fields where:
+                `points_rz` has shape `(nelem, nq_per_element, 2)` and units `[length]`,
+                `strain`, `thermal_strain`, and `elastic_strain` have shape
+                `(nelem, nq_per_element, 4)` and units `[strain]`,
+                `stress` has shape `(nelem, nq_per_element, 4)` and units `[stress]`.
+
+        Raises:
+            ValueError: If thermal materials are present but `nodal_temperature` is omitted.
         """
 
         arr = np.asarray(displacements, dtype=self.dtype)
@@ -510,8 +571,18 @@ def _normalize_elements(elements: ArrayLike) -> npt.NDArray[np.uint64]:
 def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh:
     """Elevate a corner-only quad mesh to an explicit 9-node Lagrange mesh.
 
-    The input corner nodes must be ordered counter-clockwise in the `(r, z)` plane. The returned
-    `analysis_elements` follow the local quad9 ordering documented on `ElevatedQuad9Mesh`.
+    Args:
+        nodes: Corner-node coordinates with shape `(nnode, 2)` in `(r, z)` order. Units are
+            `[length]`.
+        elements: Quad4 connectivity with shape `(nelem, 4)`. Corner nodes must be ordered
+            counter-clockwise in the `(r, z)` plane.
+
+    Returns:
+        ElevatedQuad9Mesh: Elevated analysis mesh with:
+            `analysis_nodes` of shape `(n_analysis_nodes, 2)` and units `[length]`,
+            `analysis_elements` of shape `(nelem, 9)`,
+            `corner_node_indices`, `midside_node_indices`, and `center_node_indices` as
+            one-dimensional index arrays.
     """
 
     dtype = _resolve_float_dtype(nodes)
@@ -600,28 +671,14 @@ def _analysis_temperature_for_element_type(
 
 def _normalize_materials(
     material_ids: ArrayLike,
-    material_table: ArrayLike | Mapping[int, ArrayLike],
+    material_table: ArrayLike,
     dtype: np.dtype[Any],
 ) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
     ids = np.asarray(material_ids, dtype=np.uint64)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
-    if isinstance(material_table, Mapping):
-        assert material_table, "material_table mapping cannot be empty"
-        keys = sorted(int(key) for key in material_table)
-        dense_table = []
-        tag_to_index = {key: index for index, key in enumerate(keys)}
-        for key in keys:
-            matrix = np.asarray(material_table[key], dtype=dtype)
-            assert matrix.shape == (4, 4), f"material_table[{key}] must have shape (4, 4); got {matrix.shape}"
-            dense_table.append(matrix)
-        try:
-            normalized_ids = np.asarray([tag_to_index[int(tag)] for tag in ids], dtype=np.uint64)
-        except KeyError as exc:
-            raise ValueError(
-                f"material_ids contains tag {exc.args[0]} that is missing from material_table"
-            ) from exc
-        return normalized_ids, np.ascontiguousarray(np.stack(dense_table, axis=0), dtype=dtype)
-
+    assert not isinstance(
+        material_table, Mapping
+    ), "material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
     table = np.asarray(material_table, dtype=dtype)
     assert table.ndim == 3 and table.shape[1:] == (
         4,
@@ -632,40 +689,124 @@ def _normalize_materials(
 
 def _normalize_thermal_material_table(
     material_ids: ArrayLike,
-    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None,
+    thermal_material_table: ArrayLike | None,
     dtype: np.dtype[Any],
-    *,
-    require_mapping: bool | None = None,
-    elastic_mapping_keys: set[int] | None = None,
 ) -> npt.NDArray[np.floating[Any]] | None:
     if thermal_material_table is None:
         return None
     ids = np.asarray(material_ids, dtype=np.uint64)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
-    is_mapping = isinstance(thermal_material_table, Mapping)
+    assert not isinstance(
+        thermal_material_table, Mapping
+    ), "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
+    table = np.asarray(thermal_material_table, dtype=dtype)
     assert (
-        require_mapping is None or is_mapping == require_mapping
-    ), "thermal_material_table must use the same mapping/dense convention as material_table"
-    if is_mapping:
-        mapping = thermal_material_table
-        assert mapping, "thermal_material_table mapping cannot be empty"
-        keys = sorted(int(key) for key in mapping)
-        if elastic_mapping_keys is not None and set(keys) != elastic_mapping_keys:
-            raise ValueError("thermal_material_table must have exactly the same keys as material_table")
-        dense_table = []
-        for key in keys:
-            row = np.asarray(mapping[key], dtype=dtype)
-            assert row.shape == (5,), f"thermal_material_table[{key}] must have shape (5,); got {row.shape}"
-            dense_table.append(row)
-        table = np.ascontiguousarray(np.stack(dense_table, axis=0), dtype=dtype)
-    else:
-        table = np.asarray(thermal_material_table, dtype=dtype)
-        assert (
-            table.ndim == 2 and table.shape[1] == 5
-        ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
-        table = np.ascontiguousarray(table)
+        table.ndim == 2 and table.shape[1] == 5
+    ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
+    table = np.ascontiguousarray(table)
     assert not np.any(table[:, 3] != 0.0), "shear thermal expansion (alpha_rz) is not yet supported"
     return table
+
+
+def pack_material_tables_from_tags(
+    material_ids: ArrayLike,
+    material_table_by_tag: Mapping[int, ArrayLike],
+    thermal_material_table_by_tag: Mapping[int, ArrayLike] | None = None,
+    dtype: npt.DTypeLike | None = None,
+) -> tuple[
+    npt.NDArray[np.uint64],
+    npt.NDArray[np.floating[Any]],
+    npt.NDArray[np.floating[Any]] | None,
+]:
+    """Pack tagged material definitions into the dense FEM input format.
+
+    Args:
+        material_ids: Element material tags with shape `(nelem,)`.
+        material_table_by_tag: Mapping from external material tag to elastic stress-strain matrix
+            with shape `(4, 4)`. Matrix units are `[stress / strain] = [pressure]`.
+        thermal_material_table_by_tag: Optional mapping from external material tag to thermal row
+            with shape `(5,)` storing `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. Thermal
+            expansion coefficients have units `[strain / temperature]` and `T_ref` has units
+            `[temperature]`.
+        dtype: Optional output floating dtype. Defaults to the resolved dtype of the provided
+            material rows.
+
+    Returns:
+        tuple: `(packed_material_ids, packed_material_table, packed_thermal_material_table)` where:
+            `packed_material_ids` has shape `(nelem,)`,
+            `packed_material_table` has shape `(nmat, 4, 4)`,
+            `packed_thermal_material_table` has shape `(nmat, 5)` when provided, otherwise `None`.
+
+    Raises:
+        ValueError: If an element tag is missing from `material_table_by_tag`, or if thermal tags
+            do not match the elastic tags exactly.
+    """
+
+    assert material_table_by_tag, "material_table_by_tag cannot be empty"
+    resolved_dtype = (
+        np.dtype(dtype)
+        if dtype is not None
+        else _resolve_float_dtype(
+            material_table_by_tag,
+            thermal_material_table_by_tag,
+        )
+    )
+    ids = np.asarray(material_ids, dtype=np.uint64)
+    assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
+
+    material_tags = sorted(int(tag) for tag in material_table_by_tag)
+    tag_to_index = {tag: index for index, tag in enumerate(material_tags)}
+    try:
+        packed_ids = np.asarray([tag_to_index[int(tag)] for tag in ids], dtype=np.uint64)
+    except KeyError as exc:
+        raise ValueError(
+            f"material_ids contains tag {exc.args[0]} that is missing from material_table_by_tag"
+        ) from exc
+
+    material_rows = []
+    for tag in material_tags:
+        matrix = cast(
+            npt.NDArray[np.floating[Any]],
+            np.asarray(material_table_by_tag[tag], dtype=resolved_dtype),
+        )
+        assert matrix.shape == (
+            4,
+            4,
+        ), f"material_table_by_tag[{tag}] must have shape (4, 4); got {matrix.shape}"
+        material_rows.append(matrix)
+    packed_material_table = cast(
+        npt.NDArray[np.floating[Any]],
+        np.ascontiguousarray(np.stack(material_rows, axis=0), dtype=resolved_dtype),
+    )
+
+    packed_thermal_table: npt.NDArray[np.floating[Any]] | None
+    if thermal_material_table_by_tag is None:
+        packed_thermal_table = None
+    else:
+        thermal_tags = {int(tag) for tag in thermal_material_table_by_tag}
+        if thermal_tags != set(material_tags):
+            raise ValueError(
+                "thermal_material_table_by_tag must have exactly the same keys as material_table_by_tag"
+            )
+        thermal_rows = []
+        for tag in material_tags:
+            row = cast(
+                npt.NDArray[np.floating[Any]],
+                np.asarray(thermal_material_table_by_tag[tag], dtype=resolved_dtype),
+            )
+            assert row.shape == (
+                5,
+            ), f"thermal_material_table_by_tag[{tag}] must have shape (5,); got {row.shape}"
+            thermal_rows.append(row)
+        packed_thermal_table = cast(
+            npt.NDArray[np.floating[Any]],
+            np.ascontiguousarray(np.stack(thermal_rows, axis=0), dtype=resolved_dtype),
+        )
+        assert not np.any(
+            packed_thermal_table[:, 3] != 0.0
+        ), "shear thermal expansion (alpha_rz) is not yet supported"
+
+    return packed_ids, packed_material_table, packed_thermal_table
 
 
 def _normalize_nodal_temperature(
@@ -756,24 +897,44 @@ def assemble_axisymmetric(
     nodes: ArrayLike,
     elements: ArrayLike,
     material_ids: ArrayLike,
-    material_table: ArrayLike | Mapping[int, ArrayLike],
+    material_table: ArrayLike,
     pressure_faces: ArrayLike | None = None,
     traction_faces: ArrayLike | None = None,
-    thermal_material_table: ArrayLike | Mapping[int, ArrayLike] | None = None,
+    thermal_material_table: ArrayLike | None = None,
     prescribed: Mapping[int, float] | None = None,
     quadrature: str | int = "gl3",
     element_type: str = "quad4",
 ) -> AxisymmetricFEMModel:
     """Assemble the reusable axisymmetric FEM model.
 
-    The returned model stores the reduced stiffness matrix, the sparse load operators, the sparse
-    quadrature-recovery operators, and the fixed load topology associated with `pressure_faces`,
-    `traction_faces`, and `thermal_material_table`.
+    Args:
+        nodes: Corner-node coordinates with shape `(nnode, 2)` in `(r, z)` order. Units are
+            `[length]`.
+        elements: Quad4 connectivity with shape `(nelem, 4)`. Corner nodes must be ordered
+            counter-clockwise in the `(r, z)` meridian plane.
+        material_ids: Dense material row indices with shape `(nelem,)`.
+        material_table: Elastic stress-strain matrices with shape `(nmat, 4, 4)`. Matrix units
+            are `[stress / strain] = [pressure]`.
+        pressure_faces: Optional pressure-load topology with shape `(n_pressure_faces, 2)`. Each
+            row is `[element_index, local_face]`.
+        traction_faces: Optional traction-load topology with shape `(n_traction_faces, 2)`. Each
+            row is `[element_index, local_face]`.
+        thermal_material_table: Optional thermal material rows with shape `(nmat, 5)` storing
+            `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. Thermal expansion coefficients have
+            units `[strain / temperature]` and `T_ref` has units `[temperature]`.
+        prescribed: Optional mapping from full displacement DOF index to prescribed displacement
+            value. Displacement units are `[length]`.
+        quadrature: Quadrature rule selector, either `gl3`, `gl4`, `3`, or `4`.
+        element_type: Analysis element family, either `quad4` or `quad9`.
 
-    `element_type="quad4"` uses the input mesh directly. `element_type="quad9"` elevates the
-    corner-only input mesh to an explicit 9-node analysis mesh for the backend while keeping the
-    Python-side load and temperature inputs on the original corner nodes. Element corner nodes
-    must be ordered counter-clockwise in the `(r, z)` meridian plane.
+    Returns:
+        AxisymmetricFEMModel: Reusable model storing the reduced stiffness matrix, sparse load
+        operators, sparse quadrature-recovery operators, and cached solve state.
+
+    Raises:
+        ValueError: If `quadrature` is unsupported.
+        AssertionError: If array shapes are invalid or if mapping-style material inputs are passed
+            instead of dense arrays.
     """
 
     elements_arr = _normalize_elements(elements)
@@ -784,10 +945,6 @@ def assemble_axisymmetric(
         material_ids,
         thermal_material_table,
         dtype,
-        require_mapping=isinstance(material_table, Mapping) if thermal_material_table is not None else None,
-        elastic_mapping_keys=(
-            {int(key) for key in material_table} if isinstance(material_table, Mapping) else None
-        ),
     )
     pressure_faces_arr = _normalize_face_pairs("pressure_faces", pressure_faces)
     traction_faces_arr = _normalize_face_pairs("traction_faces", traction_faces)
@@ -895,7 +1052,17 @@ def isotropic_axisymmetric_material(
     poisson_ratio: float,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct the full 3D isotropic axisymmetric elastic stress-strain matrix."""
+    """Construct the isotropic axisymmetric elastic stress-strain matrix.
+
+    Args:
+        youngs_modulus: Young's modulus with units `[pressure]`.
+        poisson_ratio: Poisson ratio with units `[dimensionless]`.
+        dtype: Output floating dtype.
+
+    Returns:
+        NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order
+        `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
+    """
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
@@ -911,7 +1078,18 @@ def isotropic_axisymmetric_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct isotropic thermal-expansion data `[alpha_r, alpha_z, alpha_t, 0, T_ref]`."""
+    """Construct isotropic thermal-expansion data.
+
+    Args:
+        alpha: Isotropic thermal expansion coefficient with units `[strain / temperature]`.
+        reference_temperature: Stress-free reference temperature with units `[temperature]`.
+        dtype: Output floating dtype.
+
+    Returns:
+        NDArray: Thermal material row with shape `(5,)` storing
+        `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. The first four entries have units
+        `[strain / temperature]`; `T_ref` has units `[temperature]`.
+    """
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
@@ -929,7 +1107,20 @@ def orthotropic_axisymmetric_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct orthotropic thermal-expansion data `[alpha_r, alpha_z, alpha_t, 0, T_ref]`."""
+    """Construct orthotropic thermal-expansion data.
+
+    Args:
+        alpha_r: Radial thermal expansion coefficient with units `[strain / temperature]`.
+        alpha_z: Axial thermal expansion coefficient with units `[strain / temperature]`.
+        alpha_t: Hoop thermal expansion coefficient with units `[strain / temperature]`.
+        reference_temperature: Stress-free reference temperature with units `[temperature]`.
+        dtype: Output floating dtype.
+
+    Returns:
+        NDArray: Thermal material row with shape `(5,)` storing
+        `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. The first four entries have units
+        `[strain / temperature]`; `T_ref` has units `[temperature]`.
+    """
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
@@ -945,7 +1136,17 @@ def cfsem_radial_material(
     poisson_ratio: float,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct the reduced isotropic elastic stress-strain matrix matching `SolenoidStress1D`."""
+    """Construct the reduced elastic matrix used by the 1D radial solver.
+
+    Args:
+        youngs_modulus: Young's modulus with units `[pressure]`.
+        poisson_ratio: Poisson ratio with units `[dimensionless]`.
+        dtype: Output floating dtype.
+
+    Returns:
+        NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order
+        `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
+    """
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
@@ -981,4 +1182,5 @@ __all__ = [
     "isotropic_axisymmetric_material",
     "isotropic_axisymmetric_thermal_material",
     "orthotropic_axisymmetric_thermal_material",
+    "pack_material_tables_from_tags",
 ]

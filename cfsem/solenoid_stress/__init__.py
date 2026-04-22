@@ -32,6 +32,7 @@ from .axisymmetric_fem import (
     isotropic_axisymmetric_material,
     isotropic_axisymmetric_thermal_material,
     orthotropic_axisymmetric_thermal_material,
+    pack_material_tables_from_tags,
 )
 
 __all__ = [
@@ -48,6 +49,7 @@ __all__ = [
     "isotropic_axisymmetric_material",
     "isotropic_axisymmetric_thermal_material",
     "orthotropic_axisymmetric_thermal_material",
+    "pack_material_tables_from_tags",
     "s_hoop_thick_wall_cylinder",
     "s_long_solenoid",
     "s_radial_thick_wall_cylinder",

@@ -1033,31 +1033,40 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
     with pytest.raises(ValueError, match="nodal_temperature is required"):
         model.build_rhs()
 
-    mapped_model = fem.assemble_axisymmetric(
+    packed_ids, packed_material_table, packed_thermal_table = fem.pack_material_tables_from_tags(
+        material_ids=np.array([7], dtype=np.uint64),
+        material_table_by_tag={7: material},
+        thermal_material_table_by_tag={7: thermal_material},
+    )
+    packed_model = fem.assemble_axisymmetric(
         nodes=nodes,
         elements=elements,
-        material_ids=np.array([0], dtype=np.uint64),
-        material_table={0: material},
-        thermal_material_table={0: thermal_material},
+        material_ids=packed_ids,
+        material_table=packed_material_table,
+        thermal_material_table=packed_thermal_table,
     )
-    mapped_rhs = mapped_model.build_rhs(nodal_temperature=nodal_temperature)
-    assert mapped_rhs.shape == (mapped_model.ndof_reduced,)
+    packed_rhs = packed_model.build_rhs(nodal_temperature=nodal_temperature)
+    assert packed_rhs.shape == (packed_model.ndof_reduced,)
 
-    with pytest.raises(ValueError, match="missing from material_table"):
+    with pytest.raises(AssertionError, match="pack_material_tables_from_tags"):
         fem.assemble_axisymmetric(
             nodes=nodes,
             elements=elements,
-            material_ids=np.array([1], dtype=np.uint64),
+            material_ids=np.array([0], dtype=np.uint64),
             material_table={0: material},
         )
 
-    with pytest.raises(ValueError, match="same keys as material_table"):
-        fem.assemble_axisymmetric(
-            nodes=nodes,
-            elements=elements,
+    with pytest.raises(ValueError, match="missing from material_table_by_tag"):
+        fem.pack_material_tables_from_tags(
             material_ids=np.array([1], dtype=np.uint64),
-            material_table={0: material, 1: material},
-            thermal_material_table={1: thermal_material, 2: thermal_material},
+            material_table_by_tag={0: material},
+        )
+
+    with pytest.raises(ValueError, match="same keys as material_table_by_tag"):
+        fem.pack_material_tables_from_tags(
+            material_ids=np.array([1], dtype=np.uint64),
+            material_table_by_tag={0: material, 1: material},
+            thermal_material_table_by_tag={1: thermal_material, 2: thermal_material},
         )
 
     with pytest.raises(AssertionError, match="alpha_rz"):
@@ -1078,6 +1087,38 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
         nodal_temperature=nodal_temperature,
     )
     assert samples.stress.shape[-1] == 4
+
+
+def test_pack_material_tables_from_tags_sorts_tags_and_rewrites_ids() -> None:
+    dtype = np.float64
+    material_a = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material_b = isotropic_axisymmetric_material(150.0e9, 0.31, dtype=dtype)
+    thermal_a = fem.isotropic_axisymmetric_thermal_material(1.2e-5, 293.15, dtype=dtype)
+    thermal_b = fem.isotropic_axisymmetric_thermal_material(1.8e-5, 310.0, dtype=dtype)
+
+    packed_ids_no_thermal, packed_material_table_no_thermal, packed_thermal_table_no_thermal = (
+        fem.pack_material_tables_from_tags(
+            material_ids=np.array([20, 10, 20], dtype=np.uint64),
+            material_table_by_tag={20: material_b, 10: material_a},
+        )
+    )
+    assert np.array_equal(packed_ids_no_thermal, np.array([1, 0, 1], dtype=np.uint64))
+    assert np.allclose(packed_material_table_no_thermal[0], material_a)
+    assert np.allclose(packed_material_table_no_thermal[1], material_b)
+    assert packed_thermal_table_no_thermal is None
+
+    packed_ids, packed_material_table, packed_thermal_table = fem.pack_material_tables_from_tags(
+        material_ids=np.array([20, 10, 20], dtype=np.uint64),
+        material_table_by_tag={20: material_b, 10: material_a},
+        thermal_material_table_by_tag={20: thermal_b, 10: thermal_a},
+    )
+
+    assert np.array_equal(packed_ids, np.array([1, 0, 1], dtype=np.uint64))
+    assert np.allclose(packed_material_table[0], material_a)
+    assert np.allclose(packed_material_table[1], material_b)
+    assert packed_thermal_table is not None
+    assert np.allclose(packed_thermal_table[0], thermal_a)
+    assert np.allclose(packed_thermal_table[1], thermal_b)
 
 
 def test_python_convenience_wrappers_preserve_dtype_and_shapes() -> None:

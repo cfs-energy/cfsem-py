@@ -698,7 +698,8 @@ def _normalize_thermal_material_table(
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     assert not isinstance(
         thermal_material_table, Mapping
-    ), "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
+    ), "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...)"
+    " for tagged inputs"
     table = np.asarray(thermal_material_table, dtype=dtype)
     assert (
         table.ndim == 2 and table.shape[1] == 5

@@ -183,17 +183,21 @@ pub struct AxisymmetricModel<F: Real> {
 }
 
 impl<F: Real> AxisymmetricModel<F> {
-    /// Build the reduced right-hand side for one specific load state.
+    /// Build one reduced structural right-hand side.
     ///
-    /// Each optional input vector is interpreted in the column layout of the corresponding stored
-    /// operator:
-    /// - `body_force`: `[b_r, b_z]` per element with units `[force / volume]`,
-    /// - `pressure_values`: one scalar pressure per `pressure_faces` entry with units
-    ///   `[force / area]`,
-    /// - `traction_values`: `[t_r, t_z]` per `traction_faces` entry with units `[force / area]`,
-    /// - `nodal_temperature`: one temperature per analysis node.
+    /// Args:
+    ///     body_force: Optional body-force amplitudes with shape `(2 * nelem,)`, grouped as
+    ///         `[b_r, b_z]` per element. Units are `[force / volume]`.
+    ///     pressure_values: Optional pressure amplitudes with shape `(n_pressure_faces,)`.
+    ///         Units are `[force / area]`. Positive values act in the inward normal direction.
+    ///     traction_values: Optional traction amplitudes with shape `(2 * n_traction_faces,)`,
+    ///         grouped as `[t_r, t_z]` per traction face. Units are `[force / area]`.
+    ///     nodal_temperature: Optional nodal temperatures with shape `(n_temperature_nodes,)`.
+    ///         Units are `[temperature]`. Required only when the model includes thermal materials.
     ///
-    /// The returned vector has length `ndof_reduced` and units `[energy / distance]`.
+    /// Returns:
+    ///     Reduced right-hand side with shape `(ndof_reduced,)` and units
+    ///     `[generalized force] = [energy / distance]`.
     pub fn build_rhs(
         &self,
         body_force: Option<&[F]>,
@@ -237,13 +241,18 @@ impl<F: Real> AxisymmetricModel<F> {
         Ok(rhs)
     }
 
-    /// Solve the reduced structural system and return the recovered full displacement vector.
+    /// Solve the reduced structural system and recover the full displacement vector.
     ///
-    /// The model caches the sparse LU factorization of `stiffness` on first use, so repeated calls
-    /// reuse the same factorization.
+    /// The model caches the sparse LU factorization of `stiffness` on first use, so repeated
+    /// calls reuse the same factorization.
     ///
-    /// Input units: `rhs` has units `[energy / distance]`.
-    /// Output units: displacements `[length]`.
+    /// Args:
+    ///     rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
+    ///         `[generalized force] = [energy / distance]`.
+    ///
+    /// Returns:
+    ///     Full displacement vector with shape `(ndof_full,)` and component ordering
+    ///     `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
     pub fn solve(&mut self, rhs: &[F]) -> Result<Vec<F>, String> {
         if rhs.len() != self.ndof_reduced {
             return Err(format!(
@@ -274,9 +283,15 @@ impl<F: Real> AxisymmetricModel<F> {
         Ok(self.recover_full(&reduced_solution))
     }
 
-    /// Reinsert prescribed Dirichlet values into a reduced solution vector.
+    /// Reinsert prescribed Dirichlet values into a reduced displacement vector.
     ///
-    /// Input and output units: displacement `[length]`.
+    /// Args:
+    ///     reduced_solution: Reduced displacement vector with shape `(ndof_reduced,)`.
+    ///         Units are `[length]`.
+    ///
+    /// Returns:
+    ///     Full displacement vector with shape `(ndof_full,)` and component ordering
+    ///     `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
     pub fn recover_full(&self, reduced_solution: &[F]) -> Vec<F> {
         assert!(
             reduced_solution.len() == self.ndof_reduced,
@@ -295,6 +310,13 @@ impl<F: Real> AxisymmetricModel<F> {
     }
 
     /// Recompute the physical quadrature points and mapped weights for the stored analysis mesh.
+    ///
+    /// Returns:
+    ///     Element-major quadrature data with:
+    ///     - `points_rz` length `nelem * nq_per_element`, each entry `(r, z)` with units `[length]`
+    ///     - `weights_area` length `nelem * nq_per_element` with units `[area]`
+    ///     - `weights_volume` length `nelem * nq_per_element` with units `[volume]`
+    ///     - `nq_per_element` giving the number of consecutive quadrature entries per element
     pub fn element_quadrature(&self) -> Result<AxisymmetricElementQuadrature<F>, String> {
         match self.element_type {
             AxisymmetricElementType::Quad4 => {
@@ -317,6 +339,11 @@ impl<F: Real> AxisymmetricModel<F> {
     }
 
     /// Return per-element meridian area and swept volume from the model quadrature data.
+    ///
+    /// Returns:
+    ///     Per-element measures with:
+    ///     - `areas` shape `(nelem,)` and units `[area]`
+    ///     - `swept_volumes` shape `(nelem,)` and units `[volume]`
     pub fn element_measures(&self) -> Result<AxisymmetricElementMeasures<F>, String> {
         let quadrature = self.element_quadrature()?;
         let mut areas = vec![F::zero(); self.nelem];
@@ -337,8 +364,22 @@ impl<F: Real> AxisymmetricModel<F> {
         })
     }
 
-    /// Recover strain and stress fields at element quadrature points from a full displacement
-    /// vector and optional nodal temperatures.
+    /// Recover quadrature-point strain and stress fields.
+    ///
+    /// Args:
+    ///     displacements_full: Full displacement vector with shape `(ndof_full,)` and component
+    ///         ordering `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
+    ///     nodal_temperature: Optional nodal temperatures with shape `(n_temperature_nodes,)`.
+    ///         Units are `[temperature]`. Required only when the model includes thermal materials.
+    ///
+    /// Returns:
+    ///     Recovered quadrature fields where:
+    ///     - `points_rz` has length `nelem * nq_per_element` and units `[length]`
+    ///     - `strain`, `thermal_strain`, and `elastic_strain` each have length
+    ///       `nelem * nq_per_element`, with component order `[rr, zz, tt, rz]` and units `[strain]`
+    ///     - `stress` has length `nelem * nq_per_element`, with component order
+    ///       `[rr, zz, tt, rz]` and units `[stress]`
+    ///     - `nq_per_element` gives the number of consecutive samples per element
     pub fn evaluate_quadrature(
         &self,
         displacements_full: &[F],
@@ -417,6 +458,33 @@ impl<F: Real> AxisymmetricModel<F> {
 /// - reduced RHS operators for all supported load types,
 /// - cached metadata describing the analysis mesh and load faces, and
 /// - reduced recovery operators for quadrature-point postprocessing.
+///
+/// Args:
+///     nodes_rz: Corner-node coordinates with shape `(nnode, 2)` in `(r, z)` order. Units are
+///         `[length]`.
+///     elements: Analysis connectivity, either quad4 with shape `(nelem, 4)` or quad9 with shape
+///         `(nelem, 9)`. Corner nodes must be ordered counter-clockwise in the `(r, z)` plane.
+///     material_ids: Dense material row indices with shape `(nelem,)`.
+///     material_table: Elastic stress-strain matrices with shape `(nmat, 4, 4)`. Matrix units
+///         are `[stress / strain] = [pressure]`.
+///     pressure_faces: Pressure-load topology with shape `(n_pressure_faces,)`, one
+///         `PressureLoad` per loaded face.
+///     traction_faces: Traction-load topology with shape `(n_traction_faces,)`, one
+///         `TractionLoad` per loaded face.
+///     thermal_material_table: Optional thermal material table with shape `(nmat,)`, one
+///         `ThermalMaterial` per material row. Each row stores
+///         `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`, where `alpha_*` has units
+///         `[strain / temperature]` and `T_ref` has units `[temperature]`.
+///     prescribed: Prescribed displacement values with shape `(n_prescribed,)`, stored as
+///         `(global_dof, value)` pairs. Displacement units are `[length]`.
+///     quadrature: Volume and face quadrature rule used to assemble the stored operators.
+///
+/// Returns:
+///     Reduced axisymmetric FEM model storing:
+///     - CSC stiffness with shape `(ndof_reduced, ndof_reduced)`
+///     - CSR load operators mapping reusable load amplitudes into the reduced right-hand side
+///     - CSR recovery operators for quadrature-point postprocessing
+///     - metadata for the reduced solve, analysis mesh, and load topology
 pub fn assemble_axisymmetric<F: Real>(
     nodes_rz: &[[F; 2]],
     elements: AxisymmetricElements<'_>,

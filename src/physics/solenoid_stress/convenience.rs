@@ -102,7 +102,15 @@ pub struct ElevatedQuad9Mesh<F: Real> {
     pub center_node_indices: Vec<usize>,
 }
 
-/// Construct the full 3D isotropic axisymmetric elastic stress-strain matrix.
+/// Construct the isotropic axisymmetric elastic stress-strain matrix.
+///
+/// Args:
+///     youngs_modulus: Young's modulus with units `[pressure]`.
+///     poisson_ratio: Poisson ratio with units `[dimensionless]`.
+///
+/// Returns:
+///     Elastic stress-strain matrix with shape `(4, 4)` in component order
+///     `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
 pub fn isotropic_axisymmetric_material<F: Real>(
     youngs_modulus: F,
     poisson_ratio: F,
@@ -119,7 +127,16 @@ pub fn isotropic_axisymmetric_material<F: Real>(
     ]
 }
 
-/// Construct isotropic thermal-expansion data in axisymmetric strain order `[rr, zz, tt, rz]`.
+/// Construct isotropic thermal-expansion data.
+///
+/// Args:
+///     alpha: Isotropic thermal expansion coefficient with units `[strain / temperature]`.
+///     reference_temperature: Stress-free reference temperature with units `[temperature]`.
+///
+/// Returns:
+///     Thermal material data with row shape `(5,)`, stored as
+///     `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. The first four entries have units
+///     `[strain / temperature]`; `T_ref` has units `[temperature]`.
 pub fn isotropic_axisymmetric_thermal_material<F: Real>(
     alpha: F,
     reference_temperature: F,
@@ -130,7 +147,18 @@ pub fn isotropic_axisymmetric_thermal_material<F: Real>(
     }
 }
 
-/// Construct orthotropic thermal-expansion data in axisymmetric strain order `[rr, zz, tt, rz]`.
+/// Construct orthotropic thermal-expansion data.
+///
+/// Args:
+///     alpha_r: Radial thermal expansion coefficient with units `[strain / temperature]`.
+///     alpha_z: Axial thermal expansion coefficient with units `[strain / temperature]`.
+///     alpha_t: Hoop thermal expansion coefficient with units `[strain / temperature]`.
+///     reference_temperature: Stress-free reference temperature with units `[temperature]`.
+///
+/// Returns:
+///     Thermal material data with row shape `(5,)`, stored as
+///     `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. The first four entries have units
+///     `[strain / temperature]`; `T_ref` has units `[temperature]`.
 pub fn orthotropic_axisymmetric_thermal_material<F: Real>(
     alpha_r: F,
     alpha_z: F,
@@ -143,7 +171,15 @@ pub fn orthotropic_axisymmetric_thermal_material<F: Real>(
     }
 }
 
-/// Construct the reduced elastic stress-strain matrix matching the assumptions of the 1D radial solver.
+/// Construct the reduced elastic matrix used by the 1D radial solver.
+///
+/// Args:
+///     youngs_modulus: Young's modulus with units `[pressure]`.
+///     poisson_ratio: Poisson ratio with units `[dimensionless]`.
+///
+/// Returns:
+///     Elastic stress-strain matrix with shape `(4, 4)` in component order
+///     `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
 pub fn cfsem_radial_material<F: Real>(youngs_modulus: F, poisson_ratio: F) -> [[F; 4]; 4] {
     let factor = youngs_modulus / (F::one() - poisson_ratio * poisson_ratio);
     let shear = youngs_modulus / (cast::<F>(2.0) * (F::one() + poisson_ratio));
@@ -160,6 +196,21 @@ pub fn cfsem_radial_material<F: Real>(youngs_modulus: F, poisson_ratio: F) -> [[
 /// The output `analysis_elements` use the standard local quad9 ordering documented on
 /// [`ElevatedQuad9Mesh::analysis_elements`]. In particular, midside nodes `4..=7` follow the
 /// quad local face numbering `[bottom, right, top, left]`.
+///
+/// Args:
+///     nodes_rz: Corner-node coordinates with shape `(nnode, 2)` in `(r, z)` order. Units are
+///         `[length]`.
+///     elements: Quad4 connectivity with shape `(nelem, 4)`. Corner nodes must be ordered
+///         counter-clockwise in the `(r, z)` plane.
+///
+/// Returns:
+///     Elevated quad9 mesh with:
+///     - `input_nodes` shape `(nnode, 2)` and units `[length]`
+///     - `input_elements` shape `(nelem, 4)`
+///     - `analysis_nodes` shape `(n_analysis_nodes, 2)` and units `[length]`
+///     - `analysis_elements` shape `(nelem, 9)`
+///     - `corner_node_indices`, `midside_node_indices`, and `center_node_indices` as
+///       one-dimensional index vectors.
 pub fn infer_quad9_mesh<F: Real>(
     nodes_rz: &[[F; 2]],
     elements: &[[usize; 4]],

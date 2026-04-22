@@ -1,5 +1,7 @@
 //! Borrowed view of 2D quadrilateral mesh geometry.
 
+use std::collections::HashSet;
+
 /// Borrowed view of a 2D quadrilateral mesh with fixed nodes per element.
 #[derive(Clone, Copy)]
 pub struct QuadMeshView2d<'a, F: Copy, const NODES_PER_ELEMENT: usize> {
@@ -24,12 +26,19 @@ impl<'a, F: Copy, const NODES_PER_ELEMENT: usize> QuadMeshView2d<'a, F, NODES_PE
     pub fn validate_connectivity(&self) -> Result<(), String> {
         let node_count = self.num_nodes();
         for (element_index, element) in self.elements.iter().enumerate() {
+            let mut unique_nodes = HashSet::with_capacity(NODES_PER_ELEMENT);
             for &node in element {
                 if node >= node_count {
                     return Err(format!(
                         "element {element_index} references node {node}, but mesh has only {node_count} nodes"
                     ));
                 }
+                unique_nodes.insert(node);
+            }
+            if unique_nodes.len() != NODES_PER_ELEMENT {
+                eprintln!(
+                    "warning: element {element_index} contains duplicate node indices: {element:?}"
+                );
             }
         }
         Ok(())

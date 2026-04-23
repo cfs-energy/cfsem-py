@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.3.1 2026-04-23
+
+### Changed
+
+* Rust
+    * Make `triangle_basis_current_densities` pub
+
 ## 5.3.0 2026-04-10
 
 ### Added

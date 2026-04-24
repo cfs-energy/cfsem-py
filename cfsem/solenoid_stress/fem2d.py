@@ -565,12 +565,12 @@ def _normalize_thickness(
     formulation: str,
     thickness: float | None,
     dtype: np.dtype[Any],
-) -> np.floating[Any]:
+) -> float:
     if formulation == "axisymmetric":
         assert thickness is None, "thickness is only valid for formulation='plane_strain'"
-        return np.asarray(0.0, dtype=dtype)[()]
+        return float(np.asarray(0.0, dtype=dtype))
     assert thickness is not None, "thickness is required for formulation='plane_strain'"
-    value = np.asarray(thickness, dtype=dtype)[()]
+    value = float(np.asarray(thickness, dtype=dtype))
     assert value > 0.0, f"thickness must be positive; got {thickness!r}"
     return value
 

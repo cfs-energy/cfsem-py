@@ -98,11 +98,11 @@ fn circular_strip_triangles_at_z(
 
         let tri0 = TrianglePatch {
             nodes: [lower0, lower1, upper1],
-            s: [-s0, -s0, s0],
+            s: [0.5 * s0, 0.5 * s0, -0.5 * s0],
         };
         let tri1 = TrianglePatch {
             nodes: [lower0, upper1, upper0],
-            s: [-s0, s0, s0],
+            s: [0.5 * s0, -0.5 * s0, -0.5 * s0],
         };
 
         let radial = [(phi0 + 0.5 * dphi).cos(), (phi0 + 0.5 * dphi).sin(), 0.0];

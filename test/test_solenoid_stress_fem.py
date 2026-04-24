@@ -8,8 +8,8 @@ import scipy.interpolate as spi
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from cfsem.solenoid_stress import axisymmetric_fem as fem
-from cfsem.solenoid_stress.axisymmetric_fem import (
+from cfsem.solenoid_stress import fem2d as fem
+from cfsem.solenoid_stress.fem2d import (
     cfsem_radial_material,
     isotropic_axisymmetric_material,
 )
@@ -214,7 +214,7 @@ def tolerance(dtype: DType) -> tuple[float, float]:
 
 
 def solve_with_factorized_model(
-    model: fem.AxisymmetricFEMModel,
+    model: fem.Structural2DFEMModel,
     rhs: np.ndarray,
 ) -> np.ndarray:
     if model.stiffness.shape[0] == 0:
@@ -354,8 +354,8 @@ def assemble_model_and_rhs(
     prescribed: dict[int, float] | None = None,
     quadrature: str = "gl3",
     element_type: str = "quad4",
-) -> tuple[fem.AxisymmetricFEMModel, np.ndarray]:
-    model = fem.assemble_axisymmetric(
+) -> tuple[fem.Structural2DFEMModel, np.ndarray]:
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=material_ids,
@@ -386,7 +386,7 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
     nz: int,
 ) -> None:
     nodes, elements = build_annulus_strip_mesh(1.0, 2.0, 1.0, nr=nr, nz=nz, dtype=dtype)
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -403,9 +403,9 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
     rtol, atol = tolerance(dtype)
 
     assert np.all(measures.areas > 0.0)
-    assert np.all(measures.swept_volumes > 0.0)
+    assert np.all(measures.volumes > 0.0)
     assert np.allclose(measures.areas.sum(), expected_area, rtol=rtol, atol=atol)
-    assert np.allclose(measures.swept_volumes.sum(), expected_volume, rtol=rtol, atol=atol)
+    assert np.allclose(measures.volumes.sum(), expected_volume, rtol=rtol, atol=atol)
     assert np.allclose(
         quadrature_data.weights_area.sum(axis=1),
         measures.areas,
@@ -414,7 +414,7 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
     )
     assert np.allclose(
         quadrature_data.weights_volume.sum(axis=1),
-        measures.swept_volumes,
+        measures.volumes,
         rtol=rtol,
         atol=atol,
     )
@@ -430,7 +430,7 @@ def test_body_force_total_matches_requested_total_force(
     nz: int,
 ) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=nr, nz=nz, dtype=dtype)
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -439,7 +439,7 @@ def test_body_force_total_matches_requested_total_force(
     )
     measures = model.element_measures()
     total_force = np.array([1234.0, -432.0], dtype=dtype)
-    density = total_force / measures.swept_volumes.sum()
+    density = total_force / measures.volumes.sum()
 
     model, rhs = assemble_model_and_rhs(
         nodes=nodes,
@@ -467,7 +467,7 @@ def test_model_dtype_resolution_includes_material_tables() -> None:
     )
     nodal_temperature = np.linspace(294.0, 301.0, nodes.shape[0], dtype=np.float32)
 
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -493,7 +493,7 @@ def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType,
     inner_faces, outer_faces = pressure_faces_for_strip(nr=4, nz=2)
     pressure_faces = np.vstack([inner_faces, outer_faces])
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -710,7 +710,7 @@ def test_factorized_solve_reuses_stiffness_with_varying_traction(quadrature: str
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=3, nz=2)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
     prescribed = prescribed_z_dofs(analysis_node_count_for_element_type(nodes, elements, element_type))
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -834,7 +834,7 @@ def test_linear_radial_temperature_long_cylinder_matches_analytic_midplane_stres
         (nodes[:, 0] - ri) / (ro - ri)
     )
 
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -849,7 +849,7 @@ def test_linear_radial_temperature_long_cylinder_matches_analytic_midplane_stres
     samples = model.evaluate_quadrature(displacement, nodal_temperature=nodal_temperature)
 
     dz = height / nz
-    points = samples.points_rz.reshape(-1, 2)
+    points = samples.points.reshape(-1, 2)
     stress = samples.stress.reshape(-1, 4)
     center_band = np.abs(points[:, 1] - 0.5 * height) <= 0.5 * dz
     assert np.count_nonzero(center_band) > 0
@@ -974,7 +974,7 @@ def test_multimaterial_loads_superpose_linearly(
     zfrac = case.nodes[:, 1] / case.height
     nodal_temperature_hot = reference_temperature + 18.0 * rfrac + 11.0 * zfrac
 
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=case.nodes,
         elements=case.elements,
         material_ids=case.material_ids,
@@ -1076,7 +1076,7 @@ def test_quadrature_recovery_splits_total_elastic_and_thermal_strain_consistentl
     displacement = np.linspace(-2.0e-4, 3.0e-4, 2 * analysis_nnode, dtype=dtype)
     nodal_temperature = np.linspace(292.0, 307.0, nodes.shape[0], dtype=dtype)
 
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -1125,7 +1125,7 @@ def test_pressure_vessel_stresses_match_lame_reference(
     )
     displacement = solve_with_factorized_model(model_fe, rhs)
     samples = model_fe.evaluate_quadrature(displacement)
-    radii = samples.points_rz[..., 0]
+    radii = samples.points[..., 0]
     radial_exact = s_radial_thick_wall_cylinder(radii, ri, ro, pin, pout)
     hoop_exact = s_hoop_thick_wall_cylinder(radii, ri, ro, pin, pout)
 
@@ -1281,7 +1281,7 @@ def test_two_material_pressure_vessel_matches_chained_1d_solver(element_type: st
         r_outer,
         u_outer,
     )
-    sample_r = samples.points_rz[..., 0]
+    sample_r = samples.points[..., 0]
     stress_r_1d = piecewise_interp_two_region(
         sample_r,
         interface_radius,
@@ -1396,12 +1396,12 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
     regular_displacement = interpolate_field(regular_model.analysis_nodes, regular_u, sample_points)
     distorted_displacement = interpolate_field(distorted_model.analysis_nodes, distorted_u, sample_points)
     regular_stress = interpolate_field(
-        regular_samples.points_rz.reshape(-1, 2),
+        regular_samples.points.reshape(-1, 2),
         regular_samples.stress.reshape(-1, 4),
         sample_points,
     )
     distorted_stress = interpolate_field(
-        distorted_samples.points_rz.reshape(-1, 2),
+        distorted_samples.points.reshape(-1, 2),
         distorted_samples.stress.reshape(-1, 4),
         sample_points,
     )
@@ -1421,7 +1421,7 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
 def test_model_recovery_and_fixed_dof_branches() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=np.float64)
     material = isotropic_axisymmetric_material(200.0e9, 0.27)
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -1441,7 +1441,7 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
     material = isotropic_axisymmetric_material(200.0e9, 0.27)
 
     with pytest.raises(ValueError, match="material_ids has length 0"):
-        fem.assemble_axisymmetric(
+        fem.assemble_structural_2d(
             nodes=nodes,
             elements=elements,
             material_ids=np.zeros((0,), dtype=np.uint64),
@@ -1449,7 +1449,7 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
         )
 
     with pytest.raises(ValueError, match="unsupported quadrature"):
-        fem.assemble_axisymmetric(
+        fem.assemble_structural_2d(
             nodes=nodes,
             elements=elements,
             material_ids=np.zeros((1,), dtype=np.uint64),
@@ -1458,7 +1458,7 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
         )
 
     with pytest.raises(ValueError, match="displacements must have shape"):
-        model = fem.assemble_axisymmetric(
+        model = fem.assemble_structural_2d(
             nodes=nodes,
             elements=elements,
             material_ids=np.zeros((1,), dtype=np.uint64),
@@ -1476,7 +1476,7 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
         dtype=np.float32,
     )
     with pytest.raises(ValueError, match="too close to zero"):
-        model = fem.assemble_axisymmetric(
+        model = fem.assemble_structural_2d(
             near_axis_nodes,
             np.array([[0, 1, 2, 3]], dtype=np.uint64),
             np.zeros((1,), dtype=np.uint64),
@@ -1490,7 +1490,7 @@ def test_model_zero_load_and_empty_reduction_branches() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
 
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -1503,7 +1503,7 @@ def test_model_zero_load_and_empty_reduction_branches() -> None:
     assert displacement.shape == (model.ndof_full,)
 
     all_fixed = {dof: 0.0 for dof in range(2 * nodes.shape[0])}
-    fixed_model = fem.assemble_axisymmetric(
+    fixed_model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -1521,7 +1521,7 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
     material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
     thermal_material = fem.isotropic_axisymmetric_thermal_material(1.2e-5, 293.15, dtype=dtype)
 
-    model = fem.assemble_axisymmetric(
+    model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -1540,7 +1540,7 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
         material_table_by_tag={7: material},
         thermal_material_table_by_tag={7: thermal_material},
     )
-    packed_model = fem.assemble_axisymmetric(
+    packed_model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=packed_ids,
@@ -1551,7 +1551,7 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
     assert packed_rhs.shape == (packed_model.ndof_reduced,)
 
     with pytest.raises(AssertionError, match="pack_material_tables_from_tags"):
-        fem.assemble_axisymmetric(
+        fem.assemble_structural_2d(
             nodes=nodes,
             elements=elements,
             material_ids=np.array([0], dtype=np.uint64),
@@ -1572,7 +1572,7 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
         )
 
     with pytest.raises(AssertionError, match="alpha_rz"):
-        fem.assemble_axisymmetric(
+        fem.assemble_structural_2d(
             nodes=nodes,
             elements=elements,
             material_ids=np.array([0], dtype=np.uint64),
@@ -1673,3 +1673,95 @@ def test_quad9_temperature_elevation_reproduces_affine_temperature_field() -> No
     expected_temperature = a_r * elevated.analysis_nodes[:, 0] + b_z * elevated.analysis_nodes[:, 1] + c0
 
     assert np.allclose(analysis_temperature, expected_temperature, rtol=0.0, atol=1.0e-14)
+
+
+def test_plane_strain_accepts_negative_coordinates_and_recovers_linear_strain() -> None:
+    dtype = np.float64
+    nodes = np.asarray(
+        [
+            [-1.0, -0.5],
+            [2.0, -0.5],
+            [2.0, 1.5],
+            [-1.0, 1.5],
+        ],
+        dtype=dtype,
+    )
+    elements = np.asarray([[0, 1, 2, 3]], dtype=np.uint64)
+    material = fem.isotropic_plane_strain_material(200.0e9, 0.29, dtype=dtype)
+
+    model = fem.assemble_structural_2d(
+        nodes,
+        elements,
+        np.asarray([0], dtype=np.uint64),
+        np.asarray([material]),
+        formulation="plane_strain",
+        thickness=0.12,
+    )
+
+    a, b, c, d = 0.015, -0.02, 0.031, -0.011
+    displacement = np.column_stack(
+        [
+            a * nodes[:, 0] + b * nodes[:, 1],
+            c * nodes[:, 0] + d * nodes[:, 1],
+        ]
+    )
+    samples = model.evaluate_quadrature(displacement)
+
+    expected = np.asarray([a, d, 0.0, b + c], dtype=dtype)
+    assert model.formulation == "plane_strain"
+    assert model.coordinate_labels == ("x", "y")
+    assert model.tensor_labels == ("xx", "yy", "zz", "xy")
+    assert np.allclose(samples.strain.reshape(-1, 4), expected)
+
+    with pytest.raises(ValueError, match="negative radius"):
+        fem.assemble_structural_2d(
+            nodes,
+            elements,
+            np.asarray([0], dtype=np.uint64),
+            np.asarray([material]),
+            formulation="axisymmetric",
+        )
+
+
+def test_material_orientation_angles_rotate_in_plane_for_both_formulations() -> None:
+    dtype = np.float64
+    nodes_axisymmetric = np.asarray(
+        [
+            [0.7, 0.0],
+            [1.1, 0.0],
+            [1.1, 0.3],
+            [0.7, 0.3],
+        ],
+        dtype=dtype,
+    )
+    nodes_planar = np.asarray(
+        [
+            [-0.2, 0.0],
+            [0.2, 0.0],
+            [0.2, 0.3],
+            [-0.2, 0.3],
+        ],
+        dtype=dtype,
+    )
+    elements = np.asarray([[0, 1, 2, 3]], dtype=np.uint64)
+    material = np.diag(np.asarray([4.0, 7.0, 11.0, 3.0], dtype=dtype))
+
+    def dense_stiffness(nodes: np.ndarray, formulation: str, angle: float) -> np.ndarray:
+        model = fem.assemble_structural_2d(
+            nodes,
+            elements,
+            np.asarray([0], dtype=np.uint64),
+            np.asarray([material]),
+            formulation=formulation,
+            thickness=0.2 if formulation == "plane_strain" else None,
+            material_orientation_angles=angle,
+        )
+        return model.stiffness.toarray()
+
+    for nodes, formulation in ((nodes_axisymmetric, "axisymmetric"), (nodes_planar, "plane_strain")):
+        k0 = dense_stiffness(nodes, formulation, 0.0)
+        k_pi = dense_stiffness(nodes, formulation, np.pi)
+        k_half_pi = dense_stiffness(nodes, formulation, 0.5 * np.pi)
+
+        assert np.allclose(k0, k_pi, rtol=1.0e-12, atol=1.0e-12)
+        assert not np.allclose(k0, k_half_pi, rtol=1.0e-6, atol=1.0e-12)

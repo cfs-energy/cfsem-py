@@ -34,9 +34,14 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     build_b_matrix, constitutive_times_b, constitutive_times_strain,
 };
+use crate::physics::solenoid_stress::convenience::{
+    rotate_material_in_plane, rotate_thermal_material_in_plane,
+};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
-use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_axisymmetric_mesh};
-use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, ThermalMaterial, local_dofs};
+use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
+use crate::physics::solenoid_stress::types::{
+    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, local_dofs,
+};
 
 /// Sparse quadrature-point recovery operators before reduction into the model-owned CSR form.
 ///
@@ -47,7 +52,7 @@ pub struct QuadratureFieldOperators<F: Real> {
     /// Quadrature-point coordinates `(r, z)` in element-major order.
     ///
     /// Units: `[length]`.
-    pub points_rz: Vec<[F; 2]>,
+    pub points: Vec<[F; 2]>,
     /// Sparse row indices for the strain operator triplets.
     pub strain_rows: Vec<usize>,
     /// Sparse column indices for the strain operator triplets.
@@ -158,15 +163,17 @@ fn quadrature_sample_kernel<
     material: &[[F; 4]; 4],
     thermal_material: Option<&ThermalMaterial<F>>,
     thermal_stress_unit: Option<&[F; 4]>,
+    formulation: Structural2dFormulation<F>,
 ) -> Result<LocalQuadratureSampleKernel<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>, String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     // `B` maps nodal displacements `[length]` to strain `[dimensionless]`.
     let strain = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        formulation,
         &sample.n,
         &sample.grad_phys,
-        sample.point[0],
+        sample.point,
     )?;
     // `D B` maps nodal displacements `[length]` to stress `[pressure]`. The elastic stress-strain
     // matrix is applied here with the local per-material `4 x 4` matrix; there is no assembled
@@ -222,6 +229,8 @@ pub(crate) fn quadrature_field_operators_for_family<
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
+    material_orientation_angles: Option<&[F]>,
+    formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
 ) -> Result<QuadratureFieldOperators<F>, String>
 where
@@ -230,7 +239,7 @@ where
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    validate_axisymmetric_mesh(mesh)?;
+    validate_structural_2d_mesh(mesh, formulation)?;
     if material_ids.len() != mesh.num_elements() {
         return Err(format!(
             "material_ids has length {}, but mesh has {} elements",
@@ -238,10 +247,19 @@ where
             mesh.num_elements()
         ));
     }
+    if let Some(angles) = material_orientation_angles
+        && angles.len() != mesh.num_elements()
+    {
+        return Err(format!(
+            "material_orientation_angles has length {}, but mesh has {} elements",
+            angles.len(),
+            mesh.num_elements()
+        ));
+    }
 
     let nq_per_element = quadrature.points_per_element();
     let nsamples = mesh.num_elements() * nq_per_element;
-    let mut points_rz = Vec::with_capacity(nsamples);
+    let mut points = Vec::with_capacity(nsamples);
     let mut strain_rows = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
     let mut strain_cols = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
     let mut strain_vals = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
@@ -264,7 +282,7 @@ where
         let material = material_table.get(material_id).ok_or_else(|| {
             format!("material_id {material_id} on element {element_index} is out of range")
         })?;
-        let thermal_material = thermal_material_table
+        let thermal_material_base = thermal_material_table
             .map(|table| {
                 table.get(material_id).ok_or_else(|| {
                     format!(
@@ -273,6 +291,16 @@ where
                 })
             })
             .transpose()?;
+        let material_storage;
+        let thermal_storage;
+        let (material, thermal_material) = if let Some(angles) = material_orientation_angles {
+            material_storage = rotate_material_in_plane(material, angles[element_index]);
+            thermal_storage = thermal_material_base
+                .map(|thermal| rotate_thermal_material_in_plane(thermal, angles[element_index]));
+            (&material_storage, thermal_storage.as_ref())
+        } else {
+            (material, thermal_material_base)
+        };
         let global_dofs = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
         let thermal_stress_unit =
             thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
@@ -286,10 +314,11 @@ where
                 material,
                 thermal_material,
                 thermal_stress_unit.as_ref(),
+                formulation,
             )?;
             let row_base = 4 * (element_index * nq_per_element + q_local);
             let global_rows = [row_base, row_base + 1, row_base + 2, row_base + 3];
-            points_rz.push(sample.point);
+            points.push(sample.point);
             scatter_local_matrix(
                 &mut strain_rows,
                 &mut strain_cols,
@@ -334,7 +363,7 @@ where
     }
 
     Ok(QuadratureFieldOperators {
-        points_rz,
+        points,
         strain_rows,
         strain_cols,
         strain_vals,
@@ -357,13 +386,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::quadrature_field_operators_for_family;
-    use crate::mesh::QuadratureRule;
+    use crate::mesh::{QuadratureRule, sampling};
     use crate::physics::solenoid_stress::axisym::{build_b_matrix, constitutive_times_b};
     use crate::physics::solenoid_stress::convenience::isotropic_axisymmetric_material;
     use crate::physics::solenoid_stress::family::Quad4Family;
-    use crate::physics::solenoid_stress::geometry::volume_samples_quad4;
     use crate::physics::solenoid_stress::test_utils::single_element_quad4_mesh;
-    use crate::physics::solenoid_stress::types::dof_per_element;
+    use crate::physics::solenoid_stress::types::{Structural2dFormulation, dof_per_element};
 
     /// Apply one triplet operator to a dense vector for direct-reference comparison in tests.
     fn apply_triplets(
@@ -392,6 +420,8 @@ mod tests {
                 &material_ids,
                 &material_table,
                 None,
+                None,
+                Structural2dFormulation::Axisymmetric,
                 QuadratureRule::GaussLegendre3,
             )
             .expect("operator assembly should succeed");
@@ -401,23 +431,28 @@ mod tests {
             &operators.strain_rows,
             &operators.strain_cols,
             &operators.strain_vals,
-            operators.points_rz.len() * 4,
+            operators.points.len() * 4,
             &u,
         );
         let stress = apply_triplets(
             &operators.stress_rows,
             &operators.stress_cols,
             &operators.stress_vals,
-            operators.points_rz.len() * 4,
+            operators.points.len() * 4,
             &u,
         );
 
         let coords = mesh.element_coords(0).expect("element coords");
-        let samples =
-            volume_samples_quad4(&coords, QuadratureRule::GaussLegendre3).expect("samples");
+        let samples = sampling::volume_samples_quad4(&coords, QuadratureRule::GaussLegendre3)
+            .expect("samples");
         for (q_local, sample) in samples.into_iter().enumerate() {
-            let b = build_b_matrix::<f64, 4, 8>(&sample.n, &sample.grad_phys, sample.point[0])
-                .expect("B matrix");
+            let b = build_b_matrix::<f64, 4, 8>(
+                Structural2dFormulation::Axisymmetric,
+                &sample.n,
+                &sample.grad_phys,
+                sample.point,
+            )
+            .expect("B matrix");
             let db = constitutive_times_b(&material_table[0], &b);
             for component in 0..4 {
                 let row = 4 * q_local + component;

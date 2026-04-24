@@ -33,8 +33,8 @@ if os.getenv("CFSEM_TESTING"):
 
 from matplotlib import pyplot as plt
 
-from cfsem.solenoid_stress.axisymmetric_fem import (
-    assemble_axisymmetric,
+from cfsem.solenoid_stress.fem2d import (
+    assemble_structural_2d,
     cfsem_radial_material,
     infer_quad9_mesh,
 )
@@ -319,7 +319,7 @@ def solve_fem_midplane_profile(
     nelem = elements.shape[0]
     material = cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO, dtype=np.float64)
     prescribed = prescribed_z_dofs(analysis_nodes.shape[0])
-    model = assemble_axisymmetric(
+    model = assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(nelem, dtype=np.uint64),
@@ -329,7 +329,7 @@ def solve_fem_midplane_profile(
         element_type=element_type,
     )
     quadrature_data = model.element_quadrature()
-    points = quadrature_data.points_rz.reshape(-1, 2)
+    points = quadrature_data.points.reshape(-1, 2)
     nq = quadrature_data.nq_per_element
     weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64)
     bz_weighted = linear_bz_profile(points[:, 0]).reshape(nelem, nq) * weights
@@ -423,7 +423,7 @@ def plot_discretization_panel(ax, nr: int, nz: int, element_type: str) -> None:
     elevated = infer_quad9_mesh(nodes, elements) if element_type == "quad9" else None
     analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
     analysis_elements = elevated.analysis_elements if elevated is not None else elements
-    model = assemble_axisymmetric(
+    model = assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
@@ -433,7 +433,7 @@ def plot_discretization_panel(ax, nr: int, nz: int, element_type: str) -> None:
         element_type=element_type,
     )
     quadrature_data = model.element_quadrature()
-    quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
+    quadrature_points = quadrature_data.points.reshape(-1, 2)
     fd_grid = build_1d_grid((RO - RI) / nr)[1:-1]
 
     if quadrature_points.shape[0] <= 1_000:

@@ -1,4 +1,4 @@
-//! Reduced-model assembly and solve wrapper for the axisymmetric structural FEM.
+//! Reduced-model assembly and solve wrapper for the 2D structural FEM.
 
 use faer::Col;
 use faer::linalg::solvers::Solve;
@@ -9,7 +9,7 @@ use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::assemble_stiffness_for_family;
 use crate::physics::solenoid_stress::convenience::{
-    AxisymmetricElementMeasures, AxisymmetricElementQuadrature, QuadratureFieldSamples,
+    QuadratureFieldSamples, Structural2dElementMeasures, Structural2dElementQuadrature,
 };
 use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
@@ -18,19 +18,19 @@ use crate::physics::solenoid_stress::loads::{
 };
 use crate::physics::solenoid_stress::recovery::quadrature_field_operators_for_family;
 use crate::physics::solenoid_stress::types::{
-    PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element, two_pi,
+    PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad, dof_per_element,
 };
 
-/// Public element-family selector for the axisymmetric structural solver.
+/// Public element-family selector for the 2D structural solver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisymmetricElementType {
-    /// Bilinear four-node quadrilateral in the meridian plane.
+pub enum Structural2dElementType {
+    /// Bilinear four-node quadrilateral in the analysis plane.
     Quad4,
-    /// Quadratic nine-node quadrilateral in the meridian plane.
+    /// Quadratic nine-node quadrilateral in the analysis plane.
     Quad9,
 }
 
-impl AxisymmetricElementType {
+impl Structural2dElementType {
     /// Return the canonical public string spelling used by the Python wrapper and docs.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -45,7 +45,7 @@ impl AxisymmetricElementType {
             4 => Ok(Self::Quad4),
             9 => Ok(Self::Quad9),
             _ => Err(format!(
-                "unsupported axisymmetric FEM element code {code}; use 4 or 9"
+                "unsupported structural 2D FEM element code {code}; use 4 or 9"
             )),
         }
     }
@@ -55,8 +55,8 @@ impl AxisymmetricElementType {
 ///
 /// Each variant stores element-node connectivity in the node ordering expected by the
 /// corresponding quadrilateral family. Element corner nodes must be ordered
-/// counter-clockwise in the `(r, z)` meridian plane.
-pub enum AxisymmetricElements<'a> {
+/// counter-clockwise in the 2D analysis plane.
+pub enum Structural2dElements<'a> {
     Quad4(&'a [[usize; 4]]),
     Quad9(&'a [[usize; 9]]),
 }
@@ -65,7 +65,7 @@ pub enum AxisymmetricElements<'a> {
 ///
 /// All sparse operators in this struct act on the reduced displacement vector produced by the
 /// constrained solve, except for the thermal operators, which act on the nodal temperature field.
-/// `points_rz` has flattened shape `(nelem * nq_per_element, 2)`. Each operator and constant
+/// `points` has flattened shape `(nelem * nq_per_element, 2)`. Each operator and constant
 /// vector acts on or stores flattened quadrature-point blocks with row ordering
 /// `[rr, zz, tt, rz]`, so those arrays have flattened shape `(4 * nelem * nq_per_element,)`.
 #[derive(Debug, Clone)]
@@ -74,7 +74,7 @@ pub struct ReducedRecoveryOperators<F: Real> {
     ///
     /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
-    pub points_rz: Vec<[F; 2]>,
+    pub points: Vec<[F; 2]>,
     /// CSR operator mapping reduced displacements `[length]` to quadrature-point strains
     /// `[dimensionless]`.
     ///
@@ -118,7 +118,7 @@ pub struct ReducedRecoveryOperators<F: Real> {
     pub n_temperature_nodes: usize,
 }
 
-/// Fully assembled reduced axisymmetric structural model.
+/// Fully assembled reduced 2D structural model.
 ///
 /// The public system stored here is the Dirichlet-reduced system.  `stiffness`, the load
 /// operators, and `constant_rhs` all live in reduced displacement space, while the recovery
@@ -127,7 +127,7 @@ pub struct ReducedRecoveryOperators<F: Real> {
 /// `(nelem * nodes_per_element,)`, `pressure_faces` has shape `(n_pressure_faces, 2)`, and
 /// `traction_faces` has shape `(n_traction_faces, 2)`.
 #[derive(Debug)]
-pub struct AxisymmetricModel<F: Real> {
+pub struct Structural2dModel<F: Real> {
     /// Reduced structural stiffness matrix in CSC form.
     ///
     /// This matrix maps reduced displacements `[length]` to reduced generalized nodal forces
@@ -170,7 +170,7 @@ pub struct AxisymmetricModel<F: Real> {
     ///
     /// Shape: `(n_traction_faces, 2)`.
     pub traction_faces: Vec<[usize; 2]>,
-    /// Analysis mesh nodes `(r, z)` used by the backend.
+    /// Analysis mesh nodes used by the backend.
     ///
     /// Shape: `(n_analysis_nodes, 2)`.
     /// Units: `[length]`.
@@ -182,9 +182,11 @@ pub struct AxisymmetricModel<F: Real> {
     /// Number of nodes per analysis element.
     pub nodes_per_element: usize,
     /// Analysis element family used by the backend.
-    pub element_type: AxisymmetricElementType,
+    pub element_type: Structural2dElementType,
     /// Volume and face quadrature rule used to assemble the stored operators.
     pub quadrature: QuadratureRule,
+    /// Structural 2D formulation used by the backend.
+    pub formulation: Structural2dFormulation<F>,
     /// Number of displacement DOFs in the unreduced full system.
     pub ndof_full: usize,
     /// Number of displacement DOFs remaining after Dirichlet reduction.
@@ -207,7 +209,7 @@ pub struct AxisymmetricModel<F: Real> {
     lu: Option<Lu<usize, F>>,
 }
 
-impl<F: Real> AxisymmetricModel<F> {
+impl<F: Real> Structural2dModel<F> {
     /// Build one reduced structural right-hand side.
     ///
     /// Args:
@@ -338,41 +340,43 @@ impl<F: Real> AxisymmetricModel<F> {
     ///
     /// Returns:
     ///     Element-major quadrature data with:
-    ///     - `points_rz` length `nelem * nq_per_element`, each entry `(r, z)` with units `[length]`
+    ///     - `points` length `nelem * nq_per_element`, each entry `(r, z)` with units `[length]`
     ///     - `weights_area` length `nelem * nq_per_element` with units `[area]`
     ///     - `weights_volume` length `nelem * nq_per_element` with units `[volume]`
     ///     - `nq_per_element` giving the number of consecutive quadrature entries per element
-    pub fn element_quadrature(&self) -> Result<AxisymmetricElementQuadrature<F>, String> {
+    pub fn element_quadrature(&self) -> Result<Structural2dElementQuadrature<F>, String> {
         match self.element_type {
-            AxisymmetricElementType::Quad4 => {
+            Structural2dElementType::Quad4 => {
                 element_quadrature_for_family::<F, Quad4Family, { quad4::NODES_PER_ELEMENT }>(
                     &self.analysis_nodes,
                     &self.analysis_elements_flat,
                     self.nelem,
+                    self.formulation,
                     self.quadrature,
                 )
             }
-            AxisymmetricElementType::Quad9 => {
+            Structural2dElementType::Quad9 => {
                 element_quadrature_for_family::<F, Quad9Family, { quad9::NODES_PER_ELEMENT }>(
                     &self.analysis_nodes,
                     &self.analysis_elements_flat,
                     self.nelem,
+                    self.formulation,
                     self.quadrature,
                 )
             }
         }
     }
 
-    /// Return per-element meridian area and swept volume from the model quadrature data.
+    /// Return per-element analysis-plane area and represented volume from the model quadrature data.
     ///
     /// Returns:
     ///     Per-element measures with:
     ///     - `areas` shape `(nelem,)` and units `[area]`
-    ///     - `swept_volumes` shape `(nelem,)` and units `[volume]`
-    pub fn element_measures(&self) -> Result<AxisymmetricElementMeasures<F>, String> {
+    ///     - `volumes` shape `(nelem,)` and units `[volume]`
+    pub fn element_measures(&self) -> Result<Structural2dElementMeasures<F>, String> {
         let quadrature = self.element_quadrature()?;
         let mut areas = vec![F::zero(); self.nelem];
-        let mut swept_volumes = vec![F::zero(); self.nelem];
+        let mut volumes = vec![F::zero(); self.nelem];
         for element in 0..self.nelem {
             let start = element * quadrature.nq_per_element;
             let end = start + quadrature.nq_per_element;
@@ -380,13 +384,10 @@ impl<F: Real> AxisymmetricModel<F> {
                 areas[element] = areas[element] + weight;
             }
             for &weight in &quadrature.weights_volume[start..end] {
-                swept_volumes[element] = swept_volumes[element] + weight;
+                volumes[element] = volumes[element] + weight;
             }
         }
-        Ok(AxisymmetricElementMeasures {
-            areas,
-            swept_volumes,
-        })
+        Ok(Structural2dElementMeasures { areas, volumes })
     }
 
     /// Recover quadrature-point strain and stress fields.
@@ -399,7 +400,7 @@ impl<F: Real> AxisymmetricModel<F> {
     ///
     /// Returns:
     ///     Recovered quadrature fields where:
-    ///     - `points_rz` has length `nelem * nq_per_element` and units `[length]`
+    ///     - `points` has length `nelem * nq_per_element` and units `[length]`
     ///     - `strain`, `thermal_strain`, and `elastic_strain` each have length
     ///       `nelem * nq_per_element`, with component order `[rr, zz, tt, rz]` and units `[strain]`
     ///     - `stress` has length `nelem * nq_per_element`, with component order
@@ -463,7 +464,7 @@ impl<F: Real> AxisymmetricModel<F> {
             .collect();
 
         Ok(QuadratureFieldSamples {
-            points_rz: self.recovery.points_rz.clone(),
+            points: self.recovery.points.clone(),
             strain,
             thermal_strain,
             elastic_strain,
@@ -474,56 +475,22 @@ impl<F: Real> AxisymmetricModel<F> {
 }
 
 #[allow(clippy::too_many_arguments)]
-/// Assemble the reduced axisymmetric structural model and all associated operators.
-///
-/// This is the single public Rust entry point for the axisymmetric FEM backend.  It accepts the
-/// analysis mesh, material data, optional load topology, optional thermal material data, and
-/// prescribed Dirichlet displacement values, then returns a reduced model containing:
-/// - the reduced stiffness matrix,
-/// - reduced RHS operators for all supported load types,
-/// - cached metadata describing the analysis mesh and load faces, and
-/// - reduced recovery operators for quadrature-point postprocessing.
-///
-/// Args:
-///     nodes_rz: Corner-node coordinates with shape `(nnode, 2)` in `(r, z)` order. Units are
-///         `[length]`.
-///     elements: Analysis connectivity, either quad4 with shape `(nelem, 4)` or quad9 with shape
-///         `(nelem, 9)`. Corner nodes must be ordered counter-clockwise in the `(r, z)` plane.
-///     material_ids: Dense material row indices with shape `(nelem,)`.
-///     material_table: Elastic stress-strain matrices with shape `(nmat, 4, 4)`. Matrix units
-///         are `[stress / strain] = [pressure]`.
-///     pressure_faces: Pressure-load topology with shape `(n_pressure_faces,)`, one
-///         `PressureLoad` per loaded face.
-///     traction_faces: Traction-load topology with shape `(n_traction_faces,)`, one
-///         `TractionLoad` per loaded face.
-///     thermal_material_table: Optional thermal material table with shape `(nmat,)`, one
-///         `ThermalMaterial` per material row. Each row stores
-///         `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`, where `alpha_*` has units
-///         `[strain / temperature]` and `T_ref` has units `[temperature]`.
-///     prescribed: Prescribed displacement values with shape `(n_prescribed,)`, stored as
-///         `(global_dof, value)` pairs. Displacement units are `[length]`.
-///     quadrature: Volume and face quadrature rule used to assemble the stored operators.
-///
-/// Returns:
-///     Reduced axisymmetric FEM model storing:
-///     - CSC stiffness with shape `(ndof_reduced, ndof_reduced)`
-///     - CSR load operators mapping reusable load amplitudes into the reduced right-hand side
-///     - CSR recovery operators for quadrature-point postprocessing
-///     - `constant_rhs` with shape `(ndof_reduced,)` and units `[energy / distance]`
-///     - analysis mesh and load metadata with the shapes documented on [`AxisymmetricModel`]
-pub fn assemble_axisymmetric<F: Real>(
+/// Assemble the reduced 2D structural model and all associated operators.
+pub fn assemble_structural_2d<F: Real>(
     nodes_rz: &[[F; 2]],
-    elements: AxisymmetricElements<'_>,
+    elements: Structural2dElements<'_>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     pressure_faces: &[PressureLoad],
     traction_faces: &[TractionLoad],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
+    material_orientation_angles: Option<&[F]>,
     prescribed: &[(usize, F)],
+    formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
-) -> Result<AxisymmetricModel<F>, String> {
+) -> Result<Structural2dModel<F>, String> {
     match elements {
-        AxisymmetricElements::Quad4(elements) => build_model_for_family::<
+        Structural2dElements::Quad4(elements) => build_model_for_family::<
             F,
             Quad4Family,
             { quad4::NODES_PER_ELEMENT },
@@ -536,10 +503,12 @@ pub fn assemble_axisymmetric<F: Real>(
             pressure_faces,
             traction_faces,
             thermal_material_table,
+            material_orientation_angles,
             prescribed,
+            formulation,
             quadrature,
         ),
-        AxisymmetricElements::Quad9(elements) => build_model_for_family::<
+        Structural2dElements::Quad9(elements) => build_model_for_family::<
             F,
             Quad9Family,
             { quad9::NODES_PER_ELEMENT },
@@ -552,7 +521,9 @@ pub fn assemble_axisymmetric<F: Real>(
             pressure_faces,
             traction_faces,
             thermal_material_table,
+            material_orientation_angles,
             prescribed,
+            formulation,
             quadrature,
         ),
     }
@@ -573,7 +544,7 @@ type ReducedLayout<F> = (Vec<usize>, Vec<usize>, Vec<F>, Vec<usize>, Vec<Option<
 ///
 /// This is the family-generic core of the public assembly path.  It builds the unreduced
 /// operators, applies Dirichlet reduction, compresses the final sparse matrices, and packages the
-/// result into the public `AxisymmetricModel`.
+/// result into the public `Structural2dModel`.
 fn build_model_for_family<
     F: Real,
     Family,
@@ -587,9 +558,11 @@ fn build_model_for_family<
     pressure_faces: &[PressureLoad],
     traction_faces: &[TractionLoad],
     thermal_material_table: Option<&[ThermalMaterial<F>]>,
+    material_orientation_angles: Option<&[F]>,
     prescribed: &[(usize, F)],
+    formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
-) -> Result<AxisymmetricModel<F>, String>
+) -> Result<Structural2dModel<F>, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -606,12 +579,15 @@ where
     // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
     // This keeps the element kernels simple and pushes all constraint handling into the common
     // reduction helpers below.
-    let stiffness_full = assemble_stiffness_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(mesh, material_ids, material_table, quadrature)?;
+    let stiffness_full =
+        assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            material_ids,
+            material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+        )?;
     let mut constant_rhs = vec![F::zero(); ndof_reduced];
     let stiffness_reduced = reduce_square_triplets(
         &stiffness_full.rows,
@@ -637,6 +613,8 @@ where
                     material_ids,
                     material_table,
                     thermal_material_table,
+                    material_orientation_angles,
+                    formulation,
                     quadrature,
                 )?;
             let reduced_reference_rhs = free_dofs
@@ -668,19 +646,19 @@ where
         Family,
         NODES_PER_ELEMENT,
         DOF_PER_ELEMENT,
-    >(mesh, quadrature)?)?;
+    >(mesh, formulation, quadrature)?)?;
     let pressure_to_rhs = reduce_operator(pressure_operator_for_family::<
         F,
         Family,
         NODES_PER_ELEMENT,
         DOF_PER_ELEMENT,
-    >(mesh, pressure_faces, quadrature)?)?;
+    >(mesh, pressure_faces, formulation, quadrature)?)?;
     let traction_to_rhs = reduce_operator(traction_operator_for_family::<
         F,
         Family,
         NODES_PER_ELEMENT,
         DOF_PER_ELEMENT,
-    >(mesh, traction_faces, quadrature)?)?;
+    >(mesh, traction_faces, formulation, quadrature)?)?;
 
     // Recovery is assembled in full displacement space, then its displacement columns are reduced.
     // Eliminated fixed-displacement columns become constant strain/stress offsets.
@@ -690,9 +668,11 @@ where
             material_ids,
             material_table,
             thermal_material_table,
+            material_orientation_angles,
+            formulation,
             quadrature,
         )?;
-    let nq_row_count = recovery_full.points_rz.len() * 4;
+    let nq_row_count = recovery_full.points.len() * 4;
     let (strain_operator, strain_constant) = reduce_column_operator(
         recovery_full.strain_rows,
         recovery_full.strain_cols,
@@ -712,21 +692,21 @@ where
         &fixed_lookup,
     )?;
     let thermal_strain_operator = csr_from_parts(
-        recovery_full.points_rz.len() * 4,
+        recovery_full.points.len() * 4,
         recovery_full.ntemp,
         recovery_full.thermal_strain_rows,
         recovery_full.thermal_strain_cols,
         recovery_full.thermal_strain_vals,
     )?;
     let thermal_stress_operator = csr_from_parts(
-        recovery_full.points_rz.len() * 4,
+        recovery_full.points.len() * 4,
         recovery_full.ntemp,
         recovery_full.thermal_stress_rows,
         recovery_full.thermal_stress_cols,
         recovery_full.thermal_stress_vals,
     )?;
 
-    Ok(AxisymmetricModel {
+    Ok(Structural2dModel {
         stiffness,
         body_force_to_rhs,
         pressure_to_rhs,
@@ -734,7 +714,7 @@ where
         temperature_to_rhs,
         constant_rhs,
         recovery: ReducedRecoveryOperators {
-            points_rz: recovery_full.points_rz,
+            points: recovery_full.points,
             strain_operator,
             stress_operator,
             thermal_strain_operator,
@@ -759,6 +739,7 @@ where
         nodes_per_element: NODES_PER_ELEMENT,
         element_type: Family::element_type(),
         quadrature,
+        formulation,
         ndof_full,
         ndof_reduced,
         nelem,
@@ -1016,12 +997,13 @@ fn element_quadrature_for_family<F: Real, Family, const NODES_PER_ELEMENT: usize
     analysis_nodes: &[[F; 2]],
     analysis_elements_flat: &[usize],
     nelem: usize,
+    formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
-) -> Result<AxisymmetricElementQuadrature<F>, String>
+) -> Result<Structural2dElementQuadrature<F>, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
-    let mut points_rz = Vec::new();
+    let mut points = Vec::new();
     let mut weights_area = Vec::new();
     let mut weights_volume = Vec::new();
     let mut nq_per_element = None;
@@ -1044,13 +1026,17 @@ where
         }
         for sample in samples {
             let area_weight = sample.det_j * sample.weight;
-            points_rz.push(sample.point);
+            points.push(sample.point);
             weights_area.push(area_weight);
-            weights_volume.push(area_weight * two_pi::<F>() * sample.point[0]);
+            weights_volume.push(formulation.volume_scale(
+                sample.point,
+                sample.det_j,
+                sample.weight,
+            )?);
         }
     }
-    Ok(AxisymmetricElementQuadrature {
-        points_rz,
+    Ok(Structural2dElementQuadrature {
+        points,
         weights_area,
         weights_volume,
         nq_per_element: nq_per_element.unwrap_or(0),

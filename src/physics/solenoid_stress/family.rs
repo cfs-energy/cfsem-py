@@ -1,12 +1,9 @@
 //! Family-specific quadrilateral sampling and metadata for the axisymmetric FEM backend.
 
-use crate::mesh::QuadratureRule;
 use crate::mesh::elements::quad2d::{quad4, quad9};
-use crate::physics::solenoid_stress::geometry::{
-    FaceSample, VolumeSample, face_samples_quad4, face_samples_quad9, volume_samples_quad4,
-    volume_samples_quad9,
-};
-use crate::physics::solenoid_stress::model::AxisymmetricElementType;
+use crate::mesh::{QuadratureRule, sampling};
+use crate::physics::solenoid_stress::geometry::{FaceSample, VolumeSample};
+use crate::physics::solenoid_stress::model::Structural2dElementType;
 use crate::physics::solenoid_stress::types::Real;
 
 /// Family-specific differences that remain after stiffness, load, and recovery assembly have been
@@ -19,7 +16,7 @@ use crate::physics::solenoid_stress::types::Real;
 /// - connectivity flattening for Python-facing metadata export.
 pub(crate) trait QuadElementFamily<const NODES_PER_ELEMENT: usize> {
     /// Return the public element-family tag corresponding to this internal family marker.
-    fn element_type() -> AxisymmetricElementType;
+    fn element_type() -> Structural2dElementType;
 
     /// Flatten element connectivity into one element-major `Vec<usize>` for metadata export.
     fn flatten_elements(elements: &[[usize; NODES_PER_ELEMENT]]) -> Vec<usize> {
@@ -49,8 +46,8 @@ pub(crate) struct Quad4Family;
 
 impl QuadElementFamily<{ quad4::NODES_PER_ELEMENT }> for Quad4Family {
     /// Identify this marker as the public `quad4` family.
-    fn element_type() -> AxisymmetricElementType {
-        AxisymmetricElementType::Quad4
+    fn element_type() -> Structural2dElementType {
+        Structural2dElementType::Quad4
     }
 
     /// Delegate `quad4` volume sampling to the generic mesh sampling layer.
@@ -58,7 +55,7 @@ impl QuadElementFamily<{ quad4::NODES_PER_ELEMENT }> for Quad4Family {
         coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
         quadrature: QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, { quad4::NODES_PER_ELEMENT }>>, String> {
-        volume_samples_quad4(coords, quadrature)
+        sampling::volume_samples_quad4(coords, quadrature)
     }
 
     /// Delegate `quad4` face sampling to the generic mesh sampling layer.
@@ -67,7 +64,7 @@ impl QuadElementFamily<{ quad4::NODES_PER_ELEMENT }> for Quad4Family {
         local_face: u8,
         quadrature: QuadratureRule,
     ) -> Result<Vec<FaceSample<F, { quad4::NODES_PER_ELEMENT }>>, String> {
-        face_samples_quad4(coords, local_face, quadrature)
+        sampling::face_samples_quad4(coords, local_face, quadrature)
     }
 }
 
@@ -76,8 +73,8 @@ pub(crate) struct Quad9Family;
 
 impl QuadElementFamily<{ quad9::NODES_PER_ELEMENT }> for Quad9Family {
     /// Identify this marker as the public `quad9` family.
-    fn element_type() -> AxisymmetricElementType {
-        AxisymmetricElementType::Quad9
+    fn element_type() -> Structural2dElementType {
+        Structural2dElementType::Quad9
     }
 
     /// Delegate `quad9` volume sampling to the generic mesh sampling layer.
@@ -85,7 +82,7 @@ impl QuadElementFamily<{ quad9::NODES_PER_ELEMENT }> for Quad9Family {
         coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
         quadrature: QuadratureRule,
     ) -> Result<Vec<VolumeSample<F, { quad9::NODES_PER_ELEMENT }>>, String> {
-        volume_samples_quad9(coords, quadrature)
+        sampling::volume_samples_quad9(coords, quadrature)
     }
 
     /// Delegate `quad9` face sampling to the generic mesh sampling layer.
@@ -94,6 +91,6 @@ impl QuadElementFamily<{ quad9::NODES_PER_ELEMENT }> for Quad9Family {
         local_face: u8,
         quadrature: QuadratureRule,
     ) -> Result<Vec<FaceSample<F, { quad9::NODES_PER_ELEMENT }>>, String> {
-        face_samples_quad9(coords, local_face, quadrature)
+        sampling::face_samples_quad9(coords, local_face, quadrature)
     }
 }

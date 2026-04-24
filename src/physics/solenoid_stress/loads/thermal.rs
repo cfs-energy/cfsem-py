@@ -2,10 +2,13 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     accumulate_b_transpose_vector, build_b_matrix, constitutive_times_strain,
 };
+use crate::physics::solenoid_stress::convenience::{
+    rotate_material_in_plane, rotate_thermal_material_in_plane,
+};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
-use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_axisymmetric_mesh};
+use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, ThermalMaterial, local_dofs, two_pi,
+    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, local_dofs,
 };
 
 use super::{SparseOperator, ThermalLoadOperator, scatter_local_matrix};
@@ -33,6 +36,7 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
     samples: &[VolumeSample<F, NODES_PER_ELEMENT>],
     material: &[[F; 4]; 4],
     thermal: &ThermalMaterial<F>,
+    formulation: Structural2dFormulation<F>,
 ) -> Result<LocalThermalKernel<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>, String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
@@ -41,7 +45,6 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         temperature_to_rhs: [[F::zero(); NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
         reference_rhs: [F::zero(); DOF_PER_ELEMENT],
     };
-    let two_pi = two_pi::<F>();
     let thermal_stress_unit = constitutive_times_strain(material, &thermal.alpha);
 
     for sample in samples {
@@ -49,11 +52,12 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         // quadrature scale contributes a physical volume. The resulting local block has units
         // `[force / temperature]`.
         let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            formulation,
             &sample.n,
             &sample.grad_phys,
-            sample.point[0],
+            sample.point,
         )?;
-        let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
+        let scale = formulation.volume_scale(sample.point, sample.det_j, sample.weight)?;
         let mut local_unit_rhs = [F::zero(); DOF_PER_ELEMENT];
         accumulate_b_transpose_vector(&mut local_unit_rhs, &b, &thermal_stress_unit, scale);
 
@@ -104,6 +108,8 @@ pub(crate) fn temperature_operator_for_family<
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
     thermal_material_table: &[ThermalMaterial<F>],
+    material_orientation_angles: Option<&[F]>,
+    formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
 ) -> Result<ThermalLoadOperator<F>, String>
 where
@@ -112,11 +118,20 @@ where
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    validate_axisymmetric_mesh(mesh)?;
+    validate_structural_2d_mesh(mesh, formulation)?;
     if material_ids.len() != mesh.num_elements() {
         return Err(format!(
             "material_ids has length {}, but mesh has {} elements",
             material_ids.len(),
+            mesh.num_elements()
+        ));
+    }
+    if let Some(angles) = material_orientation_angles
+        && angles.len() != mesh.num_elements()
+    {
+        return Err(format!(
+            "material_orientation_angles has length {}, but mesh has {} elements",
+            angles.len(),
             mesh.num_elements()
         ));
     }
@@ -137,9 +152,21 @@ where
         let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
             format!("thermal material_id {material_id} on element {element_index} is out of range")
         })?;
+        let material_storage;
+        let thermal_storage;
+        let (material, thermal) = if let Some(angles) = material_orientation_angles {
+            material_storage = rotate_material_in_plane(material, angles[element_index]);
+            thermal_storage = rotate_thermal_material_in_plane(thermal, angles[element_index]);
+            (&material_storage, &thermal_storage)
+        } else {
+            (material, thermal)
+        };
         let samples = Family::volume_samples::<F>(&coords, quadrature)?;
         let local = thermal_element_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            &samples, material, thermal,
+            &samples,
+            material,
+            thermal,
+            formulation,
         )?;
         let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
         scatter_local_matrix(

@@ -4,10 +4,8 @@
 //! module adds the axisymmetric-specific validation and the `2*pi*r`-weighted element summaries
 //! needed by the structural solver.
 
-use crate::mesh::elements::quad2d::{quad4, quad9};
-use crate::mesh::sampling;
-use crate::mesh::{QuadMeshView2d, QuadratureRule};
-use crate::physics::solenoid_stress::types::Real;
+use crate::mesh::QuadMeshView2d;
+use crate::physics::solenoid_stress::types::{Real, Structural2dFormulation};
 
 pub use crate::mesh::{FaceSample, VolumeSample};
 
@@ -34,78 +32,20 @@ pub(crate) fn validate_axisymmetric_mesh<F: Real, const NODES_PER_ELEMENT: usize
     mesh.validate_connectivity()
 }
 
-/// Reject volume quadrature samples whose evaluated radius is invalid for axisymmetry.
-fn validate_axisymmetric_volume_samples<F: Real, const NODES_PER_ELEMENT: usize>(
-    samples: Vec<VolumeSample<F, NODES_PER_ELEMENT>>,
-) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String> {
-    for sample in &samples {
-        if sample.point[0] < F::zero() {
-            return Err(format!(
-                "quadrature point has negative radius {:?}; axisymmetric radius must be nonnegative",
-                sample.point[0]
-            ));
+/// Validate mesh connectivity and formulation-specific coordinate constraints.
+pub(crate) fn validate_structural_2d_mesh<F: Real, const NODES_PER_ELEMENT: usize>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation<F>,
+) -> Result<(), String> {
+    match formulation {
+        Structural2dFormulation::Axisymmetric => validate_axisymmetric_mesh(mesh),
+        Structural2dFormulation::PlaneStrain { thickness } => {
+            if thickness <= F::zero() {
+                return Err(format!(
+                    "plane-strain thickness must be positive; got {thickness:?}"
+                ));
+            }
+            mesh.validate_connectivity()
         }
     }
-    Ok(samples)
-}
-
-/// Reject face quadrature samples whose evaluated radius is invalid for axisymmetry.
-fn validate_axisymmetric_face_samples<F: Real, const NODES_PER_ELEMENT: usize>(
-    samples: Vec<FaceSample<F, NODES_PER_ELEMENT>>,
-) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String> {
-    for sample in &samples {
-        if sample.point[0] < F::zero() {
-            return Err(format!(
-                "face quadrature point has negative radius {:?}; axisymmetric radius must be nonnegative",
-                sample.point[0]
-            ));
-        }
-    }
-    Ok(samples)
-}
-
-/// Evaluate axisymmetric volume quadrature samples for one `quad4` element.
-///
-/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
-pub fn volume_samples_quad4<F: Real>(
-    coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
-    quadrature: QuadratureRule,
-) -> Result<Vec<VolumeSample<F, { quad4::NODES_PER_ELEMENT }>>, String> {
-    validate_axisymmetric_volume_samples(sampling::volume_samples_quad4(coords, quadrature)?)
-}
-
-/// Evaluate axisymmetric volume quadrature samples for one `quad9` element.
-///
-/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
-pub fn volume_samples_quad9<F: Real>(
-    coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
-    quadrature: QuadratureRule,
-) -> Result<Vec<VolumeSample<F, { quad9::NODES_PER_ELEMENT }>>, String> {
-    validate_axisymmetric_volume_samples(sampling::volume_samples_quad9(coords, quadrature)?)
-}
-
-/// Evaluate axisymmetric face quadrature samples for one `quad4` element face.
-///
-/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
-pub fn face_samples_quad4<F: Real>(
-    coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
-    local_face: u8,
-    quadrature: QuadratureRule,
-) -> Result<Vec<FaceSample<F, { quad4::NODES_PER_ELEMENT }>>, String> {
-    validate_axisymmetric_face_samples(sampling::face_samples_quad4(
-        coords, local_face, quadrature,
-    )?)
-}
-
-/// Evaluate axisymmetric face quadrature samples for one `quad9` element face.
-///
-/// Returned sample points live in meridian coordinates `(r, z)` with `r >= 0`.
-pub fn face_samples_quad9<F: Real>(
-    coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
-    local_face: u8,
-    quadrature: QuadratureRule,
-) -> Result<Vec<FaceSample<F, { quad9::NODES_PER_ELEMENT }>>, String> {
-    validate_axisymmetric_face_samples(sampling::face_samples_quad9(
-        coords, local_face, quadrature,
-    )?)
 }

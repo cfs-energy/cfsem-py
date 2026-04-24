@@ -1,8 +1,8 @@
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
-use crate::physics::solenoid_stress::geometry::{FaceSample, validate_axisymmetric_mesh};
+use crate::physics::solenoid_stress::geometry::{FaceSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, TractionLoad, local_dofs, two_pi,
+    DOF_PER_NODE, Real, Structural2dFormulation, TractionLoad, local_dofs,
 };
 
 use super::{SparseOperator, scatter_local_matrix};
@@ -19,18 +19,18 @@ use super::{SparseOperator, scatter_local_matrix};
 /// Each block entry therefore has units of area.
 fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     samples: &[FaceSample<F, NODES_PER_ELEMENT>],
-) -> [[F; 2]; DOF_PER_ELEMENT] {
+    formulation: Structural2dFormulation<F>,
+) -> Result<[[F; 2]; DOF_PER_ELEMENT], String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     let mut local = [[F::zero(); 2]; DOF_PER_ELEMENT];
-    let two_pi = two_pi::<F>();
 
     for sample in samples {
         // `|dx/ds|` is the physical line Jacobian for the face quadrature parameter.
         let tangent_norm =
             (sample.tangent[0] * sample.tangent[0] + sample.tangent[1] * sample.tangent[1]).sqrt();
-        let scale = two_pi * sample.point[0] * tangent_norm * sample.weight;
+        let scale = formulation.face_scale(sample.point, tangent_norm, sample.weight)?;
         for local_node in 0..NODES_PER_ELEMENT {
             // The two columns encode independent unit tractions in the global radial and axial
             // directions, so the block is diagonal in those two traction components.
@@ -40,7 +40,7 @@ fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
         }
     }
 
-    local
+    Ok(local)
 }
 
 /// Assemble the global traction-to-RHS operator for one quadrilateral family.
@@ -64,6 +64,7 @@ pub(crate) fn traction_operator_for_family<
 >(
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     traction_faces: &[TractionLoad],
+    formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
 ) -> Result<SparseOperator<F>, String>
 where
@@ -72,7 +73,7 @@ where
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    validate_axisymmetric_mesh(mesh)?;
+    validate_structural_2d_mesh(mesh, formulation)?;
     let ndof = mesh.num_nodes() * 2;
     let ncol = 2 * traction_faces.len();
     let mut rows = Vec::with_capacity(traction_faces.len() * DOF_PER_ELEMENT * 2);
@@ -90,7 +91,8 @@ where
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
         let samples = Family::face_samples::<F>(&coords, load.local_face, quadrature)?;
-        let local = traction_face_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples);
+        let local =
+            traction_face_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
         let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
         let global_cols = [2 * load_index, 2 * load_index + 1];
         scatter_local_matrix(

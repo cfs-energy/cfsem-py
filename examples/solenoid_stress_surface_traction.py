@@ -6,7 +6,7 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 from cfsem.solenoid_stress import (
-    assemble_axisymmetric,
+    assemble_structural_2d,
     infer_quad9_mesh,
     isotropic_axisymmetric_material,
     isotropic_axisymmetric_thermal_material,
@@ -198,7 +198,7 @@ def main() -> None:
 
     analysis_nodes = nodes if element_type == "quad4" else infer_quad9_mesh(nodes, elements).analysis_nodes
     prescribed = prescribed_dofs(analysis_nodes)
-    model = assemble_axisymmetric(
+    model = assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),

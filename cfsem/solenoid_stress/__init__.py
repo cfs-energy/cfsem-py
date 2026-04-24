@@ -3,7 +3,7 @@
 This subpackage includes three complementary toolsets:
 
 - a 1D finite-difference radial stress solver for deck-of-cards winding-pack models,
-- a 2D axisymmetric quadrilateral FEM implementation centered on reusable sparse load and
+- a 2D quadrilateral FEM implementation centered on reusable sparse load and
   recovery operators, with convenience methods for `build_rhs(...)`, `solve(...)`, and
   quadrature-field recovery,
 - analytic reference formulas used for validation and convergence studies.
@@ -21,35 +21,41 @@ from .thick_wall_cylinder_handcalc import (
     s_hoop_thick_wall_cylinder,
     s_radial_thick_wall_cylinder,
 )
-from .axisymmetric_fem import (
-    AxisymmetricFEMModel,
+from .fem2d import (
     ElementMeasures,
     ElementQuadrature,
     ElevatedQuad9Mesh,
     QuadratureFieldSamples,
-    assemble_axisymmetric,
+    Structural2DFEMModel,
+    assemble_structural_2d,
     cfsem_radial_material,
     infer_quad9_mesh,
     isotropic_axisymmetric_material,
     isotropic_axisymmetric_thermal_material,
+    isotropic_plane_strain_material,
+    isotropic_plane_strain_thermal_material,
     orthotropic_axisymmetric_thermal_material,
+    orthotropic_plane_strain_thermal_material,
     pack_material_tables_from_tags,
 )
 
 __all__ = [
-    "AxisymmetricFEMModel",
     "ElementMeasures",
     "ElementQuadrature",
     "ElevatedQuad9Mesh",
     "QuadratureFieldSamples",
     "SolenoidStress1D",
     "SolenoidStress1DOperators",
-    "assemble_axisymmetric",
+    "Structural2DFEMModel",
+    "assemble_structural_2d",
     "cfsem_radial_material",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
     "isotropic_axisymmetric_thermal_material",
+    "isotropic_plane_strain_material",
+    "isotropic_plane_strain_thermal_material",
     "orthotropic_axisymmetric_thermal_material",
+    "orthotropic_plane_strain_thermal_material",
     "pack_material_tables_from_tags",
     "s_hoop_thick_wall_cylinder",
     "s_long_solenoid",

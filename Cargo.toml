@@ -1,6 +1,6 @@
 [package]
 name = "cfsem"
-version = "5.4.0"
+version = "6.0.0"
 edition = "2024"
 authors = ["Commonwealth Fusion Systems <jlogan@cfs.energy>"]
 license = "MIT"

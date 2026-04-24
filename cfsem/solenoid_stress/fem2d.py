@@ -1,17 +1,13 @@
-"""
-2D-axisymmetric elasticity finite-element assembly for solenoid stress problems.
+"""2D structural elasticity finite-element assembly.
 
-This module provides a small displacement-based axisymmetric finite-element solver
-for the `(r, z)` meridian plane. The primary backend abstraction is an assembled,
-reusable model that stores sparse load operators, sparse quadrature-recovery
-operators, and the reduced stiffness matrix. The Rust backend also caches the LU
-factorization and provides shared material, mesh-elevation, and quadrature-recovery
-conveniences. Python wraps that model, normalizes NumPy-facing inputs, and reshapes
-the returned arrays.
+This module provides a small displacement-based quadrilateral FEM solver for axisymmetric and
+plane-strain structural reductions. The backend stores sparse load operators, sparse
+quadrature-recovery operators, and a reduced stiffness matrix for repeated load solves.
 
 The element formulation follows the standard small-strain Galerkin construction
 
-`K_e = integral(B^T D B 2*pi*r dA)`
+`K_e = integral(B^T D B c dA)` where `c` is `2*pi*r` for axisymmetric and the thickness of the
+planar domain for plane strain.
 
 with consistent body-force, surface-pressure, and surface-traction load vectors. The axisymmetric
 engineering-strain vector is ordered as `[e_rr, e_zz, e_tt, g_rz]`. In Bower's terminology, the
@@ -52,19 +48,27 @@ import scipy.sparse as sp
 
 import cfsem.cfsem as _cfsem_bindings
 
-_assemble_model_axisymmetric_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_f32
-_assemble_model_axisymmetric_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_model_axisymmetric_f64
+_assemble_model_2d_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_model_2d_f32
+_assemble_model_2d_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_model_2d_f64
 _cfsem_radial_material_f32 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f32
 _cfsem_radial_material_f64 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f64
 _infer_quad9_mesh_f32 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f32
 _infer_quad9_mesh_f64 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f64
 _isotropic_axisymmetric_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f32
 _isotropic_axisymmetric_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f64
+_isotropic_plane_strain_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f32
+_isotropic_plane_strain_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f64
 _isotropic_axisymmetric_thermal_material_f32 = (
     _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32
 )
 _isotropic_axisymmetric_thermal_material_f64 = (
     _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64
+)
+_isotropic_plane_strain_thermal_material_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_thermal_material_f32
+)
+_isotropic_plane_strain_thermal_material_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_thermal_material_f64
 )
 _orthotropic_axisymmetric_thermal_material_f32 = (
     _cfsem_bindings.solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32
@@ -137,27 +141,27 @@ def _csc_matrix_from_binding(
 
 @dataclass(frozen=True, slots=True)
 class ElementMeasures:
-    """Per-element meridian area and swept volume.
+    """Per-element cross-section area and represented volume.
 
-    `areas` and `swept_volumes` both have shape `(nelem,)`.
-    `areas` has units `[area]` and `swept_volumes` has units `[volume]`.
+    `areas` and `volumes` both have shape `(nelem,)`.
+    `areas` has units `[area]` and `volumes` has units `[volume]`.
     """
 
     areas: npt.NDArray[np.floating[Any]]
-    swept_volumes: npt.NDArray[np.floating[Any]]
+    volumes: npt.NDArray[np.floating[Any]]
 
 
 @dataclass(frozen=True, slots=True)
 class ElementQuadrature:
     """Per-element physical quadrature points and mapped weights.
 
-    `points_rz` has shape `(nelem, nq_per_element, 2)`.
+    `points` has shape `(nelem, nq_per_element, 2)`.
     `weights_area` and `weights_volume` have shape `(nelem, nq_per_element)`.
-    `points_rz` has units `[length]`, `weights_area` has units `[area]`, and
+    `points` has units `[length]`, `weights_area` has units `[area]`, and
     `weights_volume` has units `[volume]`.
     """
 
-    points_rz: npt.NDArray[np.floating[Any]]
+    points: npt.NDArray[np.floating[Any]]
     weights_area: npt.NDArray[np.floating[Any]]
     weights_volume: npt.NDArray[np.floating[Any]]
     nq_per_element: int
@@ -184,8 +188,8 @@ class ElevatedQuad9Mesh:
     center_node_indices: npt.NDArray[np.int64]
 
 
-class AxisymmetricFEMModel:
-    """Reusable axisymmetric FEM model with sparse operators and reduced solve state.
+class Structural2DFEMModel:
+    """Reusable 2D structural FEM model with sparse operators and reduced solve state.
 
     The stored sparse operators are the primary reusable objects:
     - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
@@ -224,6 +228,7 @@ class AxisymmetricFEMModel:
         elevated: ElevatedQuad9Mesh | None,
         pressure_faces: npt.NDArray[np.uint64],
         traction_faces: npt.NDArray[np.uint64],
+        formulation: str,
         element_type: str,
         stiffness: sp.csc_matrix,
         body_force_to_rhs: sp.csr_matrix,
@@ -231,7 +236,7 @@ class AxisymmetricFEMModel:
         traction_to_rhs: sp.csr_matrix,
         temperature_to_rhs: sp.csr_matrix,
         constant_rhs: npt.NDArray[np.floating[Any]],
-        quadrature_points_rz: npt.NDArray[np.floating[Any]],
+        quadrature_points: npt.NDArray[np.floating[Any]],
         strain_operator: sp.csr_matrix,
         stress_operator: sp.csr_matrix,
         thermal_strain_operator: sp.csr_matrix,
@@ -264,7 +269,7 @@ class AxisymmetricFEMModel:
         self.traction_faces = traction_faces
         self.analysis_nodes = analysis_nodes
         self.analysis_elements = analysis_elements
-        self.quadrature_points_rz = quadrature_points_rz
+        self.quadrature_points = quadrature_points
         self.strain_operator = strain_operator
         self.stress_operator = stress_operator
         self.thermal_strain_operator = thermal_strain_operator
@@ -276,7 +281,18 @@ class AxisymmetricFEMModel:
         self.free_dofs = free_dofs
         self.fixed_dofs = fixed_dofs
         self.fixed_values = fixed_values
+        self.formulation = formulation
         self.element_type = element_type
+        if formulation == "axisymmetric":
+            self.coordinate_labels = ("r", "z")
+            self.displacement_labels = ("u_r", "u_z")
+            self.tensor_labels = ("rr", "zz", "tt", "rz")
+            self.measure_label = "swept_volume"
+        else:
+            self.coordinate_labels = ("x", "y")
+            self.displacement_labels = ("u_x", "u_y")
+            self.tensor_labels = ("xx", "yy", "zz", "xy")
+            self.measure_label = "volume"
         self.ndof_full = int(ndof_full)
         self.ndof_reduced = int(ndof_reduced)
         self.nelem = int(nelem)
@@ -314,7 +330,7 @@ class AxisymmetricFEMModel:
 
         Returns:
             ElementQuadrature: Quadrature data with:
-                `points_rz` of shape `(nelem, nq_per_element, 2)` and units `[length]`,
+                `points` of shape `(nelem, nq_per_element, 2)` and units `[length]`,
                 `weights_area` of shape `(nelem, nq_per_element)` and units `[area]`,
                 `weights_volume` of shape `(nelem, nq_per_element)` and units `[volume]`.
         """
@@ -324,11 +340,11 @@ class AxisymmetricFEMModel:
             return cache
         points_flat, weights_area_flat, weights_volume_flat, nq = self._backend.element_quadrature()
         nelem = self.analysis_elements.shape[0]
-        points_rz = np.asarray(points_flat, dtype=self.dtype).reshape(nelem, int(nq), 2)
+        points = np.asarray(points_flat, dtype=self.dtype).reshape(nelem, int(nq), 2)
         weights_area = np.asarray(weights_area_flat, dtype=self.dtype).reshape(nelem, int(nq))
         weights_volume = np.asarray(weights_volume_flat, dtype=self.dtype).reshape(nelem, int(nq))
         cache = ElementQuadrature(
-            points_rz=points_rz,
+            points=points,
             weights_area=weights_area,
             weights_volume=weights_volume,
             nq_per_element=int(nq),
@@ -337,21 +353,21 @@ class AxisymmetricFEMModel:
         return cache
 
     def element_measures(self) -> ElementMeasures:
-        """Return meridian area and swept volume for each element.
+        """Return cross-section area and represented volume for each element.
 
         Returns:
             ElementMeasures: Per-element measures with:
                 `areas` of shape `(nelem,)` and units `[area]`,
-                `swept_volumes` of shape `(nelem,)` and units `[volume]`.
+                `volumes` of shape `(nelem,)` and units `[volume]`.
         """
 
         cache = self._element_measures_cache
         if cache is not None:
             return cache
-        areas, swept_volumes = self._backend.element_measures()
+        areas, volumes = self._backend.element_measures()
         cache = ElementMeasures(
             areas=np.asarray(areas, dtype=self.dtype),
-            swept_volumes=np.asarray(swept_volumes, dtype=self.dtype),
+            volumes=np.asarray(volumes, dtype=self.dtype),
         )
         self._element_measures_cache = cache
         return cache
@@ -483,7 +499,7 @@ class AxisymmetricFEMModel:
 
         Returns:
             QuadratureFieldSamples: Recovered quadrature fields where:
-                `points_rz` has shape `(nelem, nq_per_element, 2)` and units `[length]`,
+                `points` has shape `(nelem, nq_per_element, 2)` and units `[length]`,
                 `strain`, `thermal_strain`, and `elastic_strain` have shape
                 `(nelem, nq_per_element, 4)` and units `[strain]`,
                 `stress` has shape `(nelem, nq_per_element, 4)` and units `[stress]`.
@@ -511,7 +527,7 @@ class AxisymmetricFEMModel:
         nelem = self.analysis_elements.shape[0]
         nq = int(nq)
         return QuadratureFieldSamples(
-            points_rz=np.asarray(points_flat, dtype=self.dtype).reshape(nelem, nq, 2),
+            points=np.asarray(points_flat, dtype=self.dtype).reshape(nelem, nq, 2),
             strain=np.asarray(strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
             thermal_strain=np.asarray(thermal_strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
             elastic_strain=np.asarray(elastic_strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
@@ -524,12 +540,12 @@ class QuadratureFieldSamples:
     """Recovered strain and stress at element quadrature points.
 
     Each field has shape `(nelem, nq_per_element, 4)` with component ordering
-    `[rr, zz, tt, rz]`. `points_rz` has shape `(nelem, nq_per_element, 2)`.
-    `points_rz` has units `[length]`, `strain`, `thermal_strain`, and `elastic_strain`
+    `[rr, zz, tt, rz]`. `points` has shape `(nelem, nq_per_element, 2)`.
+    `points` has units `[length]`, `strain`, `thermal_strain`, and `elastic_strain`
     have units `[strain]`, and `stress` has units `[stress]`.
     """
 
-    points_rz: npt.NDArray[np.floating[Any]]
+    points: npt.NDArray[np.floating[Any]]
     strain: npt.NDArray[np.floating[Any]]
     thermal_strain: npt.NDArray[np.floating[Any]]
     elastic_strain: npt.NDArray[np.floating[Any]]
@@ -559,6 +575,53 @@ def _normalize_element_type(element_type: str) -> str:
     return normalized
 
 
+def _normalize_formulation(formulation: str) -> str:
+    normalized = str(formulation).strip().lower()
+    assert normalized in {
+        "axisymmetric",
+        "plane_strain",
+    }, f"unsupported formulation {formulation!r}; use 'axisymmetric' or 'plane_strain'"
+    return normalized
+
+
+def _formulation_code(formulation: str) -> int:
+    if formulation == "axisymmetric":
+        return 0
+    if formulation == "plane_strain":
+        return 1
+    raise ValueError(f"unsupported formulation {formulation!r}")
+
+
+def _normalize_thickness(
+    formulation: str,
+    thickness: float | None,
+    dtype: np.dtype[Any],
+) -> float:
+    if formulation == "axisymmetric":
+        assert thickness is None, "thickness is only valid for formulation='plane_strain'"
+        return float(np.asarray(0.0, dtype=dtype))
+    assert thickness is not None, "thickness is required for formulation='plane_strain'"
+    value = float(np.asarray(thickness, dtype=dtype))
+    assert value > 0.0, f"thickness must be positive; got {thickness!r}"
+    return value
+
+
+def _normalize_material_orientation_angles(
+    material_orientation_angles: ArrayLike | None,
+    nelem: int,
+    dtype: np.dtype[Any],
+) -> npt.NDArray[np.floating[Any]]:
+    if material_orientation_angles is None:
+        return np.zeros((0,), dtype=dtype)
+    angles = np.asarray(material_orientation_angles, dtype=dtype)
+    if angles.ndim == 0:
+        angles = np.broadcast_to(angles, (nelem,)).copy()
+    assert angles.ndim == 1 and angles.shape[0] == nelem, (
+        f"material_orientation_angles must be a scalar or have shape ({nelem},); " f"got {angles.shape}"
+    )
+    return np.ascontiguousarray(angles)
+
+
 def _resolve_float_dtype(*values: object) -> np.dtype[np.float32] | np.dtype[np.float64]:
     arrays: list[np.ndarray[Any, Any]] = []
     for value in values:
@@ -580,9 +643,16 @@ def _normalize_nodes(nodes: ArrayLike, dtype: np.dtype[Any]) -> npt.NDArray[np.f
     return np.ascontiguousarray(arr)
 
 
-def _normalize_elements(elements: ArrayLike) -> npt.NDArray[np.uint64]:
+def _normalize_elements(
+    elements: ArrayLike,
+    nodes_per_element: int | tuple[int, ...] = 4,
+) -> npt.NDArray[np.uint64]:
     arr = np.asarray(elements, dtype=np.uint64)
-    assert arr.ndim == 2 and arr.shape[1] == 4, f"elements must have shape (nelem, 4); got {arr.shape}"
+    expected = (nodes_per_element,) if isinstance(nodes_per_element, int) else nodes_per_element
+    expected_text = " or ".join(f"(nelem, {count})" for count in expected)
+    assert (
+        arr.ndim == 2 and arr.shape[1] in expected
+    ), f"elements must have shape {expected_text}; got {arr.shape}"
     return np.ascontiguousarray(arr)
 
 
@@ -714,10 +784,10 @@ def _normalize_thermal_material_table(
         return None
     ids = np.asarray(material_ids, dtype=np.uint64)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
-    assert not isinstance(
-        thermal_material_table, Mapping
-    ), "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...)"
-    " for tagged inputs"
+    assert not isinstance(thermal_material_table, Mapping), (
+        "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) "
+        "for tagged inputs"
+    )
     table = np.asarray(thermal_material_table, dtype=dtype)
     assert (
         table.ndim == 2 and table.shape[1] == 5
@@ -912,28 +982,41 @@ def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     return f64
 
 
-def assemble_axisymmetric(
+def assemble_structural_2d(
     nodes: ArrayLike,
     elements: ArrayLike,
     material_ids: ArrayLike,
     material_table: ArrayLike,
+    *,
+    formulation: str = "axisymmetric",
+    thickness: float | None = None,
+    material_orientation_angles: ArrayLike | None = None,
     pressure_faces: ArrayLike | None = None,
     traction_faces: ArrayLike | None = None,
     thermal_material_table: ArrayLike | None = None,
     prescribed: Mapping[int, float] | None = None,
     quadrature: str | int = "gl3",
     element_type: str = "quad4",
-) -> AxisymmetricFEMModel:
-    """Assemble the reusable axisymmetric FEM model.
+) -> Structural2DFEMModel:
+    """Assemble the reusable 2D structural FEM model.
 
     Args:
-        nodes: Corner-node coordinates with shape `(nnode, 2)` in `(r, z)` order. Units are
-            `[length]`.
-        elements: Quad4 connectivity with shape `(nelem, 4)`. Corner nodes must be ordered
-            counter-clockwise in the `(r, z)` meridian plane.
+        nodes: Corner-node coordinates with shape `(nnode, 2)`. Coordinates are `(r, z)` for
+            `formulation="axisymmetric"` and `(x, y)` for `formulation="plane_strain"`.
+            Units are `[length]`.
+        elements: Connectivity with shape `(nelem, 4)` for `element_type="quad4"`. For
+            `element_type="quad9"`, pass either corner-only `(nelem, 4)` connectivity to infer a
+            straight-sided quad9 mesh, or explicit `(nelem, 9)` connectivity in local order
+            `[corner0, corner1, corner2, corner3, face0_mid, face1_mid, face2_mid, face3_mid,
+            center]`. Corner nodes must be ordered counter-clockwise in the 2D analysis plane.
         material_ids: Dense material row indices with shape `(nelem,)`.
         material_table: Elastic stress-strain matrices with shape `(nmat, 4, 4)`. Matrix units
             are `[stress / strain] = [pressure]`.
+        formulation: Symmetry reduction, either `"axisymmetric"` or `"plane_strain"`.
+        thickness: Plane-strain out-of-plane thickness. Required only for
+            `formulation="plane_strain"`.
+        material_orientation_angles: Optional scalar or per-element angles, in radians, rotating
+            local material axes into the global 2D frame before assembly.
         pressure_faces: Optional pressure-load topology with shape `(n_pressure_faces, 2)`. Each
             row is `[element_index, local_face]`.
         traction_faces: Optional traction-load topology with shape `(n_traction_faces, 2)`. Each
@@ -947,7 +1030,7 @@ def assemble_axisymmetric(
         element_type: Analysis element family, either `quad4` or `quad9`.
 
     Returns:
-        AxisymmetricFEMModel: Reusable model storing the reduced stiffness matrix, sparse load
+        Structural2DFEMModel: Reusable model storing the reduced stiffness matrix, sparse load
         operators, sparse quadrature-recovery operators, and cached solve state.
 
     Raises:
@@ -956,7 +1039,6 @@ def assemble_axisymmetric(
             instead of dense arrays.
     """
 
-    elements_arr = _normalize_elements(elements)
     dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
     nodes_arr = _normalize_nodes(nodes, dtype)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
@@ -969,16 +1051,28 @@ def assemble_axisymmetric(
     traction_faces_arr = _normalize_face_pairs("traction_faces", traction_faces)
     prescribed_dofs, prescribed_values = _normalize_prescribed_dirichlet(prescribed, dtype)
     quadrature_code = _quadrature_code(quadrature)
+    normalized_formulation = _normalize_formulation(formulation)
+    thickness_value = _normalize_thickness(normalized_formulation, thickness, dtype)
     normalized_element_type = _normalize_element_type(element_type)
     if normalized_element_type == "quad4":
+        elements_arr = _normalize_elements(elements, 4)
         analysis_nodes, analysis_elements, elevated = nodes_arr, elements_arr, None
     else:
-        elevated = infer_quad9_mesh(nodes_arr, elements_arr)
-        analysis_nodes, analysis_elements = elevated.analysis_nodes, elevated.analysis_elements
+        elements_arr = _normalize_elements(elements, (4, 9))
+        if elements_arr.shape[1] == 4:
+            elevated = infer_quad9_mesh(nodes_arr, elements_arr)
+            analysis_nodes, analysis_elements = elevated.analysis_nodes, elevated.analysis_elements
+        else:
+            analysis_nodes, analysis_elements, elevated = nodes_arr, elements_arr, None
+    material_orientation_angles_arr = _normalize_material_orientation_angles(
+        material_orientation_angles,
+        int(analysis_elements.shape[0]),
+        dtype,
+    )
     low_level = _dispatch_pair(
         dtype,
-        _assemble_model_axisymmetric_f32,
-        _assemble_model_axisymmetric_f64,
+        _assemble_model_2d_f32,
+        _assemble_model_2d_f64,
     )
     backend = low_level(
         analysis_nodes,
@@ -988,9 +1082,12 @@ def assemble_axisymmetric(
         pressure_faces_arr,
         traction_faces_arr,
         np.zeros((0, 5), dtype=dtype) if thermal_material_table_arr is None else thermal_material_table_arr,
+        material_orientation_angles_arr,
         prescribed_dofs,
         prescribed_values,
         4 if normalized_element_type == "quad4" else 9,
+        _formulation_code(normalized_formulation),
+        thickness_value,
         quadrature_code,
     )
 
@@ -1026,7 +1123,7 @@ def assemble_axisymmetric(
             thermal_stress_operator = _to_csr_matrix(analysis_thermal_stress_operator @ temperature_elevation)
         n_temperature_nodes = nodes_arr.shape[0]
 
-    return AxisymmetricFEMModel(
+    return Structural2DFEMModel(
         backend=backend,
         dtype=dtype,
         input_nodes=nodes_arr,
@@ -1036,6 +1133,7 @@ def assemble_axisymmetric(
         elevated=elevated,
         pressure_faces=pressure_faces_arr,
         traction_faces=traction_faces_arr,
+        formulation=normalized_formulation,
         element_type=normalized_element_type,
         stiffness=stiffness,
         body_force_to_rhs=body_force_to_rhs,
@@ -1043,7 +1141,7 @@ def assemble_axisymmetric(
         traction_to_rhs=traction_to_rhs,
         temperature_to_rhs=_to_csr_matrix(temperature_to_rhs),
         constant_rhs=np.asarray(backend.constant_rhs(), dtype=dtype),
-        quadrature_points_rz=np.asarray(
+        quadrature_points=np.asarray(
             backend.quadrature_points_flat(),
             dtype=dtype,
         ).reshape(analysis_elements.shape[0], int(backend.nq_per_element), 2),
@@ -1119,6 +1217,47 @@ def isotropic_axisymmetric_thermal_material(
     return _as_float_array(binding(alpha, reference_temperature), resolved_dtype)
 
 
+def isotropic_plane_strain_material(
+    youngs_modulus: float,
+    poisson_ratio: float,
+    dtype: npt.DTypeLike = np.float64,
+) -> npt.NDArray[np.floating[Any]]:
+    """Construct the isotropic plane-strain elastic stress-strain matrix.
+
+    Returns a dense `(4, 4)` constitutive matrix in `[xx, yy, zz, xy]` order. The plane-strain
+    solver sets `epsilon_zz = 0`, but this matrix still recovers the nonzero `sigma_zz` implied
+    by the in-plane strains.
+    """
+
+    resolved_dtype = np.dtype(dtype)
+    binding = _dispatch_pair(
+        resolved_dtype,
+        _isotropic_plane_strain_material_f32,
+        _isotropic_plane_strain_material_f64,
+    )
+    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
+
+
+def isotropic_plane_strain_thermal_material(
+    alpha: float,
+    reference_temperature: float = 0.0,
+    dtype: npt.DTypeLike = np.float64,
+) -> npt.NDArray[np.floating[Any]]:
+    """Construct isotropic plane-strain thermal-expansion data.
+
+    Returns a row `[alpha_x, alpha_y, alpha_z, alpha_xy, T_ref]` with equal normal expansion
+    coefficients and zero engineering shear expansion.
+    """
+
+    resolved_dtype = np.dtype(dtype)
+    binding = _dispatch_pair(
+        resolved_dtype,
+        _isotropic_plane_strain_thermal_material_f32,
+        _isotropic_plane_strain_thermal_material_f64,
+    )
+    return _as_float_array(binding(alpha, reference_temperature), resolved_dtype)
+
+
 def orthotropic_axisymmetric_thermal_material(
     alpha_r: float,
     alpha_z: float,
@@ -1148,6 +1287,28 @@ def orthotropic_axisymmetric_thermal_material(
         _orthotropic_axisymmetric_thermal_material_f64,
     )
     return _as_float_array(binding(alpha_r, alpha_z, alpha_t, reference_temperature), resolved_dtype)
+
+
+def orthotropic_plane_strain_thermal_material(
+    alpha_x: float,
+    alpha_y: float,
+    alpha_z: float,
+    reference_temperature: float = 0.0,
+    dtype: npt.DTypeLike = np.float64,
+) -> npt.NDArray[np.floating[Any]]:
+    """Construct orthotropic plane-strain thermal-expansion data.
+
+    Returns a row `[alpha_x, alpha_y, alpha_z, alpha_xy, T_ref]` with zero engineering shear
+    expansion. Use `material_orientation_angles` during assembly to rotate local orthotropic axes.
+    """
+
+    return orthotropic_axisymmetric_thermal_material(
+        alpha_x,
+        alpha_y,
+        alpha_z,
+        reference_temperature,
+        dtype,
+    )
 
 
 def cfsem_radial_material(
@@ -1190,16 +1351,19 @@ def _normalize_displacements(
 
 
 __all__ = [
-    "AxisymmetricFEMModel",
+    "Structural2DFEMModel",
     "ElementMeasures",
     "ElementQuadrature",
     "ElevatedQuad9Mesh",
     "QuadratureFieldSamples",
-    "assemble_axisymmetric",
+    "assemble_structural_2d",
     "cfsem_radial_material",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
     "isotropic_axisymmetric_thermal_material",
+    "isotropic_plane_strain_material",
+    "isotropic_plane_strain_thermal_material",
     "orthotropic_axisymmetric_thermal_material",
+    "orthotropic_plane_strain_thermal_material",
     "pack_material_tables_from_tags",
 ]

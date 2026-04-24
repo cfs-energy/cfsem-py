@@ -27,6 +27,78 @@ pub fn two_pi<F: Real>() -> F {
     cast(2.0 * core::f64::consts::PI)
 }
 
+/// Structural 2D reduction used by the quadrilateral FEM backend.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Structural2dFormulation<F: Real> {
+    /// Axisymmetric reduction in `(r, z)` with hoop strain `e_tt = u_r / r`.
+    Axisymmetric,
+    /// Plane-strain reduction in `(x, y)` with `e_zz = 0` and finite model thickness.
+    PlaneStrain {
+        /// Out-of-plane thickness used to convert analysis-plane integrals into 3D volume.
+        thickness: F,
+    },
+}
+
+impl<F: Real> Structural2dFormulation<F> {
+    /// Parse the compact formulation code used by the low-level Python binding.
+    pub fn from_code(code: u8, thickness: F) -> Result<Self, String> {
+        match code {
+            0 => Ok(Self::Axisymmetric),
+            1 => {
+                if thickness <= F::zero() {
+                    return Err(format!(
+                        "plane-strain thickness must be positive; got {thickness:?}"
+                    ));
+                }
+                Ok(Self::PlaneStrain { thickness })
+            }
+            _ => Err(format!(
+                "unsupported structural 2D formulation code {code}; use 0 for axisymmetric or 1 for plane_strain"
+            )),
+        }
+    }
+
+    /// Return the canonical public string spelling used by the Python wrapper and docs.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Axisymmetric => "axisymmetric",
+            Self::PlaneStrain { .. } => "plane_strain",
+        }
+    }
+
+    /// Return the axisymmetric swept-volume or planar-thickness measure for one volume sample.
+    pub fn volume_scale(self, point: [F; 2], det_j: F, weight: F) -> Result<F, String> {
+        match self {
+            Self::Axisymmetric => {
+                if point[0] < F::zero() {
+                    return Err(format!(
+                        "quadrature point has negative radius {:?}; axisymmetric radius must be nonnegative",
+                        point[0]
+                    ));
+                }
+                Ok(two_pi::<F>() * point[0] * det_j * weight)
+            }
+            Self::PlaneStrain { thickness } => Ok(thickness * det_j * weight),
+        }
+    }
+
+    /// Return the axisymmetric swept-surface or planar-thickness measure for one face sample.
+    pub fn face_scale(self, point: [F; 2], line_jacobian: F, weight: F) -> Result<F, String> {
+        match self {
+            Self::Axisymmetric => {
+                if point[0] < F::zero() {
+                    return Err(format!(
+                        "face quadrature point has negative radius {:?}; axisymmetric radius must be nonnegative",
+                        point[0]
+                    ));
+                }
+                Ok(two_pi::<F>() * point[0] * line_jacobian * weight)
+            }
+            Self::PlaneStrain { thickness } => Ok(thickness * line_jacobian * weight),
+        }
+    }
+}
+
 /// Number of displacement unknowns carried by each node in the axisymmetric structural solver.
 pub const DOF_PER_NODE: usize = 2;
 
@@ -76,10 +148,12 @@ pub struct TractionLoad {
     pub local_face: u8,
 }
 
-/// Per-material thermal-expansion data for the axisymmetric thermoelastic model.
+/// Per-material thermal-expansion data for the 2D thermoelastic model.
 #[derive(Clone, Copy, Debug)]
 pub struct ThermalMaterial<F: Real> {
-    /// Thermal strain coefficients in axisymmetric strain order `[rr, zz, tt, rz]`.
+    /// Thermal strain coefficients in the active four-component strain order.
+    ///
+    /// Axisymmetric models use `[rr, zz, tt, rz]`; plane-strain models use `[xx, yy, zz, xy]`.
     ///
     /// Units: `[strain / temperature]`.
     pub alpha: [F; 4],

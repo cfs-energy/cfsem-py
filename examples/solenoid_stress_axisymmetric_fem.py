@@ -11,8 +11,8 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
 import cfsem
-from cfsem.solenoid_stress.axisymmetric_fem import (
-    assemble_axisymmetric,
+from cfsem.solenoid_stress.fem2d import (
+    assemble_structural_2d,
     cfsem_radial_material,
     infer_quad9_mesh,
 )
@@ -1012,7 +1012,7 @@ def solve_case(
         bottom_faces, top_faces = top_bottom_pressure_faces(nr, nz)
         pressure_faces = np.vstack([bottom_faces, top_faces])
 
-    model = assemble_axisymmetric(
+    model = assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=material_ids,
@@ -1023,7 +1023,7 @@ def solve_case(
         element_type=element_type,
     )
     quadrature_data = model.element_quadrature()
-    quadrature_points = quadrature_data.points_rz.reshape(-1, 2)
+    quadrature_points = quadrature_data.points.reshape(-1, 2)
     br_loop_q, bz_loop_q = sample_loop_field(
         quadrature_points[:, 0],
         quadrature_points[:, 1],
@@ -1048,7 +1048,7 @@ def solve_case(
     body_force = np.column_stack((current_density * bz_mean, axial_body_force))
 
     measures = model.element_measures()
-    net_body_force_z = float(np.sum(body_force[:, 1] * measures.swept_volumes))
+    net_body_force_z = float(np.sum(body_force[:, 1] * measures.volumes))
     top_area = np.pi * (ro**2 - ri**2)
     pressure_top = net_body_force_z / (2.0 * top_area) if balance_axial_load else 0.0
     pressure_bottom = -pressure_top

@@ -65,6 +65,7 @@ fn validate_triangle_mesh_geometry(
         return Err("Triangle refers to non-existent node");
     }
 
+    let mut low_quality_triangles = Vec::new();
     for i in 0..ntri {
         let idx = [triangles.0[i], triangles.1[i], triangles.2[i]];
         let area = triangle_area_from_indices(nodes, idx);
@@ -73,10 +74,19 @@ fn validate_triangle_mesh_geometry(
         }
         let quality = triangle_quality_from_indices(nodes, idx);
         if quality < 1e-3 {
-            eprintln!(
-                "warning: triangle {i} has very poor aspect ratio (quality={quality:.3e}, indices={idx:?})"
-            );
+            low_quality_triangles.push((i, quality, idx));
         }
+    }
+    if !low_quality_triangles.is_empty() {
+        let entries = low_quality_triangles
+            .iter()
+            .map(|(i, quality, idx)| format!("{i} (quality={quality:.3e}, indices={idx:?})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "warning: {} triangles have very poor aspect ratio: {entries}",
+            low_quality_triangles.len()
+        );
     }
 
     Ok((nnode, ntri))

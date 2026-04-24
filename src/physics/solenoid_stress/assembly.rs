@@ -5,10 +5,11 @@
 
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
+use crate::physics::solenoid_stress::convenience::rotate_material_in_plane;
 use crate::physics::solenoid_stress::family::QuadElementFamily;
-use crate::physics::solenoid_stress::geometry::validate_axisymmetric_mesh;
+use crate::physics::solenoid_stress::geometry::validate_structural_2d_mesh;
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, StiffnessTriplets, local_dofs, two_pi,
+    DOF_PER_NODE, Real, StiffnessTriplets, Structural2dFormulation, local_dofs,
 };
 
 /// Assemble the full unconstrained stiffness matrix for one quadrilateral family.
@@ -25,6 +26,8 @@ pub(crate) fn assemble_stiffness_for_family<
     mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
     material_ids: &[usize],
     material_table: &[[[F; 4]; 4]],
+    material_orientation_angles: Option<&[F]>,
+    formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
 ) -> Result<StiffnessTriplets<F>, String>
 where
@@ -33,7 +36,7 @@ where
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    validate_axisymmetric_mesh(mesh)?;
+    validate_structural_2d_mesh(mesh, formulation)?;
     if material_ids.len() != mesh.num_elements() {
         return Err(format!(
             "material_ids has length {}, but mesh has {} elements",
@@ -41,10 +44,18 @@ where
             mesh.num_elements()
         ));
     }
+    if let Some(angles) = material_orientation_angles
+        && angles.len() != mesh.num_elements()
+    {
+        return Err(format!(
+            "material_orientation_angles has length {}, but mesh has {} elements",
+            angles.len(),
+            mesh.num_elements()
+        ));
+    }
     let mut rows = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
     let mut cols = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
     let mut vals = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
-    let two_pi = two_pi::<F>();
 
     for element_index in 0..mesh.num_elements() {
         let coords = mesh.element_coords(element_index)?;
@@ -53,15 +64,23 @@ where
         let material = material_table.get(material_id).ok_or_else(|| {
             format!("material_id {material_id} on element {element_index} is out of range")
         })?;
+        let material_storage;
+        let material = if let Some(angles) = material_orientation_angles {
+            material_storage = rotate_material_in_plane(material, angles[element_index]);
+            &material_storage
+        } else {
+            material
+        };
         let mut ke = [[F::zero(); DOF_PER_ELEMENT]; DOF_PER_ELEMENT];
 
         for sample in Family::volume_samples::<F>(&coords, quadrature)? {
             let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                formulation,
                 &sample.n,
                 &sample.grad_phys,
-                sample.point[0],
+                sample.point,
             )?;
-            let scale = two_pi * sample.point[0] * sample.det_j * sample.weight;
+            let scale = formulation.volume_scale(sample.point, sample.det_j, sample.weight)?;
             accumulate_stiffness(&mut ke, material, &b, scale);
         }
 
@@ -98,6 +117,8 @@ mod tests {
             mesh,
             &material_ids,
             &material_table,
+            None,
+            crate::physics::solenoid_stress::types::Structural2dFormulation::Axisymmetric,
             QuadratureRule::GaussLegendre3,
         )
         .expect("assembly should succeed");

@@ -11,7 +11,7 @@
 //! `u_z`.  Circumferential displacement is omitted by the axisymmetric assumption, but the hoop
 //! normal strain `e_tt` still appears because moving a ring outward changes its circumference.
 
-use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real};
+use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real, Structural2dFormulation};
 
 /// Build the axisymmetric strain-displacement matrix `B` at one quadrature point.
 ///
@@ -23,7 +23,11 @@ use crate::physics::solenoid_stress::types::{DOF_PER_NODE, Real};
 /// - Allan F. Bower, *Applied Mechanics of Solids*, CRC Press, 2009, Section 8.1.
 /// - E. L. Wilson, "Structural Analysis of Axisymmetric Solids," *AIAA Journal*, 3(12), pp. 2269-2274, December 1965. doi:10.2514/3.3356.
 /// - R. A. Mitchell, R. M. Woolley, and C. R. Fisher, "Formulation and experimental verification of an axisymmetric finite-element structural analysis," *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
-pub fn build_b_matrix<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+pub fn build_axisymmetric_b_matrix<
+    F: Real,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
     n: &[F; NODES_PER_ELEMENT],
     grad_phys: &[[F; 2]; NODES_PER_ELEMENT],
     radius: F,
@@ -53,6 +57,60 @@ pub fn build_b_matrix<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELE
         b[3][col_z] = dndr;
     }
     Ok(b)
+}
+
+/// Build the plane-strain strain-displacement matrix `B` at one quadrature point.
+///
+/// Multiplying this matrix by the element displacement vector
+/// `[u_x1, u_y1, u_x2, u_y2, ...]^T` gives the strain vector
+/// `[e_xx, e_yy, e_zz, g_xy]^T` at that point, with `e_zz = 0`.
+pub fn build_plane_strain_b_matrix<
+    F: Real,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    grad_phys: &[[F; 2]; NODES_PER_ELEMENT],
+) -> [[F; DOF_PER_ELEMENT]; 4] {
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    let mut b = [[F::zero(); DOF_PER_ELEMENT]; 4];
+    for (i, grad) in grad_phys.iter().enumerate() {
+        let col_x = 2 * i;
+        let col_y = col_x + 1;
+        let dndx = grad[0];
+        let dndy = grad[1];
+        // e_xx = du_x/dx
+        b[0][col_x] = dndx;
+        // e_yy = du_y/dy
+        b[1][col_y] = dndy;
+        // e_zz = 0 by the plane-strain kinematic assumption.
+        // g_xy = du_x/dy + du_y/dx in engineering-shear convention.
+        b[3][col_x] = dndy;
+        b[3][col_y] = dndx;
+    }
+    b
+}
+
+/// Build the formulation-specific strain-displacement matrix `B` at one quadrature point.
+pub fn build_b_matrix<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    formulation: Structural2dFormulation<F>,
+    n: &[F; NODES_PER_ELEMENT],
+    grad_phys: &[[F; 2]; NODES_PER_ELEMENT],
+    point: [F; 2],
+) -> Result<[[F; DOF_PER_ELEMENT]; 4], String> {
+    match formulation {
+        Structural2dFormulation::Axisymmetric => {
+            build_axisymmetric_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                n, grad_phys, point[0],
+            )
+        }
+        Structural2dFormulation::PlaneStrain { .. } => Ok(build_plane_strain_b_matrix::<
+            F,
+            NODES_PER_ELEMENT,
+            DOF_PER_ELEMENT,
+        >(grad_phys)),
+    }
 }
 
 /// Accumulate `scale * B^T D B` into the element stiffness matrix.

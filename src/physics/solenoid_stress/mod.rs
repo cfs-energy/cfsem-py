@@ -498,13 +498,17 @@ mod types;
 
 pub use crate::mesh::QuadratureRule;
 pub use convenience::{
-    AxisymmetricElementMeasures, AxisymmetricElementQuadrature, ElevatedQuad9Mesh,
-    QuadratureFieldSamples, cfsem_radial_material, infer_quad9_mesh,
+    ElevatedQuad9Mesh, QuadratureFieldSamples, Structural2dElementMeasures,
+    Structural2dElementQuadrature, cfsem_radial_material, infer_quad9_mesh,
     isotropic_axisymmetric_material, isotropic_axisymmetric_thermal_material,
-    orthotropic_axisymmetric_thermal_material,
+    orthotropic_axisymmetric_thermal_material, rotate_material_in_plane,
+    rotate_thermal_expansion_in_plane, rotate_thermal_material_in_plane,
 };
 pub use model::{
-    AxisymmetricElementType, AxisymmetricElements, AxisymmetricModel, ReducedRecoveryOperators,
-    assemble_axisymmetric,
+    ReducedRecoveryOperators, Structural2dElementType, Structural2dElements, Structural2dModel,
+    assemble_structural_2d,
 };
-pub use types::{DOF_PER_NODE, PressureLoad, Real, ThermalMaterial, TractionLoad, dof_per_element};
+pub use types::{
+    DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad,
+    dof_per_element,
+};

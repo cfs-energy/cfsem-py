@@ -1,4 +1,4 @@
-//! Rust-native convenience helpers layered on top of the axisymmetric FEM backend.
+//! Rust-native convenience helpers layered on top of the 2D structural FEM backend.
 //!
 //! These helpers package common construction and postprocessing tasks so both Rust and Python can
 //! use the same domain-level operations without duplicating elastic stress-strain matrix or
@@ -11,23 +11,23 @@ use crate::physics::solenoid_stress::types::{Real, ThermalMaterial, cast};
 
 /// Per-element quadrature data in element-major flattened form.
 ///
-/// `points_rz`, `weights_area`, and `weights_volume` are stored in the same element-major order.
-/// `points_rz` has flattened shape `(nelem * nq_per_element, 2)`,
+/// `points`, `weights_area`, and `weights_volume` are stored in the same element-major order.
+/// `points` has flattened shape `(nelem * nq_per_element, 2)`,
 /// `weights_area` and `weights_volume` have flattened shape `(nelem * nq_per_element,)`, and
 /// `nq_per_element` gives the number of consecutive quadrature entries belonging to each element.
 #[derive(Debug, Clone)]
-pub struct AxisymmetricElementQuadrature<F: Real> {
-    /// Physical quadrature-point coordinates `(r, z)` in element-major order.
+pub struct Structural2dElementQuadrature<F: Real> {
+    /// Physical quadrature-point coordinates in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
-    pub points_rz: Vec<[F; 2]>,
-    /// Mapped meridian-area weights `det(J) w` in element-major order.
+    pub points: Vec<[F; 2]>,
+    /// Mapped analysis-plane area weights `det(J) w` in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element,)`.
     /// Units: `[area]`.
     pub weights_area: Vec<F>,
-    /// Mapped swept-volume weights `2*pi*r det(J) w` in element-major order.
+    /// Mapped represented-volume weights in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element,)`.
     /// Units: `[volume]`.
@@ -36,36 +36,36 @@ pub struct AxisymmetricElementQuadrature<F: Real> {
     pub nq_per_element: usize,
 }
 
-/// Per-element meridian area and swept volume.
+/// Per-element analysis-plane area and represented volume.
 ///
 /// Both vectors have shape `(nelem,)`.
 #[derive(Debug, Clone)]
-pub struct AxisymmetricElementMeasures<F: Real> {
-    /// Meridian-plane area of each element.
+pub struct Structural2dElementMeasures<F: Real> {
+    /// Analysis-plane area of each element.
     ///
     /// Shape: `(nelem,)`.
     /// Units: `[area]`.
     pub areas: Vec<F>,
-    /// Swept 3D volume represented by each axisymmetric element.
+    /// Represented 3D volume for each element.
     ///
     /// Shape: `(nelem,)`.
     /// Units: `[volume]`.
-    pub swept_volumes: Vec<F>,
+    pub volumes: Vec<F>,
 }
 
 /// Recovered quadrature-point fields in element-major flattened form.
 ///
 /// Each field vector stores one `[rr, zz, tt, rz]` sample per quadrature point in element-major
-/// order. `points_rz` has flattened shape `(nelem * nq_per_element, 2)`. Each tensor field has
+/// order. `points` has flattened shape `(nelem * nq_per_element, 2)`. Each tensor field has
 /// flattened shape `(nelem * nq_per_element, 4)`. `nq_per_element` records how many consecutive
 /// samples belong to each element.
 #[derive(Debug, Clone)]
 pub struct QuadratureFieldSamples<F: Real> {
-    /// Physical quadrature-point coordinates `(r, z)` in element-major order.
+    /// Physical quadrature-point coordinates in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
-    pub points_rz: Vec<[F; 2]>,
+    pub points: Vec<[F; 2]>,
     /// Total strain samples `[e_rr, e_zz, e_tt, g_rz]`.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 4)`.
@@ -199,6 +199,97 @@ pub fn orthotropic_axisymmetric_thermal_material<F: Real>(
     ThermalMaterial {
         alpha: [alpha_r, alpha_z, alpha_t, F::zero()],
         reference_temperature,
+    }
+}
+
+/// Rotate a four-component elastic material matrix by an in-plane angle.
+///
+/// The local component order is `[11, 22, 33, 12]`.  The returned global matrix is expressed in
+/// `[rr, zz, tt, rz]` for axisymmetric use or `[xx, yy, zz, xy]` for plane-strain use.  The angle
+/// is measured from global axis 0 to local material axis 1.
+pub fn rotate_material_in_plane<F: Real>(material: &[[F; 4]; 4], angle: F) -> [[F; 4]; 4] {
+    if angle == F::zero() {
+        return *material;
+    }
+    let c = angle.cos();
+    let s = angle.sin();
+    let c2 = c * c;
+    let s2 = s * s;
+    let cs = c * s;
+    let two = cast::<F>(2.0);
+
+    // local_strain = strain_to_local * global_strain
+    let strain_to_local = [
+        [c2, s2, F::zero(), cs],
+        [s2, c2, F::zero(), -cs],
+        [F::zero(), F::zero(), F::one(), F::zero()],
+        [-two * cs, two * cs, F::zero(), c2 - s2],
+    ];
+    // global_stress = stress_to_global * local_stress
+    let stress_to_global = [
+        [c2, s2, F::zero(), -two * cs],
+        [s2, c2, F::zero(), two * cs],
+        [F::zero(), F::zero(), F::one(), F::zero()],
+        [cs, -cs, F::zero(), c2 - s2],
+    ];
+
+    let mut local_times_strain = [[F::zero(); 4]; 4];
+    for row in 0..4 {
+        for col in 0..4 {
+            let mut value = F::zero();
+            for (k, strain_row) in strain_to_local.iter().enumerate() {
+                value = value + material[row][k] * strain_row[col];
+            }
+            local_times_strain[row][col] = value;
+        }
+    }
+
+    let mut rotated = [[F::zero(); 4]; 4];
+    for row in 0..4 {
+        for col in 0..4 {
+            let mut value = F::zero();
+            for (k, local_row) in local_times_strain.iter().enumerate() {
+                value = value + stress_to_global[row][k] * local_row[col];
+            }
+            rotated[row][col] = value;
+        }
+    }
+    rotated
+}
+
+/// Rotate four-component thermal expansion coefficients by an in-plane angle.
+///
+/// The local input order is `[alpha_1, alpha_2, alpha_3, alpha_12]`; the returned vector is in the
+/// global four-component order for the active 2D formulation.
+pub fn rotate_thermal_expansion_in_plane<F: Real>(alpha: &[F; 4], angle: F) -> [F; 4] {
+    if angle == F::zero() {
+        return *alpha;
+    }
+    let c = angle.cos();
+    let s = angle.sin();
+    let c2 = c * c;
+    let s2 = s * s;
+    let cs = c * s;
+    let two = cast::<F>(2.0);
+    [
+        c2 * alpha[0] + s2 * alpha[1] - cs * alpha[3],
+        s2 * alpha[0] + c2 * alpha[1] + cs * alpha[3],
+        alpha[2],
+        two * cs * alpha[0] - two * cs * alpha[1] + (c2 - s2) * alpha[3],
+    ]
+}
+
+/// Rotate thermal material data by an in-plane angle.
+///
+/// The expansion coefficients are transformed with the same engineering-shear convention used by
+/// [`rotate_thermal_expansion_in_plane`], while the reference temperature is unchanged.
+pub fn rotate_thermal_material_in_plane<F: Real>(
+    thermal: &ThermalMaterial<F>,
+    angle: F,
+) -> ThermalMaterial<F> {
+    ThermalMaterial {
+        alpha: rotate_thermal_expansion_in_plane(&thermal.alpha, angle),
+        reference_temperature: thermal.reference_temperature,
     }
 }
 

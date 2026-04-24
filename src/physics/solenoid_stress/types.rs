@@ -33,7 +33,10 @@ pub enum Structural2dFormulation<F: Real> {
     /// Axisymmetric reduction in `(r, z)` with hoop strain `e_tt = u_r / r`.
     Axisymmetric,
     /// Plane-strain reduction in `(x, y)` with `e_zz = 0` and finite model thickness.
-    PlaneStrain { thickness: F },
+    PlaneStrain {
+        /// Out-of-plane thickness used to convert analysis-plane integrals into 3D volume.
+        thickness: F,
+    },
 }
 
 impl<F: Real> Structural2dFormulation<F> {
@@ -145,10 +148,12 @@ pub struct TractionLoad {
     pub local_face: u8,
 }
 
-/// Per-material thermal-expansion data for the axisymmetric thermoelastic model.
+/// Per-material thermal-expansion data for the 2D thermoelastic model.
 #[derive(Clone, Copy, Debug)]
 pub struct ThermalMaterial<F: Real> {
-    /// Thermal strain coefficients in axisymmetric strain order `[rr, zz, tt, rz]`.
+    /// Thermal strain coefficients in the active four-component strain order.
+    ///
+    /// Axisymmetric models use `[rr, zz, tt, rz]`; plane-strain models use `[xx, yy, zz, xy]`.
     ///
     /// Units: `[strain / temperature]`.
     pub alpha: [F; 4],

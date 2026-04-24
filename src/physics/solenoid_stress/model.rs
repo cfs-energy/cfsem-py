@@ -57,7 +57,9 @@ impl Structural2dElementType {
 /// corresponding quadrilateral family. Element corner nodes must be ordered
 /// counter-clockwise in the 2D analysis plane.
 pub enum Structural2dElements<'a> {
+    /// Four-node bilinear quadrilateral connectivity in local corner order.
     Quad4(&'a [[usize; 4]]),
+    /// Nine-node quadratic quadrilateral connectivity in local corner, midside, center order.
     Quad9(&'a [[usize; 9]]),
 }
 

@@ -280,6 +280,9 @@ pub fn rotate_thermal_expansion_in_plane<F: Real>(alpha: &[F; 4], angle: F) -> [
 }
 
 /// Rotate thermal material data by an in-plane angle.
+///
+/// The expansion coefficients are transformed with the same engineering-shear convention used by
+/// [`rotate_thermal_expansion_in_plane`], while the reference temperature is unchanged.
 pub fn rotate_thermal_material_in_plane<F: Real>(
     thermal: &ThermalMaterial<F>,
     angle: F,

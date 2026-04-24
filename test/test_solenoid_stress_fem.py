@@ -87,6 +87,8 @@ def build_planar_rect_mesh(
     ny: int,
     dtype: DType,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Build a structured rectangular quad4 mesh in the Cartesian analysis plane."""
+
     xs = np.linspace(x_min, x_max, nx + 1, dtype=dtype)
     ys = np.linspace(y_min, y_max, ny + 1, dtype=dtype)
     nodes = np.array([[x, y] for y in ys for x in xs], dtype=dtype)
@@ -115,6 +117,8 @@ def build_annular_hole_mesh(
     ntheta: int,
     dtype: DType,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Build a straight-sided annular quad4 mesh for circular-hole validation."""
+
     radii = np.linspace(hole_radius, outer_radius, nr + 1, dtype=dtype)
     theta = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False, dtype=dtype)
     nodes = np.array([[r * np.cos(t), r * np.sin(t)] for r in radii for t in theta], dtype=dtype)
@@ -143,6 +147,8 @@ def build_annular_hole_quad9_mesh(
     ntheta: int,
     dtype: DType,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Build an explicit curved quad9 annular mesh with polar midside and center nodes."""
+
     radii = np.linspace(hole_radius, outer_radius, 2 * nr + 1, dtype=dtype)
     theta = np.linspace(0.0, 2.0 * np.pi, 2 * ntheta, endpoint=False, dtype=dtype)
     nodes = np.array([[r * np.cos(t), r * np.sin(t)] for r in radii for t in theta], dtype=dtype)
@@ -172,6 +178,8 @@ def build_annular_hole_quad9_mesh(
 
 
 def outer_faces_for_annular_hole_mesh(nr: int, ntheta: int) -> np.ndarray:
+    """Return `[element, local_face]` rows for the annular mesh outer boundary."""
+
     return np.asarray([[j * nr + nr - 1, 1] for j in range(ntheta)], dtype=np.uint64)
 
 
@@ -217,7 +225,7 @@ def cartesian_traction_from_polar_stress(
 
 
 def hoop_stress_from_cartesian(stress_xy: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """Project Cartesian plane-stress components onto the local circumferential direction."""
+    """Project in-plane Cartesian stress components onto the local circumferential direction."""
 
     theta = np.arctan2(points[:, 1], points[:, 0])
     sin_theta = np.sin(theta)

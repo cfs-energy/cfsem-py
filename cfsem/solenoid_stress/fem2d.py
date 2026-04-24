@@ -3,6 +3,37 @@
 This module provides a small displacement-based quadrilateral FEM solver for axisymmetric and
 plane-strain structural reductions. The backend stores sparse load operators, sparse
 quadrature-recovery operators, and a reduced stiffness matrix for repeated load solves.
+
+The element formulation follows the standard small-strain Galerkin construction
+
+`K_e = integral(B^T D B c dA)` where `c` is `2*pi*r` for axisymmetric and the thickness of the
+planar domain for plane strain.
+
+with consistent body-force, surface-pressure, and surface-traction load vectors. The axisymmetric
+engineering-strain vector is ordered as `[e_rr, e_zz, e_tt, g_rz]`. In Bower's terminology, the
+underlying equations are the strain-displacement equation, the elastic stress-strain law, the
+equation of static equilibrium for stresses, and the boundary conditions on displacement and
+stress.
+
+References:
+    [1] Allan F. Bower,
+        *Applied Mechanics of Solids*,
+        CRC Press, 2009.
+        See especially Section 8.1 and Table 8.3 for the general displacement-based
+        finite-element construction and 2D interpolation functions.
+
+    [2] E. L. Wilson,
+        "Structural Analysis of Axisymmetric Solids,"
+        *AIAA Journal*, 3(12), pp. 2269-2274, 1965.
+
+    [3] R. A. Mitchell, R. M. Woolley, and C. R. Fisher,
+        "Formulation and experimental verification of an axisymmetric finite-element structural
+        analysis,"
+        *Journal of Research of the National Bureau of Standards Section C*, 75C, 1971.
+
+    [4] I. Fried,
+        "Notes on the finite element analysis of the axisymmetric elastic solid,"
+        *International Journal of Solids and Structures*, 10(3), 1974.
 """
 
 from __future__ import annotations
@@ -1191,7 +1222,12 @@ def isotropic_plane_strain_material(
     poisson_ratio: float,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct the isotropic plane-strain elastic stress-strain matrix."""
+    """Construct the isotropic plane-strain elastic stress-strain matrix.
+
+    Returns a dense `(4, 4)` constitutive matrix in `[xx, yy, zz, xy]` order. The plane-strain
+    solver sets `epsilon_zz = 0`, but this matrix still recovers the nonzero `sigma_zz` implied
+    by the in-plane strains.
+    """
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
@@ -1207,7 +1243,11 @@ def isotropic_plane_strain_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct isotropic plane-strain thermal-expansion data."""
+    """Construct isotropic plane-strain thermal-expansion data.
+
+    Returns a row `[alpha_x, alpha_y, alpha_z, alpha_xy, T_ref]` with equal normal expansion
+    coefficients and zero engineering shear expansion.
+    """
 
     resolved_dtype = np.dtype(dtype)
     binding = _dispatch_pair(
@@ -1256,7 +1296,11 @@ def orthotropic_plane_strain_thermal_material(
     reference_temperature: float = 0.0,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
-    """Construct orthotropic plane-strain thermal-expansion data."""
+    """Construct orthotropic plane-strain thermal-expansion data.
+
+    Returns a row `[alpha_x, alpha_y, alpha_z, alpha_xy, T_ref]` with zero engineering shear
+    expansion. Use `material_orientation_angles` during assembly to rotate local orthotropic axes.
+    """
 
     return orthotropic_axisymmetric_thermal_material(
         alpha_x,

@@ -136,6 +136,41 @@ def build_annular_hole_mesh(
     return nodes, np.asarray(elements, dtype=np.uint64)
 
 
+def build_annular_hole_quad9_mesh(
+    hole_radius: float,
+    outer_radius: float,
+    nr: int,
+    ntheta: int,
+    dtype: DType,
+) -> tuple[np.ndarray, np.ndarray]:
+    radii = np.linspace(hole_radius, outer_radius, 2 * nr + 1, dtype=dtype)
+    theta = np.linspace(0.0, 2.0 * np.pi, 2 * ntheta, endpoint=False, dtype=dtype)
+    nodes = np.array([[r * np.cos(t), r * np.sin(t)] for r in radii for t in theta], dtype=dtype)
+
+    def node_id(i: int, j: int) -> int:
+        return i * (2 * ntheta) + (j % (2 * ntheta))
+
+    elements = []
+    for j in range(ntheta):
+        for i in range(nr):
+            i0 = 2 * i
+            j0 = 2 * j
+            elements.append(
+                [
+                    node_id(i0, j0),
+                    node_id(i0 + 2, j0),
+                    node_id(i0 + 2, j0 + 2),
+                    node_id(i0, j0 + 2),
+                    node_id(i0 + 1, j0),
+                    node_id(i0 + 2, j0 + 1),
+                    node_id(i0 + 1, j0 + 2),
+                    node_id(i0, j0 + 1),
+                    node_id(i0 + 1, j0 + 1),
+                ]
+            )
+    return nodes, np.asarray(elements, dtype=np.uint64)
+
+
 def outer_faces_for_annular_hole_mesh(nr: int, ntheta: int) -> np.ndarray:
     return np.asarray([[j * nr + nr - 1, 1] for j in range(ntheta)], dtype=np.uint64)
 
@@ -146,6 +181,12 @@ def kirsch_polar_stress(
     r: np.ndarray,
     theta: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return the Kirsch infinite-plate stress field around a circular hole.
+
+    The remote load is uniaxial tension in the global x direction. Returned components are
+    `[sigma_rr, sigma_tt, sigma_rt]` in the local polar frame at `(r, theta)`.
+    """
+
     radius_ratio_2 = (hole_radius / r) ** 2
     radius_ratio_4 = radius_ratio_2**2
     cos2 = np.cos(2.0 * theta)
@@ -165,6 +206,8 @@ def cartesian_traction_from_polar_stress(
     sigma_rt: np.ndarray,
     theta: np.ndarray,
 ) -> np.ndarray:
+    """Convert polar radial-face stresses into global Cartesian traction components."""
+
     return np.column_stack(
         [
             sigma_rr * np.cos(theta) - sigma_rt * np.sin(theta),
@@ -174,6 +217,8 @@ def cartesian_traction_from_polar_stress(
 
 
 def hoop_stress_from_cartesian(stress_xy: np.ndarray, points: np.ndarray) -> np.ndarray:
+    """Project Cartesian plane-stress components onto the local circumferential direction."""
+
     theta = np.arctan2(points[:, 1], points[:, 0])
     sin_theta = np.sin(theta)
     cos_theta = np.cos(theta)
@@ -1872,9 +1917,56 @@ def test_material_orientation_angles_rotate_in_plane_for_both_formulations() -> 
         assert not np.allclose(k0, k_half_pi, rtol=1.0e-6, atol=1.0e-12)
 
 
+def test_explicit_quad9_input_uses_supplied_analysis_mesh() -> None:
+    """Explicit quad9 connectivity should preserve supplied geometry and recover affine strain."""
+
+    dtype = np.float64
+    nodes = np.asarray(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+            [0.5, 0.0],
+            [1.0, 0.5],
+            [0.5, 1.0],
+            [0.0, 0.5],
+            [0.5, 0.5],
+        ],
+        dtype=dtype,
+    )
+    elements = np.asarray([[0, 1, 2, 3, 4, 5, 6, 7, 8]], dtype=np.uint64)
+    material = fem.isotropic_plane_strain_material(185.0e9, 0.31, dtype=dtype)
+    model = fem.assemble_structural_2d(
+        nodes,
+        elements,
+        np.asarray([0], dtype=np.uint64),
+        np.asarray([material]),
+        formulation="plane_strain",
+        thickness=0.35,
+        element_type="quad9",
+    )
+
+    a, b, c, d = 0.013, -0.017, 0.019, -0.011
+    displacement = np.column_stack(
+        [
+            a * nodes[:, 0] + b * nodes[:, 1],
+            c * nodes[:, 0] + d * nodes[:, 1],
+        ]
+    )
+    samples = model.evaluate_quadrature(displacement)
+
+    assert model.input_elements.shape == (1, 9)
+    assert np.array_equal(model.analysis_elements, elements)
+    assert np.allclose(model.analysis_nodes, nodes)
+    assert np.allclose(samples.strain.reshape(-1, 4), np.asarray([a, d, 0.0, b + c]))
+
+
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 def test_plane_strain_affine_patch_solve_is_exact(element_type: str, quadrature: str) -> None:
+    """A compatible affine displacement field should solve exactly and recover constant strain."""
+
     dtype = np.float64
     nodes, elements = build_planar_rect_mesh(-1.25, 1.75, -0.8, 1.4, nx=2, ny=2, dtype=dtype)
     analysis_nodes = analysis_nodes_for_element_type(nodes, elements, element_type)
@@ -1931,6 +2023,8 @@ def test_plane_strain_uniaxial_stress_has_nonzero_out_of_plane_stress(
     element_type: str,
     quadrature: str,
 ) -> None:
+    """Plane strain should enforce zero out-of-plane strain while retaining sigma_zz."""
+
     dtype = np.float64
     youngs_modulus = 210.0e9
     poisson_ratio = 0.28
@@ -1991,14 +2085,20 @@ def test_plane_strain_circular_hole_matches_kirsch_stress_concentration(
     quadrature: str,
     resolution_scale: int,
 ) -> None:
+    """A large plate with a circular hole should recover the Kirsch Kt=3 stress concentration."""
+
     dtype = np.float64
     hole_radius = 1.0
     outer_radius = 8.0
-    nr = 32 * resolution_scale
-    ntheta = 256 * resolution_scale
+    base_nr, base_ntheta = (16, 128) if element_type == "quad9" else (32, 256)
+    nr = base_nr * resolution_scale
+    ntheta = base_ntheta * resolution_scale
     remote_stress = 8.0e6
     poisson_ratio = 0.29
-    nodes, elements = build_annular_hole_mesh(hole_radius, outer_radius, nr, ntheta, dtype)
+    if element_type == "quad9":
+        nodes, elements = build_annular_hole_quad9_mesh(hole_radius, outer_radius, nr, ntheta, dtype)
+    else:
+        nodes, elements = build_annular_hole_mesh(hole_radius, outer_radius, nr, ntheta, dtype)
     outer_faces = outer_faces_for_annular_hole_mesh(nr, ntheta)
     face_theta = (np.arange(ntheta, dtype=dtype) + 0.5) * (2.0 * np.pi / ntheta)
     sigma_rr, _sigma_tt, sigma_rt = kirsch_polar_stress(

@@ -1,5 +1,18 @@
 # Changelog
 
+## 6.0.0 2026-04-24
+
+### Changed
+
+* Rust
+    * !Generalize axisymmetric stress solver to cover both axisymmetric and plane-strain
+    * !Rename items from "axisymmetric" to indicate more general usage
+* Python
+    * !Rename axisymmetric_fem module to fem2d
+    * !Update FEM bindings to match changes to Rust backend
+    * Add handling for explicit 9-point quad mesh input
+
+
 ## 5.4.0 2026-04-24
 
 ### Changed

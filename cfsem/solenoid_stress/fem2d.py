@@ -612,9 +612,16 @@ def _normalize_nodes(nodes: ArrayLike, dtype: np.dtype[Any]) -> npt.NDArray[np.f
     return np.ascontiguousarray(arr)
 
 
-def _normalize_elements(elements: ArrayLike) -> npt.NDArray[np.uint64]:
+def _normalize_elements(
+    elements: ArrayLike,
+    nodes_per_element: int | tuple[int, ...] = 4,
+) -> npt.NDArray[np.uint64]:
     arr = np.asarray(elements, dtype=np.uint64)
-    assert arr.ndim == 2 and arr.shape[1] == 4, f"elements must have shape (nelem, 4); got {arr.shape}"
+    expected = (nodes_per_element,) if isinstance(nodes_per_element, int) else nodes_per_element
+    expected_text = " or ".join(f"(nelem, {count})" for count in expected)
+    assert (
+        arr.ndim == 2 and arr.shape[1] in expected
+    ), f"elements must have shape {expected_text}; got {arr.shape}"
     return np.ascontiguousarray(arr)
 
 
@@ -746,9 +753,10 @@ def _normalize_thermal_material_table(
         return None
     ids = np.asarray(material_ids, dtype=np.uint64)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
-    assert not isinstance(
-        thermal_material_table, Mapping
-    ), "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
+    assert not isinstance(thermal_material_table, Mapping), (
+        "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) "
+        "for tagged inputs"
+    )
     table = np.asarray(thermal_material_table, dtype=dtype)
     assert (
         table.ndim == 2 and table.shape[1] == 5
@@ -965,8 +973,11 @@ def assemble_structural_2d(
         nodes: Corner-node coordinates with shape `(nnode, 2)`. Coordinates are `(r, z)` for
             `formulation="axisymmetric"` and `(x, y)` for `formulation="plane_strain"`.
             Units are `[length]`.
-        elements: Quad4 connectivity with shape `(nelem, 4)`. Corner nodes must be ordered
-            counter-clockwise in the 2D analysis plane.
+        elements: Connectivity with shape `(nelem, 4)` for `element_type="quad4"`. For
+            `element_type="quad9"`, pass either corner-only `(nelem, 4)` connectivity to infer a
+            straight-sided quad9 mesh, or explicit `(nelem, 9)` connectivity in local order
+            `[corner0, corner1, corner2, corner3, face0_mid, face1_mid, face2_mid, face3_mid,
+            center]`. Corner nodes must be ordered counter-clockwise in the 2D analysis plane.
         material_ids: Dense material row indices with shape `(nelem,)`.
         material_table: Elastic stress-strain matrices with shape `(nmat, 4, 4)`. Matrix units
             are `[stress / strain] = [pressure]`.
@@ -997,7 +1008,6 @@ def assemble_structural_2d(
             instead of dense arrays.
     """
 
-    elements_arr = _normalize_elements(elements)
     dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
     nodes_arr = _normalize_nodes(nodes, dtype)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
@@ -1014,10 +1024,15 @@ def assemble_structural_2d(
     thickness_value = _normalize_thickness(normalized_formulation, thickness, dtype)
     normalized_element_type = _normalize_element_type(element_type)
     if normalized_element_type == "quad4":
+        elements_arr = _normalize_elements(elements, 4)
         analysis_nodes, analysis_elements, elevated = nodes_arr, elements_arr, None
     else:
-        elevated = infer_quad9_mesh(nodes_arr, elements_arr)
-        analysis_nodes, analysis_elements = elevated.analysis_nodes, elevated.analysis_elements
+        elements_arr = _normalize_elements(elements, (4, 9))
+        if elements_arr.shape[1] == 4:
+            elevated = infer_quad9_mesh(nodes_arr, elements_arr)
+            analysis_nodes, analysis_elements = elevated.analysis_nodes, elevated.analysis_elements
+        else:
+            analysis_nodes, analysis_elements, elevated = nodes_arr, elements_arr, None
     material_orientation_angles_arr = _normalize_material_orientation_angles(
         material_orientation_angles,
         int(analysis_elements.shape[0]),

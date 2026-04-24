@@ -21,7 +21,7 @@ This package includes three complementary layers:
 The FEM path supports:
 
 - axisymmetric and plane-strain structural formulations,
-- `quad4` and inferred `quad9` elements,
+- `quad4`, inferred `quad9`, and explicit `quad9` elements,
 - `gl3` and `gl4` quadrature,
 - optional per-element in-plane material orientation angles,
 - reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,

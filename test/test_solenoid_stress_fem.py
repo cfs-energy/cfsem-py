@@ -5,7 +5,6 @@ from typing import NamedTuple
 import numpy as np
 import pytest
 import scipy.interpolate as spi
-import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from cfsem.solenoid_stress import fem2d as fem
@@ -77,6 +76,112 @@ def build_annulus_strip_mesh(
                 ]
             )
     return nodes, np.asarray(elements, dtype=np.uint64)
+
+
+def build_planar_rect_mesh(
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    nx: int,
+    ny: int,
+    dtype: DType,
+) -> tuple[np.ndarray, np.ndarray]:
+    xs = np.linspace(x_min, x_max, nx + 1, dtype=dtype)
+    ys = np.linspace(y_min, y_max, ny + 1, dtype=dtype)
+    nodes = np.array([[x, y] for y in ys for x in xs], dtype=dtype)
+
+    def node_id(i: int, j: int) -> int:
+        return j * (nx + 1) + i
+
+    elements = []
+    for j in range(ny):
+        for i in range(nx):
+            elements.append(
+                [
+                    node_id(i, j),
+                    node_id(i + 1, j),
+                    node_id(i + 1, j + 1),
+                    node_id(i, j + 1),
+                ]
+            )
+    return nodes, np.asarray(elements, dtype=np.uint64)
+
+
+def build_annular_hole_mesh(
+    hole_radius: float,
+    outer_radius: float,
+    nr: int,
+    ntheta: int,
+    dtype: DType,
+) -> tuple[np.ndarray, np.ndarray]:
+    radii = np.linspace(hole_radius, outer_radius, nr + 1, dtype=dtype)
+    theta = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False, dtype=dtype)
+    nodes = np.array([[r * np.cos(t), r * np.sin(t)] for r in radii for t in theta], dtype=dtype)
+
+    def node_id(i: int, j: int) -> int:
+        return i * ntheta + (j % ntheta)
+
+    elements = []
+    for j in range(ntheta):
+        for i in range(nr):
+            elements.append(
+                [
+                    node_id(i, j),
+                    node_id(i + 1, j),
+                    node_id(i + 1, j + 1),
+                    node_id(i, j + 1),
+                ]
+            )
+    return nodes, np.asarray(elements, dtype=np.uint64)
+
+
+def outer_faces_for_annular_hole_mesh(nr: int, ntheta: int) -> np.ndarray:
+    return np.asarray([[j * nr + nr - 1, 1] for j in range(ntheta)], dtype=np.uint64)
+
+
+def kirsch_polar_stress(
+    remote_stress: float,
+    hole_radius: float,
+    r: np.ndarray,
+    theta: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    radius_ratio_2 = (hole_radius / r) ** 2
+    radius_ratio_4 = radius_ratio_2**2
+    cos2 = np.cos(2.0 * theta)
+    sin2 = np.sin(2.0 * theta)
+    sigma_rr = 0.5 * remote_stress * (
+        1.0 - radius_ratio_2 + (1.0 - 4.0 * radius_ratio_2 + 3.0 * radius_ratio_4) * cos2
+    )
+    sigma_tt = 0.5 * remote_stress * (
+        1.0 + radius_ratio_2 - (1.0 + 3.0 * radius_ratio_4) * cos2
+    )
+    sigma_rt = -0.5 * remote_stress * (1.0 + 2.0 * radius_ratio_2 - 3.0 * radius_ratio_4) * sin2
+    return sigma_rr, sigma_tt, sigma_rt
+
+
+def cartesian_traction_from_polar_stress(
+    sigma_rr: np.ndarray,
+    sigma_rt: np.ndarray,
+    theta: np.ndarray,
+) -> np.ndarray:
+    return np.column_stack(
+        [
+            sigma_rr * np.cos(theta) - sigma_rt * np.sin(theta),
+            sigma_rr * np.sin(theta) + sigma_rt * np.cos(theta),
+        ]
+    )
+
+
+def hoop_stress_from_cartesian(stress_xy: np.ndarray, points: np.ndarray) -> np.ndarray:
+    theta = np.arctan2(points[:, 1], points[:, 0])
+    sin_theta = np.sin(theta)
+    cos_theta = np.cos(theta)
+    return (
+        stress_xy[:, 0] * sin_theta**2
+        + stress_xy[:, 1] * cos_theta**2
+        - 2.0 * stress_xy[:, 3] * sin_theta * cos_theta
+    )
 
 
 def distort_annulus_strip_mesh(
@@ -1765,3 +1870,183 @@ def test_material_orientation_angles_rotate_in_plane_for_both_formulations() -> 
 
         assert np.allclose(k0, k_pi, rtol=1.0e-12, atol=1.0e-12)
         assert not np.allclose(k0, k_half_pi, rtol=1.0e-6, atol=1.0e-12)
+
+
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+def test_plane_strain_affine_patch_solve_is_exact(element_type: str, quadrature: str) -> None:
+    dtype = np.float64
+    nodes, elements = build_planar_rect_mesh(-1.25, 1.75, -0.8, 1.4, nx=2, ny=2, dtype=dtype)
+    analysis_nodes = analysis_nodes_for_element_type(nodes, elements, element_type)
+    material = fem.isotropic_plane_strain_material(185.0e9, 0.31, dtype=dtype)
+
+    a, b, c, d = 0.017, -0.023, 0.019, -0.013
+
+    def affine_displacement(points: np.ndarray) -> np.ndarray:
+        return np.column_stack(
+            [
+                a * points[:, 0] + b * points[:, 1],
+                c * points[:, 0] + d * points[:, 1],
+            ]
+        )
+
+    x_min, y_min = np.min(analysis_nodes, axis=0)
+    x_max, y_max = np.max(analysis_nodes, axis=0)
+    boundary = np.flatnonzero(
+        np.isclose(analysis_nodes[:, 0], x_min)
+        | np.isclose(analysis_nodes[:, 0], x_max)
+        | np.isclose(analysis_nodes[:, 1], y_min)
+        | np.isclose(analysis_nodes[:, 1], y_max)
+    )
+    boundary_displacement = affine_displacement(analysis_nodes)
+    prescribed = {
+        2 * int(node) + component: float(boundary_displacement[node, component])
+        for node in boundary
+        for component in range(2)
+    }
+
+    model = fem.assemble_structural_2d(
+        nodes,
+        elements,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        formulation="plane_strain",
+        thickness=0.35,
+        prescribed=prescribed,
+        element_type=element_type,
+        quadrature=quadrature,
+    )
+    displacement = model.solve(model.build_rhs())
+    samples = model.evaluate_quadrature(displacement)
+
+    expected_displacement = affine_displacement(model.analysis_nodes).reshape(-1)
+    expected_strain = np.asarray([a, d, 0.0, b + c], dtype=dtype)
+    assert np.allclose(displacement, expected_displacement, rtol=1.0e-11, atol=1.0e-12)
+    assert np.allclose(samples.strain.reshape(-1, 4), expected_strain, rtol=1.0e-12, atol=1.0e-13)
+
+
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+def test_plane_strain_uniaxial_stress_has_nonzero_out_of_plane_stress(
+    element_type: str,
+    quadrature: str,
+) -> None:
+    dtype = np.float64
+    youngs_modulus = 210.0e9
+    poisson_ratio = 0.28
+    remote_stress = 12.5e6
+    nodes, elements = build_planar_rect_mesh(-0.6, 0.9, -0.4, 0.5, nx=3, ny=3, dtype=dtype)
+    analysis_nodes = analysis_nodes_for_element_type(nodes, elements, element_type)
+    material = fem.isotropic_plane_strain_material(youngs_modulus, poisson_ratio, dtype=dtype)
+
+    epsilon_xx = remote_stress * (1.0 - poisson_ratio**2) / youngs_modulus
+    epsilon_yy = -poisson_ratio * (1.0 + poisson_ratio) * remote_stress / youngs_modulus
+    displacement_field = np.column_stack(
+        [
+            epsilon_xx * analysis_nodes[:, 0],
+            epsilon_yy * analysis_nodes[:, 1],
+        ]
+    )
+
+    x_min, y_min = np.min(analysis_nodes, axis=0)
+    x_max, y_max = np.max(analysis_nodes, axis=0)
+    boundary = np.flatnonzero(
+        np.isclose(analysis_nodes[:, 0], x_min)
+        | np.isclose(analysis_nodes[:, 0], x_max)
+        | np.isclose(analysis_nodes[:, 1], y_min)
+        | np.isclose(analysis_nodes[:, 1], y_max)
+    )
+    prescribed = {
+        2 * int(node) + component: float(displacement_field[node, component])
+        for node in boundary
+        for component in range(2)
+    }
+    model = fem.assemble_structural_2d(
+        nodes,
+        elements,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        formulation="plane_strain",
+        thickness=0.2,
+        prescribed=prescribed,
+        element_type=element_type,
+        quadrature=quadrature,
+    )
+    displacement = model.solve(model.build_rhs())
+    samples = model.evaluate_quadrature(displacement)
+
+    expected_stress = np.asarray(
+        [remote_stress, 0.0, poisson_ratio * remote_stress, 0.0],
+        dtype=dtype,
+    )
+    assert np.allclose(samples.strain[..., 2], 0.0, rtol=0.0, atol=1.0e-14)
+    assert np.allclose(samples.stress.reshape(-1, 4), expected_stress, rtol=1.0e-11, atol=2.0e-6)
+
+
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+@pytest.mark.parametrize("quadrature", QUADRATURES)
+@pytest.mark.parametrize("resolution_scale", [1, 2])
+def test_plane_strain_circular_hole_matches_kirsch_stress_concentration(
+    element_type: str,
+    quadrature: str,
+    resolution_scale: int,
+) -> None:
+    dtype = np.float64
+    hole_radius = 1.0
+    outer_radius = 8.0
+    nr = 32 * resolution_scale
+    ntheta = 256 * resolution_scale
+    remote_stress = 8.0e6
+    poisson_ratio = 0.29
+    nodes, elements = build_annular_hole_mesh(hole_radius, outer_radius, nr, ntheta, dtype)
+    outer_faces = outer_faces_for_annular_hole_mesh(nr, ntheta)
+    face_theta = (np.arange(ntheta, dtype=dtype) + 0.5) * (2.0 * np.pi / ntheta)
+    sigma_rr, _sigma_tt, sigma_rt = kirsch_polar_stress(
+        remote_stress,
+        hole_radius,
+        np.full(ntheta, outer_radius, dtype=dtype),
+        face_theta,
+    )
+    traction_values = cartesian_traction_from_polar_stress(sigma_rr, sigma_rt, face_theta).astype(dtype)
+
+    material = fem.isotropic_plane_strain_material(200.0e9, poisson_ratio, dtype=dtype)
+    prescribed = {
+        0: 0.0,
+        1: 0.0,
+        2 * ntheta + 1: 0.0,
+    }
+    model = fem.assemble_structural_2d(
+        nodes,
+        elements,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material]),
+        formulation="plane_strain",
+        thickness=1.0,
+        traction_faces=outer_faces,
+        prescribed=prescribed,
+        quadrature=quadrature,
+        element_type=element_type,
+    )
+    displacement = solve_with_factorized_model(model, model.build_rhs(traction_values=traction_values))
+    samples = model.evaluate_quadrature(displacement)
+
+    points = samples.points.reshape(-1, 2)
+    stress = samples.stress.reshape(-1, 4)
+    radius = np.linalg.norm(points, axis=1)
+    theta = np.mod(np.arctan2(points[:, 1], points[:, 0]), 2.0 * np.pi)
+    fit_layers = 2.5 if element_type == "quad9" else 3.5
+    fit_degree = 3 if element_type == "quad9" else 2
+    near_hole = radius < hole_radius + fit_layers * (outer_radius - hole_radius) / nr
+    near_peak = near_hole & (np.abs(theta - 0.5 * np.pi) < 0.04)
+    assert np.count_nonzero(near_peak) >= 12
+
+    # The Kirsch stress concentration is a boundary value at r = a.  Recovered FEM stresses live
+    # at interior quadrature points, so compare a near-boundary extrapolation to Kt = 3.
+    hoop = hoop_stress_from_cartesian(stress[near_peak], points[near_peak]) / remote_stress
+    radial_offset = radius[near_peak] - hole_radius
+    boundary_fit = np.polyfit(radial_offset, hoop, deg=fit_degree)
+    stress_concentration = float(np.polyval(boundary_fit, 0.0))
+
+    assert np.isclose(stress_concentration, 3.0, rtol=0.02)
+    expected_sigma_zz = poisson_ratio * (stress[near_peak, 0] + stress[near_peak, 1])
+    assert np.allclose(stress[near_peak, 2], expected_sigma_zz, rtol=1.0e-10)

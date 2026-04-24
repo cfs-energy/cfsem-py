@@ -25,6 +25,7 @@ impl<'a, F: Copy, const NODES_PER_ELEMENT: usize> QuadMeshView2d<'a, F, NODES_PE
     /// Validate that every connectivity entry references an existing node.
     pub fn validate_connectivity(&self) -> Result<(), String> {
         let node_count = self.num_nodes();
+        let mut duplicate_elements = Vec::new();
         for (element_index, element) in self.elements.iter().enumerate() {
             let mut unique_nodes = HashSet::with_capacity(NODES_PER_ELEMENT);
             for &node in element {
@@ -36,10 +37,19 @@ impl<'a, F: Copy, const NODES_PER_ELEMENT: usize> QuadMeshView2d<'a, F, NODES_PE
                 unique_nodes.insert(node);
             }
             if unique_nodes.len() != NODES_PER_ELEMENT {
-                eprintln!(
-                    "warning: element {element_index} contains duplicate node indices: {element:?}"
-                );
+                duplicate_elements.push((element_index, *element));
             }
+        }
+        if !duplicate_elements.is_empty() {
+            let entries = duplicate_elements
+                .iter()
+                .map(|(element_index, element)| format!("{element_index} {element:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!(
+                "warning: {} elements contain duplicate node indices: {entries}",
+                duplicate_elements.len()
+            );
         }
         Ok(())
     }

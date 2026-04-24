@@ -44,7 +44,7 @@ def _triangle_strip_mesh(
         triangles[2 * i + 1] = [lower0, upper1, upper0]
 
     s = np.ascontiguousarray(
-        np.concatenate((-s0 * np.ones(nphi), s0 * np.ones(nphi))),
+        np.concatenate((0.5 * s0 * np.ones(nphi), -0.5 * s0 * np.ones(nphi))),
         dtype=np.float64,
     )
 
@@ -81,7 +81,7 @@ def _triangle_current_density_reference(
         n1 = nodes[i1]
         n2 = nodes[i2]
         area = 0.5 * np.linalg.norm(np.cross(n1 - n0, n2 - n0))
-        out[i] = (s[i0] * (n2 - n1) + s[i1] * (n0 - n2) + s[i2] * (n1 - n0)) / (2.0 * area)
+        out[i] = (s[i0] * (n1 - n2) + s[i1] * (n2 - n0) + s[i2] * (n0 - n1)) / area
     return out
 
 
@@ -261,9 +261,7 @@ def test_triangle_mesh_field_mappings_contract_to_collection_fields(par):
     b_from_map = np.column_stack((bx_map @ s, by_map @ s, bz_map @ s))
     a_from_map = np.column_stack((ax_map @ s, ay_map @ s, az_map @ s))
     b_direct = np.column_stack(cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=False))
-    a_direct = np.column_stack(
-        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False)
-    )
+    a_direct = np.column_stack(cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False))
 
     assert bx_map.shape == (obs.shape[0], nodes.shape[0])
     assert by_map.shape == (obs.shape[0], nodes.shape[0])
@@ -602,9 +600,7 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
     )
     tri_forces_lin = _contract_force_mapping(fx_lin, fy_lin, fz_lin, ifil)
     b_lin = np.column_stack(
-        cfsem.flux_density_linear_filament(
-            xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=False
-        )
+        cfsem.flux_density_linear_filament(xyzp, xyzfil, dlxyzfil, ifil, wire_radius=wire_radius, par=False)
     ).reshape(points.shape)
     tri_forces_lin_ref = _force_from_bfield_on_target(points, weights, j_tgt, b_lin)
 

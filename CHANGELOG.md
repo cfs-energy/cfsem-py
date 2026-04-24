@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.4.0 2026-04-24
+
+### Changed
+
+* Rust
+    * Update BEM current density basis sign and scale convention to be more standard
+
 ## 5.3.1 2026-04-23
 
 ### Changed

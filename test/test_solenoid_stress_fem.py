@@ -1776,24 +1776,44 @@ def test_pack_material_tables_from_tags_sorts_tags_and_rewrites_ids() -> None:
 def test_python_convenience_wrappers_preserve_dtype_and_shapes() -> None:
     dtype = np.dtype(np.float32)
     iso = fem.isotropic_axisymmetric_material(200.0e9, 0.3, dtype=dtype)
+    iso_plane = fem.isotropic_plane_strain_material(200.0e9, 0.3, dtype=dtype)
     reduced = fem.cfsem_radial_material(200.0e9, 0.3, dtype=dtype)
     thermal = fem.isotropic_axisymmetric_thermal_material(1.0e-5, reference_temperature=293.15, dtype=dtype)
+    thermal_plane = fem.isotropic_plane_strain_thermal_material(
+        1.0e-5,
+        reference_temperature=293.15,
+        dtype=dtype,
+    )
     ortho = fem.orthotropic_axisymmetric_thermal_material(
+        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=dtype
+    )
+    ortho_plane = fem.orthotropic_plane_strain_thermal_material(
         1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=dtype
     )
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
     elevated = fem.infer_quad9_mesh(nodes, elements)
 
     assert iso.shape == (4, 4)
+    assert iso_plane.shape == (4, 4)
     assert reduced.shape == (4, 4)
     assert thermal.shape == (5,)
+    assert thermal_plane.shape == (5,)
     assert ortho.shape == (5,)
+    assert ortho_plane.shape == (5,)
     assert iso.dtype == dtype
+    assert iso_plane.dtype == dtype
     assert reduced.dtype == dtype
     assert thermal.dtype == dtype
+    assert thermal_plane.dtype == dtype
     assert ortho.dtype == dtype
+    assert ortho_plane.dtype == dtype
     assert elevated.analysis_elements.shape[1] == 9
     assert elevated.analysis_nodes.dtype == dtype
+
+
+def test_private_formulation_code_rejects_unknown_formulation() -> None:
+    with pytest.raises(ValueError, match="unsupported formulation"):
+        fem._formulation_code("plane_stress")
 
 
 def test_quad9_temperature_elevation_reproduces_affine_temperature_field() -> None:

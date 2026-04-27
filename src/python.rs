@@ -90,6 +90,7 @@ fn split_triangle_index_array2(
 
 fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::QuadratureKind> {
     match quad {
+        "gl1" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre1),
         "gl2" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre2),
         "gl3" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre3),
         "dunavant5" => Ok(physics::boundary_element::QuadratureKind::Dunavant5),

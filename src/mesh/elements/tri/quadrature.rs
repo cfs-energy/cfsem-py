@@ -1,5 +1,9 @@
 //! Reference-triangle quadrature rules used by the boundary-element triangle kernels.
 
+/// One-point centroid quadrature rule on a triangle.
+/// Format is `[weight, u, v]`.
+const TABLE_GAUSS_LEGENDRE_1: [[f64; 3]; 1] = [[0.5, 1.0 / 3.0, 1.0 / 3.0]];
+
 /// Second-order quadrature integration weights on a triangular surface.
 /// Format is `[weight, u, v]`.
 const TABLE_GAUSS_LEGENDRE_2: [[f64; 3]; 4] = [
@@ -40,6 +44,7 @@ pub const TRIANGLE_MAX_QUADRATURE_POINTS: usize = TABLE_GAUSS_LEGENDRE_3.len();
 
 #[derive(Clone, Copy)]
 pub enum QuadratureKind {
+    GaussLegendre1,
     GaussLegendre2,
     GaussLegendre3,
     Dunavant5,
@@ -48,6 +53,7 @@ pub enum QuadratureKind {
 #[inline]
 pub fn triangle_quadrature_points(quad_kind: QuadratureKind) -> &'static [[f64; 3]] {
     match quad_kind {
+        QuadratureKind::GaussLegendre1 => &TABLE_GAUSS_LEGENDRE_1,
         QuadratureKind::GaussLegendre2 => &TABLE_GAUSS_LEGENDRE_2,
         QuadratureKind::GaussLegendre3 => &TABLE_GAUSS_LEGENDRE_3,
         QuadratureKind::Dunavant5 => &TABLE_DUNAVANT_5,

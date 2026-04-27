@@ -1,11 +1,12 @@
 # Changelog
 
-## 6.1.0 2026-04-27
+## 7.0.0 2026-04-27
 
 ### Changed
 
 * Rust
-    * Add single-point quadrature option for BEM triangles
+    * !Add single-point quadrature option for BEM triangles
+        * Breaking change due to added enum variant
 * Python
     * Plumb `gl1` single-point quad into bindings and tests
 

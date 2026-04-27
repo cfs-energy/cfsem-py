@@ -1133,6 +1133,29 @@ fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     }
 }
 
+/// Checks that the single-point rule is the reference-triangle centroid rule.
+#[test]
+fn test_single_point_triangle_quadrature_rule() {
+    let quad_points = triangle_quadrature_points(QuadratureKind::GaussLegendre1);
+
+    assert_eq!(quad_points, &[[0.5, 1.0 / 3.0, 1.0 / 3.0]]);
+    assert_eq!(triangle_quadrature_count(QuadratureKind::GaussLegendre1), 1);
+
+    for p in 0..=1 {
+        for q in 0..=(1 - p) {
+            let approx_int = quad_points
+                .iter()
+                .map(|qp| qp[0] * qp[1].powi(p as i32) * qp[2].powi(q as i32))
+                .sum::<f64>();
+            let exact_int = reference_triangle_monomial_integral(p, q);
+            assert!(
+                approx(approx_int, exact_int, 0.0, 1e-14),
+                "single-point rule failed for u^{p} v^{q}: approx={approx_int:.16e}, exact={exact_int:.16e}"
+            );
+        }
+    }
+}
+
 /// Checks that the Dunavant rule integrates reference-triangle monomials through degree five.
 #[test]
 fn test_dunavant_rule_integrates_reference_triangle_monomials_to_degree_five() {

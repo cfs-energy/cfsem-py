@@ -5,6 +5,8 @@ from pytest import approx, mark, raises
 
 import cfsem
 
+GL1_TRI_QUAD = np.array([[0.5, 1.0 / 3.0, 1.0 / 3.0]], dtype=np.float64)
+
 GL2_TRI_QUAD = np.array(
     [
         [0.05283121635, 0.1666666667, 0.7886751346],
@@ -134,12 +136,17 @@ def test_triangle_mesh_quadrature_points_and_current_density():
 
     j = cfsem.triangle_mesh_current_density(nodes, triangles, s)
     j_ref = _triangle_current_density_reference(nodes, triangles, s)
+    centroid_points, centroid_weights = cfsem.triangle_mesh_quadrature_points(
+        nodes, triangles, quad="gl1"
+    )
     points, weights = cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="gl2")
     dunavant_points, dunavant_weights = cfsem.triangle_mesh_quadrature_points(
         nodes, triangles, quad="dunavant5"
     )
 
     assert j.shape == (triangles.shape[0], 3)
+    assert centroid_points.shape == (triangles.shape[0], GL1_TRI_QUAD.shape[0], 3)
+    assert centroid_weights.shape == (triangles.shape[0], GL1_TRI_QUAD.shape[0])
     assert points.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0], 3)
     assert weights.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0])
     assert dunavant_points.shape == (triangles.shape[0], 7, 3)
@@ -151,18 +158,26 @@ def test_triangle_mesh_quadrature_points_and_current_density():
         n1 = nodes[i1]
         n2 = nodes[i2]
         area = 0.5 * np.linalg.norm(np.cross(n1 - n0, n2 - n0))
+        expected_centroid = (
+            (1.0 - GL1_TRI_QUAD[:, 1] - GL1_TRI_QUAD[:, 2])[:, None] * n0[None, :]
+            + GL1_TRI_QUAD[:, 1][:, None] * n1[None, :]
+            + GL1_TRI_QUAD[:, 2][:, None] * n2[None, :]
+        )
+        expected_centroid_weights = GL1_TRI_QUAD[:, 0] * area
         expected_points = (
             (1.0 - GL2_TRI_QUAD[:, 1] - GL2_TRI_QUAD[:, 2])[:, None] * n0[None, :]
             + GL2_TRI_QUAD[:, 1][:, None] * n1[None, :]
             + GL2_TRI_QUAD[:, 2][:, None] * n2[None, :]
         )
         expected_weights = GL2_TRI_QUAD[:, 0] * area
+        assert np.allclose(centroid_points[i], expected_centroid, rtol=0.0, atol=1e-13)
+        assert np.allclose(centroid_weights[i], expected_centroid_weights, rtol=0.0, atol=1e-13)
         assert np.allclose(points[i], expected_points, rtol=0.0, atol=1e-13)
         assert np.allclose(weights[i], expected_weights, rtol=0.0, atol=1e-13)
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("quad", ["gl2", "gl3", "dunavant5"])
+@mark.parametrize("quad", ["gl1", "gl2", "gl3", "dunavant5"])
 def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     """Compare far-field triangle-mesh fields against the circular-filament reference."""
     radius = 0.7312345987

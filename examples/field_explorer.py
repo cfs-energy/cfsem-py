@@ -116,7 +116,7 @@ def normalize_boundary_element_strip_count(n_strip_count: int) -> int:
 
 
 def normalize_boundary_element_quadrature(quad: str | None) -> str:
-    return quad if quad in ("gl2", "gl3", "dunavant5") else DEFAULT_BOUNDARY_ELEMENT_QUAD
+    return quad if quad in ("gl1", "gl2", "gl3", "dunavant5") else DEFAULT_BOUNDARY_ELEMENT_QUAD
 
 
 def finite_positive_max(values: np.ndarray) -> float | None:
@@ -2098,6 +2098,7 @@ def create_app():
                                     dcc.Dropdown(
                                         id="boundary-element-quad",
                                         options=[
+                                            {"label": "Gauss-Legendre 1", "value": "gl1"},
                                             {"label": "Gauss-Legendre 2", "value": "gl2"},
                                             {"label": "Gauss-Legendre 3", "value": "gl3"},
                                             {"label": "Dunavant 5", "value": "dunavant5"},

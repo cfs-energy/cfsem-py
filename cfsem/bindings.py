@@ -378,7 +378,7 @@ def flux_density_triangle_mesh(
     triangles: NDArray[int64],
     s: NDArray[float64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> Array3xN:
     """
     Biot-Savart law calculation for B-field contribution from a triangle mesh
@@ -390,7 +390,8 @@ def flux_density_triangle_mesh(
         triangles: node indices with shape `(ntri, 3)`
         s: [A] nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [T] (Bx, By, Bz) magnetic flux density at observation points
@@ -408,7 +409,7 @@ def vector_potential_triangle_mesh(
     triangles: NDArray[int64],
     s: NDArray[float64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> Array3xN:
     """
     Vector potential calculation for A-field contribution from a triangle mesh
@@ -420,7 +421,8 @@ def vector_potential_triangle_mesh(
         triangles: node indices with shape `(ntri, 3)`
         s: [A] nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
@@ -437,7 +439,7 @@ def flux_density_triangle_mesh_mapping(
     nodes: NDArray[float64],
     triangles: NDArray[int64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the dense source-node to target-point B-field mapping for a triangle mesh.
@@ -447,7 +449,8 @@ def flux_density_triangle_mesh_mapping(
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [T/A] `(bx_map, by_map, bz_map)` with shape `(nobs, nnode)`
@@ -470,7 +473,7 @@ def vector_potential_triangle_mesh_mapping(
     nodes: NDArray[float64],
     triangles: NDArray[int64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the dense source-node to target-point A-field mapping for a triangle mesh.
@@ -480,7 +483,8 @@ def vector_potential_triangle_mesh_mapping(
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [V*s/(m*A)] `(ax_map, ay_map, az_map)` with shape `(nobs, nnode)`
@@ -524,7 +528,7 @@ def triangle_mesh_current_density(
 def triangle_mesh_quadrature_points(
     nodes: NDArray[float64],
     triangles: NDArray[int64],
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """
     Extract physical quadrature-point coordinates and area weights for each triangle.
@@ -532,7 +536,8 @@ def triangle_mesh_quadrature_points(
     Args:
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         points: [m] quadrature-point coordinates with shape `(ntri, nqp, 3)`
@@ -551,7 +556,7 @@ def triangle_mesh_inductance_matrix(
     nodes: NDArray[float64],
     triangles: NDArray[int64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> NDArray[float64]:
     """
     Assemble the dense nodal inductance matrix for a triangle stream-function mesh.
@@ -563,7 +568,8 @@ def triangle_mesh_inductance_matrix(
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [H] dense nodal inductance matrix with shape `(nnode, nnode)`
@@ -582,7 +588,7 @@ def triangle_mesh_inductance_mapping_from_linear_filaments(
     triangles_tgt: NDArray[int64],
     wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> NDArray[float64]:
     """
     Assemble the source-current to target-node inductance mapping from linear filaments.
@@ -594,7 +600,8 @@ def triangle_mesh_inductance_mapping_from_linear_filaments(
         triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
         wire_radius: [m] filament radius, scalar or array of length `nfil`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [H] mapping matrix with shape `(nnode_tgt, nfil)`
@@ -618,7 +625,7 @@ def triangle_mesh_inductance_mapping_from_circular_filaments(
     nodes_tgt: NDArray[float64],
     triangles_tgt: NDArray[int64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> NDArray[float64]:
     """
     Assemble the source-current to target-node inductance mapping from circular filaments.
@@ -629,7 +636,8 @@ def triangle_mesh_inductance_mapping_from_circular_filaments(
         nodes_tgt: [m] target mesh node coordinates with shape `(nnode_tgt, 3)`
         triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [H] mapping matrix with shape `(nnode_tgt, nfil)`
@@ -651,7 +659,7 @@ def triangle_mesh_flux_linkage_mapping_from_dipoles(
     triangles_tgt: NDArray[int64],
     outer_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> NDArray[float64]:
     """
     Assemble the source-amplitude to target-node flux-linkage mapping from dipoles.
@@ -663,7 +671,8 @@ def triangle_mesh_flux_linkage_mapping_from_dipoles(
         triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
         outer_radius: [m] dipole finite-core radius, scalar or array of length `ndip`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         mapping matrix with shape `(nnode_tgt, ndip)`
@@ -688,7 +697,7 @@ def triangle_mesh_force_mapping(
     triangles_tgt: NDArray[int64],
     s_tgt: NDArray[float64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the frozen-target source-node to target-triangle force mapping between two meshes.
@@ -700,7 +709,8 @@ def triangle_mesh_force_mapping(
         triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
         s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, nnode_src)`
@@ -727,7 +737,7 @@ def triangle_mesh_self_force_mapping(
     triangles: NDArray[int64],
     s: NDArray[float64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the self-excluded frozen-target source-node to target-triangle force mapping.
@@ -737,7 +747,8 @@ def triangle_mesh_self_force_mapping(
         triangles: node indices with shape `(ntri, 3)`
         s: [A] fixed nodal current-potential values with shape `(nnode,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri, nnode)`
@@ -763,7 +774,7 @@ def triangle_mesh_force_mapping_from_linear_filaments(
     s_tgt: NDArray[float64],
     wire_radius: float | NDArray[float64] = 0.0,
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the frozen-target source-current to target-triangle force mapping from linear filaments.
@@ -776,7 +787,8 @@ def triangle_mesh_force_mapping_from_linear_filaments(
         s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
         wire_radius: [m] filament radius, scalar or array of length `nfil`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, nfil)`
@@ -808,7 +820,7 @@ def triangle_mesh_force_mapping_from_circular_filaments(
     triangles_tgt: NDArray[int64],
     s_tgt: NDArray[float64],
     par: bool = True,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the frozen-target source-current to target-triangle force mapping from circular filaments.
@@ -820,7 +832,8 @@ def triangle_mesh_force_mapping_from_circular_filaments(
         triangles_tgt: target node indices with shape `(ntri_tgt, 3)`
         s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [N/A] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, nfil)`
@@ -850,7 +863,7 @@ def triangle_mesh_force_mapping_from_dipoles(
     s_tgt: NDArray[float64],
     par: bool = True,
     outer_radius: NDArray[float64] | None = None,
-    quad: str = "gl3",
+    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the frozen-target source-amplitude to target-triangle force mapping from dipoles.
@@ -863,7 +876,8 @@ def triangle_mesh_force_mapping_from_dipoles(
         s_tgt: [A] fixed target nodal current-potential values with shape `(nnode_tgt,)`
         par: Whether to use CPU parallelism
         outer_radius: [m] radius inside which to defer to magnetized sphere calc. Defaults to zeroes.
-        quad: Triangle quadrature rule, one of `"gl1"`, `"gl2"`, `"gl3"`, or `"dunavant5"`
+        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
+            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [N/source_amplitude] `(fx, fy, fz)` force mappings, each with shape `(ntri_tgt, ndip)`

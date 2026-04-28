@@ -1,5 +1,12 @@
 # Changelog
 
+## 8.0.0 2026-04-28
+
+* Rust
+    * !Replace triangle Gauss-Legendre quadrature point sets with Dunavant variants of order 1-4
+* Python
+    * Plumb new quadrature variants through bindings
+
 ## 7.0.0 2026-04-27
 
 ### Changed

@@ -90,9 +90,10 @@ fn split_triangle_index_array2(
 
 fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::QuadratureKind> {
     match quad {
-        "gl1" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre1),
-        "gl2" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre2),
-        "gl3" => Ok(physics::boundary_element::QuadratureKind::GaussLegendre3),
+        "dunavant1" => Ok(physics::boundary_element::QuadratureKind::Dunavant1),
+        "dunavant2" => Ok(physics::boundary_element::QuadratureKind::Dunavant2),
+        "dunavant3" => Ok(physics::boundary_element::QuadratureKind::Dunavant3),
+        "dunavant4" => Ok(physics::boundary_element::QuadratureKind::Dunavant4),
         "dunavant5" => Ok(physics::boundary_element::QuadratureKind::Dunavant5),
         _ => Err(PyInteropError::ValueError {
             msg: format!("Unsupported triangle quadrature rule: {quad}"),
@@ -2246,7 +2247,7 @@ fn triangle_mesh_view<'a>(
     })
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="gl3"))]
+#[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="dunavant3"))]
 fn flux_density_triangle_mesh(
     obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
@@ -2286,7 +2287,7 @@ fn flux_density_triangle_mesh(
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="gl3"))]
+#[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="dunavant3"))]
 fn vector_potential_triangle_mesh(
     obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
@@ -2326,7 +2327,7 @@ fn vector_potential_triangle_mesh(
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="gl3"))]
+#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="dunavant3"))]
 fn flux_density_triangle_mesh_mapping(
     obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
@@ -2369,7 +2370,7 @@ fn flux_density_triangle_mesh_mapping(
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="gl3"))]
+#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="dunavant3"))]
 fn vector_potential_triangle_mesh_mapping(
     obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
@@ -2441,7 +2442,7 @@ fn triangle_mesh_current_density(
     _3tup_ret!((jx, f64), (jy, f64), (jz, f64))
 }
 
-#[pyfunction(signature = (nodes, triangles, quad="gl3"))]
+#[pyfunction(signature = (nodes, triangles, quad="dunavant3"))]
 fn triangle_mesh_quadrature_points(
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
@@ -2492,7 +2493,7 @@ fn triangle_mesh_quadrature_points(
     })
 }
 
-#[pyfunction(signature = (nodes, triangles, par=true, quad="gl3"))]
+#[pyfunction(signature = (nodes, triangles, par=true, quad="dunavant3"))]
 fn triangle_mesh_inductance_matrix(
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
@@ -2527,7 +2528,7 @@ fn triangle_mesh_inductance_matrix(
     Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, par=true, quad="dunavant3"))]
 fn triangle_mesh_inductance_mapping_from_linear_filaments(
     xyzfil: (
         PyReadonlyArray1<f64>,
@@ -2577,7 +2578,7 @@ fn triangle_mesh_inductance_mapping_from_linear_filaments(
     Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
 }
 
-#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, par=true, quad="dunavant3"))]
 fn triangle_mesh_inductance_mapping_from_circular_filaments(
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
@@ -2621,7 +2622,7 @@ fn triangle_mesh_inductance_mapping_from_circular_filaments(
     Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
 }
 
-#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, par=true, quad="gl3"))]
+#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, par=true, quad="dunavant3"))]
 fn triangle_mesh_flux_linkage_mapping_from_dipoles(
     loc: (
         PyReadonlyArray1<f64>,
@@ -2671,7 +2672,7 @@ fn triangle_mesh_flux_linkage_mapping_from_dipoles(
     Python::attach(|py| Ok(PyArray1::from_vec(py, out).unbind()))
 }
 
-#[pyfunction(signature = (nodes_src, triangles_src, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+#[pyfunction(signature = (nodes_src, triangles_src, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="dunavant3"))]
 fn triangle_mesh_force_mapping(
     nodes_src: PyReadonlyArray2<f64>,
     triangles_src: PyReadonlyArray2<i64>,
@@ -2720,7 +2721,7 @@ fn triangle_mesh_force_mapping(
     _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
 }
 
-#[pyfunction(signature = (nodes, triangles, s, par=true, quad="gl3"))]
+#[pyfunction(signature = (nodes, triangles, s, par=true, quad="dunavant3"))]
 fn triangle_mesh_self_force_mapping(
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
@@ -2758,7 +2759,7 @@ fn triangle_mesh_self_force_mapping(
     _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+#[pyfunction(signature = (xyzfil, dlxyzfil, wire_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="dunavant3"))]
 fn triangle_mesh_force_mapping_from_linear_filaments(
     xyzfil: (
         PyReadonlyArray1<f64>,
@@ -2818,7 +2819,7 @@ fn triangle_mesh_force_mapping_from_linear_filaments(
     _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
 }
 
-#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+#[pyfunction(signature = (rfil, zfil, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="dunavant3"))]
 fn triangle_mesh_force_mapping_from_circular_filaments(
     rfil: PyReadonlyArray1<f64>,
     zfil: PyReadonlyArray1<f64>,
@@ -2867,7 +2868,7 @@ fn triangle_mesh_force_mapping_from_circular_filaments(
     _3tup_ret!((fx, f64), (fy, f64), (fz, f64))
 }
 
-#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="gl3"))]
+#[pyfunction(signature = (loc, moment_dir, outer_radius, nodes_tgt, triangles_tgt, s_tgt, par=true, quad="dunavant3"))]
 fn triangle_mesh_force_mapping_from_dipoles(
     loc: (
         PyReadonlyArray1<f64>,

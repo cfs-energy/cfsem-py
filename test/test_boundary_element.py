@@ -5,14 +5,25 @@ from pytest import approx, mark, raises
 
 import cfsem
 
-GL1_TRI_QUAD = np.array([[0.5, 1.0 / 3.0, 1.0 / 3.0]], dtype=np.float64)
+DUNAVANT1_TRI_QUAD = np.array([[0.5, 1.0 / 3.0, 1.0 / 3.0]], dtype=np.float64)
 
-GL2_TRI_QUAD = np.array(
+DUNAVANT2_TRI_QUAD = np.array(
     [
-        [0.05283121635, 0.1666666667, 0.7886751346],
-        [0.1971687836, 0.6220084679, 0.2113248654],
-        [0.05283121635, 0.04465819874, 0.7886751346],
-        [0.1971687836, 0.1666666667, 0.2113248654],
+        [1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0],
+        [1.0 / 6.0, 2.0 / 3.0, 1.0 / 6.0],
+        [1.0 / 6.0, 1.0 / 6.0, 2.0 / 3.0],
+    ],
+    dtype=np.float64,
+)
+
+DUNAVANT4_TRI_QUAD = np.array(
+    [
+        [0.1116907948390055, 0.445948490915965, 0.445948490915965],
+        [0.1116907948390055, 0.108103018168070, 0.445948490915965],
+        [0.1116907948390055, 0.445948490915965, 0.108103018168070],
+        [0.054975871827661, 0.091576213509771, 0.091576213509771],
+        [0.054975871827661, 0.816847572980459, 0.091576213509771],
+        [0.054975871827661, 0.091576213509771, 0.816847572980459],
     ],
     dtype=np.float64,
 )
@@ -137,18 +148,23 @@ def test_triangle_mesh_quadrature_points_and_current_density():
     j = cfsem.triangle_mesh_current_density(nodes, triangles, s)
     j_ref = _triangle_current_density_reference(nodes, triangles, s)
     centroid_points, centroid_weights = cfsem.triangle_mesh_quadrature_points(
-        nodes, triangles, quad="gl1"
+        nodes, triangles, quad="dunavant1"
     )
-    points, weights = cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="gl2")
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="dunavant2")
+    dunavant4_points, dunavant4_weights = cfsem.triangle_mesh_quadrature_points(
+        nodes, triangles, quad="dunavant4"
+    )
     dunavant_points, dunavant_weights = cfsem.triangle_mesh_quadrature_points(
         nodes, triangles, quad="dunavant5"
     )
 
     assert j.shape == (triangles.shape[0], 3)
-    assert centroid_points.shape == (triangles.shape[0], GL1_TRI_QUAD.shape[0], 3)
-    assert centroid_weights.shape == (triangles.shape[0], GL1_TRI_QUAD.shape[0])
-    assert points.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0], 3)
-    assert weights.shape == (triangles.shape[0], GL2_TRI_QUAD.shape[0])
+    assert centroid_points.shape == (triangles.shape[0], DUNAVANT1_TRI_QUAD.shape[0], 3)
+    assert centroid_weights.shape == (triangles.shape[0], DUNAVANT1_TRI_QUAD.shape[0])
+    assert points.shape == (triangles.shape[0], DUNAVANT2_TRI_QUAD.shape[0], 3)
+    assert weights.shape == (triangles.shape[0], DUNAVANT2_TRI_QUAD.shape[0])
+    assert dunavant4_points.shape == (triangles.shape[0], DUNAVANT4_TRI_QUAD.shape[0], 3)
+    assert dunavant4_weights.shape == (triangles.shape[0], DUNAVANT4_TRI_QUAD.shape[0])
     assert dunavant_points.shape == (triangles.shape[0], 7, 3)
     assert dunavant_weights.shape == (triangles.shape[0], 7)
     assert np.allclose(j, j_ref, rtol=1e-13, atol=1e-13)
@@ -159,25 +175,33 @@ def test_triangle_mesh_quadrature_points_and_current_density():
         n2 = nodes[i2]
         area = 0.5 * np.linalg.norm(np.cross(n1 - n0, n2 - n0))
         expected_centroid = (
-            (1.0 - GL1_TRI_QUAD[:, 1] - GL1_TRI_QUAD[:, 2])[:, None] * n0[None, :]
-            + GL1_TRI_QUAD[:, 1][:, None] * n1[None, :]
-            + GL1_TRI_QUAD[:, 2][:, None] * n2[None, :]
+            (1.0 - DUNAVANT1_TRI_QUAD[:, 1] - DUNAVANT1_TRI_QUAD[:, 2])[:, None] * n0[None, :]
+            + DUNAVANT1_TRI_QUAD[:, 1][:, None] * n1[None, :]
+            + DUNAVANT1_TRI_QUAD[:, 2][:, None] * n2[None, :]
         )
-        expected_centroid_weights = GL1_TRI_QUAD[:, 0] * area
+        expected_centroid_weights = DUNAVANT1_TRI_QUAD[:, 0] * area
         expected_points = (
-            (1.0 - GL2_TRI_QUAD[:, 1] - GL2_TRI_QUAD[:, 2])[:, None] * n0[None, :]
-            + GL2_TRI_QUAD[:, 1][:, None] * n1[None, :]
-            + GL2_TRI_QUAD[:, 2][:, None] * n2[None, :]
+            (1.0 - DUNAVANT2_TRI_QUAD[:, 1] - DUNAVANT2_TRI_QUAD[:, 2])[:, None] * n0[None, :]
+            + DUNAVANT2_TRI_QUAD[:, 1][:, None] * n1[None, :]
+            + DUNAVANT2_TRI_QUAD[:, 2][:, None] * n2[None, :]
         )
-        expected_weights = GL2_TRI_QUAD[:, 0] * area
+        expected_weights = DUNAVANT2_TRI_QUAD[:, 0] * area
+        expected_dunavant4_points = (
+            (1.0 - DUNAVANT4_TRI_QUAD[:, 1] - DUNAVANT4_TRI_QUAD[:, 2])[:, None] * n0[None, :]
+            + DUNAVANT4_TRI_QUAD[:, 1][:, None] * n1[None, :]
+            + DUNAVANT4_TRI_QUAD[:, 2][:, None] * n2[None, :]
+        )
+        expected_dunavant4_weights = DUNAVANT4_TRI_QUAD[:, 0] * area
         assert np.allclose(centroid_points[i], expected_centroid, rtol=0.0, atol=1e-13)
         assert np.allclose(centroid_weights[i], expected_centroid_weights, rtol=0.0, atol=1e-13)
         assert np.allclose(points[i], expected_points, rtol=0.0, atol=1e-13)
         assert np.allclose(weights[i], expected_weights, rtol=0.0, atol=1e-13)
+        assert np.allclose(dunavant4_points[i], expected_dunavant4_points, rtol=0.0, atol=1e-13)
+        assert np.allclose(dunavant4_weights[i], expected_dunavant4_weights, rtol=0.0, atol=1e-13)
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("quad", ["gl1", "gl2", "gl3", "dunavant5"])
+@mark.parametrize("quad", ["dunavant1", "dunavant2", "dunavant3", "dunavant4", "dunavant5"])
 def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     """Compare far-field triangle-mesh fields against the circular-filament reference."""
     radius = 0.7312345987
@@ -261,16 +285,16 @@ def test_triangle_mesh_field_mappings_contract_to_collection_fields(par):
     )
 
     bx_map, by_map, bz_map = cfsem.flux_density_triangle_mesh_mapping(
-        obs, nodes, triangles, par=par, quad="gl3"
+        obs, nodes, triangles, par=par, quad="dunavant3"
     )
     ax_map, ay_map, az_map = cfsem.vector_potential_triangle_mesh_mapping(
-        obs, nodes, triangles, par=par, quad="gl3"
+        obs, nodes, triangles, par=par, quad="dunavant3"
     )
     bx_map_ref, by_map_ref, bz_map_ref = cfsem.flux_density_triangle_mesh_mapping(
-        obs, nodes, triangles, par=not par, quad="gl3"
+        obs, nodes, triangles, par=not par, quad="dunavant3"
     )
     ax_map_ref, ay_map_ref, az_map_ref = cfsem.vector_potential_triangle_mesh_mapping(
-        obs, nodes, triangles, par=not par, quad="gl3"
+        obs, nodes, triangles, par=not par, quad="dunavant3"
     )
 
     b_from_map = np.column_stack((bx_map @ s, by_map @ s, bz_map @ s))
@@ -304,7 +328,7 @@ def test_triangle_mesh_inductance_matrix_strip_self_inductance_against_wien_and_
     target_current = 3.7  # [A]
 
     # Calculate full-mesh nodal mutual inductance matrix
-    lmat = cfsem.triangle_mesh_inductance_matrix(nodes, triangles, par=False, quad="gl3")  # [H]
+    lmat = cfsem.triangle_mesh_inductance_matrix(nodes, triangles, par=False, quad="dunavant3")  # [H]
 
     # Total self-inductance is 2 * stored energy per amp^2,
     # so we can calculate the self-inductance by taking 2 times the stored energy at unit current.
@@ -345,7 +369,7 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
     radius = 0.58
     height = radius * 1e-3
     nodes_tgt, triangles_tgt, s_tgt = _triangle_strip_mesh(radius, height, 0.9, nphi=20, z_center=0.14)
-    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="gl3")
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="dunavant3")
     j_tgt = cfsem.triangle_mesh_current_density(nodes_tgt, triangles_tgt, s_tgt)
     xyzp = (points[..., 0].ravel(), points[..., 1].ravel(), points[..., 2].ravel())
 
@@ -369,7 +393,7 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
         triangles_tgt,
         wire_radius=wire_radius,
         par=par,
-        quad="gl3",
+        quad="dunavant3",
     )
     m_lin_ref = cfsem.triangle_mesh_inductance_mapping_from_linear_filaments(
         xyzfil,
@@ -378,7 +402,7 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
         triangles_tgt,
         wire_radius=wire_radius,
         par=not par,
-        quad="gl3",
+        quad="dunavant3",
     )
     energy_lin = float(s_tgt @ (m_lin @ ifil))
     a_lin = np.column_stack(
@@ -392,10 +416,10 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
     zfil = np.array([-0.16, 0.29], dtype=np.float64)
     icirc = np.array([0.8, -1.1], dtype=np.float64)
     m_circ = cfsem.triangle_mesh_inductance_mapping_from_circular_filaments(
-        rfil, zfil, nodes_tgt, triangles_tgt, par=par, quad="gl3"
+        rfil, zfil, nodes_tgt, triangles_tgt, par=par, quad="dunavant3"
     )
     m_circ_ref = cfsem.triangle_mesh_inductance_mapping_from_circular_filaments(
-        rfil, zfil, nodes_tgt, triangles_tgt, par=not par, quad="gl3"
+        rfil, zfil, nodes_tgt, triangles_tgt, par=not par, quad="dunavant3"
     )
     energy_circ = float(s_tgt @ (m_circ @ icirc))
     r_qp = np.sqrt(points[..., 0] ** 2 + points[..., 1] ** 2)
@@ -433,7 +457,7 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
         triangles_tgt,
         outer_radius=outer_radius,
         par=par,
-        quad="gl3",
+        quad="dunavant3",
     )
     m_dip_ref = cfsem.triangle_mesh_flux_linkage_mapping_from_dipoles(
         loc,
@@ -442,7 +466,7 @@ def test_triangle_mesh_inductance_mappings_from_other_source_models(par):
         triangles_tgt,
         outer_radius=outer_radius,
         par=not par,
-        quad="gl3",
+        quad="dunavant3",
     )
     energy_dip = float(s_tgt @ (m_dip @ dip_amp))
     moment = tuple(dip_amp * comp for comp in moment_dir)
@@ -493,7 +517,7 @@ def test_triangle_mesh_inductance_mappings_scalar_source_thickness_inputs():
         triangles_tgt,
         wire_radius=wire_radius_scalar,
         par=False,
-        quad="gl3",
+        quad="dunavant3",
     )
 
     loc = (
@@ -515,7 +539,7 @@ def test_triangle_mesh_inductance_mappings_scalar_source_thickness_inputs():
         triangles_tgt,
         outer_radius=outer_radius_scalar,
         par=False,
-        quad="gl3",
+        quad="dunavant3",
     )
 
     assert m_lin.shape == (nodes_tgt.shape[0], 2)
@@ -539,15 +563,15 @@ def test_triangle_mesh_force_mapping_against_direct_target_quadrature(par):
         triangles_tgt,
         s_tgt,
         par=par,
-        quad="gl3",
+        quad="dunavant3",
     )
     tri_forces = _contract_force_mapping(fx, fy, fz, s_src)
 
-    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="gl3")
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="dunavant3")
     j_tgt = cfsem.triangle_mesh_current_density(nodes_tgt, triangles_tgt, s_tgt)
     b_qp = np.column_stack(
         cfsem.flux_density_triangle_mesh(
-            points.reshape(-1, 3), nodes_src, triangles_src, s_src, par=False, quad="gl3"
+            points.reshape(-1, 3), nodes_src, triangles_src, s_src, par=False, quad="dunavant3"
         )
     ).reshape(points.shape)
     tri_forces_ref = _force_from_bfield_on_target(points, weights, j_tgt, b_qp)
@@ -565,11 +589,11 @@ def test_triangle_mesh_self_force_mapping_shapes_and_serial_parallel_agree(par):
     height = radius * 1e-3
     nodes, triangles, s = _triangle_strip_mesh(radius, height, 1.0, nphi=32)
 
-    fx, fy, fz = cfsem.triangle_mesh_self_force_mapping(nodes, triangles, s, par=par, quad="gl3")
+    fx, fy, fz = cfsem.triangle_mesh_self_force_mapping(nodes, triangles, s, par=par, quad="dunavant3")
     tri_forces = _contract_force_mapping(fx, fy, fz, s)
     total_force = np.sum(tri_forces, axis=0)
     fx_ref, fy_ref, fz_ref = cfsem.triangle_mesh_self_force_mapping(
-        nodes, triangles, s, par=not par, quad="gl3"
+        nodes, triangles, s, par=not par, quad="dunavant3"
     )
     tri_forces_ref = _contract_force_mapping(fx_ref, fy_ref, fz_ref, s)
 
@@ -586,7 +610,7 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
     radius = 0.58
     height = radius * 1e-3
     nodes_tgt, triangles_tgt, s_tgt = _triangle_strip_mesh(radius, height, 0.9, nphi=20, z_center=0.14)
-    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="gl3")
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="dunavant3")
     j_tgt = cfsem.triangle_mesh_current_density(nodes_tgt, triangles_tgt, s_tgt)
     xyzp = (points[..., 0].ravel(), points[..., 1].ravel(), points[..., 2].ravel())
 
@@ -611,7 +635,7 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
         s_tgt,
         wire_radius=wire_radius,
         par=par,
-        quad="gl3",
+        quad="dunavant3",
     )
     tri_forces_lin = _contract_force_mapping(fx_lin, fy_lin, fz_lin, ifil)
     b_lin = np.column_stack(
@@ -623,7 +647,7 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
     zfil = np.array([-0.16, 0.29], dtype=np.float64)
     icirc = np.array([0.8, -1.1], dtype=np.float64)
     fx_circ, fy_circ, fz_circ = cfsem.triangle_mesh_force_mapping_from_circular_filaments(
-        rfil, zfil, nodes_tgt, triangles_tgt, s_tgt, par=par, quad="gl3"
+        rfil, zfil, nodes_tgt, triangles_tgt, s_tgt, par=par, quad="dunavant3"
     )
     tri_forces_circ = _contract_force_mapping(fx_circ, fy_circ, fz_circ, icirc)
     b_circ = np.column_stack(
@@ -657,7 +681,7 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
         s_tgt,
         par=par,
         outer_radius=outer_radius,
-        quad="gl3",
+        quad="dunavant3",
     )
     tri_forces_dip = _contract_force_mapping(fx_dip, fy_dip, fz_dip, dip_amp)
     moment = tuple(dip_amp * comp for comp in moment_dir)
@@ -709,11 +733,11 @@ def test_triangle_mesh_force_on_strip_against_linear_filament_loop(par):
         s_tgt,
         wire_radius=0.0,
         par=par,
-        quad="gl3",
+        quad="dunavant3",
     )
     tri_forces = _contract_force_mapping(fx, fy, fz, ifil)
 
-    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="gl3")
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes_tgt, triangles_tgt, quad="dunavant3")
     j_tgt = cfsem.triangle_mesh_current_density(nodes_tgt, triangles_tgt, s_tgt)
     j_qp = np.repeat(j_tgt[:, None, :], points.shape[1], axis=1).reshape(-1, 3)
     fx_ref, fy_ref, fz_ref = cfsem.body_force_density_linear_filament(
@@ -762,7 +786,7 @@ def test_triangle_mesh_invalid_inputs():
         cfsem.triangle_mesh_current_density(nodes, degenerate_triangles, s)
 
     with raises(ValueError, match="zero area"):
-        cfsem.triangle_mesh_quadrature_points(nodes, degenerate_triangles, quad="gl3")
+        cfsem.triangle_mesh_quadrature_points(nodes, degenerate_triangles, quad="dunavant3")
 
     with raises(ValueError, match="Unsupported triangle quadrature rule") as excinfo:
         cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, quad="bad")

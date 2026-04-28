@@ -51,6 +51,71 @@ struct TriangleMeshData {
     s: Vec<f64>,
 }
 
+fn permute_triangle_patch(tri: TrianglePatch, order: [usize; 3]) -> TrianglePatch {
+    TrianglePatch {
+        nodes: order.map(|i| tri.nodes[i]),
+        s: order.map(|i| tri.s[i]),
+    }
+}
+
+fn mesh_node(mesh: &TriangleMeshData, idx: usize) -> [f64; 3] {
+    [mesh.nodes.0[idx], mesh.nodes.1[idx], mesh.nodes.2[idx]]
+}
+
+fn node_permutation_by_coordinates(
+    reference: &TriangleMeshData,
+    candidate: &TriangleMeshData,
+) -> Vec<usize> {
+    (0..reference.nodes.0.len())
+        .map(|iref| {
+            let node = mesh_node(reference, iref);
+            (0..candidate.nodes.0.len())
+                .find(|&icand| mesh_node(candidate, icand) == node)
+                .unwrap_or_else(|| panic!("candidate mesh is missing reference node {node:?}"))
+        })
+        .collect()
+}
+
+fn explicit_patch_inductance_matrix(
+    patches: &[TrianglePatch],
+    mesh: &TriangleMeshData,
+) -> Vec<f64> {
+    let nnode = mesh.nodes.0.len();
+    let mut out = vec![0.0; nnode * nnode];
+
+    for (isrc, src) in patches.iter().enumerate() {
+        let src_idx = [
+            mesh.triangles.0[isrc],
+            mesh.triangles.1[isrc],
+            mesh.triangles.2[isrc],
+        ];
+        for (itgt, tgt) in patches.iter().enumerate() {
+            let tgt_idx = [
+                mesh.triangles.0[itgt],
+                mesh.triangles.1[itgt],
+                mesh.triangles.2[itgt],
+            ];
+            let block = triangle_basis_mutual_inductance_block(
+                src.nodes[0],
+                src.nodes[1],
+                src.nodes[2],
+                tgt.nodes[0],
+                tgt.nodes[1],
+                tgt.nodes[2],
+                QuadratureKind::Dunavant3,
+            );
+
+            for i in 0..3 {
+                for j in 0..3 {
+                    out[src_idx[i] * nnode + tgt_idx[j]] += block[i][j];
+                }
+            }
+        }
+    }
+
+    out
+}
+
 fn mesh_view(mesh: &TriangleMeshData) -> TriangleMeshView<'_> {
     TriangleMeshView::new(
         (&mesh.nodes.0, &mesh.nodes.1, &mesh.nodes.2),
@@ -133,7 +198,7 @@ fn strip_flux_density(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
             tri.nodes[2],
             tri.s,
             obs,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
         out[0] += contrib[0];
         out[1] += contrib[1];
@@ -151,7 +216,7 @@ fn strip_vector_potential(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
             tri.nodes[2],
             tri.s,
             obs,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
         out[0] += contrib[0];
         out[1] += contrib[1];
@@ -228,14 +293,14 @@ fn mesh_flux_density(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -> Ve
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
         false => flux_density_triangle_mesh(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
     };
@@ -256,14 +321,14 @@ fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
     };
@@ -277,10 +342,8 @@ fn mesh_inductance_matrix(mesh: &TriangleMeshData, par: bool) -> Vec<f64> {
     let mut out = vec![0.0; nnode * nnode];
     let view = mesh_view(mesh);
     let result = match par {
-        true => {
-            triangle_mesh_inductance_matrix_par(&view, QuadratureKind::GaussLegendre3, &mut out)
-        }
-        false => triangle_mesh_inductance_matrix(&view, QuadratureKind::GaussLegendre3, &mut out),
+        true => triangle_mesh_inductance_matrix_par(&view, QuadratureKind::Dunavant3, &mut out),
+        false => triangle_mesh_inductance_matrix(&view, QuadratureKind::Dunavant3, &mut out),
     };
     result.unwrap();
     out
@@ -312,7 +375,7 @@ where
         let tri_area = calc_tri_area(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
         let ktgt = triangle_basis_current_densities(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
 
-        for qp in triangle_quadrature_points(QuadratureKind::GaussLegendre3) {
+        for qp in triangle_quadrature_points(QuadratureKind::Dunavant3) {
             let obs = map_tri_uv(tri_nodes[0], tri_nodes[1], tri_nodes[2], [qp[1], qp[2]]);
             let a = eval_a(obs);
             let w = qp[0] * tri_area;
@@ -349,7 +412,7 @@ fn mesh_inductance_mapping_from_linear_filaments(
             dlxyzfil,
             wire_radius,
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             &mut out,
         ),
         false => triangle_mesh_inductance_mapping_from_linear_filaments(
@@ -357,7 +420,7 @@ fn mesh_inductance_mapping_from_linear_filaments(
             dlxyzfil,
             wire_radius,
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             &mut out,
         ),
     };
@@ -380,14 +443,14 @@ fn mesh_inductance_mapping_from_circular_filaments(
             rfil,
             zfil,
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             &mut out,
         ),
         false => triangle_mesh_inductance_mapping_from_circular_filaments(
             rfil,
             zfil,
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             &mut out,
         ),
     };
@@ -412,7 +475,7 @@ fn mesh_flux_linkage_mapping_from_dipoles(
             moment_dir,
             outer_radius,
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             &mut out,
         ),
         false => triangle_mesh_flux_linkage_mapping_from_dipoles(
@@ -420,7 +483,7 @@ fn mesh_flux_linkage_mapping_from_dipoles(
             moment_dir,
             outer_radius,
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             &mut out,
         ),
     };
@@ -443,13 +506,13 @@ fn mesh_flux_density_mapping(
         true => flux_density_triangle_mesh_mapping_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
         false => flux_density_triangle_mesh_mapping(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
     };
@@ -473,13 +536,13 @@ fn mesh_vector_potential_mapping(
         true => vector_potential_triangle_mesh_mapping_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh_mapping(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
     };
@@ -505,14 +568,14 @@ fn mesh_force_mapping(
             &view_src,
             &view_tgt,
             &mesh_tgt.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut fx, &mut fy, &mut fz),
         ),
         false => triangle_mesh_force_mapping(
             &view_src,
             &view_tgt,
             &mesh_tgt.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut fx, &mut fy, &mut fz),
         ),
     };
@@ -532,13 +595,13 @@ fn mesh_self_force_mapping(mesh: &TriangleMeshData, par: bool) -> (Vec<f64>, Vec
         true => triangle_mesh_self_force_mapping_par(
             &view,
             &mesh.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut fx, &mut fy, &mut fz),
         ),
         false => triangle_mesh_self_force_mapping(
             &view,
             &mesh.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut fx, &mut fy, &mut fz),
         ),
     };
@@ -556,7 +619,7 @@ fn explicit_force_on_target_triangle_from_source_mesh(
     let k_tgt = triangle_current_density(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s);
     let mut out = [0.0; 3];
     let view = mesh_view(mesh_src);
-    for qp in triangle_quadrature_points(QuadratureKind::GaussLegendre3) {
+    for qp in triangle_quadrature_points(QuadratureKind::Dunavant3) {
         let obs = map_tri_uv(tri_nodes[0], tri_nodes[1], tri_nodes[2], [qp[1], qp[2]]);
         let mut bx = [0.0];
         let mut by = [0.0];
@@ -565,7 +628,7 @@ fn explicit_force_on_target_triangle_from_source_mesh(
             (&[obs[0]], &[obs[1]], &[obs[2]]),
             &view,
             &mesh_src.s,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         )
         .unwrap();
@@ -671,7 +734,7 @@ fn strip_mutual_inductance(src: &[TrianglePatch], tgt: &[TrianglePatch]) -> f64 
                 target.nodes[0],
                 target.nodes[1],
                 target.nodes[2],
-                QuadratureKind::GaussLegendre3,
+                QuadratureKind::Dunavant3,
             );
             out += triangle_inductance_from_potential_vectors(block, source.s, target.s);
         }
@@ -765,7 +828,7 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
             tri.nodes[2],
             tri.s,
             *point,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
         let a_direct = vector_potential_triangle(
             tri.nodes[0],
@@ -773,7 +836,7 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
             tri.nodes[2],
             tri.s,
             *point,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
 
         for axis in 0..3 {
@@ -962,7 +1025,7 @@ fn test_triangle_mesh_field_mappings_match_collection_fields() {
 fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
     let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
     let obs = [0.35, -0.22, 1.15];
-    let quad_kind = QuadratureKind::GaussLegendre3;
+    let quad_kind = QuadratureKind::Dunavant3;
 
     let (tri_area, jref) = triangle_basis_current_density(tri[0], tri[1], tri[2]);
     let mut b_via_elements = [0.0; 3];
@@ -1030,7 +1093,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
                 tri[2],
                 s_basis,
                 obs,
-                QuadratureKind::GaussLegendre3,
+                QuadratureKind::Dunavant3,
             );
             let a = vector_potential_triangle(
                 tri[0],
@@ -1038,7 +1101,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
                 tri[2],
                 s_basis,
                 obs,
-                QuadratureKind::GaussLegendre3,
+                QuadratureKind::Dunavant3,
             );
             for axis in 0..3 {
                 b_sum[axis] += b[axis];
@@ -1081,7 +1144,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
 fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     let tris = circular_strip_triangles(0.73, 7.3e-4, 1.7, 24);
     let mesh = triangle_patches_to_mesh(&tris);
-    let quad_kind = QuadratureKind::GaussLegendre2;
+    let quad_kind = QuadratureKind::Dunavant2;
     let ntri = mesh.triangles.0.len();
     let nqp = triangle_quadrature_count(quad_kind);
 
@@ -1133,16 +1196,19 @@ fn test_triangle_mesh_quadrature_points_and_current_density_extractors() {
     }
 }
 
-/// Checks that the single-point rule is the reference-triangle centroid rule.
-#[test]
-fn test_single_point_triangle_quadrature_rule() {
-    let quad_points = triangle_quadrature_points(QuadratureKind::GaussLegendre1);
+fn assert_triangle_rule_integrates_monomials(
+    name: &str,
+    quad_kind: QuadratureKind,
+    degree: usize,
+    npoints: usize,
+) {
+    let quad_points = triangle_quadrature_points(quad_kind);
 
-    assert_eq!(quad_points, &[[0.5, 1.0 / 3.0, 1.0 / 3.0]]);
-    assert_eq!(triangle_quadrature_count(QuadratureKind::GaussLegendre1), 1);
+    assert_eq!(quad_points.len(), npoints);
+    assert_eq!(triangle_quadrature_count(quad_kind), npoints);
 
-    for p in 0..=1 {
-        for q in 0..=(1 - p) {
+    for p in 0..=degree {
+        for q in 0..=(degree - p) {
             let approx_int = quad_points
                 .iter()
                 .map(|qp| qp[0] * qp[1].powi(p as i32) * qp[2].powi(q as i32))
@@ -1150,32 +1216,20 @@ fn test_single_point_triangle_quadrature_rule() {
             let exact_int = reference_triangle_monomial_integral(p, q);
             assert!(
                 approx(approx_int, exact_int, 0.0, 1e-14),
-                "single-point rule failed for u^{p} v^{q}: approx={approx_int:.16e}, exact={exact_int:.16e}"
+                "{name} failed for u^{p} v^{q}: approx={approx_int:.16e}, exact={exact_int:.16e}"
             );
         }
     }
 }
 
-/// Checks that the Dunavant rule integrates reference-triangle monomials through degree five.
+/// Checks that the Dunavant rules integrate reference-triangle monomials to their exact degree.
 #[test]
-fn test_dunavant_rule_integrates_reference_triangle_monomials_to_degree_five() {
-    let quad_points = triangle_quadrature_points(QuadratureKind::Dunavant5);
-
-    assert_eq!(quad_points.len(), 7);
-
-    for p in 0..=5 {
-        for q in 0..=(5 - p) {
-            let approx_int = quad_points
-                .iter()
-                .map(|qp| qp[0] * qp[1].powi(p as i32) * qp[2].powi(q as i32))
-                .sum::<f64>();
-            let exact_int = reference_triangle_monomial_integral(p, q);
-            assert!(
-                approx(approx_int, exact_int, 0.0, 1e-14),
-                "Dunavant rule failed for u^{p} v^{q}: approx={approx_int:.16e}, exact={exact_int:.16e}"
-            );
-        }
-    }
+fn test_dunavant_rules_integrate_reference_triangle_monomials_to_expected_degree() {
+    assert_triangle_rule_integrates_monomials("Dunavant1", QuadratureKind::Dunavant1, 1, 1);
+    assert_triangle_rule_integrates_monomials("Dunavant2", QuadratureKind::Dunavant2, 2, 3);
+    assert_triangle_rule_integrates_monomials("Dunavant3", QuadratureKind::Dunavant3, 3, 4);
+    assert_triangle_rule_integrates_monomials("Dunavant4", QuadratureKind::Dunavant4, 4, 6);
+    assert_triangle_rule_integrates_monomials("Dunavant5", QuadratureKind::Dunavant5, 5, 7);
 }
 
 /// Checks disjoint-triangle inductance blocks against vector-potential contraction.
@@ -1183,7 +1237,7 @@ fn test_dunavant_rule_integrates_reference_triangle_monomials_to_degree_five() {
 fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disjoint_triangles() {
     let src = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.0]];
     let tgt = [[0.3, -0.2, 1.1], [1.1, 0.1, 1.4], [0.2, 0.9, 1.2]];
-    let quad_kind = QuadratureKind::GaussLegendre3;
+    let quad_kind = QuadratureKind::Dunavant3;
 
     let block = triangle_basis_mutual_inductance_block(
         src[0], src[1], src[2], tgt[0], tgt[1], tgt[2], quad_kind,
@@ -1232,42 +1286,85 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
     }
 }
 
-/// Checks a one-triangle mesh inductance matrix against the direct single-triangle block.
+/// Checks a shared-edge two-triangle inductance matrix against direct triangle blocks
+/// and verifies that permuting triangle node order preserves the physical result.
 #[test]
-fn test_triangle_mesh_inductance_matrix_matches_single_triangle_block() {
-    let tri = TrianglePatch {
-        nodes: [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]],
-        s: [1.2, -0.4, 0.7],
-    };
-    let mesh = triangle_patches_to_mesh(&[tri]);
-    let block = triangle_basis_mutual_inductance_block(
-        tri.nodes[0],
-        tri.nodes[1],
-        tri.nodes[2],
-        tri.nodes[0],
-        tri.nodes[1],
-        tri.nodes[2],
-        QuadratureKind::GaussLegendre3,
-    );
-    let lmat = mesh_inductance_matrix(&mesh, false);
-    let lmat_par = mesh_inductance_matrix(&mesh, true);
+fn test_triangle_mesh_inductance_matrix_is_invariant_to_shared_edge_triangle_node_order() {
+    let p0 = [0.0, 0.0, 0.0];
+    let p1 = [0.9, 0.1, 0.0];
+    let p2 = [0.2, 0.8, 0.1];
+    let p3 = [1.1, 1.0, -0.03];
+    let base_patches = [
+        TrianglePatch {
+            nodes: [p0, p1, p2],
+            s: [1.2, -0.4, 0.7],
+        },
+        TrianglePatch {
+            nodes: [p1, p3, p2],
+            s: [-0.4, -1.1, 0.7],
+        },
+    ];
+    let base_mesh = triangle_patches_to_mesh(&base_patches);
+    let base_lmat = mesh_inductance_matrix(&base_mesh, false);
+    let base_bilinear =
+        triangle_mesh_inductance_from_potential_vectors(&base_lmat, &base_mesh.s, &base_mesh.s)
+            .unwrap();
 
-    for i in 0..3 {
-        for j in 0..3 {
-            let idx = i * 3 + j;
+    for (case_name, orders) in [
+        ("unpermuted", [[0, 1, 2], [0, 1, 2]]),
+        ("permuted", [[1, 2, 0], [1, 2, 0]]),
+    ] {
+        let patches = [
+            permute_triangle_patch(base_patches[0], orders[0]),
+            permute_triangle_patch(base_patches[1], orders[1]),
+        ];
+        let mesh = triangle_patches_to_mesh(&patches);
+        let direct_lmat = explicit_patch_inductance_matrix(&patches, &mesh);
+        let lmat = mesh_inductance_matrix(&mesh, false);
+        let lmat_par = mesh_inductance_matrix(&mesh, true);
+        let base_to_case = node_permutation_by_coordinates(&base_mesh, &mesh);
+        assert_eq!(mesh.nodes.0.len(), base_mesh.nodes.0.len());
+        let nnode = base_mesh.nodes.0.len();
+
+        for i in 0..nnode {
             assert!(
-                approx(lmat[idx], block[i][j], 1e-12, 1e-14),
-                "single-triangle nodal matrix mismatch at ({i},{j}): matrix={:.16e}, block={:.16e}",
-                lmat[idx],
-                block[i][j],
+                approx(mesh.s[base_to_case[i]], base_mesh.s[i], 0.0, 1e-14),
+                "nodal stream function changed under {case_name} node order at node {i}: value={:.16e}, expected={:.16e}",
+                mesh.s[base_to_case[i]],
+                base_mesh.s[i],
             );
-            assert!(
-                approx(lmat_par[idx], block[i][j], 1e-12, 1e-14),
-                "single-triangle parallel nodal matrix mismatch at ({i},{j}): matrix={:.16e}, block={:.16e}",
-                lmat_par[idx],
-                block[i][j],
-            );
+            for j in 0..nnode {
+                let idx = i * nnode + j;
+                let case_idx = base_to_case[i] * nnode + base_to_case[j];
+                assert!(
+                    approx(lmat[idx], direct_lmat[idx], 1e-12, 1e-14),
+                    "shared-edge nodal matrix mismatch for {case_name} node order at ({i},{j}): matrix={:.16e}, direct={:.16e}",
+                    lmat[idx],
+                    direct_lmat[idx],
+                );
+                assert!(
+                    approx(lmat_par[idx], direct_lmat[idx], 1e-12, 1e-14),
+                    "shared-edge parallel nodal matrix mismatch for {case_name} node order at ({i},{j}): matrix={:.16e}, direct={:.16e}",
+                    lmat_par[idx],
+                    direct_lmat[idx],
+                );
+                assert!(
+                    approx(lmat[case_idx], base_lmat[idx], 1e-12, 1e-14),
+                    "shared-edge nodal matrix changed under {case_name} node order at base nodes ({i},{j}): matrix={:.16e}, expected={:.16e}",
+                    lmat[case_idx],
+                    base_lmat[idx],
+                );
+            }
         }
+
+        let bilinear =
+            triangle_mesh_inductance_from_potential_vectors(&lmat, &mesh.s, &mesh.s).unwrap();
+        assert!(
+            approx(bilinear, base_bilinear, 1e-12, 1e-14),
+            "shared-edge inductance changed under {case_name} node order: matrix={:.16e}, expected={:.16e}",
+            bilinear,
+            base_bilinear,
+        );
     }
 }
 
@@ -1282,7 +1379,7 @@ fn test_triangle_basis_self_inductance_block_is_symmetric_and_finite() {
         tri[0],
         tri[1],
         tri[2],
-        QuadratureKind::GaussLegendre3,
+        QuadratureKind::Dunavant3,
     );
 
     let mut max_entry: f64 = 0.0;
@@ -1649,7 +1746,7 @@ fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciproca
             other[0],
             other[1],
             other[2],
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
         let block21 = triangle_basis_mutual_inductance_block(
             other[0],
@@ -1658,7 +1755,7 @@ fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciproca
             tri0[0],
             tri0[1],
             tri0[2],
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
 
         for i in 0..3 {
@@ -1756,16 +1853,16 @@ fn test_triangle_basis_force_block_matches_direct_contraction() {
         tgt0,
         tgt1,
         tgt2,
-        QuadratureKind::GaussLegendre3,
+        QuadratureKind::Dunavant3,
     );
     let via_block = triangle_force_from_potential_vectors(block, s_src, s_tgt);
 
     let tri_area = calc_tri_area(tgt0, tgt1, tgt2);
     let k_tgt = triangle_current_density(tgt0, tgt1, tgt2, s_tgt);
     let mut direct = [0.0; 3];
-    for qp in triangle_quadrature_points(QuadratureKind::GaussLegendre3) {
+    for qp in triangle_quadrature_points(QuadratureKind::Dunavant3) {
         let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
-        let b = flux_density_triangle(src0, src1, src2, s_src, obs, QuadratureKind::GaussLegendre3);
+        let b = flux_density_triangle(src0, src1, src2, s_src, obs, QuadratureKind::Dunavant3);
         let jf = cross3(k_tgt[0], k_tgt[1], k_tgt[2], b[0], b[1], b[2]);
         let w = qp[0] * tri_area;
         direct[0] += jf.0 * w;
@@ -2041,7 +2138,7 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
             tri.nodes[2],
             tri.s,
             *point,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
         let a_direct = vector_potential_triangle(
             tri.nodes[0],
@@ -2049,7 +2146,7 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
             tri.nodes[2],
             tri.s,
             *point,
-            QuadratureKind::GaussLegendre3,
+            QuadratureKind::Dunavant3,
         );
 
         for axis in 0..3 {

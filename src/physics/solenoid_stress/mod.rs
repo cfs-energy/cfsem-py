@@ -497,6 +497,7 @@ mod test_utils;
 mod types;
 
 pub use crate::mesh::QuadratureRule;
+pub(crate) use axisym::build_b_matrix;
 pub use convenience::{
     ElevatedQuad9Mesh, QuadratureFieldSamples, Structural2dElementMeasures,
     Structural2dElementQuadrature, cfsem_radial_material, infer_quad9_mesh,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 8.1.0 2026-04-30
+
+* Rust
+    * Add quad mesh query interface for getting nearest nodes, faces, and elements
+    * Add sparse operators for interpolation and stress/strain recovery on quad meshes using query result
+* Python
+    * Plumb new mesh inspection functions through bindings
+
 ## 8.0.0 2026-04-28
 
 * Rust

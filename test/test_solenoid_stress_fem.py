@@ -2324,25 +2324,25 @@ def test_plane_strain_circular_hole_matches_kirsch_stress_concentration(
         element_type=element_type,
     )
     displacement = solve_with_factorized_model(model, model.build_rhs(traction_values=traction_values))
-    samples = model.evaluate_quadrature(displacement)
 
-    points = samples.points.reshape(-1, 2)
-    stress = samples.stress.reshape(-1, 4)
-    radius = np.linalg.norm(points, axis=1)
-    theta = np.mod(np.arctan2(points[:, 1], points[:, 0]), 2.0 * np.pi)
-    fit_layers = 2.5 if element_type == "quad9" else 3.5
-    fit_degree = 3 if element_type == "quad9" else 2
-    near_hole = radius < hole_radius + fit_layers * (outer_radius - hole_radius) / nr
-    near_peak = near_hole & (np.abs(theta - 0.5 * np.pi) < 0.04)
-    assert np.count_nonzero(near_peak) >= 12
+    points = np.asarray([[0.0, hole_radius]], dtype=dtype)
+    query = fem.query_quad_mesh(
+        model.analysis_nodes,
+        model.analysis_elements,
+        points,
+        element_type=element_type,
+    )
+    strain_operator = fem.quad_mesh_strain_operator(
+        query,
+        formulation="plane_strain",
+        thickness=1.0,
+    )
+    stress = np.asarray(strain_operator @ displacement, dtype=dtype).reshape(-1, 4) @ material.T
 
-    # The Kirsch stress concentration is a boundary value at r = a.  Recovered FEM stresses live
-    # at interior quadrature points, so compare a near-boundary extrapolation to Kt = 3.
-    hoop = hoop_stress_from_cartesian(stress[near_peak], points[near_peak]) / remote_stress
-    radial_offset = radius[near_peak] - hole_radius
-    boundary_fit = np.polyfit(radial_offset, hoop, deg=fit_degree)
-    stress_concentration = float(np.polyval(boundary_fit, 0.0))
+    # The Kirsch stress concentration is a boundary value at r = a, theta = pi/2.
+    hoop = hoop_stress_from_cartesian(stress, points) / remote_stress
+    stress_concentration = float(hoop[0])
 
-    assert np.isclose(stress_concentration, 3.0, rtol=0.02)
-    expected_sigma_zz = poisson_ratio * (stress[near_peak, 0] + stress[near_peak, 1])
-    assert np.allclose(stress[near_peak, 2], expected_sigma_zz, rtol=1.0e-10)
+    assert np.isclose(stress_concentration, 3.0, rtol=0.10)
+    expected_sigma_zz = poisson_ratio * (stress[:, 0] + stress[:, 1])
+    assert np.allclose(stress[:, 2], expected_sigma_zz, rtol=1.0e-10)

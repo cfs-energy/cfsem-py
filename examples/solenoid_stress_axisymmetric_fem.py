@@ -15,6 +15,9 @@ from cfsem.solenoid_stress.fem2d import (
     assemble_structural_2d,
     cfsem_radial_material,
     infer_quad9_mesh,
+    quad_mesh_interpolation_operator,
+    quad_mesh_strain_operator,
+    query_quad_mesh,
 )
 from cfsem.solenoid_stress.solenoid_1d import (
     SolenoidStress1D,
@@ -396,100 +399,25 @@ def source_intersects_solenoid(
     return ri <= source_r <= ro and z_min <= source_z <= z_max
 
 
-def q2_lagrange_1d(x: float) -> np.ndarray:
-    return np.array([0.5 * x * (x - 1.0), 1.0 - x * x, 0.5 * x * (x + 1.0)], dtype=np.float64)
-
-
-def q2_lagrange_grad_1d(x: float) -> np.ndarray:
-    return np.array([x - 0.5, -2.0 * x, x + 0.5], dtype=np.float64)
-
-
-def element_center_point_strain_stress(
-    coords: np.ndarray,
-    displacement_local: np.ndarray,
+def recover_axisymmetric_fields_at_points(
+    nodes: np.ndarray,
+    elements: np.ndarray,
+    points: np.ndarray,
+    displacement: np.ndarray,
     material: np.ndarray,
     element_type: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    if element_type == "quad4":
-        n = 0.25 * np.ones(4, dtype=np.float64)
-        grad_ref = 0.25 * np.array(
-            [
-                [-1.0, -1.0],
-                [1.0, -1.0],
-                [1.0, 1.0],
-                [-1.0, 1.0],
-            ],
-            dtype=np.float64,
-        )
-    elif element_type == "quad9":
-        lx = q2_lagrange_1d(0.0)
-        ly = q2_lagrange_1d(0.0)
-        dlx = q2_lagrange_grad_1d(0.0)
-        dly = q2_lagrange_grad_1d(0.0)
-        n = np.array(
-            [
-                lx[0] * ly[0],
-                lx[2] * ly[0],
-                lx[2] * ly[2],
-                lx[0] * ly[2],
-                lx[1] * ly[0],
-                lx[2] * ly[1],
-                lx[1] * ly[2],
-                lx[0] * ly[1],
-                lx[1] * ly[1],
-            ],
-            dtype=np.float64,
-        )
-        grad_ref = np.array(
-            [
-                [dlx[0] * ly[0], lx[0] * dly[0]],
-                [dlx[2] * ly[0], lx[2] * dly[0]],
-                [dlx[2] * ly[2], lx[2] * dly[2]],
-                [dlx[0] * ly[2], lx[0] * dly[2]],
-                [dlx[1] * ly[0], lx[1] * dly[0]],
-                [dlx[2] * ly[1], lx[2] * dly[1]],
-                [dlx[1] * ly[2], lx[1] * dly[2]],
-                [dlx[0] * ly[1], lx[0] * dly[1]],
-                [dlx[1] * ly[1], lx[1] * dly[1]],
-            ],
-            dtype=np.float64,
-        )
-    else:
-        raise ValueError(f"Unsupported element type {element_type!r}.")
-    jac = np.array(
-        [
-            [coords[:, 0] @ grad_ref[:, 0], coords[:, 0] @ grad_ref[:, 1]],
-            [coords[:, 1] @ grad_ref[:, 0], coords[:, 1] @ grad_ref[:, 1]],
-        ],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    query = query_quad_mesh(nodes, elements, points, element_type=element_type)
+    interpolation_operator = quad_mesh_interpolation_operator(query)
+    strain_operator = quad_mesh_strain_operator(query, formulation="axisymmetric")
+    displacement_2d = np.asarray(displacement, dtype=np.float64).reshape(nodes.shape[0], 2)
+    displacement_at_points = np.asarray(interpolation_operator @ displacement_2d, dtype=np.float64)
+    strain_at_points = np.asarray(
+        strain_operator @ displacement_2d.reshape(-1),
         dtype=np.float64,
-    )
-    inv_j = np.linalg.inv(jac)
-    grad_phys = np.column_stack(
-        [
-            inv_j[0, 0] * grad_ref[:, 0] + inv_j[1, 0] * grad_ref[:, 1],
-            inv_j[0, 1] * grad_ref[:, 0] + inv_j[1, 1] * grad_ref[:, 1],
-        ]
-    )
-
-    point = n @ coords
-    radius = float(point[0])
-    if radius <= np.finfo(np.float64).eps:
-        raise ValueError(f"section sample radius {radius} is too close to zero")
-
-    b = np.zeros((4, 2 * coords.shape[0]), dtype=np.float64)
-    for i in range(coords.shape[0]):
-        col_r = 2 * i
-        col_z = col_r + 1
-        b[0, col_r] = grad_phys[i, 0]
-        b[1, col_z] = grad_phys[i, 1]
-        b[2, col_r] = n[i] / radius
-        b[3, col_r] = grad_phys[i, 1]
-        b[3, col_z] = grad_phys[i, 0]
-
-    u_center = np.sum(n[:, None] * displacement_local, axis=0)
-    eps_center = b @ displacement_local.reshape(-1)
-    sig_center = material @ eps_center
-    return point, u_center, eps_center, sig_center
+    ).reshape(-1, 4)
+    stress_at_points = strain_at_points @ np.asarray(material, dtype=np.float64).T
+    return displacement_at_points, strain_at_points, stress_at_points
 
 
 def field_grid(
@@ -765,38 +693,32 @@ def build_section_comparisons(
 ) -> tuple[SectionComparison, ...]:
     section_list: list[SectionComparison] = []
     row_centers = 0.5 * (zs[:-1] + zs[1:])
+    elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
 
     for label, color, row in section_rows(nz):
-        element_indices = row * nr + np.arange(nr, dtype=np.int64)
-        radius = np.zeros(nr, dtype=np.float64)
-        u_r_fe = np.zeros(nr, dtype=np.float64)
-        e_rr_fe = np.zeros(nr, dtype=np.float64)
-        e_tt_fe = np.zeros(nr, dtype=np.float64)
-        s_rr_fe = np.zeros(nr, dtype=np.float64)
-        s_zz_fe = np.zeros(nr, dtype=np.float64)
-        s_tt_fe = np.zeros(nr, dtype=np.float64)
-        s_vm_fe = np.zeros(nr, dtype=np.float64)
-
-        for i_local, element_index in enumerate(element_indices):
-            conn = elements[element_index]
-            coords = nodes[conn]
-            displacement_local = displacement[conn]
-            point, u_center, eps_center, sig_center = element_center_point_strain_stress(
-                coords,
-                displacement_local,
-                material,
-                element_type,
-            )
-            radius[i_local] = point[0]
-            u_r_fe[i_local] = u_center[0]
-            e_rr_fe[i_local] = eps_center[0]
-            e_tt_fe[i_local] = eps_center[2]
-            s_rr_fe[i_local] = sig_center[0]
-            s_zz_fe[i_local] = sig_center[1]
-            s_tt_fe[i_local] = sig_center[2]
-            s_vm_fe[i_local] = von_mises_stress(sig_center[0], sig_center[1], sig_center[2], sig_center[3])
-
         z_value = float(row_centers[row])
+        radius = elem_r_centers
+        sample_points = np.column_stack([radius, np.full_like(radius, z_value)])
+        displacement_at_points, strain_at_points, stress_at_points = recover_axisymmetric_fields_at_points(
+            nodes,
+            elements,
+            sample_points,
+            displacement,
+            material,
+            element_type,
+        )
+        u_r_fe = displacement_at_points[:, 0]
+        e_rr_fe = strain_at_points[:, 0]
+        e_tt_fe = strain_at_points[:, 2]
+        s_rr_fe = stress_at_points[:, 0]
+        s_zz_fe = stress_at_points[:, 1]
+        s_tt_fe = stress_at_points[:, 2]
+        s_vm_fe = von_mises_stress(
+            stress_at_points[:, 0],
+            stress_at_points[:, 1],
+            stress_at_points[:, 2],
+            stress_at_points[:, 3],
+        )
         b_z_fe = body_force_r[row] / current_density if current_density > 0.0 else np.zeros_like(radius)
         _br_self, bz_self = sample_smooth_self_field(self_field, radius, np.full_like(radius, z_value))
         b_z_section = sample_loop_bz(radius, z_value, source_radius, source_z, source_current) + bz_self
@@ -857,20 +779,16 @@ def build_vm_stress_grids(
     vm_fem = np.zeros((nz, nr), dtype=np.float64)
     row_centers = 0.5 * (zs[:-1] + zs[1:])
     elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
-
-    for row in range(nz):
-        for col in range(nr):
-            element_index = row * nr + col
-            conn = elements[element_index]
-            coords = nodes[conn]
-            displacement_local = displacement[conn]
-            _point, _u_center, _eps_center, sig_center = element_center_point_strain_stress(
-                coords,
-                displacement_local,
-                material,
-                element_type,
-            )
-            vm_fem[row, col] = von_mises_stress(sig_center[0], sig_center[1], sig_center[2], sig_center[3])
+    sample_r, sample_z = np.meshgrid(elem_r_centers, row_centers, indexing="xy")
+    _u, _strain, stress = recover_axisymmetric_fields_at_points(
+        nodes,
+        elements,
+        np.column_stack([sample_r.reshape(-1), sample_z.reshape(-1)]),
+        displacement,
+        material,
+        element_type,
+    )
+    vm_fem[:, :] = von_mises_stress(stress[:, 0], stress[:, 1], stress[:, 2], stress[:, 3]).reshape(nz, nr)
 
     vm_1d = np.zeros((nz, nr), dtype=np.float64)
     for row, z_value in enumerate(row_centers):

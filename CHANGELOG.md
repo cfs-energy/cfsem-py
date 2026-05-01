@@ -5,6 +5,7 @@
 * Rust
     * Add stress operator on query points as standalone method
     * Remove unused dep on `branches`
+    * Reduce boilerplate in bindings
 * Python
     * Plumb new bindings
     * Deduplicate stress queries using new operator

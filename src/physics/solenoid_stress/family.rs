@@ -1,6 +1,7 @@
-//! Family-specific quadrilateral sampling and metadata for the axisymmetric FEM backend.
+//! Family-specific quadrilateral sampling and metadata for the structural 2D FEM backend.
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
+use crate::mesh::quad2d::{Quad4ReferenceElement, Quad9ReferenceElement, QuadReferenceElement};
 use crate::mesh::{QuadratureRule, sampling};
 use crate::physics::solenoid_stress::geometry::{FaceSample, VolumeSample};
 use crate::physics::solenoid_stress::model::Structural2dElementType;
@@ -15,6 +16,9 @@ use crate::physics::solenoid_stress::types::Real;
 /// - family-specific face sampling, and
 /// - connectivity flattening for Python-facing metadata export.
 pub(crate) trait QuadElementFamily<const NODES_PER_ELEMENT: usize> {
+    /// Reference-element implementation used by mesh query and recovery operators.
+    type ReferenceElement: QuadReferenceElement<NODES_PER_ELEMENT>;
+
     /// Return the public element-family tag corresponding to this internal family marker.
     fn element_type() -> Structural2dElementType;
 
@@ -45,6 +49,8 @@ pub(crate) trait QuadElementFamily<const NODES_PER_ELEMENT: usize> {
 pub(crate) struct Quad4Family;
 
 impl QuadElementFamily<{ quad4::NODES_PER_ELEMENT }> for Quad4Family {
+    type ReferenceElement = Quad4ReferenceElement;
+
     /// Identify this marker as the public `quad4` family.
     fn element_type() -> Structural2dElementType {
         Structural2dElementType::Quad4
@@ -72,6 +78,8 @@ impl QuadElementFamily<{ quad4::NODES_PER_ELEMENT }> for Quad4Family {
 pub(crate) struct Quad9Family;
 
 impl QuadElementFamily<{ quad9::NODES_PER_ELEMENT }> for Quad9Family {
+    type ReferenceElement = Quad9ReferenceElement;
+
     /// Identify this marker as the public `quad9` family.
     fn element_type() -> Structural2dElementType {
         Structural2dElementType::Quad9

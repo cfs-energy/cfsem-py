@@ -1161,14 +1161,11 @@ def _normalize_materials(
 
 
 def _normalize_thermal_material_table(
-    material_ids: ArrayLike,
     thermal_material_table: ArrayLike | None,
     dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]] | None:
     if thermal_material_table is None:
         return None
-    ids = np.asarray(material_ids, dtype=np.uint64)
-    assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     assert not isinstance(thermal_material_table, Mapping), (
         "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) "
         "for tagged inputs"
@@ -1428,7 +1425,6 @@ def assemble_structural_2d(
     nodes_arr = _normalize_nodes(nodes, dtype)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
     thermal_material_table_arr = _normalize_thermal_material_table(
-        material_ids,
         thermal_material_table,
         dtype,
     )

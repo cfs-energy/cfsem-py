@@ -6,6 +6,7 @@ use crate::mesh::elements::quad2d::{mapping, quad4, quad9};
 use crate::mesh::{Scalar, cast};
 use crate::physics::solenoid_stress::{
     DOF_PER_NODE, Real, Structural2dFormulation, build_b_matrix, rotate_material_in_plane,
+    validate_element_material_inputs,
 };
 
 /// Borrowed view of a 2D quadrilateral mesh with fixed nodes per element.
@@ -657,22 +658,11 @@ where
             reference_points.len()
         ));
     }
-    if material_ids.len() != mesh.num_elements() {
-        return Err(format!(
-            "material_ids has length {}, but mesh has {} elements",
-            material_ids.len(),
-            mesh.num_elements()
-        ));
-    }
-    if let Some(angles) = material_orientation_angles
-        && angles.len() != mesh.num_elements()
-    {
-        return Err(format!(
-            "material_orientation_angles has length {}, but mesh has {} elements",
-            angles.len(),
-            mesh.num_elements()
-        ));
-    }
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
 
     let max_nonzeros = element_indices.len() * 4 * DOF_PER_ELEMENT;
     let mut rows = Vec::with_capacity(max_nonzeros);

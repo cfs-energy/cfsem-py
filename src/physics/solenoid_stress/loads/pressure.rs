@@ -2,10 +2,10 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{FaceSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, local_dofs,
+    DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, local_dofs, scatter_local_vector,
 };
 
-use super::{SparseOperator, scatter_local_vector};
+use super::SparseOperator;
 
 /// Build the local dense pressure-load vector for one loaded face.
 ///

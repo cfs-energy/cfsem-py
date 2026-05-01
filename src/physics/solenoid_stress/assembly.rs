@@ -10,6 +10,7 @@ use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::validate_structural_2d_mesh;
 use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, StiffnessTriplets, Structural2dFormulation, local_dofs,
+    validate_element_material_inputs,
 };
 
 /// Assemble the full unconstrained stiffness matrix for one quadrilateral family.
@@ -37,22 +38,11 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    if material_ids.len() != mesh.num_elements() {
-        return Err(format!(
-            "material_ids has length {}, but mesh has {} elements",
-            material_ids.len(),
-            mesh.num_elements()
-        ));
-    }
-    if let Some(angles) = material_orientation_angles
-        && angles.len() != mesh.num_elements()
-    {
-        return Err(format!(
-            "material_orientation_angles has length {}, but mesh has {} elements",
-            angles.len(),
-            mesh.num_elements()
-        ));
-    }
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
     let mut rows = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
     let mut cols = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);
     let mut vals = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT);

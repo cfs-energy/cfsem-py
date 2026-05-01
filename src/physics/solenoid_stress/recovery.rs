@@ -46,7 +46,8 @@ use crate::physics::solenoid_stress::convenience::{
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial,
+    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, scatter_local_matrix,
+    validate_element_material_inputs,
 };
 
 /// Sparse quadrature-point recovery operators before reduction into the model-owned CSR form.
@@ -124,27 +125,6 @@ struct LocalThermalSampleKernel<F: Real, const NODES_PER_ELEMENT: usize> {
     thermal_stress: [[F; NODES_PER_ELEMENT]; 4],
     thermal_strain_constant: [F; 4],
     thermal_stress_constant: [F; 4],
-}
-
-/// Scatter one dense local block into triplet storage for a sparse recovery operator.
-fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
-    rows: &mut Vec<usize>,
-    cols: &mut Vec<usize>,
-    vals: &mut Vec<F>,
-    global_rows: &[usize; NROW],
-    global_cols: &[usize; NCOL],
-    local: &[[F; NCOL]; NROW],
-) {
-    for row in 0..NROW {
-        for col in 0..NCOL {
-            let value = local[row][col];
-            if value != F::zero() {
-                rows.push(global_rows[row]);
-                cols.push(global_cols[col]);
-                vals.push(value);
-            }
-        }
-    }
 }
 
 /// Build the dense thermal recovery blocks for one quadrature point.
@@ -234,22 +214,11 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    if material_ids.len() != mesh.num_elements() {
-        return Err(format!(
-            "material_ids has length {}, but mesh has {} elements",
-            material_ids.len(),
-            mesh.num_elements()
-        ));
-    }
-    if let Some(angles) = material_orientation_angles
-        && angles.len() != mesh.num_elements()
-    {
-        return Err(format!(
-            "material_orientation_angles has length {}, but mesh has {} elements",
-            angles.len(),
-            mesh.num_elements()
-        ));
-    }
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
 
     let nq_per_element = quadrature.points_per_element();
     let nsamples = mesh.num_elements() * nq_per_element;

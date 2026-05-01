@@ -8,6 +8,7 @@
     * Reduce boilerplate in bindings
     * Consolidate calculation of stress and strain operators
         * Use synthetic mesh query data for quadrature points
+    * Consolidate validation and matrix scattering
 * Python
     * Plumb new bindings
     * Deduplicate stress queries using new operator

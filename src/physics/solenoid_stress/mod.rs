@@ -509,6 +509,7 @@ pub use model::{
     ReducedRecoveryOperators, Structural2dElementType, Structural2dElements, Structural2dModel,
     assemble_structural_2d,
 };
+pub(crate) use types::validate_element_material_inputs;
 pub use types::{
     DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad,
     dof_per_element,

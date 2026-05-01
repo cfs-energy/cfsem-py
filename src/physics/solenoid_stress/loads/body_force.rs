@@ -2,10 +2,10 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, local_dofs,
+    DOF_PER_NODE, Real, Structural2dFormulation, local_dofs, scatter_local_matrix,
 };
 
-use super::{SparseOperator, scatter_local_matrix};
+use super::SparseOperator;
 
 /// Build the local dense body-force operator for one element.
 ///

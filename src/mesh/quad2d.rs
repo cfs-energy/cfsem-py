@@ -567,9 +567,10 @@ where
         ));
     }
 
-    let mut rows = Vec::new();
-    let mut cols = Vec::new();
-    let mut vals = Vec::new();
+    let max_nonzeros = element_indices.len() * 4 * DOF_PER_ELEMENT;
+    let mut rows = Vec::with_capacity(max_nonzeros);
+    let mut cols = Vec::with_capacity(max_nonzeros);
+    let mut vals = Vec::with_capacity(max_nonzeros);
 
     for (query_index, (&element_index, &reference)) in
         element_indices.iter().zip(reference_points).enumerate()
@@ -673,9 +674,10 @@ where
         ));
     }
 
-    let mut rows = Vec::new();
-    let mut cols = Vec::new();
-    let mut vals = Vec::new();
+    let max_nonzeros = element_indices.len() * 4 * DOF_PER_ELEMENT;
+    let mut rows = Vec::with_capacity(max_nonzeros);
+    let mut cols = Vec::with_capacity(max_nonzeros);
+    let mut vals = Vec::with_capacity(max_nonzeros);
 
     for (query_index, (&element_index, &reference)) in
         element_indices.iter().zip(reference_points).enumerate()

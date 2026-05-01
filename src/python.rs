@@ -1263,27 +1263,25 @@ fn solenoid_stress_fem_infer_quad9_mesh_f32<'py>(
     ))
 }
 
-/// Low-level binding for one-pass quad mesh queries.
-#[pyfunction]
-fn solenoid_stress_fem_quad_mesh_query_f64<'py>(
-    py: Python<'py>,
-    nodes: PyReadonlyArray2<'_, f64>,
+fn quad_mesh_query_for_element_type<F>(
+    nodes: &[[F; 2]],
     elements: PyReadonlyArray2<'_, u64>,
-    points: PyReadonlyArray2<'_, f64>,
+    points: &[[F; 2]],
     element_type: &str,
     max_iterations: usize,
-) -> PyResult<Py<PyDict>> {
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let points = read_axisym_nodes("points", points)?;
-    let query = match element_type {
+) -> PyResult<mesh::quad2d::QuadMeshQueryResult<F>>
+where
+    F: physics::solenoid_stress::Real + NumpyElement,
+{
+    match element_type {
         "quad4" => {
             let elements = read_axisym_elements::<4>("elements", elements)?;
             mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad4ReferenceElement, _, 4>(
                 mesh::QuadMeshView2d {
-                    nodes_rz: &nodes,
+                    nodes_rz: nodes,
                     elements: &elements,
                 },
-                &points,
+                points,
                 max_iterations,
             )
         }
@@ -1291,10 +1289,10 @@ fn solenoid_stress_fem_quad_mesh_query_f64<'py>(
             let elements = read_axisym_elements::<9>("elements", elements)?;
             mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad9ReferenceElement, _, 9>(
                 mesh::QuadMeshView2d {
-                    nodes_rz: &nodes,
+                    nodes_rz: nodes,
                     elements: &elements,
                 },
-                &points,
+                points,
                 max_iterations,
             )
         }
@@ -1302,7 +1300,16 @@ fn solenoid_stress_fem_quad_mesh_query_f64<'py>(
             "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
         )),
     }
-    .map_err(|msg| PyInteropError::ValueError { msg })?;
+    .map_err(|msg| PyInteropError::ValueError { msg }.into())
+}
+
+fn quad_mesh_query_to_py<'py, F>(
+    py: Python<'py>,
+    query: mesh::quad2d::QuadMeshQueryResult<F>,
+) -> PyResult<Py<PyDict>>
+where
+    F: mesh::Scalar + NumpyElement,
+{
     let dict = PyDict::new(py);
     dict.set_item(
         "nearest_node_indices",
@@ -1388,6 +1395,23 @@ fn solenoid_stress_fem_quad_mesh_query_f64<'py>(
 
 /// Low-level binding for one-pass quad mesh queries.
 #[pyfunction]
+fn solenoid_stress_fem_quad_mesh_query_f64<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    points: PyReadonlyArray2<'_, f64>,
+    element_type: &str,
+    max_iterations: usize,
+) -> PyResult<Py<PyDict>> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let points = read_axisym_nodes("points", points)?;
+    let query =
+        quad_mesh_query_for_element_type(&nodes, elements, &points, element_type, max_iterations)?;
+    quad_mesh_query_to_py(py, query)
+}
+
+/// Low-level binding for one-pass quad mesh queries.
+#[pyfunction]
 fn solenoid_stress_fem_quad_mesh_query_f32<'py>(
     py: Python<'py>,
     nodes: PyReadonlyArray2<'_, f32>,
@@ -1398,115 +1422,9 @@ fn solenoid_stress_fem_quad_mesh_query_f32<'py>(
 ) -> PyResult<Py<PyDict>> {
     let nodes = read_axisym_nodes("nodes", nodes)?;
     let points = read_axisym_nodes("points", points)?;
-    let query = match element_type {
-        "quad4" => {
-            let elements = read_axisym_elements::<4>("elements", elements)?;
-            mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad4ReferenceElement, _, 4>(
-                mesh::QuadMeshView2d {
-                    nodes_rz: &nodes,
-                    elements: &elements,
-                },
-                &points,
-                max_iterations,
-            )
-        }
-        "quad9" => {
-            let elements = read_axisym_elements::<9>("elements", elements)?;
-            mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad9ReferenceElement, _, 9>(
-                mesh::QuadMeshView2d {
-                    nodes_rz: &nodes,
-                    elements: &elements,
-                },
-                &points,
-                max_iterations,
-            )
-        }
-        _ => Err(format!(
-            "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
-        )),
-    }
-    .map_err(|msg| PyInteropError::ValueError { msg })?;
-    let dict = PyDict::new(py);
-    dict.set_item(
-        "nearest_node_indices",
-        PyArray1::from_vec(
-            py,
-            query
-                .nearest_node_indices
-                .into_iter()
-                .map(|index| index as u64)
-                .collect(),
-        ),
-    )?;
-    dict.set_item(
-        "nearest_node_points",
-        PyArray1::from_vec(py, flatten_quad_points(query.nearest_node_points)),
-    )?;
-    dict.set_item(
-        "nearest_node_distances",
-        PyArray1::from_vec(py, query.nearest_node_distances),
-    )?;
-    dict.set_item(
-        "nearest_element_indices",
-        PyArray1::from_vec(
-            py,
-            query
-                .nearest_element_indices
-                .into_iter()
-                .map(|index| index as u64)
-                .collect(),
-        ),
-    )?;
-    dict.set_item(
-        "nearest_element_reference_points",
-        PyArray1::from_vec(
-            py,
-            flatten_quad_points(query.nearest_element_reference_points),
-        ),
-    )?;
-    dict.set_item(
-        "nearest_element_points",
-        PyArray1::from_vec(py, flatten_quad_points(query.nearest_element_points)),
-    )?;
-    dict.set_item(
-        "nearest_element_distances",
-        PyArray1::from_vec(py, query.nearest_element_distances),
-    )?;
-    dict.set_item(
-        "nearest_face_element_indices",
-        PyArray1::from_vec(
-            py,
-            query
-                .nearest_face_element_indices
-                .into_iter()
-                .map(|index| index as u64)
-                .collect(),
-        ),
-    )?;
-    dict.set_item(
-        "nearest_face_local_faces",
-        PyArray1::from_vec(
-            py,
-            query
-                .nearest_face_local_faces
-                .into_iter()
-                .map(u64::from)
-                .collect(),
-        ),
-    )?;
-    dict.set_item(
-        "nearest_face_reference_coordinates",
-        PyArray1::from_vec(py, query.nearest_face_reference_coordinates),
-    )?;
-    dict.set_item(
-        "nearest_face_points",
-        PyArray1::from_vec(py, flatten_quad_points(query.nearest_face_points)),
-    )?;
-    dict.set_item(
-        "nearest_face_distances",
-        PyArray1::from_vec(py, query.nearest_face_distances),
-    )?;
-    Ok(dict.unbind())
+    let query =
+        quad_mesh_query_for_element_type(&nodes, elements, &points, element_type, max_iterations)?;
+    quad_mesh_query_to_py(py, query)
 }
 
 fn quad_mesh_interpolation_operator_for_element_type<F>(

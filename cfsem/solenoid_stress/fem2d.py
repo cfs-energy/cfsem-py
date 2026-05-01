@@ -64,6 +64,8 @@ _quad_mesh_query_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f32
 _quad_mesh_query_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f64
 _quad_mesh_strain_operator_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f32
 _quad_mesh_strain_operator_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f64
+_quad_mesh_stress_operator_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_stress_operator_f32
+_quad_mesh_stress_operator_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_stress_operator_f64
 _isotropic_axisymmetric_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f32
 _isotropic_axisymmetric_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f64
 _isotropic_plane_strain_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f32
@@ -805,6 +807,19 @@ def query_quad_mesh(
     recovery operators do not repeat point location. Complexity is
     `O(npoint * (nnode + nelem * max_iterations))`. A point is contained when its
     nearest-element distance is zero to the caller's tolerance.
+
+    Args:
+        nodes: Mesh node coordinates with shape `(nnode, 2)` and units `[length]`.
+        elements: Quad connectivity with shape `(nelem, 4)` for `quad4` or `(nelem, 9)` for
+            `quad9`. Entries are unitless node indices.
+        points: Query point coordinates with shape `(npoint, 2)` and units `[length]`.
+        element_type: Element family, either `"quad4"` or `"quad9"`.
+        max_iterations: Maximum Newton/projection iterations per element. Unitless.
+
+    Returns:
+        Query data with nearest-node, nearest-element, and nearest-face arrays. Coordinate arrays
+        have units `[length]`, distances have units `[length]`, reference coordinates are unitless,
+        and index arrays are unitless.
     """
 
     dtype = _resolve_float_dtype(nodes, points)
@@ -858,6 +873,14 @@ def quad_mesh_interpolation_operator(
     The returned matrix has shape `(npoint, nnode)`. Applying it to a dense `(nnode,)` vector gives
     scalar values at the query points; applying it to `(nnode, ncomponent)` interpolates multiple
     nodal fields with the same operator. The operator always uses the query's nearest element.
+
+    Args:
+        query: Mesh query data from `query_quad_mesh(...)`.
+
+    Returns:
+        Sparse interpolation operator with shape `(npoint, nnode)`. Entries are unitless shape
+        function values, so output values have the same units as the nodal values supplied during
+        matrix multiplication.
     """
 
     dtype = query.nodes.dtype
@@ -888,6 +911,17 @@ def quad_mesh_strain_operator(
 
     The returned matrix has shape `(4 * npoint, 2 * nnode)`. Rows are grouped by query point and
     use the same four-component strain ordering as the structural FEM formulation.
+
+    Args:
+        query: Mesh query data from `query_quad_mesh(...)`.
+        formulation: Symmetry reduction, either `"axisymmetric"` or `"plane_strain"`.
+        thickness: Plane-strain out-of-plane thickness with units `[length]`. Required only for
+            `formulation="plane_strain"`; must be omitted for `formulation="axisymmetric"`.
+
+    Returns:
+        Sparse strain-recovery operator with shape `(4 * npoint, 2 * nnode)`. Entries have units
+        `[1 / length]`, so multiplying by full nodal displacements with shape `(2 * nnode,)` and
+        units `[length]` returns unitless strain samples with shape `(4 * npoint,)`.
     """
 
     normalized_formulation = _normalize_formulation(formulation)
@@ -900,6 +934,72 @@ def quad_mesh_strain_operator(
             query.elements,
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
             query.nearest_element_reference_points,
+            query.element_type,
+            _formulation_code(normalized_formulation),
+            thickness_value,
+        ),
+        dtype,
+    )
+
+
+def quad_mesh_stress_operator(
+    query: QuadMeshQuery,
+    material_ids: ArrayLike,
+    material_table: ArrayLike,
+    *,
+    formulation: str,
+    thickness: float | None = None,
+    material_orientation_angles: ArrayLike | None = None,
+) -> sp.csr_matrix:
+    """Return a sparse operator mapping full nodal displacements to query-point stress.
+
+    The returned matrix has shape `(4 * npoint, 2 * nnode)`. Rows are grouped by query point and
+    use the same four-component stress ordering as the structural FEM formulation. Each query point
+    uses the material row assigned to its nearest element; for points contained by the mesh, that is
+    the containing element. Optional `material_orientation_angles` follow assembly semantics and
+    rotate local anisotropic material axes into the global 2D frame per element.
+
+    Args:
+        query: Mesh query data from `query_quad_mesh(...)`.
+        material_ids: Per-element material row indices with shape `(nelem,)`. Entries are unitless
+            indices into `material_table`.
+        material_table: Elastic stress-strain matrices with shape `(nmat, 4, 4)`. Entries have
+            units `[stress / strain] = [pressure]`.
+        formulation: Symmetry reduction, either `"axisymmetric"` or `"plane_strain"`.
+        thickness: Plane-strain out-of-plane thickness with units `[length]`. Required only for
+            `formulation="plane_strain"`; must be omitted for `formulation="axisymmetric"`.
+        material_orientation_angles: Optional scalar or per-element angles with shape `(nelem,)`,
+            in radians. Angles are unitless and rotate local material axes into the global 2D frame.
+
+    Returns:
+        Sparse stress-recovery operator with shape `(4 * npoint, 2 * nnode)`. Entries have units
+        `[pressure / length]`, so multiplying by full nodal displacements with shape
+        `(2 * nnode,)` and units `[length]` returns stress samples with shape `(4 * npoint,)` and
+        units `[pressure]`.
+    """
+
+    dtype = _resolve_float_dtype(query.nodes, material_table, material_orientation_angles)
+    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    assert material_ids_arr.shape == (
+        query.elements.shape[0],
+    ), f"material_ids must have shape ({query.elements.shape[0]},); got {material_ids_arr.shape}"
+    material_orientation_angles_arr = _normalize_material_orientation_angles(
+        material_orientation_angles,
+        query.elements.shape[0],
+        dtype,
+    )
+    normalized_formulation = _normalize_formulation(formulation)
+    thickness_value = _normalize_thickness(normalized_formulation, thickness, dtype)
+    binding = _dispatch_pair(dtype, _quad_mesh_stress_operator_f32, _quad_mesh_stress_operator_f64)
+    return _coo_operator_from_binding(
+        binding(
+            np.asarray(query.nodes, dtype=dtype),
+            query.elements,
+            np.asarray(query.nearest_element_indices, dtype=np.uint64),
+            np.asarray(query.nearest_element_reference_points, dtype=dtype),
+            material_ids_arr,
+            material_table_arr,
+            material_orientation_angles_arr,
             query.element_type,
             _formulation_code(normalized_formulation),
             thickness_value,
@@ -941,8 +1041,10 @@ def interpolate_quad_mesh_values(
         max_iterations: Maximum Newton/projection iterations per element.
 
     Returns:
-        QuadMeshInterpolation: interpolated values plus element indices, reference coordinates, and
-        inside flags for the query points.
+        Interpolated values plus element indices, reference coordinates, and inside flags for the
+        query points. `values` has shape `(npoint,)` or `(npoint, ...)` and the same units as
+        `nodal_values`; `element_indices` is unitless with shape `(npoint,)`; `reference_points`
+        is unitless with shape `(npoint, 2)`; `inside` has shape `(npoint,)`.
     """
 
     dtype = _resolve_float_dtype(nodes, nodal_values, points)
@@ -1654,6 +1756,7 @@ __all__ = [
     "orthotropic_plane_strain_thermal_material",
     "pack_material_tables_from_tags",
     "quad_mesh_interpolation_operator",
+    "quad_mesh_stress_operator",
     "quad_mesh_strain_operator",
     "query_quad_mesh",
 ]

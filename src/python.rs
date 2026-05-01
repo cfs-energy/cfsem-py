@@ -1766,6 +1766,190 @@ fn solenoid_stress_fem_quad_mesh_strain_operator_f32<'py>(
     ))
 }
 
+/// Low-level binding for stress-recovery operators from query element/reference data.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_stress_operator_f64<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    element_indices: PyReadonlyArray1<'_, u64>,
+    reference_points: PyReadonlyArray2<'_, f64>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f64>,
+    material_orientation_angles: PyReadonlyArray1<'_, f64>,
+    element_type: &str,
+    formulation: u8,
+    thickness: f64,
+) -> PyResult<(
+    Py<PyArray1<f64>>,
+    Py<PyArray1<u64>>,
+    Py<PyArray1<u64>>,
+    u64,
+    u64,
+)> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
+    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
+    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
+    let material_table = read_axisym_material_table("material_table", material_table)?;
+    let material_orientation_angles = read_axisym_material_orientation_angles(
+        "material_orientation_angles",
+        material_orientation_angles,
+    )?;
+    let material_orientation_angles =
+        (!material_orientation_angles.is_empty()).then_some(material_orientation_angles.as_slice());
+    let formulation =
+        physics::solenoid_stress::Structural2dFormulation::from_code(formulation, thickness)
+            .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let operator =
+        match element_type {
+            "quad4" => {
+                let elements = read_axisym_elements::<4>("elements", elements)?;
+                mesh::quad2d::quad_mesh_stress_operator::<
+                    mesh::quad2d::Quad4ReferenceElement,
+                    _,
+                    4,
+                    8,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    &material_ids,
+                    &material_table,
+                    material_orientation_angles,
+                    formulation,
+                )
+            }
+            "quad9" => {
+                let elements = read_axisym_elements::<9>("elements", elements)?;
+                mesh::quad2d::quad_mesh_stress_operator::<
+                    mesh::quad2d::Quad9ReferenceElement,
+                    _,
+                    9,
+                    18,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    &material_ids,
+                    &material_table,
+                    material_orientation_angles,
+                    formulation,
+                )
+            }
+            _ => Err(format!(
+                "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+            )),
+        }
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let (vals, rows, cols, nrow, ncol) = flatten_sparse_operator(operator);
+    Ok((
+        PyArray1::from_vec(py, vals).unbind(),
+        PyArray1::from_vec(py, rows).unbind(),
+        PyArray1::from_vec(py, cols).unbind(),
+        nrow,
+        ncol,
+    ))
+}
+
+/// Low-level binding for stress-recovery operators from query element/reference data.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_stress_operator_f32<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    element_indices: PyReadonlyArray1<'_, u64>,
+    reference_points: PyReadonlyArray2<'_, f32>,
+    material_ids: PyReadonlyArray1<'_, u64>,
+    material_table: PyReadonlyArray3<'_, f32>,
+    material_orientation_angles: PyReadonlyArray1<'_, f32>,
+    element_type: &str,
+    formulation: u8,
+    thickness: f32,
+) -> PyResult<(
+    Py<PyArray1<f32>>,
+    Py<PyArray1<u64>>,
+    Py<PyArray1<u64>>,
+    u64,
+    u64,
+)> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
+    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
+    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
+    let material_table = read_axisym_material_table("material_table", material_table)?;
+    let material_orientation_angles = read_axisym_material_orientation_angles(
+        "material_orientation_angles",
+        material_orientation_angles,
+    )?;
+    let material_orientation_angles =
+        (!material_orientation_angles.is_empty()).then_some(material_orientation_angles.as_slice());
+    let formulation =
+        physics::solenoid_stress::Structural2dFormulation::from_code(formulation, thickness)
+            .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let operator =
+        match element_type {
+            "quad4" => {
+                let elements = read_axisym_elements::<4>("elements", elements)?;
+                mesh::quad2d::quad_mesh_stress_operator::<
+                    mesh::quad2d::Quad4ReferenceElement,
+                    _,
+                    4,
+                    8,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    &material_ids,
+                    &material_table,
+                    material_orientation_angles,
+                    formulation,
+                )
+            }
+            "quad9" => {
+                let elements = read_axisym_elements::<9>("elements", elements)?;
+                mesh::quad2d::quad_mesh_stress_operator::<
+                    mesh::quad2d::Quad9ReferenceElement,
+                    _,
+                    9,
+                    18,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    &material_ids,
+                    &material_table,
+                    material_orientation_angles,
+                    formulation,
+                )
+            }
+            _ => Err(format!(
+                "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+            )),
+        }
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let (vals, rows, cols, nrow, ncol) = flatten_sparse_operator(operator);
+    Ok((
+        PyArray1::from_vec(py, vals).unbind(),
+        PyArray1::from_vec(py, rows).unbind(),
+        PyArray1::from_vec(py, cols).unbind(),
+        nrow,
+        ncol,
+    ))
+}
+
 #[pyfunction]
 fn filament_helix_path(
     path: (
@@ -3690,6 +3874,14 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_quad_mesh_strain_operator_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_stress_operator_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_stress_operator_f32,
         m.clone()
     )?)?;
     Ok(())

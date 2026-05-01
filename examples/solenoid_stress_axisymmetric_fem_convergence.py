@@ -37,7 +37,7 @@ from cfsem.solenoid_stress.fem2d import (
     cfsem_radial_material,
     infer_quad9_mesh,
     quad_mesh_interpolation_operator,
-    quad_mesh_strain_operator,
+    quad_mesh_stress_operator,
     query_quad_mesh,
 )
 from cfsem.solenoid_stress.solenoid_handcalc import s_long_solenoid
@@ -177,11 +177,18 @@ def recover_axisymmetric_midplane_profile(
     points = np.column_stack([sample_radius, np.full_like(sample_radius, 0.5 * HEIGHT)])
     query = query_quad_mesh(nodes, elements, points, element_type=element_type)
     interpolation_operator = quad_mesh_interpolation_operator(query)
-    strain_operator = quad_mesh_strain_operator(query, formulation="axisymmetric")
+    stress_operator = quad_mesh_stress_operator(
+        query,
+        np.zeros(elements.shape[0], dtype=np.uint64),
+        np.asarray([material], dtype=np.float64),
+        formulation="axisymmetric",
+    )
     displacement_2d = np.asarray(displacement, dtype=np.float64).reshape(nodes.shape[0], 2)
     displacement_at_points = np.asarray(interpolation_operator @ displacement_2d, dtype=np.float64)
-    strain = np.asarray(strain_operator @ displacement_2d.reshape(-1), dtype=np.float64).reshape(-1, 4)
-    stress = strain @ np.asarray(material, dtype=np.float64).T
+    stress = np.asarray(
+        stress_operator @ displacement_2d.reshape(-1),
+        dtype=np.float64,
+    ).reshape(-1, 4)
     return Profile(
         radius=np.asarray(sample_radius, dtype=np.float64),
         u_r=displacement_at_points[:, 0],

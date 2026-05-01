@@ -1,5 +1,14 @@
 # Changelog
 
+## 8.2.0 2026-05-01
+
+* Rust
+    * Add stress operator on query points as standalone method
+    * Remove unused dep on `branches`
+* Python
+    * Plumb new bindings
+    * Deduplicate stress queries using new operator
+
 ## 8.1.0 2026-04-30
 
 * Rust

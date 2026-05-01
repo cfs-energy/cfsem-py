@@ -115,6 +115,101 @@ def test_quad_mesh_query_and_interpolation_helpers_for_quad4():
     assert np.isnan(outside.values[0])
 
 
+def test_quad_mesh_stress_operator_selects_material_by_query_element() -> None:
+    """Query-point stress recovery should use the material assigned to each containing element."""
+
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    elements = np.array([[0, 1, 4, 3], [1, 2, 5, 4]], dtype=np.uint64)
+    material_ids = np.array([0, 1], dtype=np.uint64)
+    material_table = np.array(
+        [
+            [
+                [2.0, 0.25, 0.0, 0.0],
+                [0.5, 3.0, 0.0, 0.0],
+                [0.0, 0.0, 5.0, 0.0],
+                [0.0, 0.0, 0.0, 7.0],
+            ],
+            [
+                [11.0, 1.5, 0.0, 0.0],
+                [2.0, 13.0, 0.0, 0.0],
+                [0.0, 0.0, 17.0, 0.0],
+                [0.0, 0.0, 0.0, 19.0],
+            ],
+        ],
+        dtype=np.float64,
+    )
+    query = fem.query_quad_mesh(nodes, elements, [[0.25, 0.5], [1.75, 0.5]])
+    displacement = np.column_stack([nodes[:, 0], 2.0 * nodes[:, 1]]).reshape(-1)
+
+    stress_operator = fem.quad_mesh_stress_operator(
+        query,
+        material_ids,
+        material_table,
+        formulation="plane_strain",
+        thickness=1.0,
+    )
+    stress = np.asarray(stress_operator @ displacement).reshape(-1, 4)
+
+    strain = np.asarray([1.0, 2.0, 0.0, 0.0])
+    expected = np.vstack([material_table[0] @ strain, material_table[1] @ strain])
+    np.testing.assert_allclose(stress, expected, atol=1.0e-12)
+
+
+def test_quad_mesh_stress_operator_applies_material_orientation() -> None:
+    """Material orientation should rotate local anisotropic stiffness before stress recovery."""
+
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    elements = np.array([[0, 1, 2, 3]], dtype=np.uint64)
+    material_ids = np.array([0], dtype=np.uint64)
+    material_table = np.diag([10.0, 20.0, 30.0, 40.0]).reshape(1, 4, 4)
+    query = fem.query_quad_mesh(nodes, elements, [[0.5, 0.5]])
+    displacement = np.column_stack([nodes[:, 0], np.zeros(nodes.shape[0])]).reshape(-1)
+
+    unrotated_operator = fem.quad_mesh_stress_operator(
+        query,
+        material_ids,
+        material_table,
+        formulation="plane_strain",
+        thickness=1.0,
+    )
+    rotated_operator = fem.quad_mesh_stress_operator(
+        query,
+        material_ids,
+        material_table,
+        formulation="plane_strain",
+        thickness=1.0,
+        material_orientation_angles=np.pi / 2.0,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(unrotated_operator @ displacement).reshape(-1, 4),
+        [[10.0, 0.0, 0.0, 0.0]],
+    )
+    np.testing.assert_allclose(
+        np.asarray(rotated_operator @ displacement).reshape(-1, 4),
+        [[20.0, 0.0, 0.0, 0.0]],
+        atol=1.0e-12,
+    )
+
+
 def test_quad_mesh_interpolation_outside_policy_errors():
     """Check interpolation policy errors for points outside the nearest-element tolerance."""
 
@@ -2332,12 +2427,14 @@ def test_plane_strain_circular_hole_matches_kirsch_stress_concentration(
         points,
         element_type=element_type,
     )
-    strain_operator = fem.quad_mesh_strain_operator(
+    stress_operator = fem.quad_mesh_stress_operator(
         query,
+        np.zeros(model.analysis_elements.shape[0], dtype=np.uint64),
+        np.asarray([material], dtype=dtype),
         formulation="plane_strain",
         thickness=1.0,
     )
-    stress = np.asarray(strain_operator @ displacement, dtype=dtype).reshape(-1, 4) @ material.T
+    stress = np.asarray(stress_operator @ displacement, dtype=dtype).reshape(-1, 4)
 
     # The Kirsch stress concentration is a boundary value at r = a, theta = pi/2.
     hoop = hoop_stress_from_cartesian(stress, points) / remote_stress

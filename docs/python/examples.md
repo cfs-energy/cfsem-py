@@ -38,6 +38,27 @@ nearly uniform magnetic field.
 --8<-- "examples/helmholtz.py"
 ```
 
+## Quadrilateral Element Explorer
+
+Explore `quad4` and `quad9` interpolation in a Plotly Dash app. The example
+shows a central element with one layer of neighboring elements, quadrature
+locations for `gl3` or `gl4`, and the interpolated scalar field lifted above the
+analysis mesh.
+
+Run it with `uv run --group dev examples/element_explorer.py`.
+
+<figure markdown="span">
+  <iframe
+    class="plotly-embed"
+    loading="lazy"
+    src="../example_outputs/element_explorer.html"
+    title="Quadrilateral element explorer example"
+  ></iframe>
+  <figcaption>
+    Quadrilateral interpolation surface and quadrature points.
+  </figcaption>
+</figure>
+
 ## High-aspect-ratio Coil Inductance
 
 Estimate the (low-frequency) self- and mutual- inductance of a pair of air-core solenoids,

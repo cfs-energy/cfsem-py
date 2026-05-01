@@ -54,6 +54,16 @@ _cfsem_radial_material_f32 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_ma
 _cfsem_radial_material_f64 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f64
 _infer_quad9_mesh_f32 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f32
 _infer_quad9_mesh_f64 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f64
+_quad_mesh_interpolation_operator_f32 = (
+    _cfsem_bindings.solenoid_stress_fem_quad_mesh_interpolation_operator_f32
+)
+_quad_mesh_interpolation_operator_f64 = (
+    _cfsem_bindings.solenoid_stress_fem_quad_mesh_interpolation_operator_f64
+)
+_quad_mesh_query_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f32
+_quad_mesh_query_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f64
+_quad_mesh_strain_operator_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f32
+_quad_mesh_strain_operator_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f64
 _isotropic_axisymmetric_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f32
 _isotropic_axisymmetric_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f64
 _isotropic_plane_strain_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f32
@@ -188,6 +198,49 @@ class ElevatedQuad9Mesh:
     center_node_indices: npt.NDArray[np.int64]
 
 
+@dataclass(frozen=True, slots=True)
+class QuadMeshInterpolation:
+    """Interpolated nodal values and element-location metadata for query points.
+
+    `values` has shape `(npoint, ...)`, where `...` is the trailing shape of the nodal values.
+    `element_indices` stores the nearest element used for interpolation. `inside` reports whether
+    the nearest-element distance was within the containment tolerance.
+    """
+
+    values: npt.NDArray[np.floating[Any]]
+    element_indices: npt.NDArray[np.int64]
+    reference_points: npt.NDArray[np.floating[Any]]
+    inside: npt.NDArray[np.bool_]
+
+
+@dataclass(frozen=True, slots=True)
+class QuadMeshQuery:
+    """One-pass geometric query results for points in a 2D quadrilateral mesh.
+
+    The query stores nearest-node, nearest-element, and nearest-face data for each query point.
+    Interpolation and recovery operators can reuse this object without repeating the mesh search.
+    For contained points, the nearest element is the containing element and
+    `nearest_element_distances` is zero to numerical tolerance.
+    """
+
+    nodes: npt.NDArray[np.floating[Any]]
+    elements: npt.NDArray[np.uint64]
+    points: npt.NDArray[np.floating[Any]]
+    element_type: str
+    nearest_node_indices: npt.NDArray[np.int64]
+    nearest_node_points: npt.NDArray[np.floating[Any]]
+    nearest_node_distances: npt.NDArray[np.floating[Any]]
+    nearest_element_indices: npt.NDArray[np.int64]
+    nearest_element_reference_points: npt.NDArray[np.floating[Any]]
+    nearest_element_points: npt.NDArray[np.floating[Any]]
+    nearest_element_distances: npt.NDArray[np.floating[Any]]
+    nearest_face_element_indices: npt.NDArray[np.int64]
+    nearest_face_local_faces: npt.NDArray[np.int64]
+    nearest_face_reference_coordinates: npt.NDArray[np.floating[Any]]
+    nearest_face_points: npt.NDArray[np.floating[Any]]
+    nearest_face_distances: npt.NDArray[np.floating[Any]]
+
+
 class Structural2DFEMModel:
     """Reusable 2D structural FEM model with sparse operators and reduced solve state.
 
@@ -229,6 +282,7 @@ class Structural2DFEMModel:
         pressure_faces: npt.NDArray[np.uint64],
         traction_faces: npt.NDArray[np.uint64],
         formulation: str,
+        thickness: float,
         element_type: str,
         stiffness: sp.csc_matrix,
         body_force_to_rhs: sp.csr_matrix,
@@ -282,6 +336,7 @@ class Structural2DFEMModel:
         self.fixed_dofs = fixed_dofs
         self.fixed_values = fixed_values
         self.formulation = formulation
+        self.thickness = thickness
         self.element_type = element_type
         if formulation == "axisymmetric":
             self.coordinate_labels = ("r", "z")
@@ -693,6 +748,234 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
         corner_node_indices=np.asarray(corner_node_indices, dtype=np.int64),
         midside_node_indices=np.asarray(midside_node_indices, dtype=np.int64),
         center_node_indices=np.asarray(center_node_indices, dtype=np.int64),
+    )
+
+
+def _normalize_query_points(
+    points: ArrayLike,
+    dtype: np.dtype[Any],
+) -> npt.NDArray[np.floating[Any]]:
+    arr = np.asarray(points, dtype=dtype)
+    assert arr.ndim == 2 and arr.shape[1] == 2, f"points must have shape (npoint, 2); got {arr.shape}"
+    return np.ascontiguousarray(arr)
+
+
+def _normalize_query_tolerance(
+    tolerance: float | None,
+    dtype: np.dtype[Any],
+) -> float:
+    if tolerance is not None:
+        value = float(np.asarray(tolerance, dtype=dtype))
+        assert value >= 0.0, f"tolerance must be nonnegative; got {tolerance!r}"
+        return value
+    return 1.0e-5 if dtype == np.float32 else 1.0e-10
+
+
+def _coo_operator_from_binding(
+    binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
+    dtype: np.dtype[Any],
+) -> sp.csr_matrix:
+    vals, rows, cols, nrow, ncol = binding
+    return _to_csr_matrix(
+        sp.coo_matrix(
+            (
+                np.asarray(vals, dtype=dtype),
+                (
+                    np.asarray(rows, dtype=np.int64),
+                    np.asarray(cols, dtype=np.int64),
+                ),
+            ),
+            shape=(int(nrow), int(ncol)),
+        ).tocsr()
+    )
+
+
+def query_quad_mesh(
+    nodes: ArrayLike,
+    elements: ArrayLike,
+    points: ArrayLike,
+    *,
+    element_type: str = "quad4",
+    max_iterations: int = 20,
+) -> QuadMeshQuery:
+    """Query nearest node, nearest element, and nearest face in one pass.
+
+    The Rust backend scans all nodes once and all elements once per query point. The element scan
+    computes nearest-element and nearest-face metadata together so downstream interpolation and
+    recovery operators do not repeat point location. Complexity is
+    `O(npoint * (nnode + nelem * max_iterations))`. A point is contained when its
+    nearest-element distance is zero to the caller's tolerance.
+    """
+
+    dtype = _resolve_float_dtype(nodes, points)
+    normalized_element_type = _normalize_element_type(element_type)
+    nodes_arr = _normalize_nodes(nodes, dtype)
+    elements_arr = _normalize_elements(
+        elements,
+        4 if normalized_element_type == "quad4" else 9,
+    )
+    points_arr = _normalize_query_points(points, dtype)
+    binding = _dispatch_pair(dtype, _quad_mesh_query_f32, _quad_mesh_query_f64)
+    data = binding(
+        nodes_arr,
+        elements_arr,
+        points_arr,
+        normalized_element_type,
+        int(max_iterations),
+    )
+
+    return QuadMeshQuery(
+        nodes=nodes_arr,
+        elements=elements_arr,
+        points=points_arr,
+        element_type=normalized_element_type,
+        nearest_node_indices=np.asarray(data["nearest_node_indices"], dtype=np.int64),
+        nearest_node_points=np.asarray(data["nearest_node_points"], dtype=dtype).reshape(-1, 2),
+        nearest_node_distances=np.asarray(data["nearest_node_distances"], dtype=dtype),
+        nearest_element_indices=np.asarray(data["nearest_element_indices"], dtype=np.int64),
+        nearest_element_reference_points=np.asarray(
+            data["nearest_element_reference_points"],
+            dtype=dtype,
+        ).reshape(-1, 2),
+        nearest_element_points=np.asarray(data["nearest_element_points"], dtype=dtype).reshape(-1, 2),
+        nearest_element_distances=np.asarray(data["nearest_element_distances"], dtype=dtype),
+        nearest_face_element_indices=np.asarray(data["nearest_face_element_indices"], dtype=np.int64),
+        nearest_face_local_faces=np.asarray(data["nearest_face_local_faces"], dtype=np.int64),
+        nearest_face_reference_coordinates=np.asarray(
+            data["nearest_face_reference_coordinates"],
+            dtype=dtype,
+        ),
+        nearest_face_points=np.asarray(data["nearest_face_points"], dtype=dtype).reshape(-1, 2),
+        nearest_face_distances=np.asarray(data["nearest_face_distances"], dtype=dtype),
+    )
+
+
+def quad_mesh_interpolation_operator(
+    query: QuadMeshQuery,
+) -> sp.csr_matrix:
+    """Return a reusable sparse operator mapping nodal scalar values to query-point values.
+
+    The returned matrix has shape `(npoint, nnode)`. Applying it to a dense `(nnode,)` vector gives
+    scalar values at the query points; applying it to `(nnode, ncomponent)` interpolates multiple
+    nodal fields with the same operator. The operator always uses the query's nearest element.
+    """
+
+    dtype = query.nodes.dtype
+    binding = _dispatch_pair(
+        dtype,
+        _quad_mesh_interpolation_operator_f32,
+        _quad_mesh_interpolation_operator_f64,
+    )
+    return _coo_operator_from_binding(
+        binding(
+            query.nodes,
+            query.elements,
+            np.asarray(query.nearest_element_indices, dtype=np.uint64),
+            query.nearest_element_reference_points,
+            query.element_type,
+        ),
+        dtype,
+    )
+
+
+def quad_mesh_strain_operator(
+    query: QuadMeshQuery,
+    *,
+    formulation: str,
+    thickness: float | None = None,
+) -> sp.csr_matrix:
+    """Return a sparse operator mapping full nodal displacements to query-point strain.
+
+    The returned matrix has shape `(4 * npoint, 2 * nnode)`. Rows are grouped by query point and
+    use the same four-component strain ordering as the structural FEM formulation.
+    """
+
+    normalized_formulation = _normalize_formulation(formulation)
+    thickness_value = _normalize_thickness(normalized_formulation, thickness, query.nodes.dtype)
+    dtype = query.nodes.dtype
+    binding = _dispatch_pair(dtype, _quad_mesh_strain_operator_f32, _quad_mesh_strain_operator_f64)
+    return _coo_operator_from_binding(
+        binding(
+            query.nodes,
+            query.elements,
+            np.asarray(query.nearest_element_indices, dtype=np.uint64),
+            query.nearest_element_reference_points,
+            query.element_type,
+            _formulation_code(normalized_formulation),
+            thickness_value,
+        ),
+        dtype,
+    )
+
+
+def interpolate_quad_mesh_values(
+    nodes: ArrayLike,
+    elements: ArrayLike,
+    nodal_values: ArrayLike,
+    points: ArrayLike,
+    *,
+    element_type: str = "quad4",
+    outside: str = "raise",
+    tolerance: float | None = None,
+    max_iterations: int = 20,
+) -> QuadMeshInterpolation:
+    """Interpolate nodal values at arbitrary physical points in a quadrilateral mesh.
+
+    The interpolation uses the element's actual shape functions. `nodal_values` may have shape
+    `(nnode,)` or `(nnode, ...)`; the returned values have shape `(npoint,)` or `(npoint, ...)`.
+
+    Point location is Rust-backed but brute-force and scans all elements once per query point.
+    Outside policies are applied from the nearest-element distance: `"raise"` errors,
+    `"nan"` masks outside values, and `"nearest"` returns the nearest-element interpolation.
+    Complexity is `O(npoint * nelem * max_iterations)` for point location plus
+    `O(npoint * nodes_per_element * ncomponent)` for interpolation.
+
+    Args:
+        nodes: Mesh node coordinates with shape `(nnode, 2)`.
+        elements: Quad connectivity with shape `(nelem, 4)` or `(nelem, 9)`.
+        nodal_values: Values at mesh nodes with shape `(nnode,)` or `(nnode, ...)`.
+        points: Query point coordinates with shape `(npoint, 2)`.
+        element_type: Element family, either `"quad4"` or `"quad9"`.
+        outside: Outside-mesh policy: `"raise"`/`"error"`, `"nan"`, or `"nearest"`.
+        tolerance: Physical and reference-space tolerance for point containment.
+        max_iterations: Maximum Newton/projection iterations per element.
+
+    Returns:
+        QuadMeshInterpolation: interpolated values plus element indices, reference coordinates, and
+        inside flags for the query points.
+    """
+
+    dtype = _resolve_float_dtype(nodes, nodal_values, points)
+    query = query_quad_mesh(
+        nodes,
+        elements,
+        points,
+        element_type=element_type,
+        max_iterations=max_iterations,
+    )
+    values_arr = np.asarray(nodal_values, dtype=dtype)
+    assert (
+        values_arr.ndim >= 1 and values_arr.shape[0] == query.nodes.shape[0]
+    ), f"nodal_values must have shape (nnode,) or (nnode, ...); got {values_arr.shape}"
+    values_shape = values_arr.shape[1:]
+    values_2d = np.ascontiguousarray(values_arr.reshape(query.nodes.shape[0], -1), dtype=dtype)
+    outside_policy = str(outside).strip().lower()
+    tol = _normalize_query_tolerance(tolerance, dtype)
+    inside = query.nearest_element_distances <= tol
+    if outside_policy in {"raise", "error"} and not np.all(inside):
+        first = int(np.flatnonzero(~inside)[0])
+        raise ValueError(f"query point {first} is outside the quad mesh")
+    if outside_policy not in {"nearest", "nan", "raise", "error"}:
+        raise ValueError(f"unsupported outside policy {outside!r}; use 'raise', 'nan', or 'nearest'")
+    operator = quad_mesh_interpolation_operator(query)
+    values = np.asarray(operator @ values_2d, dtype=dtype).reshape((query.points.shape[0], *values_shape))
+    if outside_policy == "nan" and np.any(~inside):
+        values[~inside] = np.nan
+    return QuadMeshInterpolation(
+        values=values,
+        element_indices=query.nearest_element_indices,
+        reference_points=query.nearest_element_reference_points,
+        inside=inside,
     )
 
 
@@ -1134,6 +1417,7 @@ def assemble_structural_2d(
         pressure_faces=pressure_faces_arr,
         traction_faces=traction_faces_arr,
         formulation=normalized_formulation,
+        thickness=thickness_value,
         element_type=normalized_element_type,
         stiffness=stiffness,
         body_force_to_rhs=body_force_to_rhs,
@@ -1355,9 +1639,12 @@ __all__ = [
     "ElementMeasures",
     "ElementQuadrature",
     "ElevatedQuad9Mesh",
+    "QuadMeshInterpolation",
+    "QuadMeshQuery",
     "QuadratureFieldSamples",
     "assemble_structural_2d",
     "cfsem_radial_material",
+    "interpolate_quad_mesh_values",
     "infer_quad9_mesh",
     "isotropic_axisymmetric_material",
     "isotropic_axisymmetric_thermal_material",
@@ -1366,4 +1653,7 @@ __all__ = [
     "orthotropic_axisymmetric_thermal_material",
     "orthotropic_plane_strain_thermal_material",
     "pack_material_tables_from_tags",
+    "quad_mesh_interpolation_operator",
+    "quad_mesh_strain_operator",
+    "query_quad_mesh",
 ]

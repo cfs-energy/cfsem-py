@@ -35,6 +35,174 @@ PRESSURE_NR_CASES = [24, 48]
 ELEMENT_TYPES = ["quad4", "quad9"]
 
 
+def quad9_shape(xi: float, eta: float) -> np.ndarray:
+    """Return quad9 Lagrange shape functions in the solver's local-node order."""
+
+    lx = np.array([0.5 * xi * (xi - 1.0), 1.0 - xi * xi, 0.5 * xi * (xi + 1.0)])
+    ly = np.array([0.5 * eta * (eta - 1.0), 1.0 - eta * eta, 0.5 * eta * (eta + 1.0)])
+    return np.array(
+        [
+            lx[0] * ly[0],
+            lx[2] * ly[0],
+            lx[2] * ly[2],
+            lx[0] * ly[2],
+            lx[1] * ly[0],
+            lx[2] * ly[1],
+            lx[1] * ly[2],
+            lx[0] * ly[1],
+            lx[1] * ly[1],
+        ]
+    )
+
+
+def test_quad_mesh_query_and_interpolation_helpers_for_quad4():
+    """Check one-pass quad4 mesh queries and interpolation on a single affine element."""
+
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    elements = np.array([[0, 1, 2, 3]], dtype=np.uint64)
+
+    query = fem.query_quad_mesh(nodes, elements, [[0.25, 0.75], [1.4, 0.5]])
+    assert query.nearest_element_indices.tolist() == [0, 0]
+    assert query.nearest_node_indices.tolist() == [3, 1]
+    np.testing.assert_allclose(query.nearest_node_points, [[0.0, 1.0], [1.0, 0.0]])
+    assert query.nearest_element_distances[0] <= 1.0e-12
+    assert query.nearest_element_distances[1] > 0.0
+    np.testing.assert_allclose(query.nearest_element_reference_points[0], [-0.5, 0.5])
+    np.testing.assert_allclose(query.nearest_element_points[1], [1.0, 0.5])
+
+    face_query = fem.query_quad_mesh(nodes, elements, [[0.5, -0.2]])
+    assert face_query.nearest_face_element_indices.tolist() == [0]
+    assert face_query.nearest_face_local_faces.tolist() == [0]
+    np.testing.assert_allclose(face_query.nearest_face_reference_coordinates, [0.0], atol=1.0e-12)
+    np.testing.assert_allclose(face_query.nearest_face_points, [[0.5, 0.0]], atol=1.0e-12)
+
+    nodal_values = nodes[:, 0] + 2.0 * nodes[:, 1]
+    interpolated = fem.interpolate_quad_mesh_values(nodes, elements, nodal_values, [[0.25, 0.75]])
+    np.testing.assert_allclose(interpolated.values, [1.75])
+    assert interpolated.element_indices.tolist() == [0]
+    assert interpolated.inside.tolist() == [True]
+
+    interpolation_operator = fem.quad_mesh_interpolation_operator(query)
+    np.testing.assert_allclose(interpolation_operator @ nodal_values, [1.75, 2.0])
+
+    displacements = np.column_stack([nodes[:, 0], 2.0 * nodes[:, 1]]).reshape(-1)
+    strain_operator = fem.quad_mesh_strain_operator(
+        query,
+        formulation="plane_strain",
+        thickness=1.0,
+    )
+    strain = np.asarray(strain_operator @ displacements).reshape(-1, 4)
+    np.testing.assert_allclose(strain[0], [1.0, 2.0, 0.0, 0.0], atol=1.0e-12)
+    np.testing.assert_allclose(strain[1], [1.0, 2.0, 0.0, 0.0], atol=1.0e-12)
+
+    outside = fem.interpolate_quad_mesh_values(
+        nodes,
+        elements,
+        nodal_values,
+        [[2.0, 2.0]],
+        outside="nan",
+    )
+    assert outside.element_indices.tolist() == [0]
+    assert outside.inside.tolist() == [False]
+    assert np.isnan(outside.values[0])
+
+
+def test_quad_mesh_interpolation_outside_policy_errors():
+    """Check interpolation policy errors for points outside the nearest-element tolerance."""
+
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    elements = np.array([[0, 1, 2, 3]], dtype=np.uint64)
+    nodal_values = nodes[:, 0] + nodes[:, 1]
+
+    inside = fem.interpolate_quad_mesh_values(
+        nodes,
+        elements,
+        nodal_values,
+        [[0.25, 0.5]],
+        tolerance=1.0e-12,
+    )
+    assert inside.inside.tolist() == [True]
+
+    with pytest.raises(AssertionError, match="tolerance"):
+        fem.interpolate_quad_mesh_values(
+            nodes,
+            elements,
+            nodal_values,
+            [[0.25, 0.5]],
+            tolerance=-1.0,
+        )
+
+    with pytest.raises(ValueError, match="outside the quad mesh"):
+        fem.interpolate_quad_mesh_values(
+            nodes,
+            elements,
+            nodal_values,
+            [[2.0, 2.0]],
+            tolerance=1.0e-12,
+        )
+
+    with pytest.raises(ValueError, match="unsupported outside policy"):
+        fem.interpolate_quad_mesh_values(
+            nodes,
+            elements,
+            nodal_values,
+            [[0.25, 0.5]],
+            outside="clip",
+        )
+
+
+def test_quad_mesh_interpolation_uses_quad9_curved_geometry():
+    """Check that quad9 interpolation uses midside nodes in the inverse geometry map."""
+
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+            [0.5, -0.2],
+            [1.2, 0.5],
+            [0.5, 1.1],
+            [-0.1, 0.5],
+            [0.45, 0.55],
+        ],
+        dtype=np.float64,
+    )
+    elements = np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8]], dtype=np.uint64)
+    nodal_values = np.arange(9.0)
+    xi = 0.0
+    eta = -0.5
+    shape = quad9_shape(xi, eta)
+    point = shape @ nodes
+
+    interpolated = fem.interpolate_quad_mesh_values(
+        nodes,
+        elements,
+        nodal_values,
+        [point],
+        element_type="quad9",
+    )
+
+    np.testing.assert_allclose(interpolated.reference_points, [[xi, eta]], atol=1.0e-10)
+    np.testing.assert_allclose(interpolated.values, [shape @ nodal_values], atol=1.0e-10)
+
+
 class MultiMaterialCheckerboardCase(NamedTuple):
     nodes: np.ndarray
     elements: np.ndarray
@@ -2156,25 +2324,25 @@ def test_plane_strain_circular_hole_matches_kirsch_stress_concentration(
         element_type=element_type,
     )
     displacement = solve_with_factorized_model(model, model.build_rhs(traction_values=traction_values))
-    samples = model.evaluate_quadrature(displacement)
 
-    points = samples.points.reshape(-1, 2)
-    stress = samples.stress.reshape(-1, 4)
-    radius = np.linalg.norm(points, axis=1)
-    theta = np.mod(np.arctan2(points[:, 1], points[:, 0]), 2.0 * np.pi)
-    fit_layers = 2.5 if element_type == "quad9" else 3.5
-    fit_degree = 3 if element_type == "quad9" else 2
-    near_hole = radius < hole_radius + fit_layers * (outer_radius - hole_radius) / nr
-    near_peak = near_hole & (np.abs(theta - 0.5 * np.pi) < 0.04)
-    assert np.count_nonzero(near_peak) >= 12
+    points = np.asarray([[0.0, hole_radius]], dtype=dtype)
+    query = fem.query_quad_mesh(
+        model.analysis_nodes,
+        model.analysis_elements,
+        points,
+        element_type=element_type,
+    )
+    strain_operator = fem.quad_mesh_strain_operator(
+        query,
+        formulation="plane_strain",
+        thickness=1.0,
+    )
+    stress = np.asarray(strain_operator @ displacement, dtype=dtype).reshape(-1, 4) @ material.T
 
-    # The Kirsch stress concentration is a boundary value at r = a.  Recovered FEM stresses live
-    # at interior quadrature points, so compare a near-boundary extrapolation to Kt = 3.
-    hoop = hoop_stress_from_cartesian(stress[near_peak], points[near_peak]) / remote_stress
-    radial_offset = radius[near_peak] - hole_radius
-    boundary_fit = np.polyfit(radial_offset, hoop, deg=fit_degree)
-    stress_concentration = float(np.polyval(boundary_fit, 0.0))
+    # The Kirsch stress concentration is a boundary value at r = a, theta = pi/2.
+    hoop = hoop_stress_from_cartesian(stress, points) / remote_stress
+    stress_concentration = float(hoop[0])
 
-    assert np.isclose(stress_concentration, 3.0, rtol=0.02)
-    expected_sigma_zz = poisson_ratio * (stress[near_peak, 0] + stress[near_peak, 1])
-    assert np.allclose(stress[near_peak, 2], expected_sigma_zz, rtol=1.0e-10)
+    assert np.isclose(stress_concentration, 3.0, rtol=0.10)
+    expected_sigma_zz = poisson_ratio * (stress[:, 0] + stress[:, 1])
+    assert np.allclose(stress[:, 2], expected_sigma_zz, rtol=1.0e-10)

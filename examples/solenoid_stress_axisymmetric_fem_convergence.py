@@ -24,7 +24,6 @@ from pathlib import Path
 from time import perf_counter
 
 import numpy as np
-from scipy.sparse.linalg import factorized
 
 if os.getenv("CFSEM_TESTING"):
     import matplotlib
@@ -37,6 +36,9 @@ from cfsem.solenoid_stress.fem2d import (
     assemble_structural_2d,
     cfsem_radial_material,
     infer_quad9_mesh,
+    quad_mesh_interpolation_operator,
+    quad_mesh_strain_operator,
+    query_quad_mesh,
 )
 from cfsem.solenoid_stress.solenoid_handcalc import s_long_solenoid
 from cfsem.solenoid_stress.solenoid_1d import (
@@ -164,96 +166,27 @@ def analytic_stress_profile(sample_r: np.ndarray) -> Profile:
     )
 
 
-def q2_lagrange_1d(x: float) -> np.ndarray:
-    return np.array([0.5 * x * (x - 1.0), 1.0 - x * x, 0.5 * x * (x + 1.0)], dtype=np.float64)
-
-
-def q2_lagrange_grad_1d(x: float) -> np.ndarray:
-    return np.array([x - 0.5, -2.0 * x, x + 0.5], dtype=np.float64)
-
-
-def element_center_point_strain_stress(
-    coords: np.ndarray,
-    displacement_local: np.ndarray,
+def recover_axisymmetric_midplane_profile(
+    nodes: np.ndarray,
+    elements: np.ndarray,
+    sample_radius: np.ndarray,
+    displacement: np.ndarray,
     material: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if coords.shape[0] == 4:
-        n = 0.25 * np.ones(4, dtype=np.float64)
-        grad_ref = 0.25 * np.array(
-            [
-                [-1.0, -1.0],
-                [1.0, -1.0],
-                [1.0, 1.0],
-                [-1.0, 1.0],
-            ],
-            dtype=np.float64,
-        )
-    elif coords.shape[0] == 9:
-        lx = q2_lagrange_1d(0.0)
-        ly = q2_lagrange_1d(0.0)
-        dlx = q2_lagrange_grad_1d(0.0)
-        dly = q2_lagrange_grad_1d(0.0)
-        n = np.array(
-            [
-                lx[0] * ly[0],
-                lx[2] * ly[0],
-                lx[2] * ly[2],
-                lx[0] * ly[2],
-                lx[1] * ly[0],
-                lx[2] * ly[1],
-                lx[1] * ly[2],
-                lx[0] * ly[1],
-                lx[1] * ly[1],
-            ],
-            dtype=np.float64,
-        )
-        grad_ref = np.array(
-            [
-                [dlx[0] * ly[0], lx[0] * dly[0]],
-                [dlx[2] * ly[0], lx[2] * dly[0]],
-                [dlx[2] * ly[2], lx[2] * dly[2]],
-                [dlx[0] * ly[2], lx[0] * dly[2]],
-                [dlx[1] * ly[0], lx[1] * dly[0]],
-                [dlx[2] * ly[1], lx[2] * dly[1]],
-                [dlx[1] * ly[2], lx[1] * dly[2]],
-                [dlx[0] * ly[1], lx[0] * dly[1]],
-                [dlx[1] * ly[1], lx[1] * dly[1]],
-            ],
-            dtype=np.float64,
-        )
-    else:
-        raise ValueError(f"Unsupported element with {coords.shape[0]} nodes")
-    jac = np.array(
-        [
-            [coords[:, 0] @ grad_ref[:, 0], coords[:, 0] @ grad_ref[:, 1]],
-            [coords[:, 1] @ grad_ref[:, 0], coords[:, 1] @ grad_ref[:, 1]],
-        ],
-        dtype=np.float64,
-    )
-    inv_j = np.linalg.inv(jac)
-    grad_phys = np.column_stack(
-        [
-            inv_j[0, 0] * grad_ref[:, 0] + inv_j[1, 0] * grad_ref[:, 1],
-            inv_j[0, 1] * grad_ref[:, 0] + inv_j[1, 1] * grad_ref[:, 1],
-        ]
-    )
-    point = n @ coords
-    radius = float(point[0])
-    b = np.zeros((4, 2 * coords.shape[0]), dtype=np.float64)
-    for i in range(coords.shape[0]):
-        col_r = 2 * i
-        col_z = col_r + 1
-        b[0, col_r] = grad_phys[i, 0]
-        b[1, col_z] = grad_phys[i, 1]
-        b[2, col_r] = n[i] / radius
-        b[3, col_r] = grad_phys[i, 1]
-        b[3, col_z] = grad_phys[i, 0]
-    u_center = np.sum(n[:, None] * displacement_local, axis=0)
-    stress = material @ (b @ displacement_local.reshape(-1))
-    return (
-        np.asarray(point, dtype=np.float64),
-        np.asarray(u_center, dtype=np.float64),
-        np.asarray(stress, dtype=np.float64),
+    element_type: str,
+) -> Profile:
+    points = np.column_stack([sample_radius, np.full_like(sample_radius, 0.5 * HEIGHT)])
+    query = query_quad_mesh(nodes, elements, points, element_type=element_type)
+    interpolation_operator = quad_mesh_interpolation_operator(query)
+    strain_operator = quad_mesh_strain_operator(query, formulation="axisymmetric")
+    displacement_2d = np.asarray(displacement, dtype=np.float64).reshape(nodes.shape[0], 2)
+    displacement_at_points = np.asarray(interpolation_operator @ displacement_2d, dtype=np.float64)
+    strain = np.asarray(strain_operator @ displacement_2d.reshape(-1), dtype=np.float64).reshape(-1, 4)
+    stress = strain @ np.asarray(material, dtype=np.float64).T
+    return Profile(
+        radius=np.asarray(sample_radius, dtype=np.float64),
+        u_r=displacement_at_points[:, 0],
+        s_rr=stress[:, 0],
+        s_tt=stress[:, 2],
     )
 
 
@@ -346,24 +279,15 @@ def solve_fem_midplane_profile(
     displacement = model.solve(rhs).reshape(analysis_nodes.shape[0], 2)
     fem_solve_seconds = perf_counter() - solve_start
 
-    radius = np.zeros(nr, dtype=np.float64)
-    u_r = np.zeros(nr, dtype=np.float64)
-    s_rr = np.zeros(nr, dtype=np.float64)
-    s_tt = np.zeros(nr, dtype=np.float64)
-    for i_local, element_index in enumerate(range(nr)):
-        analysis_conn = analysis_elements[element_index]
-        point, u_center, stress = element_center_point_strain_stress(
-            analysis_nodes[analysis_conn],
-            displacement[analysis_conn],
-            material,
-        )
-        radius[i_local] = point[0]
-        u_r[i_local] = u_center[0]
-        s_rr[i_local] = stress[0]
-        s_tt[i_local] = stress[2]
-
     return (
-        Profile(radius=radius, u_r=u_r, s_rr=s_rr, s_tt=s_tt),
+        recover_axisymmetric_midplane_profile(
+            analysis_nodes,
+            analysis_elements,
+            0.5 * (nodes[:nr, 0] + nodes[1 : nr + 1, 0]),
+            displacement,
+            material,
+            element_type,
+        ),
         model.ndof,
         fem_build_seconds,
         fem_factorize_seconds,
@@ -615,7 +539,8 @@ def print_results(results_by_type: dict[str, list[SweepResult]]) -> None:
         f"ri={RI:.3f} m, ro={RO:.3f} m, height={HEIGHT:.3f} m, "
         f"E={ELASTICITY_MODULUS / 1.0e9:.1f} GPa, nu={POISSON_RATIO:.3f}, "
         f"J_theta={CURRENT_DENSITY:.3e} A/m^2, "
-        f"Bz(ri)={BZ_INNER:.1f} T, Bz(ro)=0.0 T, element_types={','.join(ELEMENT_TYPES)}, quadrature={QUADRATURE}"
+        f"Bz(ri)={BZ_INNER:.1f} T, Bz(ro)=0.0 T, "
+        f"element_types={','.join(ELEMENT_TYPES)}, quadrature={QUADRATURE}"
     )
     for element_type in ELEMENT_TYPES:
         results = results_by_type[element_type]

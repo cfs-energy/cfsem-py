@@ -4,6 +4,7 @@ use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyRead
 use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use std::fmt::Debug;
 
 use crate::{math, mesh, physics};
@@ -228,6 +229,30 @@ fn read_axisym_material_orientation_angles<F: NumpyElement + Copy>(
         .into());
     }
     Ok(view.iter().copied().collect())
+}
+
+fn flatten_quad_points<F: Copy>(points: Vec<[F; 2]>) -> Vec<F> {
+    flatten_points(points)
+}
+
+fn flatten_sparse_operator<F: mesh::Scalar>(
+    operator: mesh::quad2d::QuadMeshSparseOperator<F>,
+) -> (Vec<F>, Vec<u64>, Vec<u64>, u64, u64) {
+    (
+        operator.vals,
+        operator
+            .rows
+            .into_iter()
+            .map(|index| index as u64)
+            .collect(),
+        operator
+            .cols
+            .into_iter()
+            .map(|index| index as u64)
+            .collect(),
+        operator.nrow as u64,
+        operator.ncol as u64,
+    )
 }
 
 fn read_axisym_pressure_faces(
@@ -1212,6 +1237,532 @@ fn solenoid_stress_fem_infer_quad9_mesh_f32<'py>(
                 .collect(),
         )
         .unbind(),
+    ))
+}
+
+/// Low-level binding for one-pass quad mesh queries.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_query_f64<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    points: PyReadonlyArray2<'_, f64>,
+    element_type: &str,
+    max_iterations: usize,
+) -> PyResult<Py<PyDict>> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let points = read_axisym_nodes("points", points)?;
+    let query = match element_type {
+        "quad4" => {
+            let elements = read_axisym_elements::<4>("elements", elements)?;
+            mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad4ReferenceElement, _, 4>(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &points,
+                max_iterations,
+            )
+        }
+        "quad9" => {
+            let elements = read_axisym_elements::<9>("elements", elements)?;
+            mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad9ReferenceElement, _, 9>(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &points,
+                max_iterations,
+            )
+        }
+        _ => Err(format!(
+            "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+        )),
+    }
+    .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let dict = PyDict::new(py);
+    dict.set_item(
+        "nearest_node_indices",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_node_indices
+                .into_iter()
+                .map(|index| index as u64)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_node_points",
+        PyArray1::from_vec(py, flatten_quad_points(query.nearest_node_points)),
+    )?;
+    dict.set_item(
+        "nearest_node_distances",
+        PyArray1::from_vec(py, query.nearest_node_distances),
+    )?;
+    dict.set_item(
+        "nearest_element_indices",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_element_indices
+                .into_iter()
+                .map(|index| index as u64)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_element_reference_points",
+        PyArray1::from_vec(
+            py,
+            flatten_quad_points(query.nearest_element_reference_points),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_element_points",
+        PyArray1::from_vec(py, flatten_quad_points(query.nearest_element_points)),
+    )?;
+    dict.set_item(
+        "nearest_element_distances",
+        PyArray1::from_vec(py, query.nearest_element_distances),
+    )?;
+    dict.set_item(
+        "nearest_face_element_indices",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_face_element_indices
+                .into_iter()
+                .map(|index| index as u64)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_face_local_faces",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_face_local_faces
+                .into_iter()
+                .map(u64::from)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_face_reference_coordinates",
+        PyArray1::from_vec(py, query.nearest_face_reference_coordinates),
+    )?;
+    dict.set_item(
+        "nearest_face_points",
+        PyArray1::from_vec(py, flatten_quad_points(query.nearest_face_points)),
+    )?;
+    dict.set_item(
+        "nearest_face_distances",
+        PyArray1::from_vec(py, query.nearest_face_distances),
+    )?;
+    Ok(dict.unbind())
+}
+
+/// Low-level binding for one-pass quad mesh queries.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_query_f32<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    points: PyReadonlyArray2<'_, f32>,
+    element_type: &str,
+    max_iterations: usize,
+) -> PyResult<Py<PyDict>> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let points = read_axisym_nodes("points", points)?;
+    let query = match element_type {
+        "quad4" => {
+            let elements = read_axisym_elements::<4>("elements", elements)?;
+            mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad4ReferenceElement, _, 4>(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &points,
+                max_iterations,
+            )
+        }
+        "quad9" => {
+            let elements = read_axisym_elements::<9>("elements", elements)?;
+            mesh::quad2d::query_quad_mesh::<mesh::quad2d::Quad9ReferenceElement, _, 9>(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &points,
+                max_iterations,
+            )
+        }
+        _ => Err(format!(
+            "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+        )),
+    }
+    .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let dict = PyDict::new(py);
+    dict.set_item(
+        "nearest_node_indices",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_node_indices
+                .into_iter()
+                .map(|index| index as u64)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_node_points",
+        PyArray1::from_vec(py, flatten_quad_points(query.nearest_node_points)),
+    )?;
+    dict.set_item(
+        "nearest_node_distances",
+        PyArray1::from_vec(py, query.nearest_node_distances),
+    )?;
+    dict.set_item(
+        "nearest_element_indices",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_element_indices
+                .into_iter()
+                .map(|index| index as u64)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_element_reference_points",
+        PyArray1::from_vec(
+            py,
+            flatten_quad_points(query.nearest_element_reference_points),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_element_points",
+        PyArray1::from_vec(py, flatten_quad_points(query.nearest_element_points)),
+    )?;
+    dict.set_item(
+        "nearest_element_distances",
+        PyArray1::from_vec(py, query.nearest_element_distances),
+    )?;
+    dict.set_item(
+        "nearest_face_element_indices",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_face_element_indices
+                .into_iter()
+                .map(|index| index as u64)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_face_local_faces",
+        PyArray1::from_vec(
+            py,
+            query
+                .nearest_face_local_faces
+                .into_iter()
+                .map(u64::from)
+                .collect(),
+        ),
+    )?;
+    dict.set_item(
+        "nearest_face_reference_coordinates",
+        PyArray1::from_vec(py, query.nearest_face_reference_coordinates),
+    )?;
+    dict.set_item(
+        "nearest_face_points",
+        PyArray1::from_vec(py, flatten_quad_points(query.nearest_face_points)),
+    )?;
+    dict.set_item(
+        "nearest_face_distances",
+        PyArray1::from_vec(py, query.nearest_face_distances),
+    )?;
+    Ok(dict.unbind())
+}
+
+/// Low-level binding for scalar interpolation operators from query element/reference data.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_interpolation_operator_f64<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    element_indices: PyReadonlyArray1<'_, u64>,
+    reference_points: PyReadonlyArray2<'_, f64>,
+    element_type: &str,
+) -> PyResult<(
+    Py<PyArray1<f64>>,
+    Py<PyArray1<u64>>,
+    Py<PyArray1<u64>>,
+    u64,
+    u64,
+)> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
+    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
+    let operator = match element_type {
+        "quad4" => {
+            let elements = read_axisym_elements::<4>("elements", elements)?;
+            mesh::quad2d::quad_mesh_interpolation_operator::<
+                mesh::quad2d::Quad4ReferenceElement,
+                _,
+                4,
+            >(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &element_indices,
+                &reference_points,
+            )
+        }
+        "quad9" => {
+            let elements = read_axisym_elements::<9>("elements", elements)?;
+            mesh::quad2d::quad_mesh_interpolation_operator::<
+                mesh::quad2d::Quad9ReferenceElement,
+                _,
+                9,
+            >(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &element_indices,
+                &reference_points,
+            )
+        }
+        _ => Err(format!(
+            "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+        )),
+    }
+    .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let (vals, rows, cols, nrow, ncol) = flatten_sparse_operator(operator);
+    Ok((
+        PyArray1::from_vec(py, vals).unbind(),
+        PyArray1::from_vec(py, rows).unbind(),
+        PyArray1::from_vec(py, cols).unbind(),
+        nrow,
+        ncol,
+    ))
+}
+
+/// Low-level binding for scalar interpolation operators from query element/reference data.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_interpolation_operator_f32<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    element_indices: PyReadonlyArray1<'_, u64>,
+    reference_points: PyReadonlyArray2<'_, f32>,
+    element_type: &str,
+) -> PyResult<(
+    Py<PyArray1<f32>>,
+    Py<PyArray1<u64>>,
+    Py<PyArray1<u64>>,
+    u64,
+    u64,
+)> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
+    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
+    let operator = match element_type {
+        "quad4" => {
+            let elements = read_axisym_elements::<4>("elements", elements)?;
+            mesh::quad2d::quad_mesh_interpolation_operator::<
+                mesh::quad2d::Quad4ReferenceElement,
+                _,
+                4,
+            >(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &element_indices,
+                &reference_points,
+            )
+        }
+        "quad9" => {
+            let elements = read_axisym_elements::<9>("elements", elements)?;
+            mesh::quad2d::quad_mesh_interpolation_operator::<
+                mesh::quad2d::Quad9ReferenceElement,
+                _,
+                9,
+            >(
+                mesh::QuadMeshView2d {
+                    nodes_rz: &nodes,
+                    elements: &elements,
+                },
+                &element_indices,
+                &reference_points,
+            )
+        }
+        _ => Err(format!(
+            "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+        )),
+    }
+    .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let (vals, rows, cols, nrow, ncol) = flatten_sparse_operator(operator);
+    Ok((
+        PyArray1::from_vec(py, vals).unbind(),
+        PyArray1::from_vec(py, rows).unbind(),
+        PyArray1::from_vec(py, cols).unbind(),
+        nrow,
+        ncol,
+    ))
+}
+
+/// Low-level binding for strain-recovery operators from query element/reference data.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_strain_operator_f64<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f64>,
+    elements: PyReadonlyArray2<'_, u64>,
+    element_indices: PyReadonlyArray1<'_, u64>,
+    reference_points: PyReadonlyArray2<'_, f64>,
+    element_type: &str,
+    formulation: u8,
+    thickness: f64,
+) -> PyResult<(
+    Py<PyArray1<f64>>,
+    Py<PyArray1<u64>>,
+    Py<PyArray1<u64>>,
+    u64,
+    u64,
+)> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
+    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
+    let formulation =
+        physics::solenoid_stress::Structural2dFormulation::from_code(formulation, thickness)
+            .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let operator =
+        match element_type {
+            "quad4" => {
+                let elements = read_axisym_elements::<4>("elements", elements)?;
+                mesh::quad2d::quad_mesh_strain_operator::<
+                    mesh::quad2d::Quad4ReferenceElement,
+                    _,
+                    4,
+                    8,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    formulation,
+                )
+            }
+            "quad9" => {
+                let elements = read_axisym_elements::<9>("elements", elements)?;
+                mesh::quad2d::quad_mesh_strain_operator::<
+                    mesh::quad2d::Quad9ReferenceElement,
+                    _,
+                    9,
+                    18,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    formulation,
+                )
+            }
+            _ => Err(format!(
+                "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+            )),
+        }
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let (vals, rows, cols, nrow, ncol) = flatten_sparse_operator(operator);
+    Ok((
+        PyArray1::from_vec(py, vals).unbind(),
+        PyArray1::from_vec(py, rows).unbind(),
+        PyArray1::from_vec(py, cols).unbind(),
+        nrow,
+        ncol,
+    ))
+}
+
+/// Low-level binding for strain-recovery operators from query element/reference data.
+#[pyfunction]
+fn solenoid_stress_fem_quad_mesh_strain_operator_f32<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArray2<'_, f32>,
+    elements: PyReadonlyArray2<'_, u64>,
+    element_indices: PyReadonlyArray1<'_, u64>,
+    reference_points: PyReadonlyArray2<'_, f32>,
+    element_type: &str,
+    formulation: u8,
+    thickness: f32,
+) -> PyResult<(
+    Py<PyArray1<f32>>,
+    Py<PyArray1<u64>>,
+    Py<PyArray1<u64>>,
+    u64,
+    u64,
+)> {
+    let nodes = read_axisym_nodes("nodes", nodes)?;
+    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
+    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
+    let formulation =
+        physics::solenoid_stress::Structural2dFormulation::from_code(formulation, thickness)
+            .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let operator =
+        match element_type {
+            "quad4" => {
+                let elements = read_axisym_elements::<4>("elements", elements)?;
+                mesh::quad2d::quad_mesh_strain_operator::<
+                    mesh::quad2d::Quad4ReferenceElement,
+                    _,
+                    4,
+                    8,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    formulation,
+                )
+            }
+            "quad9" => {
+                let elements = read_axisym_elements::<9>("elements", elements)?;
+                mesh::quad2d::quad_mesh_strain_operator::<
+                    mesh::quad2d::Quad9ReferenceElement,
+                    _,
+                    9,
+                    18,
+                >(
+                    mesh::QuadMeshView2d {
+                        nodes_rz: &nodes,
+                        elements: &elements,
+                    },
+                    &element_indices,
+                    &reference_points,
+                    formulation,
+                )
+            }
+            _ => Err(format!(
+                "unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"
+            )),
+        }
+        .map_err(|msg| PyInteropError::ValueError { msg })?;
+    let (vals, rows, cols, nrow, ncol) = flatten_sparse_operator(operator);
+    Ok((
+        PyArray1::from_vec(py, vals).unbind(),
+        PyArray1::from_vec(py, rows).unbind(),
+        PyArray1::from_vec(py, cols).unbind(),
+        nrow,
+        ncol,
     ))
 }
 
@@ -3117,7 +3668,30 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         solenoid_stress_fem_infer_quad9_mesh_f32,
         m.clone()
     )?)?;
-
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_query_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_query_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_interpolation_operator_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_interpolation_operator_f32,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_strain_operator_f64,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        solenoid_stress_fem_quad_mesh_strain_operator_f32,
+        m.clone()
+    )?)?;
     Ok(())
 }
 

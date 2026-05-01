@@ -255,18 +255,16 @@ fn flatten_sparse_operator<F: mesh::Scalar>(
     )
 }
 
-type SparseOperatorPyResult<'py, F> = PyResult<(
+fn sparse_operator_to_py<'py, F>(
+    py: Python<'py>,
+    operator: mesh::quad2d::QuadMeshSparseOperator<F>,
+) -> PyResult<(
     Py<PyArray1<F>>,
     Py<PyArray1<u64>>,
     Py<PyArray1<u64>>,
     u64,
     u64,
-)>;
-
-fn sparse_operator_to_py<'py, F>(
-    py: Python<'py>,
-    operator: mesh::quad2d::QuadMeshSparseOperator<F>,
-) -> SparseOperatorPyResult<'py, F>
+)>
 where
     F: mesh::Scalar + NumpyElement,
 {
@@ -1511,10 +1509,6 @@ fn solenoid_stress_fem_quad_mesh_query_f32<'py>(
     Ok(dict.unbind())
 }
 
-fn unsupported_quad_element_type(element_type: &str) -> String {
-    format!("unsupported element_type {element_type:?}; use 'quad4' or 'quad9'")
-}
-
 fn quad_mesh_interpolation_operator_for_element_type<F>(
     nodes: &[[F; 2]],
     elements: PyReadonlyArray2<'_, u64>,
@@ -1559,7 +1553,7 @@ where
             .map_err(|msg| PyInteropError::ValueError { msg }.into())
         }
         _ => Err(PyInteropError::ValueError {
-            msg: unsupported_quad_element_type(element_type),
+            msg: format!("unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"),
         }
         .into()),
     }
@@ -1604,7 +1598,7 @@ where
             .map_err(|msg| PyInteropError::ValueError { msg }.into())
         }
         _ => Err(PyInteropError::ValueError {
-            msg: unsupported_quad_element_type(element_type),
+            msg: format!("unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"),
         }
         .into()),
     }
@@ -1658,7 +1652,7 @@ where
             .map_err(|msg| PyInteropError::ValueError { msg }.into())
         }
         _ => Err(PyInteropError::ValueError {
-            msg: unsupported_quad_element_type(element_type),
+            msg: format!("unsupported element_type {element_type:?}; use 'quad4' or 'quad9'"),
         }
         .into()),
     }

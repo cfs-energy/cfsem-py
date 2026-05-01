@@ -682,9 +682,7 @@ where
     {
         let coords = mesh.element_coords(element_index)?;
         let nodes = mesh.element_nodes(element_index)?;
-        let material_id = *material_ids
-            .get(element_index)
-            .ok_or_else(|| format!("material_ids is missing element {element_index}"))?;
+        let material_id = material_ids[element_index];
         let material = material_table.get(material_id).ok_or_else(|| {
             format!("material_id {material_id} on element {element_index} is out of range")
         })?;

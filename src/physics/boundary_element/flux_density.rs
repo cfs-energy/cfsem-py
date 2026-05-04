@@ -7,8 +7,10 @@ use super::{
     QuadratureKind, TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR, calc_tri_area, map_tri_uv,
     triangle_basis_current_density, triangle_quadrature_points,
 };
+use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
+use crate::math::cross3;
 use crate::mesh::TriangleMeshView;
 use crate::mesh::elements::tri::tri3::{
     closest_point as triangle_closest_point,
@@ -16,6 +18,14 @@ use crate::mesh::elements::tri::tri3::{
     subdivide_about_point as triangle_subdivide_about_point,
 };
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
+
+/// Midpoint-rule samples for the Duffy-style transverse edge integral in
+/// near-surface triangle B-field evaluations.
+const TRIANGLE_B_DUFFY_EDGE_SAMPLES: usize = 32;
+
+/// Observation offsets below this fraction of the maximum edge length are
+/// treated as exactly on the source surface and evaluated as a principal value.
+const TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR: f64 = 1e-12;
 
 #[inline]
 fn triangle_flux_density_inner(
@@ -48,6 +58,107 @@ fn triangle_flux_density_inner(
     b
 }
 
+#[inline]
+fn norm3(v: [f64; 3]) -> f64 {
+    v[0].mul_add(v[0], v[1].mul_add(v[1], v[2] * v[2])).sqrt()
+}
+
+#[inline]
+fn add_scaled(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
+    [
+        a[0] + scale * b[0],
+        a[1] + scale * b[1],
+        a[2] + scale * b[2],
+    ]
+}
+
+#[inline]
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+#[inline]
+fn accum_cross_scaled(out: &mut [f64; 3], k: [f64; 3], r: [f64; 3], scale: f64) {
+    let k_cross_r = cross3(k[0], k[1], k[2], r[0], r[1], r[2]);
+    out[0] += scale * k_cross_r.0;
+    out[1] += scale * k_cross_r.1;
+    out[2] += scale * k_cross_r.2;
+}
+
+#[inline]
+fn triangle_flux_density_surface_duffy(
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+    current_density: [f64; 3],
+    closest: [f64; 3],
+    min_sub_area: f64,
+    length_ref: f64,
+) -> [f64; 3] {
+    let mut b = [0.0; 3]; // [T/A]
+
+    for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
+        let [p, va, vb] = tri;
+        let area_sub = calc_tri_area(p, va, vb); // [m^2]
+        if area_sub <= min_sub_area {
+            continue;
+        }
+
+        let qa = sub(va, closest); // [m]
+        let qb = sub(vb, closest); // [m]
+        let dq = sub(qb, qa); // [m]
+        let mut sub_b = [0.0; 3]; // [1/m]
+
+        for i in 0..TRIANGLE_B_DUFFY_EDGE_SAMPLES {
+            let eta = (i as f64 + 0.5) / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64;
+            let q = add_scaled(qa, dq, eta); // [m]
+            let qnorm = norm3(q); // [m]
+            if qnorm == 0.0 {
+                continue;
+            }
+            let scale = (qnorm / length_ref).ln() / qnorm.powi(3); // [1/m^3]
+            accum_cross_scaled(&mut sub_b, current_density, q, scale); // [1/m^2]
+        }
+
+        let scale = -MU0_OVER_4PI * 2.0 * area_sub / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64; // [H/m * m^2]
+        b[0] += scale * sub_b[0]; // [T/A]
+        b[1] += scale * sub_b[1]; // [T/A]
+        b[2] += scale * sub_b[2]; // [T/A]
+    }
+
+    b
+}
+
+#[inline]
+fn triangle_flux_density_duffy(
+    n0: [f64; 3],
+    n1: [f64; 3],
+    n2: [f64; 3],
+    current_density: [f64; 3],
+    obs: [f64; 3],
+    closest: [f64; 3],
+    max_edge_sq: f64,
+) -> Option<[f64; 3]> {
+    let h = sub(obs, closest); // [m]
+    let surface_tol_sq = TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR.powi(2) * max_edge_sq; // [m^2]
+    let min_sub_area = max_edge_sq * 1e-14; // [m^2]
+    let length_ref = max_edge_sq.sqrt(); // [m]
+
+    if h[0].mul_add(h[0], h[1].mul_add(h[1], h[2] * h[2])) <= surface_tol_sq {
+        Some(triangle_flux_density_surface_duffy(
+            n0,
+            n1,
+            n2,
+            current_density,
+            closest,
+            min_sub_area,
+            length_ref,
+        ))
+    } else {
+        None
+    }
+}
+
 /// Magnetic flux density (B-field) contribution of a given triangle's basis function
 /// with unit weighting to a given observation point.
 ///
@@ -58,9 +169,11 @@ fn triangle_flux_density_inner(
 ///   element.
 /// - Each quadrature point is treated as a point current element with moment
 ///   `m = K * ΔS_q`.
-/// - When the target point is close to the triangle, the element is split once
-///   about the closest point before applying the same quadrature rule on each
-///   subtriangle.
+/// - When the target point is exactly on the triangle, a Duffy-style transform
+///   centered at the closest point is used for the principal-value sheet
+///   contribution without adding either one-sided `±mu0 / 2 K x n` jump term.
+/// - Other near-field points use one level of closest-point subdivision before
+///   applying the same quadrature rule on each subtriangle.
 /// - Sum the Biot-Savart contributions with the full `μ0 / 4π` prefactor included.
 ///
 /// Args:
@@ -93,8 +206,12 @@ pub fn triangle_flux_density_basis(
         return triangle_flux_density_inner(n0, n1, n2, jref, obs, quad_kind);
     }
 
-    // Single-level triangle subdivision for near-field calcs
-    // to ensure that quad point singularities are separated from the target point.
+    if let Some(b) = triangle_flux_density_duffy(n0, n1, n2, jref, obs, closest, max_edge_sq) {
+        return b;
+    }
+
+    // Single-level triangle subdivision for finite-offset near-field calcs
+    // to keep quadrature points separated from the target point.
     let mut b = [0.0; 3]; // [T/A]
     let min_sub_area = max_edge_sq * 1e-14; // [m^2]
     for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {

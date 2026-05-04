@@ -750,7 +750,12 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
         s: [1.2, -0.4, 0.7],
     };
     let mesh = triangle_patches_to_mesh(&[tri]);
-    let obs = [[0.3, -0.2, 1.1], [0.8, 0.4, 0.6], [-0.4, 0.7, 0.9]];
+    let obs = [
+        [0.3, -0.2, 1.1],
+        [0.8, 0.4, 0.6],
+        [-0.4, 0.7, 0.9],
+        map_tri_uv(tri.nodes[0], tri.nodes[1], tri.nodes[2], [0.25, 0.5]),
+    ];
 
     let b_mesh = mesh_flux_density(&mesh, &obs, false);
     let b_mesh_par = mesh_flux_density(&mesh, &obs, true);
@@ -1080,7 +1085,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
         obs_on[2] + eps * normal[2],
     ];
 
-    for (obs_name, obs) in [("far", obs_far), ("near", obs_near)] {
+    for (obs_name, obs) in [("far", obs_far), ("near", obs_near), ("on", obs_on)] {
         let mut b_sum = [0.0; 3];
         let mut a_sum = [0.0; 3];
         let mut b_scale: f64 = 0.0;
@@ -1113,7 +1118,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
 
         let (b_rtol, a_rtol) = match obs_name {
             "far" => (1e-8, 1e-8),
-            "near" => (1e-12, 1e-12),
+            "near" | "on" => (1e-10, 1e-12),
             _ => unreachable!(),
         };
         let b_atol = b_rtol * b_scale;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 8.3.0 2026-05-04
+
+* Rust
+    * Use Duffy transform integration method for near-field triangle B kernel to improve numerical behavior near singularity
+
 ## 8.2.0 2026-05-01
 
 * Rust

@@ -1118,7 +1118,9 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
 
         let (b_rtol, a_rtol) = match obs_name {
             "far" => (1e-8, 1e-8),
-            "near" | "on" => (1e-10, 1e-12),
+            // The near/on B paths exercise singular-kernel cancellation; keep
+            // this as a tight physical consistency guard.
+            "near" | "on" => (1e-12, 1e-12),
             _ => unreachable!(),
         };
         let b_atol = b_rtol * b_scale;

@@ -142,6 +142,9 @@ fn triangle_flux_density_duffy(
     let h = sub(obs, closest); // [m]
     let surface_tol_sq = TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR.powi(2) * max_edge_sq; // [m^2]
     let min_sub_area = max_edge_sq * 1e-14; // [m^2]
+    // The finite-part log needs a dimensionless argument. The reference length
+    // is immaterial because the omitted log-divergent term cancels by angular
+    // symmetry across the subtriangles around the singular point.
     let length_ref = max_edge_sq.sqrt(); // [m]
 
     if h[0].mul_add(h[0], h[1].mul_add(h[1], h[2] * h[2])) <= surface_tol_sq {

@@ -8,10 +8,11 @@ use crate::physics::solenoid_stress::convenience::{
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, local_dofs,
+    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, local_dofs, scatter_local_matrix,
+    validate_element_material_inputs,
 };
 
-use super::{SparseOperator, ThermalLoadOperator, scatter_local_matrix};
+use super::{SparseOperator, ThermalLoadOperator};
 
 /// Local thermal operator data for one element.
 ///
@@ -119,22 +120,11 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    if material_ids.len() != mesh.num_elements() {
-        return Err(format!(
-            "material_ids has length {}, but mesh has {} elements",
-            material_ids.len(),
-            mesh.num_elements()
-        ));
-    }
-    if let Some(angles) = material_orientation_angles
-        && angles.len() != mesh.num_elements()
-    {
-        return Err(format!(
-            "material_orientation_angles has length {}, but mesh has {} elements",
-            angles.len(),
-            mesh.num_elements()
-        ));
-    }
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
     let ndof = mesh.num_nodes() * 2;
     let ncol = mesh.num_nodes();
     let mut rows = Vec::new();

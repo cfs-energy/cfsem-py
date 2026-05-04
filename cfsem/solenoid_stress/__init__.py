@@ -41,6 +41,7 @@ from .fem2d import (
     orthotropic_plane_strain_thermal_material,
     pack_material_tables_from_tags,
     quad_mesh_interpolation_operator,
+    quad_mesh_stress_operator,
     quad_mesh_strain_operator,
     query_quad_mesh,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "orthotropic_plane_strain_thermal_material",
     "pack_material_tables_from_tags",
     "quad_mesh_interpolation_operator",
+    "quad_mesh_stress_operator",
     "quad_mesh_strain_operator",
     "query_quad_mesh",
     "s_hoop_thick_wall_cylinder",

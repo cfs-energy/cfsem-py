@@ -5,15 +5,18 @@
 //! meridian coordinates `(r, z)` with the element Jacobian. There is no finite-difference
 //! approximation of the displacement field.
 //!
-//! The chain is:
+//! Mechanical strain/stress recovery uses the same query-coordinate sparse operators that serve
+//! arbitrary point probes. Quadrature recovery builds the known element-major
+//! `(element_index, reference_point)` arrays directly, so it reuses that math without doing a
+//! nearest-element search.
+//!
+//! The underlying chain is:
 //! 1. Each element family defines closed-form shape functions `N_i(\xi,\eta)` and closed-form
 //!    reference gradients.
 //! 2. At each quadrature point, those reference gradients are mapped into physical-space
 //!    gradients with the inverse Jacobian according to
 //!    `partial N / partial (r, z) = J^{-T} partial N / partial (\xi, \eta)`.
-//! 3. Those physical derivatives are stored in each [`VolumeSample`] as `grad_phys`.
-//! 4. The axisymmetric strain-displacement matrix `B` is then built from those physical
-//!    derivatives.
+//! 3. The strain-displacement matrix `B` is then built from those physical derivatives.
 //!
 //! In that `B` matrix:
 //! - `e_rr = partial u_r / partial r`,
@@ -25,22 +28,26 @@
 //! - `e_tt = u_r / r`,
 //! so that row uses `N_i / r`, not a spatial derivative.
 //!
-//! 5. Recovery then uses that same `B`:
+//! 4. Recovery then uses that same `B`:
 //!    - strain recovery uses `B`,
 //!    - stress recovery uses `D B`,
 //!    where `D` is the local per-material `4 x 4` matrix for the elastic stress-strain law.
+//!
+//! Thermal recovery remains quadrature-specific because it maps nodal temperatures and material
+//! reference temperatures to thermal strain/stress offsets.
 
+use crate::mesh::elements::quad2d::quadrature::gauss_volume;
+use crate::mesh::quad2d::{quad_mesh_strain_operator, quad_mesh_stress_operator};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
-use crate::physics::solenoid_stress::axisym::{
-    build_b_matrix, constitutive_times_b, constitutive_times_strain,
-};
+use crate::physics::solenoid_stress::axisym::constitutive_times_strain;
 use crate::physics::solenoid_stress::convenience::{
     rotate_material_in_plane, rotate_thermal_material_in_plane,
 };
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, local_dofs,
+    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, scatter_local_matrix,
+    validate_element_material_inputs,
 };
 
 /// Sparse quadrature-point recovery operators before reduction into the model-owned CSR form.
@@ -107,106 +114,73 @@ pub struct QuadratureFieldOperators<F: Real> {
     pub ntemp: usize,
 }
 
-/// Dense recovery operators for one quadrature point.
+/// Dense thermal recovery operators for one quadrature point.
 ///
 /// Units:
-/// - `strain`: `[strain / displacement] = [1 / length]`
-/// - `stress`: `[stress / displacement] = [pressure / length]`
 /// - `thermal_strain`: `[strain / temperature]`
 /// - `thermal_stress`: `[stress / temperature]`
 /// - `thermal_*_constant`: `strain` and `stress`, respectively
-struct LocalQuadratureSampleKernel<
-    F: Real,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
-> {
-    strain: [[F; DOF_PER_ELEMENT]; 4],
-    stress: [[F; DOF_PER_ELEMENT]; 4],
+struct LocalThermalSampleKernel<F: Real, const NODES_PER_ELEMENT: usize> {
     thermal_strain: [[F; NODES_PER_ELEMENT]; 4],
     thermal_stress: [[F; NODES_PER_ELEMENT]; 4],
     thermal_strain_constant: [F; 4],
     thermal_stress_constant: [F; 4],
 }
 
-/// Scatter one dense local block into triplet storage for a sparse recovery operator.
-fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
-    rows: &mut Vec<usize>,
-    cols: &mut Vec<usize>,
-    vals: &mut Vec<F>,
-    global_rows: &[usize; NROW],
-    global_cols: &[usize; NCOL],
-    local: &[[F; NCOL]; NROW],
-) {
-    for row in 0..NROW {
-        for col in 0..NCOL {
-            let value = local[row][col];
-            if value != F::zero() {
-                rows.push(global_rows[row]);
-                cols.push(global_cols[col]);
-                vals.push(value);
-            }
-        }
-    }
-}
-
-/// Build the dense recovery blocks for one quadrature point.
+/// Build the dense thermal recovery blocks for one quadrature point.
 ///
-/// This helper evaluates the local strain and stress maps with the element's `4 x 4` elastic
-/// stress-strain matrix, and, when thermal data is present, also builds the local thermal
-/// operators and constant offsets associated with the material reference temperature.
-fn quadrature_sample_kernel<
-    F: Real,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
+/// This helper builds the local thermal operators and constant offsets associated with the
+/// material reference temperature. Mechanical strain/stress recovery is assembled through the
+/// shared query-coordinate mesh operators.
+fn thermal_sample_kernel<F: Real, const NODES_PER_ELEMENT: usize>(
     sample: &VolumeSample<F, NODES_PER_ELEMENT>,
-    material: &[[F; 4]; 4],
-    thermal_material: Option<&ThermalMaterial<F>>,
-    thermal_stress_unit: Option<&[F; 4]>,
-    formulation: Structural2dFormulation<F>,
-) -> Result<LocalQuadratureSampleKernel<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>, String> {
-    const {
-        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
-    }
-    // `B` maps nodal displacements `[length]` to strain `[dimensionless]`.
-    let strain = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-        formulation,
-        &sample.n,
-        &sample.grad_phys,
-        sample.point,
-    )?;
-    // `D B` maps nodal displacements `[length]` to stress `[pressure]`. The elastic stress-strain
-    // matrix is applied here with the local per-material `4 x 4` matrix; there is no assembled
-    // global stress-strain operator.
-    let stress = constitutive_times_b(material, &strain);
-    let mut local = LocalQuadratureSampleKernel {
-        strain,
-        stress,
+    thermal: &ThermalMaterial<F>,
+    thermal_stress_unit: &[F; 4],
+) -> LocalThermalSampleKernel<F, NODES_PER_ELEMENT> {
+    let mut local = LocalThermalSampleKernel {
         thermal_strain: [[F::zero(); NODES_PER_ELEMENT]; 4],
         thermal_stress: [[F::zero(); NODES_PER_ELEMENT]; 4],
         thermal_strain_constant: [F::zero(); 4],
         thermal_stress_constant: [F::zero(); 4],
     };
 
-    if let Some(thermal) = thermal_material {
-        let thermal_stress_unit = thermal_stress_unit.expect("thermal stress unit");
-        for component in 0..4 {
-            for local_temp_node in 0..NODES_PER_ELEMENT {
-                // These blocks map the nodal temperature field directly to thermal strain/stress
-                // at this quadrature point.
-                local.thermal_strain[component][local_temp_node] =
-                    thermal.alpha[component] * sample.n[local_temp_node];
-                local.thermal_stress[component][local_temp_node] =
-                    thermal_stress_unit[component] * sample.n[local_temp_node];
-            }
-            local.thermal_strain_constant[component] =
-                -thermal.alpha[component] * thermal.reference_temperature;
-            local.thermal_stress_constant[component] =
-                -thermal_stress_unit[component] * thermal.reference_temperature;
+    for component in 0..4 {
+        for local_temp_node in 0..NODES_PER_ELEMENT {
+            // These blocks map the nodal temperature field directly to thermal strain/stress
+            // at this quadrature point.
+            local.thermal_strain[component][local_temp_node] =
+                thermal.alpha[component] * sample.n[local_temp_node];
+            local.thermal_stress[component][local_temp_node] =
+                thermal_stress_unit[component] * sample.n[local_temp_node];
         }
+        local.thermal_strain_constant[component] =
+            -thermal.alpha[component] * thermal.reference_temperature;
+        local.thermal_stress_constant[component] =
+            -thermal_stress_unit[component] * thermal.reference_temperature;
     }
 
-    Ok(local)
+    local
+}
+
+/// Return element-major quadrature-point references without doing a geometric point query.
+///
+/// Quadrature recovery already knows which element owns each point. These arrays have the same
+/// shape expected by the query-coordinate strain/stress operators, but avoid the `O(nquery *
+/// nelem)` nearest-element search that `query_quad_mesh` performs for arbitrary physical points.
+fn element_major_reference_points<F: Real>(
+    nelem: usize,
+    quadrature: QuadratureRule,
+) -> (Vec<usize>, Vec<[F; 2]>) {
+    let references = gauss_volume::<F>(quadrature);
+    let mut element_indices = Vec::with_capacity(nelem * references.len());
+    let mut reference_points = Vec::with_capacity(nelem * references.len());
+    for element_index in 0..nelem {
+        for &(reference, _) in &references {
+            element_indices.push(element_index);
+            reference_points.push(reference);
+        }
+    }
+    (element_indices, reference_points)
 }
 
 /// Assemble quadrature-point strain/stress recovery operators for one quadrilateral family.
@@ -240,32 +214,38 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    if material_ids.len() != mesh.num_elements() {
-        return Err(format!(
-            "material_ids has length {}, but mesh has {} elements",
-            material_ids.len(),
-            mesh.num_elements()
-        ));
-    }
-    if let Some(angles) = material_orientation_angles
-        && angles.len() != mesh.num_elements()
-    {
-        return Err(format!(
-            "material_orientation_angles has length {}, but mesh has {} elements",
-            angles.len(),
-            mesh.num_elements()
-        ));
-    }
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
 
     let nq_per_element = quadrature.points_per_element();
     let nsamples = mesh.num_elements() * nq_per_element;
+    let (element_indices, reference_points) =
+        element_major_reference_points::<F>(mesh.num_elements(), quadrature);
+    let strain_operator = quad_mesh_strain_operator::<
+        Family::ReferenceElement,
+        F,
+        NODES_PER_ELEMENT,
+        DOF_PER_ELEMENT,
+    >(mesh, &element_indices, &reference_points, formulation)?;
+    let stress_operator = quad_mesh_stress_operator::<
+        Family::ReferenceElement,
+        F,
+        NODES_PER_ELEMENT,
+        DOF_PER_ELEMENT,
+    >(
+        mesh,
+        &element_indices,
+        &reference_points,
+        material_ids,
+        material_table,
+        material_orientation_angles,
+        formulation,
+    )?;
+
     let mut points = Vec::with_capacity(nsamples);
-    let mut strain_rows = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
-    let mut strain_cols = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
-    let mut strain_vals = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
-    let mut stress_rows = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
-    let mut stress_cols = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
-    let mut stress_vals = Vec::with_capacity(nsamples * (DOF_PER_ELEMENT + 4));
     let mut thermal_strain_rows = Vec::new();
     let mut thermal_strain_cols = Vec::new();
     let mut thermal_strain_vals = Vec::new();
@@ -301,7 +281,6 @@ where
         } else {
             (material, thermal_material_base)
         };
-        let global_dofs = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
         let thermal_stress_unit =
             thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
 
@@ -309,33 +288,13 @@ where
             .into_iter()
             .enumerate()
         {
-            let local = quadrature_sample_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                &sample,
-                material,
-                thermal_material,
-                thermal_stress_unit.as_ref(),
-                formulation,
-            )?;
             let row_base = 4 * (element_index * nq_per_element + q_local);
             let global_rows = [row_base, row_base + 1, row_base + 2, row_base + 3];
             points.push(sample.point);
-            scatter_local_matrix(
-                &mut strain_rows,
-                &mut strain_cols,
-                &mut strain_vals,
-                &global_rows,
-                &global_dofs,
-                &local.strain,
-            );
-            scatter_local_matrix(
-                &mut stress_rows,
-                &mut stress_cols,
-                &mut stress_vals,
-                &global_rows,
-                &global_dofs,
-                &local.stress,
-            );
-            if thermal_material.is_some() {
+            if let (Some(thermal_material), Some(thermal_stress_unit)) =
+                (thermal_material, thermal_stress_unit.as_ref())
+            {
+                let local = thermal_sample_kernel(&sample, thermal_material, thermal_stress_unit);
                 scatter_local_matrix(
                     &mut thermal_strain_rows,
                     &mut thermal_strain_cols,
@@ -364,12 +323,12 @@ where
 
     Ok(QuadratureFieldOperators {
         points,
-        strain_rows,
-        strain_cols,
-        strain_vals,
-        stress_rows,
-        stress_cols,
-        stress_vals,
+        strain_rows: strain_operator.rows,
+        strain_cols: strain_operator.cols,
+        strain_vals: strain_operator.vals,
+        stress_rows: stress_operator.rows,
+        stress_cols: stress_operator.cols,
+        stress_vals: stress_operator.vals,
         thermal_strain_rows,
         thermal_strain_cols,
         thermal_strain_vals,

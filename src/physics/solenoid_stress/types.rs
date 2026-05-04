@@ -124,6 +124,71 @@ pub fn local_dofs<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     local_dofs
 }
 
+/// Validate per-element material-index arrays shared by assembly and recovery code.
+pub(crate) fn validate_element_material_inputs<F: Real>(
+    nelem: usize,
+    material_ids: &[usize],
+    material_orientation_angles: Option<&[F]>,
+) -> Result<(), String> {
+    if material_ids.len() != nelem {
+        return Err(format!(
+            "material_ids has length {}, but mesh has {} elements",
+            material_ids.len(),
+            nelem
+        ));
+    }
+    if let Some(angles) = material_orientation_angles
+        && angles.len() != nelem
+    {
+        return Err(format!(
+            "material_orientation_angles has length {}, but mesh has {} elements",
+            angles.len(),
+            nelem
+        ));
+    }
+    Ok(())
+}
+
+/// Scatter one local vector into sparse triplet storage.
+pub(crate) fn scatter_local_vector<F: Real, const NROW: usize>(
+    rows: &mut Vec<usize>,
+    cols: &mut Vec<usize>,
+    vals: &mut Vec<F>,
+    global_rows: &[usize; NROW],
+    global_col: usize,
+    local: &[F; NROW],
+) {
+    for row in 0..NROW {
+        let value = local[row];
+        if value != F::zero() {
+            rows.push(global_rows[row]);
+            cols.push(global_col);
+            vals.push(value);
+        }
+    }
+}
+
+/// Scatter one local dense block into sparse triplet storage.
+pub(crate) fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
+    rows: &mut Vec<usize>,
+    cols: &mut Vec<usize>,
+    vals: &mut Vec<F>,
+    global_rows: &[usize; NROW],
+    global_cols: &[usize; NCOL],
+    local: &[[F; NCOL]; NROW],
+) {
+    for row in 0..NROW {
+        for col in 0..NCOL {
+            let value = local[row][col];
+            if value != F::zero() {
+                rows.push(global_rows[row]);
+                cols.push(global_cols[col]);
+                vals.push(value);
+            }
+        }
+    }
+}
+
 /// One scalar normal-pressure load topology entry for one element face.
 ///
 /// The pressure amplitude is supplied later at `build_rhs(...)` time, not stored here.

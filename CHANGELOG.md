@@ -1,5 +1,18 @@
 # Changelog
 
+## 8.2.0 2026-05-01
+
+* Rust
+    * Add stress operator on query points as standalone method
+    * Remove unused dep on `branches`
+    * Reduce boilerplate in bindings
+    * Consolidate calculation of stress and strain operators
+        * Use synthetic mesh query data for quadrature points
+    * Consolidate validation and matrix scattering
+* Python
+    * Plumb new bindings
+    * Deduplicate stress queries using new operator
+
 ## 8.1.0 2026-04-30
 
 * Rust

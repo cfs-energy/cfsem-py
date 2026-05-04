@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use crate::mesh::elements::quad2d::{mapping, quad4, quad9};
 use crate::mesh::{Scalar, cast};
 use crate::physics::solenoid_stress::{
-    DOF_PER_NODE, Real, Structural2dFormulation, build_b_matrix,
+    DOF_PER_NODE, Real, Structural2dFormulation, build_b_matrix, rotate_material_in_plane,
+    validate_element_material_inputs,
 };
 
 /// Borrowed view of a 2D quadrilateral mesh with fixed nodes per element.
@@ -567,9 +568,10 @@ where
         ));
     }
 
-    let mut rows = Vec::new();
-    let mut cols = Vec::new();
-    let mut vals = Vec::new();
+    let max_nonzeros = element_indices.len() * 4 * DOF_PER_ELEMENT;
+    let mut rows = Vec::with_capacity(max_nonzeros);
+    let mut cols = Vec::with_capacity(max_nonzeros);
+    let mut vals = Vec::with_capacity(max_nonzeros);
 
     for (query_index, (&element_index, &reference)) in
         element_indices.iter().zip(reference_points).enumerate()
@@ -613,13 +615,128 @@ where
     })
 }
 
+/// Build a sparse stress-recovery operator from query element/reference coordinates.
+///
+/// The operator has shape `(4 * nquery, 2 * nnode)` and maps full nodal displacement values to the
+/// four-component stress vector at each query point. Rows are grouped per query point in the same
+/// component ordering as the structural formulation. Each query point uses the material assigned to
+/// its query element; for contained points this is the containing element.
+///
+/// `mesh.nodes_rz` and `reference_points` define geometry with physical node coordinates in
+/// `[length]` and unitless reference coordinates. `element_indices` and `material_ids` are unitless
+/// indices with lengths `nquery` and `nelem`, respectively. `material_table` has shape
+/// `(nmat, 4, 4)` and units `[stress / strain] = [pressure]`. Optional
+/// `material_orientation_angles` has shape `(nelem,)` and unitless radians. Operator entries have
+/// units `[pressure / length]`, so multiplying by nodal displacements with units `[length]`
+/// returns stresses with units `[pressure]`.
+pub fn quad_mesh_stress_operator<
+    E,
+    F,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    element_indices: &[usize],
+    reference_points: &[[F; 2]],
+    material_ids: &[usize],
+    material_table: &[[[F; 4]; 4]],
+    material_orientation_angles: Option<&[F]>,
+    formulation: Structural2dFormulation<F>,
+) -> Result<QuadMeshSparseOperator<F>, String>
+where
+    E: QuadReferenceElement<NODES_PER_ELEMENT>,
+    F: Real,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    mesh.validate_connectivity()?;
+    if element_indices.len() != reference_points.len() {
+        return Err(format!(
+            "element_indices has length {}, but reference_points has length {}",
+            element_indices.len(),
+            reference_points.len()
+        ));
+    }
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
+
+    let max_nonzeros = element_indices.len() * 4 * DOF_PER_ELEMENT;
+    let mut rows = Vec::with_capacity(max_nonzeros);
+    let mut cols = Vec::with_capacity(max_nonzeros);
+    let mut vals = Vec::with_capacity(max_nonzeros);
+
+    for (query_index, (&element_index, &reference)) in
+        element_indices.iter().zip(reference_points).enumerate()
+    {
+        let coords = mesh.element_coords(element_index)?;
+        let nodes = mesh.element_nodes(element_index)?;
+        let material_id = material_ids[element_index];
+        let material = material_table.get(material_id).ok_or_else(|| {
+            format!("material_id {material_id} on element {element_index} is out of range")
+        })?;
+        let material_storage;
+        let material = if let Some(angles) = material_orientation_angles {
+            material_storage = rotate_material_in_plane(material, angles[element_index]);
+            &material_storage
+        } else {
+            material
+        };
+
+        let shape = E::shape(reference[0], reference[1]);
+        let grad_ref = E::grad_ref(reference[0], reference[1]);
+        let jac = mapping::jacobian(&coords, &grad_ref);
+        let inv_jac = mapping::inv_j(&jac)?;
+        let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
+        let point = mapping::map_point(&coords, &shape);
+        let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            formulation,
+            &shape,
+            &grad_phys,
+            point,
+        )?;
+
+        for component in 0..4 {
+            let row = 4 * query_index + component;
+            for local_node in 0..NODES_PER_ELEMENT {
+                for dof_component in 0..DOF_PER_NODE {
+                    let local_dof = DOF_PER_NODE * local_node + dof_component;
+                    let mut value = F::zero();
+                    for strain_component in 0..4 {
+                        value = value
+                            + material[component][strain_component]
+                                * b[strain_component][local_dof];
+                    }
+                    if value != F::zero() {
+                        rows.push(row);
+                        cols.push(DOF_PER_NODE * nodes[local_node] + dof_component);
+                        vals.push(value);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(QuadMeshSparseOperator {
+        rows,
+        cols,
+        vals,
+        nrow: 4 * element_indices.len(),
+        ncol: DOF_PER_NODE * mesh.num_nodes(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         Quad4ReferenceElement, Quad9ReferenceElement, QuadMeshView2d,
-        quad_mesh_interpolation_operator, query_quad_mesh,
+        quad_mesh_interpolation_operator, quad_mesh_stress_operator, query_quad_mesh,
     };
     use crate::mesh::elements::quad2d::{mapping, quad9};
+    use crate::physics::solenoid_stress::Structural2dFormulation;
 
     #[test]
     fn quad_mesh_query_and_interpolation_operator_handle_quad4() {
@@ -712,5 +829,62 @@ mod tests {
         assert!((query.nearest_element_reference_points[0][0] - reference[0]).abs() < 1.0e-10);
         assert!((query.nearest_element_reference_points[0][1] - reference[1]).abs() < 1.0e-10);
         assert!((interpolated - expected).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn quad_mesh_stress_operator_uses_query_element_material() {
+        let nodes = [
+            [0.0_f64, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+        ];
+        let elements = [[0usize, 1, 4, 3], [1, 2, 5, 4]];
+        let mesh = QuadMeshView2d {
+            nodes_rz: &nodes,
+            elements: &elements,
+        };
+        let material_ids = [0usize, 1usize];
+        let material_table = [
+            [
+                [2.0, 0.25, 0.0, 0.0],
+                [0.5, 3.0, 0.0, 0.0],
+                [0.0, 0.0, 5.0, 0.0],
+                [0.0, 0.0, 0.0, 7.0],
+            ],
+            [
+                [11.0, 1.5, 0.0, 0.0],
+                [2.0, 13.0, 0.0, 0.0],
+                [0.0, 0.0, 17.0, 0.0],
+                [0.0, 0.0, 0.0, 19.0],
+            ],
+        ];
+        let query =
+            query_quad_mesh::<Quad4ReferenceElement, _, 4>(mesh, &[[0.25, 0.5], [1.75, 0.5]], 20)
+                .expect("mesh query");
+        let operator = quad_mesh_stress_operator::<Quad4ReferenceElement, _, 4, 8>(
+            mesh,
+            &query.nearest_element_indices,
+            &query.nearest_element_reference_points,
+            &material_ids,
+            &material_table,
+            None,
+            Structural2dFormulation::PlaneStrain { thickness: 1.0 },
+        )
+        .expect("stress operator");
+        let displacement = [
+            0.0_f64, 0.0, 1.0, 0.0, 2.0, 0.0, 0.0, 2.0, 1.0, 2.0, 2.0, 2.0,
+        ];
+        let mut stress = [0.0_f64; 8];
+        for ((&row, &col), &value) in operator.rows.iter().zip(&operator.cols).zip(&operator.vals) {
+            stress[row] += value * displacement[col];
+        }
+
+        let expected = [2.5, 6.5, 0.0, 0.0, 14.0, 28.0, 0.0, 0.0];
+        for (actual, expected) in stress.iter().zip(expected) {
+            assert!((actual - expected).abs() < 1.0e-12);
+        }
     }
 }

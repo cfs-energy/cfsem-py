@@ -8,24 +8,28 @@ use super::dipole::{
 use crate::MU0_OVER_4PI;
 use crate::physics::hierarchical::{DualTreeError, DualTreeKernel, DualTreeScalar};
 
-/// First-order source multipole summary for a cluster of point dipoles.
+/// First-order Taylor source summary for a cluster of point dipoles.
 ///
 /// `first_moment[a][b] = sum_i (x_i[a] - centroid[a]) * moment_i[b]`.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleMultipoleSummary<T: DualTreeScalar> {
+pub struct DipoleFirstOrderSummary<T: DualTreeScalar> {
     pub centroid: [T; 3],
     pub moment: [T; 3],
     pub first_moment: [[T; 3]; 3],
     pub count: T,
 }
 
-/// Dipole Barnes-Hut kernel using a first-order source multipole expansion.
+/// Dipole Barnes-Hut kernel using a first-order source-position Taylor correction.
+///
+/// This is not a full multipole treatment. Far evaluation starts with one total
+/// dipole at the source centroid and adds the first spatial moment correction
+/// from the source cluster.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleMultipoleKernel<T: DualTreeScalar> {
+pub struct DipoleFirstOrderKernel<T: DualTreeScalar> {
     marker: PhantomData<T>,
 }
 
-impl<T: DualTreeScalar> DipoleMultipoleKernel<T> {
+impl<T: DualTreeScalar> DipoleFirstOrderKernel<T> {
     pub fn new() -> Self {
         Self {
             marker: PhantomData,
@@ -33,12 +37,12 @@ impl<T: DualTreeScalar> DipoleMultipoleKernel<T> {
     }
 }
 
-impl<T: DualTreeScalar> DualTreeKernel for DipoleMultipoleKernel<T> {
+impl<T: DualTreeScalar> DualTreeKernel for DipoleFirstOrderKernel<T> {
     type Scalar = T;
     type SourceGeometry = DipoleSource<T>;
     type TargetGeometry = DipoleTarget<T>;
     type SourceMoment = [T; 3];
-    type SourceSummary = DipoleMultipoleSummary<T>;
+    type SourceSummary = DipoleFirstOrderSummary<T>;
     type TargetSummary = DipoleTargetSummary<T>;
     type Output = [T; 3];
 
@@ -49,7 +53,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleMultipoleKernel<T> {
         moments: &[Self::SourceMoment],
         out: &mut Self::SourceSummary,
     ) -> DualTreeError {
-        *out = DipoleMultipoleSummary::default();
+        *out = DipoleFirstOrderSummary::default();
         summarize_centroid(source_ids, sources, &mut out.centroid, &mut out.count);
         for i in 0..source_ids.len() {
             let source_id = source_ids[i] as usize;
@@ -66,7 +70,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleMultipoleKernel<T> {
         _child_ids: &[u32],
         out: &mut Self::SourceSummary,
     ) -> DualTreeError {
-        *out = DipoleMultipoleSummary::default();
+        *out = DipoleFirstOrderSummary::default();
         for i in 0..children.len() {
             out.count = out.count + children[i].count;
             for axis in 0..3 {

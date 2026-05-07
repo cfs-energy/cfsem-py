@@ -1,6 +1,6 @@
 use super::*;
 use crate::physics::hierarchical::kernels::{
-    DipoleMomentKernel, DipoleMultipoleKernel, DipoleSource, DipoleTarget,
+    DipoleFirstOrderKernel, DipoleMomentKernel, DipoleSource, DipoleTarget,
 };
 
 #[derive(Clone, Copy)]
@@ -614,9 +614,9 @@ fn dipole_moment_kernel_theta_zero_matches_dense() {
 }
 
 #[test]
-fn dipole_multipole_far_summary_improves_over_single_moment() {
+fn dipole_first_order_far_summary_improves_over_single_moment() {
     let moment_kernel = DipoleMomentKernel::<f64>::new();
-    let multipole_kernel = DipoleMultipoleKernel::<f64>::new();
+    let first_order_kernel = DipoleFirstOrderKernel::<f64>::new();
     let sources = [
         DipoleSource {
             position: [-1.0, 0.0, 0.0],
@@ -643,10 +643,10 @@ fn dipole_multipole_far_summary_improves_over_single_moment() {
         SourceNodeSummaries::<DipoleMomentKernel<f64>>::new(source_tree.as_view());
     let mut moment_target_summaries =
         TargetNodeSummaries::<DipoleMomentKernel<f64>>::new(target_tree.as_view());
-    let mut multipole_source_summaries =
-        SourceNodeSummaries::<DipoleMultipoleKernel<f64>>::new(source_tree.as_view());
-    let mut multipole_target_summaries =
-        TargetNodeSummaries::<DipoleMultipoleKernel<f64>>::new(target_tree.as_view());
+    let mut first_order_source_summaries =
+        SourceNodeSummaries::<DipoleFirstOrderKernel<f64>>::new(source_tree.as_view());
+    let mut first_order_target_summaries =
+        TargetNodeSummaries::<DipoleFirstOrderKernel<f64>>::new(target_tree.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -669,20 +669,20 @@ fn dipole_multipole_far_summary_improves_over_single_moment() {
     );
     assert_eq!(
         update_source_summaries_into(
-            &multipole_kernel,
+            &first_order_kernel,
             source_tree.as_view(),
             &sources,
             &moments,
-            &mut multipole_source_summaries.node_summaries,
+            &mut first_order_source_summaries.node_summaries,
         ),
         DualTreeError::Ok
     );
     assert_eq!(
         update_target_summaries_into(
-            &multipole_kernel,
+            &first_order_kernel,
             target_tree.as_view(),
             &targets,
-            &mut multipole_target_summaries.node_summaries,
+            &mut first_order_target_summaries.node_summaries,
         ),
         DualTreeError::Ok
     );
@@ -692,7 +692,7 @@ fn dipole_multipole_far_summary_improves_over_single_moment() {
         contribution: &mut scratch_value,
     };
     let mut moment_out = [[0.0; 3]; 1];
-    let mut multipole_out = [[0.0; 3]; 1];
+    let mut first_order_out = [[0.0; 3]; 1];
     let mut dense = [[0.0; 3]; 1];
 
     assert_eq!(
@@ -713,16 +713,16 @@ fn dipole_multipole_far_summary_improves_over_single_moment() {
     );
     assert_eq!(
         evaluate_into(
-            &multipole_kernel,
+            &first_order_kernel,
             plan.as_view(),
             source_tree.as_view(),
             target_tree.as_view(),
-            &multipole_source_summaries.node_summaries,
-            &multipole_target_summaries.node_summaries,
+            &first_order_source_summaries.node_summaries,
+            &first_order_target_summaries.node_summaries,
             &sources,
             &targets,
             &moments,
-            &mut multipole_out,
+            &mut first_order_out,
             &mut scratch,
         ),
         DualTreeError::Ok
@@ -740,8 +740,8 @@ fn dipole_multipole_far_summary_improves_over_single_moment() {
     );
 
     let moment_err = vec_norm(sub_vec3(moment_out[0], dense[0]));
-    let multipole_err = vec_norm(sub_vec3(multipole_out[0], dense[0]));
-    assert!(multipole_err < moment_err);
+    let first_order_err = vec_norm(sub_vec3(first_order_out[0], dense[0]));
+    assert!(first_order_err < moment_err);
 }
 
 fn sub_vec3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {

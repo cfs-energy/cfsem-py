@@ -21,10 +21,12 @@ mod tree;
 pub use aabb::Aabb;
 pub use evaluator::{
     EvaluationScratch, SourceNodeSummaries, TargetNodeSummaries, dense_direct_evaluate_into,
-    evaluate_into, update_source_summaries_into, update_target_summaries_into,
+    evaluate_into, evaluate_into_par, output_len, parallel_evaluation_scratch_len,
+    serial_evaluation_scratch_len, update_plan_target_summaries_into, update_source_summaries_into,
+    update_target_summaries_into,
 };
 pub use kernel::{BoundedGeometry, DualTreeError, DualTreeKernel};
-pub use plan::{DualInteractionPlan, DualInteractionPlanView};
+pub use plan::{DualInteractionPlan, DualInteractionPlanChunk, DualInteractionPlanView};
 pub use scalar::DualTreeScalar;
 pub use tree::{ClusterTree, ClusterTreeBuildMethod, ClusterTreeView};
 

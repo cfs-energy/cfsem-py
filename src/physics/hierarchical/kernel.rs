@@ -15,6 +15,24 @@ pub enum DualTreeError {
     KernelError1 = 8,
 }
 
+impl DualTreeError {
+    #[inline]
+    pub fn from_u32(value: u32) -> Self {
+        match value {
+            0 => Self::Ok,
+            1 => Self::EmptyInput,
+            2 => Self::LengthMismatch,
+            3 => Self::ScratchTooSmall,
+            4 => Self::InvalidLeafSize,
+            5 => Self::InvalidTheta,
+            6 => Self::CapacityExceeded,
+            7 => Self::KernelError0,
+            8 => Self::KernelError1,
+            _ => Self::KernelError1,
+        }
+    }
+}
+
 /// Geometry that can be inserted into a cluster tree.
 pub trait BoundedGeometry {
     type Scalar: DualTreeScalar;

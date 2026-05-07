@@ -298,18 +298,16 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
     let moments = [[0.0, 0.0, 2.0], [0.0, 1.0, 0.5]];
 
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
 
     let mut b_source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut b_target_summaries =
-        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     let mut a_source_summaries =
         SourceNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new(source_tree.as_view());
     let mut a_target_summaries =
-        TargetNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -322,11 +320,11 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
+        update_plan_target_summaries_into(
             &b_kernel,
-            target_tree.as_view(),
+            plan.as_view(),
             &targets,
-            &mut b_target_summaries.node_summaries,
+            &mut b_target_summaries,
         ),
         DualTreeError::Ok
     );
@@ -341,11 +339,11 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
+        update_plan_target_summaries_into(
             &a_kernel,
-            target_tree.as_view(),
+            plan.as_view(),
             &targets,
-            &mut a_target_summaries.node_summaries,
+            &mut a_target_summaries,
         ),
         DualTreeError::Ok
     );
@@ -362,9 +360,8 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             &b_kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &b_source_summaries.node_summaries,
-            &b_target_summaries.node_summaries,
+            &b_target_summaries,
             &sources,
             &targets,
             &moments,
@@ -378,9 +375,8 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             &a_kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &a_source_summaries.node_summaries,
-            &a_target_summaries.node_summaries,
+            &a_target_summaries,
             &sources,
             &targets,
             &moments,
@@ -499,13 +495,11 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     let currents = [2.0, -1.5];
 
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -518,12 +512,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries,
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries,),
         DualTreeError::Ok
     );
 
@@ -538,9 +527,8 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &currents,
@@ -629,13 +617,13 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     let currents = [2.0, -1.5];
 
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new_for_plan(
+            plan.as_view(),
+        );
 
     assert_eq!(
         update_source_summaries_into(
@@ -648,12 +636,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries,
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries,),
         DualTreeError::Ok
     );
 
@@ -668,9 +651,8 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &currents,
@@ -820,13 +802,11 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
-        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -839,12 +819,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries,
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries,),
         DualTreeError::Ok
     );
 
@@ -859,9 +834,8 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &moments,
@@ -931,16 +905,14 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new(
             source_tree.as_view(),
         );
     let mut target_summaries =
-        TargetNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new(
-            target_tree.as_view(),
+        TargetNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new_for_plan(
+            plan.as_view(),
         );
 
     assert_eq!(
@@ -954,12 +926,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries,
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries,),
         DualTreeError::Ok
     );
 
@@ -974,9 +941,8 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &moments,
@@ -1040,20 +1006,13 @@ fn linear_filament_reuses_tree_for_current_updates() {
     let currents0 = [1.0, 1.0];
     let currents1 = [2.0, -1.0];
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries,
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries,),
         DualTreeError::Ok
     );
 
@@ -1079,9 +1038,8 @@ fn linear_filament_reuses_tree_for_current_updates() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &currents0,
@@ -1106,9 +1064,8 @@ fn linear_filament_reuses_tree_for_current_updates() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &currents1,
@@ -1140,16 +1097,14 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
     }];
     let currents = [1.0, 1.0];
     let source_tree = ClusterTree::build(&sources, 2).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 1.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 1.0, 1).unwrap();
     assert_eq!(plan.far_target_node_ids.len(), 1);
     assert!(plan.near_target_ids.is_empty());
 
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -1161,12 +1116,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries,
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries,),
         DualTreeError::Ok
     );
 
@@ -1180,9 +1130,8 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &currents,
@@ -1294,9 +1243,7 @@ fn theta_zero_plan_is_all_exact() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f64(&[[10.0, 0.0, 0.0], [11.0, 0.0, 0.0]]);
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     assert_eq!(plan.near_target_ids.len(), sources.len() * targets.len());
     assert_eq!(plan.near_source_ids.len(), sources.len() * targets.len());
     assert!(plan.far_target_node_ids.is_empty());
@@ -1308,9 +1255,7 @@ fn separated_plan_has_far_pair() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
     let targets = points_f64(&[[100.0, 0.0, 0.0], [100.0, 1.0, 0.0]]);
     let source_tree = ClusterTree::build(&sources, 2).unwrap();
-    let target_tree = ClusterTree::build(&targets, 2).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 1.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 1.0, 1).unwrap();
     assert_eq!(plan.far_target_node_ids.len(), 1);
     assert_eq!(plan.far_source_node_ids.len(), 1);
     assert!(plan.near_target_ids.is_empty());
@@ -1352,17 +1297,121 @@ fn theta_zero_matches_dense_direct_f64() {
 }
 
 #[test]
+fn chunked_plan_serial_and_parallel_match_dense_direct() {
+    let kernel = MockKernel::<f64>::new();
+    let sources = points_f64(&[
+        [0.0, 0.0, 0.0],
+        [1.0, 0.2, 0.0],
+        [2.0, -0.1, 0.0],
+        [3.0, 0.4, 0.0],
+    ]);
+    let targets = points_f64(&[
+        [0.1, 0.3, 0.0],
+        [0.9, -0.2, 0.0],
+        [1.3, 0.5, 0.0],
+        [1.8, -0.3, 0.0],
+        [2.4, 0.7, 0.0],
+        [2.9, -0.5, 0.0],
+        [3.2, 0.1, 0.0],
+    ]);
+    let moments = [1.0_f64, 2.0, -0.5, 3.0];
+
+    let source_tree = ClusterTree::build(&sources, 2).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 2, 0.0, 3).unwrap();
+    assert_eq!(plan.chunks.len(), 3);
+    assert_eq!(output_len(plan.as_view()), targets.len());
+    assert_eq!(serial_evaluation_scratch_len(plan.as_view()), 1);
+    assert_eq!(
+        parallel_evaluation_scratch_len(plan.as_view()),
+        plan.chunks.len()
+    );
+
+    let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries = TargetNodeSummaries::<MockKernel<f64>>::new_for_plan(plan.as_view());
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries),
+        DualTreeError::Ok
+    );
+
+    let mut dense = vec![0.0_f64; output_len(plan.as_view())];
+    let mut serial = vec![0.0_f64; output_len(plan.as_view())];
+    let mut parallel = vec![0.0_f64; output_len(plan.as_view())];
+    let mut dense_scratch_value = [0.0_f64; 1];
+    let mut serial_scratch_value = [0.0_f64; 1];
+    let mut parallel_scratch_value = vec![0.0_f64; parallel_evaluation_scratch_len(plan.as_view())];
+
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &moments,
+            &mut dense,
+            &mut EvaluationScratch {
+                contribution: &mut dense_scratch_value
+            },
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut serial,
+            &mut EvaluationScratch {
+                contribution: &mut serial_scratch_value
+            },
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        evaluate_into_par(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut parallel,
+            &mut EvaluationScratch {
+                contribution: &mut parallel_scratch_value
+            },
+        ),
+        DualTreeError::Ok
+    );
+
+    assert_eq!(serial, dense);
+    assert_eq!(parallel, dense);
+}
+
+#[test]
 fn theta_zero_matches_dense_direct_f32() {
     let kernel = MockKernel::<f32>::new();
     let sources = points_f32(&[[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f32(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f32, 2.0, 3.0];
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f32>>::new(source_tree.as_view());
-    let mut target_summaries = TargetNodeSummaries::<MockKernel<f32>>::new(target_tree.as_view());
+    let mut target_summaries = TargetNodeSummaries::<MockKernel<f32>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -1374,12 +1423,7 @@ fn theta_zero_matches_dense_direct_f32() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries),
         DualTreeError::Ok
     );
 
@@ -1394,9 +1438,8 @@ fn theta_zero_matches_dense_direct_f32() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &moments,
@@ -1450,11 +1493,9 @@ fn run_theta_zero_matches_dense_direct_f64() {
     let targets = points_f64(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f64, 2.0, 3.0];
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries = TargetNodeSummaries::<MockKernel<f64>>::new(target_tree.as_view());
+    let mut target_summaries = TargetNodeSummaries::<MockKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -1466,12 +1507,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries),
         DualTreeError::Ok
     );
 
@@ -1486,9 +1522,8 @@ fn run_theta_zero_matches_dense_direct_f64() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &moments,
@@ -1541,13 +1576,11 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
     let moments = [[0.0, 0.0, 1.0], [0.0, 1.0, 0.5], [1.0, 0.0, 0.0]];
 
     let source_tree = ClusterTree::build(&sources, 1).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let plan = DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 0.0, 1).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
-        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -1560,12 +1593,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
         DualTreeError::Ok
     );
     assert_eq!(
-        update_target_summaries_into(
-            &kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut target_summaries.node_summaries,
-        ),
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries,),
         DualTreeError::Ok
     );
 
@@ -1581,9 +1609,8 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
             &kernel,
             plan.as_view(),
             source_tree.as_view(),
-            target_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries.node_summaries,
+            &target_summaries,
             &sources,
             &targets,
             &moments,

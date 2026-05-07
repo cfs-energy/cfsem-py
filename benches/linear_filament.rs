@@ -6,8 +6,8 @@ use cfsem::physics::hierarchical::kernels::{
 };
 use cfsem::physics::hierarchical::{
     ClusterTree, DualInteractionPlan, DualTreeError, DualTreeKernel, EvaluationScratch,
-    SourceNodeSummaries, TargetNodeSummaries, evaluate_into, update_source_summaries_into,
-    update_target_summaries_into,
+    SourceNodeSummaries, TargetNodeSummaries, evaluate_into, evaluate_into_par,
+    update_plan_target_summaries_into, update_source_summaries_into,
 };
 use cfsem::physics::linear_filament::{
     flux_density_linear_filament, flux_density_linear_filament_par,
@@ -20,6 +20,7 @@ use std::hint::black_box;
 
 const HIERARCHICAL_LEAF_SIZE: usize = 16;
 const HIERARCHICAL_THETA: f64 = 0.7;
+const HIERARCHICAL_NUM_CHUNKS: usize = 8;
 const LOOP_RADIUS: f64 = 1.0;
 const LOOP_OBS_FRACTION_OFFSET: f64 = 0.027;
 const LOOP_CURRENT: f64 = 0.5;
@@ -33,19 +34,19 @@ where
             TargetGeometry = DipoleTarget<f64>,
             SourceMoment = f64,
             Output = [f64; 3],
-        >,
+        > + Sync,
 {
     kernel: K,
     sources: Vec<LinearFilamentSource<f64>>,
     targets: Vec<DipoleTarget<f64>>,
     currents: Vec<f64>,
     source_tree: ClusterTree<f64>,
-    target_tree: ClusterTree<f64>,
-    plan: DualInteractionPlan,
+    plan: DualInteractionPlan<f64>,
     source_summaries: SourceNodeSummaries<K>,
     target_summaries: TargetNodeSummaries<K>,
     vector_out: Vec<[f64; 3]>,
     scratch_value: [[f64; 3]; 1],
+    parallel_scratch_value: Vec<[f64; 3]>,
 }
 
 impl<K> HierarchicalLinearFilamentSolve<K>
@@ -56,7 +57,7 @@ where
             TargetGeometry = DipoleTarget<f64>,
             SourceMoment = f64,
             Output = [f64; 3],
-        >,
+        > + Sync,
 {
     fn new(
         kernel: K,
@@ -89,27 +90,29 @@ where
         }
 
         let source_tree = ClusterTree::build_morton_lbvh(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
-        let target_tree = ClusterTree::build_morton_lbvh(&targets, HIERARCHICAL_LEAF_SIZE).unwrap();
         let plan = DualInteractionPlan::build(
             source_tree.as_view(),
-            target_tree.as_view(),
+            &targets,
+            HIERARCHICAL_LEAF_SIZE,
             HIERARCHICAL_THETA,
+            HIERARCHICAL_NUM_CHUNKS,
         )
         .unwrap();
 
-        let mut target_summaries = TargetNodeSummaries::<K>::new(target_tree.as_view());
+        let mut target_summaries = TargetNodeSummaries::<K>::new_for_plan(plan.as_view());
         assert_eq!(
-            update_target_summaries_into(
+            update_plan_target_summaries_into(
                 &kernel,
-                target_tree.as_view(),
+                plan.as_view(),
                 &targets,
-                &mut target_summaries.node_summaries,
+                &mut target_summaries,
             ),
             DualTreeError::Ok
         );
 
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let vector_out = vec![[0.0; 3]; targets.len()];
+        let parallel_scratch_value = vec![[0.0; 3]; plan.chunks.len()];
 
         Self {
             kernel,
@@ -117,12 +120,12 @@ where
             targets,
             currents: currents.to_vec(),
             source_tree,
-            target_tree,
             plan,
             source_summaries,
             target_summaries,
             vector_out,
             scratch_value: [[0.0; 3]; 1],
+            parallel_scratch_value,
         }
     }
 
@@ -145,9 +148,45 @@ where
                 &self.kernel,
                 self.plan.as_view(),
                 self.source_tree.as_view(),
-                self.target_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.target_summaries.node_summaries,
+                &self.target_summaries,
+                &self.sources,
+                &self.targets,
+                &self.currents,
+                &mut self.vector_out,
+                &mut scratch,
+            ),
+            DualTreeError::Ok
+        );
+
+        for i in 0..self.vector_out.len() {
+            out.0[i] = self.vector_out[i][0];
+            out.1[i] = self.vector_out[i][1];
+            out.2[i] = self.vector_out[i][2];
+        }
+    }
+
+    fn solve_into_par(&mut self, out: (&mut [f64], &mut [f64], &mut [f64])) {
+        assert_eq!(
+            update_source_summaries_into(
+                &self.kernel,
+                self.source_tree.as_view(),
+                &self.sources,
+                &self.currents,
+                &mut self.source_summaries.node_summaries,
+            ),
+            DualTreeError::Ok
+        );
+        let mut scratch = EvaluationScratch {
+            contribution: &mut self.parallel_scratch_value,
+        };
+        assert_eq!(
+            evaluate_into_par(
+                &self.kernel,
+                self.plan.as_view(),
+                self.source_tree.as_view(),
+                &self.source_summaries.node_summaries,
+                &self.target_summaries,
                 &self.sources,
                 &self.targets,
                 &self.currents,
@@ -180,7 +219,7 @@ fn hierarchical_linear_filament_build_and_solve<K>(
             TargetGeometry = DipoleTarget<f64>,
             SourceMoment = f64,
             Output = [f64; 3],
-        >,
+        > + Sync,
 {
     let mut solve = HierarchicalLinearFilamentSolve::new(
         kernel,
@@ -365,6 +404,23 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new(
                     format!(
+                        "Flux Density of Linear Filaments, Hierarchical Parallel\n{} Obs. Point(s)",
+                        nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        let n = input.xobs.len();
+                        let (mut bx, mut by, mut bz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+                        black_box(hierarchical.solve_into_par((&mut bx, &mut by, &mut bz)))
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
                         "Flux Density of Linear Filaments, Hierarchical Build+Solve\n{} Obs. Point(s)",
                         nobs
                     ),
@@ -486,6 +542,24 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
                         let n = input.xobs.len();
                         let (mut ax, mut ay, mut az) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
                         black_box(hierarchical.solve_into((&mut ax, &mut ay, &mut az)))
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Vector Potential of Linear Filaments, Hierarchical Parallel\n{} Obs. Point(s)",
+                        nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        let n = input.xobs.len();
+                        let (mut ax, mut ay, mut az) =
+                            (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+                        black_box(hierarchical.solve_into_par((&mut ax, &mut ay, &mut az)))
                     });
                 },
             );

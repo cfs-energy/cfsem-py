@@ -1,8 +1,23 @@
-use super::{ClusterTreeView, DualTreeError, DualTreeScalar};
+use super::{BoundedGeometry, ClusterTree, ClusterTreeView, DualTreeError, DualTreeScalar};
+
+/// One target-owned chunk of a finalized dual interaction plan.
+#[derive(Clone, Debug)]
+pub struct DualInteractionPlanChunk<T: DualTreeScalar> {
+    pub target_start: usize,
+    pub target_count: usize,
+    pub target_tree: ClusterTree<T>,
+    pub near_target_ids: Vec<u32>,
+    pub near_source_ids: Vec<u32>,
+    pub far_target_node_ids: Vec<u32>,
+    pub far_source_node_ids: Vec<u32>,
+}
 
 /// CPU-owned finalized dual interaction plan.
 #[derive(Clone, Debug, Default)]
-pub struct DualInteractionPlan {
+pub struct DualInteractionPlan<T: DualTreeScalar> {
+    pub chunks: Vec<DualInteractionPlanChunk<T>>,
+    pub target_count: usize,
+    pub target_chunk_size: usize,
     pub near_target_ids: Vec<u32>,
     pub near_source_ids: Vec<u32>,
     pub far_target_node_ids: Vec<u32>,
@@ -11,86 +26,100 @@ pub struct DualInteractionPlan {
 
 /// Borrowed view over a finalized interaction plan.
 #[derive(Clone, Copy)]
-pub struct DualInteractionPlanView<'a> {
-    pub near_target_ids: &'a [u32],
-    pub near_source_ids: &'a [u32],
-    pub far_target_node_ids: &'a [u32],
-    pub far_source_node_ids: &'a [u32],
+pub struct DualInteractionPlanView<'a, T: DualTreeScalar> {
+    pub chunks: &'a [DualInteractionPlanChunk<T>],
+    pub target_count: usize,
+    pub target_chunk_size: usize,
 }
 
-impl DualInteractionPlan {
-    /// Build a dual-tree interaction plan for fixed source/target geometry.
-    pub fn build<T: DualTreeScalar>(
+impl<T: DualTreeScalar> DualInteractionPlan<T> {
+    /// Build a chunked dual-tree interaction plan for fixed source/target geometry.
+    pub fn build<G>(
         source_tree: ClusterTreeView<'_, T>,
-        target_tree: ClusterTreeView<'_, T>,
+        targets: &[G],
+        target_leaf_size: usize,
         theta: T,
-    ) -> Result<Self, DualTreeError> {
+        num_chunks: usize,
+    ) -> Result<Self, DualTreeError>
+    where
+        G: BoundedGeometry<Scalar = T>,
+    {
         if theta < T::ZERO {
             return Err(DualTreeError::InvalidTheta);
         }
-        if source_tree.n_nodes() == 0 || target_tree.n_nodes() == 0 {
+        if source_tree.n_nodes() == 0 || targets.is_empty() {
             return Err(DualTreeError::EmptyInput);
         }
+        if target_leaf_size == 0 || num_chunks == 0 {
+            return Err(DualTreeError::InvalidLeafSize);
+        }
 
-        let mut plan = Self::default();
-        let mut active = Vec::new();
-        active.push((0_u32, 0_u32));
+        let chunk_count = num_chunks.min(targets.len());
+        let target_chunk_size = targets.len().div_ceil(chunk_count);
+        let mut chunks = Vec::with_capacity(chunk_count);
 
-        while let Some((target_node, source_node)) = active.pop() {
-            if is_far(target_tree, source_tree, target_node, source_node, theta) {
-                plan.far_target_node_ids.push(target_node);
-                plan.far_source_node_ids.push(source_node);
-                continue;
+        for chunk_id in 0..chunk_count {
+            let target_start = chunk_id * target_chunk_size;
+            if target_start >= targets.len() {
+                break;
             }
+            let target_end = (target_start + target_chunk_size).min(targets.len());
+            let target_tree =
+                ClusterTree::build(&targets[target_start..target_end], target_leaf_size)?;
+            let mut chunk = DualInteractionPlanChunk {
+                target_start,
+                target_count: target_end - target_start,
+                target_tree,
+                near_target_ids: Vec::new(),
+                near_source_ids: Vec::new(),
+                far_target_node_ids: Vec::new(),
+                far_source_node_ids: Vec::new(),
+            };
+            build_chunk_pairs(&mut chunk, source_tree, theta);
+            chunk.sort_pairs();
+            chunks.push(chunk);
+        }
 
-            let target_leaf = target_tree.is_leaf(target_node);
-            let source_leaf = source_tree.is_leaf(source_node);
-
-            if target_leaf && source_leaf {
-                expand_leaf_pair(
-                    &mut plan,
-                    target_tree,
-                    source_tree,
-                    target_node,
-                    source_node,
-                );
-                continue;
+        let mut near_target_ids = Vec::new();
+        let mut near_source_ids = Vec::new();
+        let mut far_target_node_ids = Vec::new();
+        let mut far_source_node_ids = Vec::new();
+        for chunk_id in 0..chunks.len() {
+            for i in 0..chunks[chunk_id].near_target_ids.len() {
+                near_target_ids.push(chunks[chunk_id].near_target_ids[i]);
+                near_source_ids.push(chunks[chunk_id].near_source_ids[i]);
             }
-
-            let target_diam_sq = target_tree.node_aabb[target_node as usize].diameter_sq();
-            let source_diam_sq = source_tree.node_aabb[source_node as usize].diameter_sq();
-
-            let split_target = !target_leaf && (source_leaf || target_diam_sq >= source_diam_sq);
-            let split_source = !source_leaf && (target_leaf || source_diam_sq >= target_diam_sq);
-
-            if split_target && split_source {
-                push_split_both(
-                    &mut active,
-                    target_tree,
-                    source_tree,
-                    target_node,
-                    source_node,
-                );
-            } else if split_target {
-                push_split_target(&mut active, target_tree, target_node, source_node);
-            } else if split_source {
-                push_split_source(&mut active, source_tree, target_node, source_node);
+            for i in 0..chunks[chunk_id].far_target_node_ids.len() {
+                far_target_node_ids.push(chunks[chunk_id].far_target_node_ids[i]);
+                far_source_node_ids.push(chunks[chunk_id].far_source_node_ids[i]);
             }
         }
 
-        plan.sort_pairs();
-
-        Ok(plan)
+        Ok(Self {
+            chunks,
+            target_count: targets.len(),
+            target_chunk_size,
+            near_target_ids,
+            near_source_ids,
+            far_target_node_ids,
+            far_source_node_ids,
+        })
     }
 
     #[inline]
-    pub fn as_view(&self) -> DualInteractionPlanView<'_> {
+    pub fn as_view(&self) -> DualInteractionPlanView<'_, T> {
         DualInteractionPlanView {
-            near_target_ids: &self.near_target_ids,
-            near_source_ids: &self.near_source_ids,
-            far_target_node_ids: &self.far_target_node_ids,
-            far_source_node_ids: &self.far_source_node_ids,
+            chunks: &self.chunks,
+            target_count: self.target_count,
+            target_chunk_size: self.target_chunk_size,
         }
+    }
+}
+
+impl<T: DualTreeScalar> DualInteractionPlanChunk<T> {
+    #[inline]
+    pub fn target_tree_view(&self) -> ClusterTreeView<'_, T> {
+        self.target_tree.as_view()
     }
 
     fn sort_pairs(&mut self) {
@@ -114,6 +143,68 @@ impl DualInteractionPlan {
             self.far_target_node_ids[i] = far_pairs[i].1;
         }
     }
+}
+
+fn build_chunk_pairs<T: DualTreeScalar>(
+    chunk: &mut DualInteractionPlanChunk<T>,
+    source_tree: ClusterTreeView<'_, T>,
+    theta: T,
+) {
+    let target_tree = chunk.target_tree.as_view();
+    let mut near_target_ids = Vec::new();
+    let mut near_source_ids = Vec::new();
+    let mut far_target_node_ids = Vec::new();
+    let mut far_source_node_ids = Vec::new();
+    let mut active = Vec::new();
+    active.push((0_u32, 0_u32));
+
+    while let Some((target_node, source_node)) = active.pop() {
+        if is_far(target_tree, source_tree, target_node, source_node, theta) {
+            far_target_node_ids.push(target_node);
+            far_source_node_ids.push(source_node);
+            continue;
+        }
+
+        let target_leaf = target_tree.is_leaf(target_node);
+        let source_leaf = source_tree.is_leaf(source_node);
+
+        if target_leaf && source_leaf {
+            expand_leaf_pair(
+                &mut near_target_ids,
+                &mut near_source_ids,
+                target_tree,
+                source_tree,
+                target_node,
+                source_node,
+            );
+            continue;
+        }
+
+        let target_diam_sq = target_tree.node_aabb[target_node as usize].diameter_sq();
+        let source_diam_sq = source_tree.node_aabb[source_node as usize].diameter_sq();
+
+        let split_target = !target_leaf && (source_leaf || target_diam_sq >= source_diam_sq);
+        let split_source = !source_leaf && (target_leaf || source_diam_sq >= target_diam_sq);
+
+        if split_target && split_source {
+            push_split_both(
+                &mut active,
+                target_tree,
+                source_tree,
+                target_node,
+                source_node,
+            );
+        } else if split_target {
+            push_split_target(&mut active, target_tree, target_node, source_node);
+        } else if split_source {
+            push_split_source(&mut active, source_tree, target_node, source_node);
+        }
+    }
+
+    chunk.near_target_ids = near_target_ids;
+    chunk.near_source_ids = near_source_ids;
+    chunk.far_target_node_ids = far_target_node_ids;
+    chunk.far_source_node_ids = far_source_node_ids;
 }
 
 fn is_far<T: DualTreeScalar>(
@@ -141,7 +232,8 @@ fn is_far<T: DualTreeScalar>(
 }
 
 fn expand_leaf_pair<T: DualTreeScalar>(
-    plan: &mut DualInteractionPlan,
+    near_target_ids: &mut Vec<u32>,
+    near_source_ids: &mut Vec<u32>,
     target_tree: ClusterTreeView<'_, T>,
     source_tree: ClusterTreeView<'_, T>,
     target_node: u32,
@@ -156,8 +248,8 @@ fn expand_leaf_pair<T: DualTreeScalar>(
         let target_id = target_tree.sorted_indices[target_start + ti];
         for si in 0..source_count {
             let source_id = source_tree.sorted_indices[source_start + si];
-            plan.near_target_ids.push(target_id);
-            plan.near_source_ids.push(source_id);
+            near_target_ids.push(target_id);
+            near_source_ids.push(source_id);
         }
     }
 }

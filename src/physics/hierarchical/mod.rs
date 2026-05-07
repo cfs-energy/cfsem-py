@@ -20,7 +20,7 @@ pub use evaluator::{
 pub use kernel::{BoundedGeometry, DualTreeError, DualTreeKernel};
 pub use plan::{DualInteractionPlan, DualInteractionPlanView};
 pub use scalar::DualTreeScalar;
-pub use tree::{ClusterTree, ClusterTreeView};
+pub use tree::{ClusterTree, ClusterTreeBuildMethod, ClusterTreeView};
 
 #[cfg(test)]
 mod tests;

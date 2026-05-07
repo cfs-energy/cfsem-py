@@ -78,8 +78,8 @@ where
             moments.push([moment.0[i], moment.1[i], moment.2[i]]);
         }
 
-        let source_tree = ClusterTree::build(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
-        let target_tree = ClusterTree::build(&targets, HIERARCHICAL_LEAF_SIZE).unwrap();
+        let source_tree = ClusterTree::build_morton_lbvh(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
+        let target_tree = ClusterTree::build_morton_lbvh(&targets, HIERARCHICAL_LEAF_SIZE).unwrap();
         let plan = DualInteractionPlan::build(
             source_tree.as_view(),
             target_tree.as_view(),

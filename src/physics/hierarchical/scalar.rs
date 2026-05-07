@@ -18,6 +18,7 @@ pub trait DualTreeScalar:
     const ONE: Self;
 
     fn from_f64(value: f64) -> Self;
+    fn to_f64(self) -> f64;
     fn sqrt(self) -> Self;
     fn abs(self) -> Self;
     fn mul_add(self, a: Self, b: Self) -> Self;
@@ -30,6 +31,11 @@ impl DualTreeScalar for f32 {
     #[inline]
     fn from_f64(value: f64) -> Self {
         value as f32
+    }
+
+    #[inline]
+    fn to_f64(self) -> f64 {
+        self as f64
     }
 
     #[inline]
@@ -55,6 +61,11 @@ impl DualTreeScalar for f64 {
     #[inline]
     fn from_f64(value: f64) -> Self {
         value
+    }
+
+    #[inline]
+    fn to_f64(self) -> f64 {
+        self
     }
 
     #[inline]

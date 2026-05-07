@@ -18,11 +18,10 @@ use std::hint::black_box;
 
 const HIERARCHICAL_LEAF_SIZE: usize = 16;
 const HIERARCHICAL_THETA: f64 = 0.7;
-const HELIX_RADIUS: f64 = 1.0;
-const HELIX_PITCH: f64 = 0.08;
-const HELIX_OBS_PHASE_OFFSET: f64 = 0.17;
-const HELIX_CURRENT: f64 = 0.5;
-const HELIX_WIRE_RADIUS: f64 = 0.002;
+const LOOP_RADIUS: f64 = 1.0;
+const LOOP_OBS_FRACTION_OFFSET: f64 = 0.027;
+const LOOP_CURRENT: f64 = 0.5;
+const LOOP_WIRE_RADIUS: f64 = 0.002;
 
 struct HierarchicalLinearFilamentSolve {
     kernel: LinearFilamentFluxDensityKernel<f64>,
@@ -69,8 +68,8 @@ impl HierarchicalLinearFilamentSolve {
             });
         }
 
-        let source_tree = ClusterTree::build(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
-        let target_tree = ClusterTree::build(&targets, HIERARCHICAL_LEAF_SIZE).unwrap();
+        let source_tree = ClusterTree::build_morton_lbvh(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
+        let target_tree = ClusterTree::build_morton_lbvh(&targets, HIERARCHICAL_LEAF_SIZE).unwrap();
         let plan = DualInteractionPlan::build(
             source_tree.as_view(),
             target_tree.as_view(),
@@ -175,11 +174,10 @@ struct LinearFilamentBenchInput {
     zobs: Vec<f64>,
 }
 
-fn helical_linear_filament_bench_input(nfils: usize, nobs: usize) -> LinearFilamentBenchInput {
-    let turns = helix_turns(nfils);
-    let height = HELIX_PITCH * turns;
-    let theta_total = core::f64::consts::TAU * turns;
-
+fn circular_loop_linear_filament_bench_input(
+    nfils: usize,
+    nobs: usize,
+) -> LinearFilamentBenchInput {
     let mut xfil = Vec::with_capacity(nfils);
     let mut yfil = Vec::with_capacity(nfils);
     let mut zfil = Vec::with_capacity(nfils);
@@ -192,16 +190,16 @@ fn helical_linear_filament_bench_input(nfils: usize, nobs: usize) -> LinearFilam
     for i in 0..nfils {
         let t0 = i as f64 / nfils as f64;
         let t1 = (i + 1) as f64 / nfils as f64;
-        let p0 = helix_point(t0, theta_total, height);
-        let p1 = helix_point(t1, theta_total, height);
+        let p0 = loop_point(t0);
+        let p1 = loop_point(t1);
         xfil.push(p0[0]);
         yfil.push(p0[1]);
         zfil.push(p0[2]);
         dlxfil.push(p1[0] - p0[0]);
         dlyfil.push(p1[1] - p0[1]);
         dlzfil.push(p1[2] - p0[2]);
-        ifil.push(HELIX_CURRENT);
-        wire_radius.push(HELIX_WIRE_RADIUS);
+        ifil.push(LOOP_CURRENT);
+        wire_radius.push(LOOP_WIRE_RADIUS);
     }
 
     let mut xobs = Vec::with_capacity(nobs);
@@ -213,10 +211,10 @@ fn helical_linear_filament_bench_input(nfils: usize, nobs: usize) -> LinearFilam
         } else {
             0.5
         };
-        let theta = theta_total * t + HELIX_OBS_PHASE_OFFSET;
-        xobs.push(HELIX_RADIUS * theta.cos());
-        yobs.push(HELIX_RADIUS * theta.sin());
-        zobs.push((t - 0.5) * height);
+        let point = loop_point(t + LOOP_OBS_FRACTION_OFFSET);
+        xobs.push(point[0]);
+        yobs.push(point[1]);
+        zobs.push(point[2]);
     }
 
     LinearFilamentBenchInput {
@@ -234,24 +232,9 @@ fn helical_linear_filament_bench_input(nfils: usize, nobs: usize) -> LinearFilam
     }
 }
 
-fn helix_turns(nfils: usize) -> f64 {
-    let by_resolution = nfils as f64 / 64.0;
-    if by_resolution < 1.0 {
-        1.0
-    } else if by_resolution > 64.0 {
-        64.0
-    } else {
-        by_resolution
-    }
-}
-
-fn helix_point(t: f64, theta_total: f64, height: f64) -> [f64; 3] {
-    let theta = theta_total * t;
-    [
-        HELIX_RADIUS * theta.cos(),
-        HELIX_RADIUS * theta.sin(),
-        (t - 0.5) * height,
-    ]
+fn loop_point(t: f64) -> [f64; 3] {
+    let theta = core::f64::consts::TAU * t;
+    [LOOP_RADIUS * theta.cos(), LOOP_RADIUS * theta.sin(), 0.0]
 }
 
 fn bench_flux_density_linear_filament(c: &mut Criterion) {
@@ -261,11 +244,11 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
 
     // Examine logspace with fixed total throughput
     for nfac in [1, 10, 100, 1000].iter() {
-        for nfils in (0_usize..=5).map(|i| 10_usize.pow(i as u32)) {
+        for nfils in (1_usize..=5).map(|i| 10_usize.pow(i as u32)) {
             let nfils = nfils * nfac;
             let nobs = 1000;
             let nobs = nobs / nfac;
-            let input = helical_linear_filament_bench_input(nfils, nobs);
+            let input = circular_loop_linear_filament_bench_input(nfils, nobs);
 
             let ntot = nobs * nfils;
             group.throughput(Throughput::Elements(ntot as u64));
@@ -383,11 +366,11 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
 
     // Examine logspace with fixed total throughput
     for nfac in [1, 10, 100, 1000].iter() {
-        for nfils in (0_usize..=5).map(|i| 10_usize.pow(i as u32)) {
+        for nfils in (1_usize..=5).map(|i| 10_usize.pow(i as u32)) {
             let nfils = nfils * nfac;
             let nobs = 1000;
             let nobs = nobs / nfac;
-            let input = helical_linear_filament_bench_input(nfils, nobs);
+            let input = circular_loop_linear_filament_bench_input(nfils, nobs);
 
             let ntot = nobs * nfils;
             group.throughput(Throughput::Elements(ntot as u64));

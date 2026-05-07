@@ -805,6 +805,57 @@ fn tree_covers_each_input_once() {
 }
 
 #[test]
+fn morton_tree_covers_each_input_once() {
+    let points = points_f64(&[
+        [0.0, 0.0, 0.0],
+        [1.0, 0.5, 0.0],
+        [0.5, 1.0, 0.25],
+        [10.0, 0.0, 0.0],
+        [10.5, 0.25, 0.5],
+        [11.0, 1.0, 0.75],
+        [2.0, 5.0, 1.0],
+        [2.5, 5.5, 1.25],
+    ]);
+    let tree = ClusterTree::build_morton_lbvh(&points, 2).unwrap();
+    assert_eq!(tree.sorted_indices.len(), points.len());
+    assert_eq!(tree.node_range_start[0], 0);
+    assert_eq!(tree.node_range_count[0] as usize, points.len());
+
+    let mut seen = vec![false; points.len()];
+    for i in 0..tree.sorted_indices.len() {
+        let id = tree.sorted_indices[i] as usize;
+        assert!(!seen[id]);
+        seen[id] = true;
+    }
+    for item in seen {
+        assert!(item);
+    }
+
+    for i in 0..tree.leaf_node_ids.len() {
+        let node = tree.leaf_node_ids[i] as usize;
+        assert!(tree.leaf_count[node] <= 2);
+        assert!(tree.leaf_start[node] != ClusterTreeView::<f64>::invalid_index());
+    }
+
+    for i in 0..points.len() {
+        let point = points[i].point;
+        for axis in 0..3 {
+            assert!(point[axis] >= tree.node_aabb[0].min[axis]);
+            assert!(point[axis] <= tree.node_aabb[0].max[axis]);
+        }
+    }
+}
+
+#[test]
+fn morton_tree_handles_degenerate_representative_extent() {
+    let points = points_f32(&[[1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [1.0, 2.0, 3.0]]);
+    let tree = ClusterTree::build_morton_lbvh(&points, 1).unwrap();
+    assert_eq!(tree.sorted_indices, vec![0, 1, 2]);
+    assert_eq!(tree.leaf_node_ids.len(), 3);
+    assert_eq!(tree.max_depth, 2);
+}
+
+#[test]
 fn theta_zero_plan_is_all_exact() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f64(&[[10.0, 0.0, 0.0], [11.0, 0.0, 0.0]]);

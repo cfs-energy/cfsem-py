@@ -123,10 +123,10 @@ where
 
     let mut out = [0.0; 3]; // [N / source-unit]
     for iqp in 0..nqp {
-        let f = cross3(k_tgt[0], k_tgt[1], k_tgt[2], bx[iqp], by[iqp], bz[iqp]); // [N/m^3]
-        out[0] += f.0 * wq[iqp]; // [N / source-unit]
-        out[1] += f.1 * wq[iqp]; // [N / source-unit]
-        out[2] += f.2 * wq[iqp]; // [N / source-unit]
+        let f = cross3(k_tgt, [bx[iqp], by[iqp], bz[iqp]]); // [N/m^3]
+        out[0] += f[0] * wq[iqp]; // [N / source-unit]
+        out[1] += f[1] * wq[iqp]; // [N / source-unit]
+        out[2] += f[2] * wq[iqp]; // [N / source-unit]
     }
 
     Ok(out)
@@ -214,15 +214,7 @@ pub fn triangle_basis_force_block(
     let mut out = [[[0.0; 3]; 3]; 3];
     for itgt_basis in 0..3 {
         for isrc_basis in 0..3 {
-            let f = cross3(
-                ktgt[itgt_basis][0],
-                ktgt[itgt_basis][1],
-                ktgt[itgt_basis][2],
-                bint[isrc_basis][0],
-                bint[isrc_basis][1],
-                bint[isrc_basis][2],
-            );
-            out[itgt_basis][isrc_basis] = [f.0, f.1, f.2]; // [N/A^2]
+            out[itgt_basis][isrc_basis] = cross3(ktgt[itgt_basis], bint[isrc_basis]); // [N/A^2]
         }
     }
 

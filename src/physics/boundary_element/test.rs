@@ -380,14 +380,7 @@ where
             let a = eval_a(obs);
             let w = qp[0] * tri_area;
             for ibasis in 0..3 {
-                out[idx[ibasis]] += dot3(
-                    ktgt[ibasis][0],
-                    ktgt[ibasis][1],
-                    ktgt[ibasis][2],
-                    a[0],
-                    a[1],
-                    a[2],
-                ) * w;
+                out[idx[ibasis]] += dot3(ktgt[ibasis], a) * w;
             }
         }
     }
@@ -632,11 +625,11 @@ fn explicit_force_on_target_triangle_from_source_mesh(
             (&mut bx, &mut by, &mut bz),
         )
         .unwrap();
-        let jf = cross3(k_tgt[0], k_tgt[1], k_tgt[2], bx[0], by[0], bz[0]);
+        let jf = cross3(k_tgt, [bx[0], by[0], bz[0]]);
         let w = qp[0] * tri_area;
-        out[0] += jf.0 * w;
-        out[1] += jf.1 * w;
-        out[2] += jf.2 * w;
+        out[0] += jf[0] * w;
+        out[1] += jf[1] * w;
+        out[2] += jf[2] * w;
     }
     out
 }
@@ -1270,11 +1263,7 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
                     obs,
                     quad_kind,
                 );
-                via_a_dot_k += qp[0]
-                    * tri_area_tgt
-                    * dot3(
-                        a_src[0], a_src[1], a_src[2], ktgt[j][0], ktgt[j][1], ktgt[j][2],
-                    );
+                via_a_dot_k += qp[0] * tri_area_tgt * dot3(a_src, ktgt[j]);
             }
 
             assert!(
@@ -1870,11 +1859,11 @@ fn test_triangle_basis_force_block_matches_direct_contraction() {
     for qp in triangle_quadrature_points(QuadratureKind::Dunavant3) {
         let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
         let b = flux_density_triangle(src0, src1, src2, s_src, obs, QuadratureKind::Dunavant3);
-        let jf = cross3(k_tgt[0], k_tgt[1], k_tgt[2], b[0], b[1], b[2]);
+        let jf = cross3(k_tgt, b);
         let w = qp[0] * tri_area;
-        direct[0] += jf.0 * w;
-        direct[1] += jf.1 * w;
-        direct[2] += jf.2 * w;
+        direct[0] += jf[0] * w;
+        direct[1] += jf[1] * w;
+        direct[2] += jf[2] * w;
     }
 
     for axis in 0..3 {

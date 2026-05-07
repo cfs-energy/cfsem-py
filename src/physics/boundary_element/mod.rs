@@ -9,7 +9,7 @@
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
 //! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
 
-use crate::math::rss3;
+use crate::math::norm3;
 use crate::mesh::TriangleMeshView;
 pub use crate::mesh::elements::tri::mapping::{
     area as calc_tri_area, map_point as map_tri_uv, normal as calc_tri_normal,
@@ -215,7 +215,7 @@ pub fn triangle_mesh_quadrature_points(
 
 #[inline]
 fn points_match(a: [f64; 3], b: [f64; 3]) -> bool {
-    rss3(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-12
+    norm3([a[0] - b[0], a[1] - b[1], a[2] - b[2]]) < 1e-12
 }
 
 #[inline]

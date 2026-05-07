@@ -651,14 +651,15 @@ pub fn flux_density_linear_filament_scalar<T: DualTreeScalar>(
     let c = frac * kappa / perp; // (A/m)
 
     // Direction of cross(dL, r), the direction of the field.
-    let (cx, cy, cz) = cross3(
-        dlhat.0, dlhat.1, dlhat.2, perp_hat.0, perp_hat.1, perp_hat.2,
+    let cxyz = cross3(
+        [dlhat.0, dlhat.1, dlhat.2],
+        [perp_hat.0, perp_hat.1, perp_hat.2],
     ); // (dimensionless)
 
     // Assemble final B-field components.
-    let bx = c * cx; // [T]
-    let by = c * cy; // [T]
-    let bz = c * cz; // [T]
+    let bx = c * cxyz[0]; // [T]
+    let by = c * cxyz[1]; // [T]
+    let bz = c * cxyz[2]; // [T]
 
     // Finally, determine whether we are clipping to zero.
     if frac > T::from_f64(1e6 * f64::EPSILON) && perp > T::from_f64(MIN_WIRE_THICKNESS) {
@@ -1112,7 +1113,8 @@ pub fn body_force_density_linear_filament_scalar(
     let (bx, by, bz) = flux_density_linear_filament_scalar(xyzifil, wire_radius, xyzobs); // [T]
 
     // Take JxB Lorentz force
-    cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
+    let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
+    (out[0], out[1], out[2])
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current
@@ -1251,7 +1253,7 @@ mod test {
     use std::f64::consts::{E, PI};
 
     use super::*;
-    use crate::math::rss3;
+    use crate::math::norm3;
     use crate::physics::point_source::segment::{
         flux_density_point_segment, vector_potential_point_segment,
     };
@@ -1366,9 +1368,9 @@ mod test {
             // Make sure jxb points outward everywhere
             for j in 0..ndiscr - 1 {
                 let r: (f64, f64, f64) = (x[j], y[j], 0.0);
-                let rxjxb = cross3(r.0, r.1, r.2, jxbx[j], jxby[j], jxbz[j]);
+                let rxjxb = cross3([r.0, r.1, r.2], [jxbx[j], jxby[j], jxbz[j]]);
                 // Linear filaments aren't perfectly aligned, so we need a slighter wider tolerance here
-                assert!(approx(0.0, rss3(rxjxb.0, rxjxb.1, rxjxb.2), rtol, 1e-8));
+                assert!(approx(0.0, norm3(rxjxb), rtol, 1e-8));
             }
         }
 
@@ -1649,8 +1651,8 @@ mod test {
         let mut abs_err_axis = Vec::with_capacity(axis_z.len());
         let mut rel_err_outside = Vec::with_capacity(outside_x.len());
         for i in 0..xp.len() {
-            let b = rss3(bx[i], by[i], bz[i]);
-            let b_ref = rss3(bx_ref[i], by_ref[i], bz_ref[i]);
+            let b = norm3([bx[i], by[i], bz[i]]);
+            let b_ref = norm3([bx_ref[i], by_ref[i], bz_ref[i]]);
             if i < axis_z.len() {
                 let err = (b - b_ref).abs();
                 assert!(err.is_finite());
@@ -1732,11 +1734,11 @@ mod test {
             let b_finite =
                 flux_density_linear_filament_scalar((start, end, ifil), wire_radius, obs);
             let b_thin = flux_density_linear_filament_scalar((start, end, ifil), 0.0, obs);
-            diff.push(rss3(
+            diff.push(norm3([
                 b_finite.0 - b_thin.0,
                 b_finite.1 - b_thin.1,
                 b_finite.2 - b_thin.2,
-            ));
+            ]));
         }
 
         assert!(diff[0] > 0.0);
@@ -2055,8 +2057,8 @@ mod test {
         let mut rel_err_axis = Vec::with_capacity(axis_z.len());
         let mut rel_err_outside = Vec::with_capacity(outside_x.len());
         for i in 0..xp.len() {
-            let a = rss3(ax[i], ay[i], az[i]);
-            let a_ref = rss3(ax_ref[i], ay_ref[i], az_ref[i]);
+            let a = norm3([ax[i], ay[i], az[i]]);
+            let a_ref = norm3([ax_ref[i], ay_ref[i], az_ref[i]]);
             let denom = a_ref.abs().max(1e-30);
             let err = (a - a_ref).abs() / denom;
             assert!(err.is_finite());
@@ -2114,11 +2116,11 @@ mod test {
             let a_finite =
                 vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, obs);
             let a_thin = vector_potential_linear_filament_scalar((start, end, ifil), 0.0, obs);
-            diff.push(rss3(
+            diff.push(norm3([
                 a_finite.0 - a_thin.0,
                 a_finite.1 - a_thin.1,
                 a_finite.2 - a_thin.2,
-            ));
+            ]));
         }
 
         assert!(diff[0] > 0.0);
@@ -2383,7 +2385,7 @@ mod test {
                     let z = &(z - 1e-2);
 
                     // Scale tolerance and step size based on distance
-                    let r: f64 = rss3(*x, *y, *z);
+                    let r: f64 = norm3([*x, *y, *z]);
                     let atol = 1e-12 / r.max(1.0); // Smaller absolute tolerance as field falls off
                     let eps = 1e-8 * r; // Larger finite difference delta in far-field for resolution
 

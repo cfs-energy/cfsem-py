@@ -8,7 +8,7 @@ use rayon::{
 use crate::{
     chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{cross3, dot3, ellipe, ellipk, rss3},
+    math::{cross3, dot3, ellipe, ellipk, norm3},
 };
 
 use crate::{MU_0, MU0_OVER_4PI};
@@ -675,8 +675,8 @@ pub fn mutual_inductance_circular_to_linear_scalar(
     let dlzfil = xyzfil1.2 - xyzfil0.2;
     // Next, we need to map the linear filament into cylindrical coordinates
     //    r = (x^2 + y^2)^0.5 in cylindrical
-    let path_r = rss3(xyzfil0.0, xyzfil0.1, 0.0); // [m]
-    let path_dr = rss3(dlxfil, dlyfil, 0.0); // [m]
+    let path_r = norm3([xyzfil0.0, xyzfil0.1, 0.0]); // [m]
+    let path_dr = norm3([dlxfil, dlyfil, 0.0]); // [m]
 
     //    phi = tan^-1(y/x)
     let path_phi0 = libm::atan2(xyzfil0.1, xyzfil0.0);
@@ -702,7 +702,7 @@ pub fn mutual_inductance_circular_to_linear_scalar(
 
     // Recover mutual inductance as dot(A, dL)/I
 
-    dot3(a_x_per_A, a_y_per_A, a_z_per_A, dlxfil, dlyfil, dlzfil)
+    dot3([a_x_per_A, a_y_per_A, a_z_per_A], [dlxfil, dlyfil, dlzfil])
 }
 
 /// Mutual inductance between a collection of circular filaments and a piecewise-linear filament.
@@ -846,7 +846,8 @@ pub fn body_force_density_circular_filament_cartesian_scalar(
     let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(rzifil, xyzobs);
 
     // Take JxB Lorentz force
-    cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
+    let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
+    (out[0], out[1], out[2])
 }
 
 /// JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current

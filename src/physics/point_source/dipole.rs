@@ -8,6 +8,7 @@ use rayon::{
 use crate::{
     MU0_OVER_4PI, chunksize,
     macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
+    math::{cross3, dot3},
     physics::{
         hierarchical::DualTreeScalar,
         volumetric::{
@@ -59,13 +60,13 @@ pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
 ) -> [T; 3] {
     // Radius vector decomposed into direction and magnitude
     let r = [obs[0] - loc[0], obs[1] - loc[1], obs[2] - loc[2]]; // [m]
-    let r2 = dot3_generic(r, r);
+    let r2 = dot3(r, r);
     let rmag = r2.sqrt(); // [m]
     let rhat = [r[0] / rmag, r[1] / rmag, r[2] / rmag]; // [dimensionless]
     let r3 = r2 * rmag; // [m^3]
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
-    let m_dot_rhat = dot3_generic(moment, rhat);
+    let m_dot_rhat = dot3(moment, rhat);
 
     // Assemble components
     let c = T::from_f64(MU0_OVER_4PI) / r3; // [H/m^4]
@@ -94,11 +95,6 @@ pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
     }
 
     out // [T]
-}
-
-#[inline]
-fn dot3_generic<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
-    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 #[inline]
@@ -226,16 +222,16 @@ pub fn vector_potential_dipole_scalar_generic<T: DualTreeScalar>(
 ) -> [T; 3] {
     // Radius and moment vectors decomposed into direction and magnitude
     let r = [obs[0] - loc[0], obs[1] - loc[1], obs[2] - loc[2]]; // [m]
-    let r2 = dot3_generic(r, r); // [m^2]
+    let r2 = dot3(r, r); // [m^2]
     let rmag = r2.sqrt(); // [m]
     let rhat = [r[0] / rmag, r[1] / rmag, r[2] / rmag]; // [dimensionless]
     let m = moment;
-    let mmag = dot3_generic(m, m).sqrt(); // [A-m^2]
+    let mmag = dot3(m, m).sqrt(); // [A-m^2]
     let mhat = [m[0] / mmag, m[1] / mmag, m[2] / mmag]; // [dimensionless]
 
     // mhat x rhat
     // Use normalized vectors for cross product to improve float roundoff
-    let mhat_cross_rhat = cross3_generic(mhat, rhat);
+    let mhat_cross_rhat = cross3(mhat, rhat);
 
     // Defer to magnetized sphere if necessary.
     // This branch does not cause a cache miss because the conditional
@@ -269,15 +265,6 @@ pub fn vector_potential_dipole_scalar_generic<T: DualTreeScalar>(
     }
 
     out // [V-s/m]
-}
-
-#[inline]
-fn cross3_generic<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
-    [
-        a[1].mul_add(b[2], (T::ZERO - b[1]) * a[2]),
-        a[2].mul_add(b[0], (T::ZERO - b[2]) * a[0]),
-        a[0].mul_add(b[1], (T::ZERO - b[0]) * a[1]),
-    ]
 }
 
 /// Magnetic vector potential of a dipole in cartesian coordinates.

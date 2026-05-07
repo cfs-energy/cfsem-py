@@ -3,7 +3,7 @@
 //! This is the 3-node triangle interpolation listed in Bower's *Applied Mechanics of Solids*,
 //! Section 8.1, Table 8.3.
 
-use crate::math::{add_scaled3, dot3_arr, sub3};
+use crate::math::{add_scaled3, dot3, sub3};
 use crate::mesh::Scalar;
 
 /// Number of nodes in the linear triangular element.
@@ -30,9 +30,7 @@ pub fn max_edge_length_squared(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> f64 
     let e01 = sub3(n1, n0);
     let e12 = sub3(n2, n1);
     let e20 = sub3(n0, n2);
-    dot3_arr(e01, e01)
-        .max(dot3_arr(e12, e12))
-        .max(dot3_arr(e20, e20))
+    dot3(e01, e01).max(dot3(e12, e12)).max(dot3(e20, e20))
 }
 
 /// Closest point on a triangle to an observation point.
@@ -41,15 +39,15 @@ pub fn closest_point(obs: [f64; 3], n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) ->
     let ab = sub3(n1, n0);
     let ac = sub3(n2, n0);
     let ap = sub3(obs, n0);
-    let d1 = dot3_arr(ab, ap);
-    let d2 = dot3_arr(ac, ap);
+    let d1 = dot3(ab, ap);
+    let d2 = dot3(ac, ap);
     if d1 <= 0.0 && d2 <= 0.0 {
         return n0;
     }
 
     let bp = sub3(obs, n1);
-    let d3 = dot3_arr(ab, bp);
-    let d4 = dot3_arr(ac, bp);
+    let d3 = dot3(ab, bp);
+    let d4 = dot3(ac, bp);
     if d3 >= 0.0 && d4 <= d3 {
         return n1;
     }
@@ -60,8 +58,8 @@ pub fn closest_point(obs: [f64; 3], n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) ->
     }
 
     let cp = sub3(obs, n2);
-    let d5 = dot3_arr(ab, cp);
-    let d6 = dot3_arr(ac, cp);
+    let d5 = dot3(ab, cp);
+    let d6 = dot3(ac, cp);
     if d6 >= 0.0 && d5 <= d6 {
         return n2;
     }

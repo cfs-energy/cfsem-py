@@ -23,16 +23,16 @@ pub(crate) fn flux_density_current_element_scalar<T: DualTreeScalar>(
     obs: [T; 3],
 ) -> [T; 3] {
     let r = [obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]]; // [m]
-    let r_sq = dot3(r[0], r[1], r[2], r[0], r[1], r[2]); // [m^2]
+    let r_sq = dot3(r, r); // [m^2]
     let min_distance_sq = T::from_f64(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
     let near = r_sq < min_distance_sq; // [-]
     let rnorm3_inv = max_scalar(r_sq, min_distance_sq).powf(-1.5); // [m^-3]
-    let m_cross_r = cross3(moment[0], moment[1], moment[2], r[0], r[1], r[2]); // [A*m^2]
+    let m_cross_r = cross3(moment, r); // [A*m^2]
     let c = T::from_f64(MU0_OVER_4PI);
     let out = [
-        c * m_cross_r.0 * rnorm3_inv, // [T]
-        c * m_cross_r.1 * rnorm3_inv, // [T]
-        c * m_cross_r.2 * rnorm3_inv, // [T]
+        c * m_cross_r[0] * rnorm3_inv, // [T]
+        c * m_cross_r[1] * rnorm3_inv, // [T]
+        c * m_cross_r[2] * rnorm3_inv, // [T]
     ];
     if near { [T::ZERO; 3] } else { out }
 }
@@ -46,7 +46,7 @@ pub(crate) fn vector_potential_current_element_scalar<T: DualTreeScalar>(
     obs: [T; 3],
 ) -> [T; 3] {
     let r = [obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]]; // [m]
-    let r_sq = dot3(r[0], r[1], r[2], r[0], r[1], r[2]); // [m^2]
+    let r_sq = dot3(r, r); // [m^2]
     let min_distance = T::from_f64(CURRENT_ELEMENT_MIN_DISTANCE);
     let min_distance_sq = T::from_f64(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
     let near = r_sq < min_distance_sq; // [-]

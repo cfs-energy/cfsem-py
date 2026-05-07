@@ -1,10 +1,11 @@
 use core::marker::PhantomData;
 
 use super::dipole::{
-    DipoleTarget, DipoleTargetSummary, add3_in_place, combine_target, dipole_vector_potential,
+    DipoleTarget, DipoleTargetSummary, combine_target, dipole_vector_potential,
     summarize_target_leaf,
 };
 use super::linear_filament_flux_density::LinearFilamentSource;
+use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::hierarchical::{
     BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar,
 };
@@ -299,33 +300,4 @@ fn array_to_tuple<T: DualTreeScalar>(value: [T; 3]) -> (T, T, T) {
 #[inline]
 fn tuple_to_array<T: DualTreeScalar>(value: (T, T, T)) -> [T; 3] {
     [value.0, value.1, value.2]
-}
-
-#[inline]
-fn sub3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-#[inline]
-fn scale3<T: DualTreeScalar>(value: [T; 3], scale: T) -> [T; 3] {
-    [value[0] * scale, value[1] * scale, value[2] * scale]
-}
-
-#[inline]
-fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
-    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
-}
-
-#[inline]
-fn cross3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
-    [
-        a[1].mul_add(b[2], (T::ZERO - b[1]) * a[2]),
-        a[2].mul_add(b[0], (T::ZERO - b[2]) * a[0]),
-        a[0].mul_add(b[1], (T::ZERO - b[0]) * a[1]),
-    ]
-}
-
-#[inline]
-fn norm3<T: DualTreeScalar>(value: [T; 3]) -> T {
-    dot3(value, value).sqrt()
 }

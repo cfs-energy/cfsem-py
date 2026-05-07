@@ -10,7 +10,7 @@ use super::{
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
-use crate::math::cross3;
+use crate::math::{add_scaled3, cross3, norm3, sub3};
 use crate::mesh::TriangleMeshView;
 use crate::mesh::elements::tri::tri3::{
     closest_point as triangle_closest_point,
@@ -59,30 +59,11 @@ fn triangle_flux_density_inner(
 }
 
 #[inline]
-fn norm3(v: [f64; 3]) -> f64 {
-    v[0].mul_add(v[0], v[1].mul_add(v[1], v[2] * v[2])).sqrt()
-}
-
-#[inline]
-fn add_scaled(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
-    [
-        a[0] + scale * b[0],
-        a[1] + scale * b[1],
-        a[2] + scale * b[2],
-    ]
-}
-
-#[inline]
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-#[inline]
 fn accum_cross_scaled(out: &mut [f64; 3], k: [f64; 3], r: [f64; 3], scale: f64) {
-    let k_cross_r = cross3(k[0], k[1], k[2], r[0], r[1], r[2]);
-    out[0] += scale * k_cross_r.0;
-    out[1] += scale * k_cross_r.1;
-    out[2] += scale * k_cross_r.2;
+    let k_cross_r = cross3(k, r);
+    out[0] += scale * k_cross_r[0];
+    out[1] += scale * k_cross_r[1];
+    out[2] += scale * k_cross_r[2];
 }
 
 #[inline]
@@ -104,14 +85,14 @@ fn triangle_flux_density_surface_duffy(
             continue;
         }
 
-        let qa = sub(va, closest); // [m]
-        let qb = sub(vb, closest); // [m]
-        let dq = sub(qb, qa); // [m]
+        let qa = sub3(va, closest); // [m]
+        let qb = sub3(vb, closest); // [m]
+        let dq = sub3(qb, qa); // [m]
         let mut sub_b = [0.0; 3]; // [1/m]
 
         for i in 0..TRIANGLE_B_DUFFY_EDGE_SAMPLES {
             let eta = (i as f64 + 0.5) / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64;
-            let q = add_scaled(qa, dq, eta); // [m]
+            let q = add_scaled3(qa, dq, eta); // [m]
             let qnorm = norm3(q); // [m]
             if qnorm == 0.0 {
                 continue;
@@ -139,7 +120,7 @@ fn triangle_flux_density_duffy(
     closest: [f64; 3],
     max_edge_sq: f64,
 ) -> Option<[f64; 3]> {
-    let h = sub(obs, closest); // [m]
+    let h = sub3(obs, closest); // [m]
     let surface_tol_sq = TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR.powi(2) * max_edge_sq; // [m^2]
     let min_sub_area = max_edge_sq * 1e-14; // [m^2]
     // The finite-part log needs a dimensionless argument. The reference length

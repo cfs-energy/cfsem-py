@@ -2,10 +2,11 @@ use core::marker::PhantomData;
 
 use super::dipole::{
     DipoleSource, DipoleTarget, DipoleTargetSummary, add_matrix_in_place, add_outer_in_place,
-    add3_in_place, combine_target, dipole_field, dipole_field_derivative_component, sub3,
-    summarize_centroid, summarize_target_leaf,
+    combine_target, dipole_field, dipole_field_derivative_component, summarize_centroid,
+    summarize_target_leaf,
 };
 use crate::MU0_OVER_4PI;
+use crate::math::{add3_in_place, sub3};
 use crate::physics::hierarchical::{DualTreeError, DualTreeKernel, DualTreeScalar};
 
 /// Source summary for dipole flux-density clusters.

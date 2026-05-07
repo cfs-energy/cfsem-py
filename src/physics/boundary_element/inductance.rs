@@ -4,7 +4,7 @@ use super::{
 };
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
-use crate::math::{cartesian_to_cylindrical, dot3, rss3};
+use crate::math::{cartesian_to_cylindrical, dot3, norm3};
 use crate::mesh::TriangleMeshView;
 use crate::mesh::elements::tri::tri3::subdivide_about_point as triangle_subdivide_about_point;
 use crate::physics::circular_filament::vector_potential_circular_filament_scalar;
@@ -33,7 +33,7 @@ fn triangle_scalar_potential_regular(
     let mut out = 0.0; // [m]
     for qp in quad_points {
         let src = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]); // [m]
-        let dist = rss3(obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]); // [m]
+        let dist = norm3([obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]]); // [m]
         out += qp[0] * tri_area / dist; // [m]
     }
 
@@ -88,7 +88,7 @@ fn triangle_scalar_potential_self_duffy(
                 (1.0 - eta).mul_add(va[1] - obs[1], eta * (vb[1] - obs[1])),
                 (1.0 - eta).mul_add(va[2] - obs[2], eta * (vb[2] - obs[2])),
             ];
-            line_integral += 1.0 / rss3(edge_vec[0], edge_vec[1], edge_vec[2]); // [1/m]
+            line_integral += 1.0 / norm3(edge_vec); // [1/m]
         }
 
         out += area_sub * line_integral / TRIANGLE_SELF_DUFFY_SAMPLES as f64; // [m]
@@ -267,11 +267,7 @@ pub fn triangle_basis_mutual_inductance_block(
     let mut out = [[0.0; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
-            out[i][j] = MU0_OVER_4PI
-                * g
-                * dot3(
-                    ksrc[i][0], ksrc[i][1], ksrc[i][2], ktgt[j][0], ktgt[j][1], ktgt[j][2],
-                );
+            out[i][j] = MU0_OVER_4PI * g * dot3(ksrc[i], ktgt[j]);
         }
     }
 
@@ -375,14 +371,7 @@ where
             for isrc in 0..nsrc {
                 let a = eval_a(isrc, obs); // [V*s/(m*source-unit)]
                 for ibasis in 0..3 {
-                    out[tgt_idx[ibasis] * nsrc + isrc] += dot3(
-                        ktgt[ibasis][0],
-                        ktgt[ibasis][1],
-                        ktgt[ibasis][2],
-                        a[0],
-                        a[1],
-                        a[2],
-                    ) * w; // [H] or source-dependent interaction units
+                    out[tgt_idx[ibasis] * nsrc + isrc] += dot3(ktgt[ibasis], a) * w; // [H] or source-dependent interaction units
                 }
             }
         }
@@ -442,14 +431,7 @@ where
                     for isrc in 0..nsrc {
                         let a = eval_a(isrc, obs); // [V*s/(m*source-unit)]
                         for ibasis in 0..3 {
-                            local[tgt_idx[ibasis] * nsrc + isrc] += dot3(
-                                ktgt[ibasis][0],
-                                ktgt[ibasis][1],
-                                ktgt[ibasis][2],
-                                a[0],
-                                a[1],
-                                a[2],
-                            ) * w; // [H] or source-dependent interaction units
+                            local[tgt_idx[ibasis] * nsrc + isrc] += dot3(ktgt[ibasis], a) * w; // [H] or source-dependent interaction units
                         }
                     }
                 }

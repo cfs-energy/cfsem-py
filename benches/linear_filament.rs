@@ -2,10 +2,12 @@
 
 use cfsem::physics::hierarchical::kernels::{
     DipoleTarget, LinearFilamentFluxDensityKernel, LinearFilamentSource,
+    LinearFilamentVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
-    ClusterTree, DualInteractionPlan, DualTreeError, EvaluationScratch, SourceNodeSummaries,
-    TargetNodeSummaries, evaluate_into, update_source_summaries_into, update_target_summaries_into,
+    ClusterTree, DualInteractionPlan, DualTreeError, DualTreeKernel, EvaluationScratch,
+    SourceNodeSummaries, TargetNodeSummaries, evaluate_into, update_source_summaries_into,
+    update_target_summaries_into,
 };
 use cfsem::physics::linear_filament::{
     flux_density_linear_filament, flux_density_linear_filament_par,
@@ -23,29 +25,47 @@ const LOOP_OBS_FRACTION_OFFSET: f64 = 0.027;
 const LOOP_CURRENT: f64 = 0.5;
 const LOOP_WIRE_RADIUS: f64 = 0.002;
 
-struct HierarchicalLinearFilamentSolve {
-    kernel: LinearFilamentFluxDensityKernel<f64>,
+struct HierarchicalLinearFilamentSolve<K>
+where
+    K: DualTreeKernel<
+            Scalar = f64,
+            SourceGeometry = LinearFilamentSource<f64>,
+            TargetGeometry = DipoleTarget<f64>,
+            SourceMoment = f64,
+            Output = [f64; 3],
+        >,
+{
+    kernel: K,
     sources: Vec<LinearFilamentSource<f64>>,
     targets: Vec<DipoleTarget<f64>>,
     currents: Vec<f64>,
     source_tree: ClusterTree<f64>,
     target_tree: ClusterTree<f64>,
     plan: DualInteractionPlan,
-    source_summaries: SourceNodeSummaries<LinearFilamentFluxDensityKernel<f64>>,
-    target_summaries: TargetNodeSummaries<LinearFilamentFluxDensityKernel<f64>>,
+    source_summaries: SourceNodeSummaries<K>,
+    target_summaries: TargetNodeSummaries<K>,
     vector_out: Vec<[f64; 3]>,
     scratch_value: [[f64; 3]; 1],
 }
 
-impl HierarchicalLinearFilamentSolve {
+impl<K> HierarchicalLinearFilamentSolve<K>
+where
+    K: DualTreeKernel<
+            Scalar = f64,
+            SourceGeometry = LinearFilamentSource<f64>,
+            TargetGeometry = DipoleTarget<f64>,
+            SourceMoment = f64,
+            Output = [f64; 3],
+        >,
+{
     fn new(
+        kernel: K,
         xyzfil: (&[f64], &[f64], &[f64]),
         dlxyzfil: (&[f64], &[f64], &[f64]),
         currents: &[f64],
         wire_radius: &[f64],
         xyzobs: (&[f64], &[f64], &[f64]),
     ) -> Self {
-        let kernel = LinearFilamentFluxDensityKernel::<f64>::new();
         let mut sources = Vec::with_capacity(xyzfil.0.len());
         for i in 0..xyzfil.0.len() {
             let start = [xyzfil.0[i], xyzfil.1[i], xyzfil.2[i]];
@@ -77,8 +97,7 @@ impl HierarchicalLinearFilamentSolve {
         )
         .unwrap();
 
-        let mut target_summaries =
-            TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(target_tree.as_view());
+        let mut target_summaries = TargetNodeSummaries::<K>::new(target_tree.as_view());
         assert_eq!(
             update_target_summaries_into(
                 &kernel,
@@ -89,8 +108,7 @@ impl HierarchicalLinearFilamentSolve {
             DualTreeError::Ok
         );
 
-        let source_summaries =
-            SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
+        let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let vector_out = vec![[0.0; 3]; targets.len()];
 
         Self {
@@ -147,16 +165,31 @@ impl HierarchicalLinearFilamentSolve {
     }
 }
 
-fn hierarchical_linear_filament_build_and_solve(
+fn hierarchical_linear_filament_build_and_solve<K>(
+    kernel: K,
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     currents: &[f64],
     wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) {
-    let mut solve =
-        HierarchicalLinearFilamentSolve::new(xyzfil, dlxyzfil, currents, wire_radius, xyzobs);
+) where
+    K: DualTreeKernel<
+            Scalar = f64,
+            SourceGeometry = LinearFilamentSource<f64>,
+            TargetGeometry = DipoleTarget<f64>,
+            SourceMoment = f64,
+            Output = [f64; 3],
+        >,
+{
+    let mut solve = HierarchicalLinearFilamentSolve::new(
+        kernel,
+        xyzfil,
+        dlxyzfil,
+        currents,
+        wire_radius,
+        xyzobs,
+    );
     solve.solve_into(out);
 }
 
@@ -305,6 +338,7 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
             );
 
             let mut hierarchical = HierarchicalLinearFilamentSolve::new(
+                LinearFilamentFluxDensityKernel::<f64>::new(),
                 (&input.xfil, &input.yfil, &input.zfil),
                 (&input.dlxfil, &input.dlyfil, &input.dlzfil),
                 &input.ifil,
@@ -343,6 +377,7 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
                         let (mut bx, mut by, mut bz) =
                             (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
                         black_box(hierarchical_linear_filament_build_and_solve(
+                            LinearFilamentFluxDensityKernel::<f64>::new(),
                             (&input.xfil, &input.yfil, &input.zfil),
                             (&input.dlxfil, &input.dlyfil, &input.dlzfil),
                             &input.ifil,
@@ -425,6 +460,58 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
                             )
                             .unwrap(),
                         )
+                    });
+                },
+            );
+
+            let mut hierarchical = HierarchicalLinearFilamentSolve::new(
+                LinearFilamentVectorPotentialKernel::<f64>::new(),
+                (&input.xfil, &input.yfil, &input.zfil),
+                (&input.dlxfil, &input.dlyfil, &input.dlzfil),
+                &input.ifil,
+                &input.wire_radius,
+                (&input.xobs, &input.yobs, &input.zobs),
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Vector Potential of Linear Filaments, Hierarchical\n{} Obs. Point(s)",
+                        nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        let n = input.xobs.len();
+                        let (mut ax, mut ay, mut az) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+                        black_box(hierarchical.solve_into((&mut ax, &mut ay, &mut az)))
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Vector Potential of Linear Filaments, Hierarchical Build+Solve\n{} Obs. Point(s)",
+                        nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        let n = input.xobs.len();
+                        let (mut ax, mut ay, mut az) =
+                            (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+                        black_box(hierarchical_linear_filament_build_and_solve(
+                            LinearFilamentVectorPotentialKernel::<f64>::new(),
+                            (&input.xfil, &input.yfil, &input.zfil),
+                            (&input.dlxfil, &input.dlyfil, &input.dlzfil),
+                            &input.ifil,
+                            &input.wire_radius,
+                            (&input.xobs, &input.yobs, &input.zobs),
+                            (&mut ax, &mut ay, &mut az),
+                        ))
                     });
                 },
             );

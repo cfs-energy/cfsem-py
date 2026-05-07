@@ -303,7 +303,8 @@ pub fn body_force_density_point_segment_scalar(
     let (bx, by, bz) = flux_density_point_segment_scalar(xyzifil, xyzobs); // [T]
 
     // Take JxB Lorentz force
-    cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
+    let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
+    (out[0], out[1], out[2])
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current
@@ -423,7 +424,7 @@ mod test {
     use std::f64::consts::PI;
 
     use super::*;
-    use crate::math::rss3;
+    use crate::math::norm3;
     use crate::mesh::quadrature::{GaussLegendreRule, gauss_legendre_unit_interval_table};
     use crate::physics::linear_filament::{
         inductance_piecewise_linear_filaments, vector_potential_linear_filament,
@@ -543,9 +544,9 @@ mod test {
             // Make sure jxb points outward everywhere
             for j in 0..ndiscr - 1 {
                 let r: (f64, f64, f64) = (x[j], y[j], 0.0);
-                let rxjxb = cross3(r.0, r.1, r.2, jxbx[j], jxby[j], jxbz[j]);
+                let rxjxb = cross3([r.0, r.1, r.2], [jxbx[j], jxby[j], jxbz[j]]);
                 // Linear filaments aren't perfectly aligned, so we need a slighter wider tolerance here
-                assert!(approx(0.0, rss3(rxjxb.0, rxjxb.1, rxjxb.2), rtol, 1e-8));
+                assert!(approx(0.0, norm3(rxjxb), rtol, 1e-8));
             }
         }
 

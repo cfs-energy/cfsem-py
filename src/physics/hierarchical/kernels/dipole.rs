@@ -1,3 +1,4 @@
+use crate::math::{add3_in_place, dot3};
 use crate::physics::hierarchical::{Aabb, BoundedGeometry, DualTreeError, DualTreeScalar};
 use crate::physics::point_source::dipole::{
     flux_density_dipole_scalar_generic, vector_potential_dipole_scalar_generic,
@@ -231,13 +232,6 @@ pub(super) fn dipole_vector_potential_derivative_component<T: DualTreeScalar>(
 }
 
 #[inline]
-pub(super) fn add3_in_place<T: DualTreeScalar>(out: &mut [T; 3], value: [T; 3]) {
-    for axis in 0..3 {
-        out[axis] = out[axis] + value[axis];
-    }
-}
-
-#[inline]
 pub(super) fn add_matrix_in_place<T: DualTreeScalar>(out: &mut [[T; 3]; 3], value: [[T; 3]; 3]) {
     for i in 0..3 {
         for j in 0..3 {
@@ -253,16 +247,6 @@ pub(super) fn add_outer_in_place<T: DualTreeScalar>(out: &mut [[T; 3]; 3], a: [T
             out[i][j] = a[i].mul_add(b[j], out[i][j]);
         }
     }
-}
-
-#[inline]
-pub(super) fn sub3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-#[inline]
-fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
-    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 #[inline]

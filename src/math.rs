@@ -88,56 +88,57 @@ pub fn ellipe(m: f64) -> f64 {
 
 /// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to reduce roundoff error.
 #[inline]
-pub fn rss3<T: DualTreeScalar>(x: T, y: T, z: T) -> T {
-    x.mul_add(x, y.mul_add(y, z * z)).sqrt()
+pub fn norm3<T: DualTreeScalar>(v: [T; 3]) -> T {
+    dot3(v, v).sqrt()
 }
 
 /// Evaluate the cross products for each axis component
 /// separately using `mul_add` which would not be assumed usable
 /// in a more general implementation.
 #[inline]
-pub fn cross3<T: DualTreeScalar>(x0: T, y0: T, z0: T, x1: T, y1: T, z1: T) -> (T, T, T) {
-    let xy = (T::ZERO - x1) * y0;
-    let yz = (T::ZERO - y1) * z0;
-    let zx = (T::ZERO - z1) * x0;
-    let cx = y0.mul_add(z1, yz);
-    let cy = z0.mul_add(x1, zx);
-    let cz = x0.mul_add(y1, xy);
-
-    (cx, cy, cz)
-}
-
-/// Evaluate the cross products for each axis component
-/// separately using `mul_add` which would not be assumed usable
-/// in a more general implementation.
-/// 32-bit float variant.
-#[inline]
-pub fn cross3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> (f32, f32, f32) {
-    let xy = -x1 * y0;
-    let yz = -y1 * z0;
-    let zx = -z1 * x0;
-    let cx = y0.mul_add(z1, yz);
-    let cy = z0.mul_add(x1, zx);
-    let cz = x0.mul_add(y1, xy);
-
-    (cx, cy, cz)
+pub fn cross3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+    [
+        a[1].mul_add(b[2], (T::ZERO - b[1]) * a[2]),
+        a[2].mul_add(b[0], (T::ZERO - b[2]) * a[0]),
+        a[0].mul_add(b[1], (T::ZERO - b[0]) * a[1]),
+    ]
 }
 
 /// Scalar dot product using `mul_add`.
 #[inline]
-pub fn dot3<T: DualTreeScalar>(x0: T, y0: T, z0: T, x1: T, y1: T, z1: T) -> T {
-    x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
+pub fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
+    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 /// Elementwise subtraction of fixed-size 3D vectors.
 #[inline]
-pub(crate) fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub fn sub3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/// Elementwise addition of fixed-size 3D vectors.
+#[inline]
+pub fn add3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+/// In-place elementwise addition of fixed-size 3D vectors.
+#[inline]
+pub fn add3_in_place<T: DualTreeScalar>(out: &mut [T; 3], value: [T; 3]) {
+    for axis in 0..3 {
+        out[axis] = out[axis] + value[axis];
+    }
+}
+
+/// Scale a fixed-size 3D vector.
+#[inline]
+pub fn scale3<T: DualTreeScalar>(value: [T; 3], scale: T) -> [T; 3] {
+    [value[0] * scale, value[1] * scale, value[2] * scale]
 }
 
 /// Affine combination `a + scale * b` of fixed-size 3D vectors using `mul_add`.
 #[inline]
-pub(crate) fn add_scaled3(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
+pub fn add_scaled3<T: DualTreeScalar>(a: [T; 3], b: [T; 3], scale: T) -> [T; 3] {
     [
         scale.mul_add(b[0], a[0]),
         scale.mul_add(b[1], a[1]),
@@ -145,16 +146,10 @@ pub(crate) fn add_scaled3(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
     ]
 }
 
-/// Fixed-size 3D dot product wrapper around [`dot3`].
-#[inline]
-pub(crate) fn dot3_arr(a: [f64; 3], b: [f64; 3]) -> f64 {
-    dot3(a[0], a[1], a[2], b[0], b[1], b[2])
-}
-
 /// Convert a point from cartesian to cylindrical coordinates.
 #[inline]
 pub fn cartesian_to_cylindrical(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
-    let r = rss3(x, y, 0.0);
+    let r = norm3([x, y, 0.0]);
     let phi = libm::atan2(y, x);
     (r, phi, z)
 }
@@ -229,13 +224,13 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
     // Normalized segment vector.
     // This might be zero, and that will be handled as late as possible to avoid disrupting
     // calculations in nominal non-zero-length cases.
-    let ab2 = dot3(ab.0, ab.1, ab.2, ab.0, ab.1, ab.2); // (m^2) squared length.
+    let ab2 = dot3([ab.0, ab.1, ab.2], [ab.0, ab.1, ab.2]); // (m^2) squared length.
     // Handle zero-length special case before any division by segment length.
     if ab2 == T::ZERO {
         let r_min = max_scalar(r_min, T::ZERO);
         let r_min_frac = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
-        let dist_a = rss3(ap.0, ap.1, ap.2);
-        let dist_b = rss3(bp.0, bp.1, bp.2);
+        let dist_a = norm3([ap.0, ap.1, ap.2]);
+        let dist_b = norm3([bp.0, bp.1, bp.2]);
         let frac = min_scalar(dist_a / r_min_frac, T::ONE);
         let dist_a = max_scalar(dist_a, r_min);
         let dist_b = max_scalar(dist_b, r_min);
@@ -258,14 +253,14 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
     let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
 
     // Find the closest point on the infinite line defined by this segment to the target point.
-    let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2; // Normed projected location
+    let t = dot3([ap.0, ap.1, ap.2], [ab.0, ab.1, ab.2]) / ab2; // Normed projected location
     let closest = (
         t.mul_add(ab.0, a.0),
         t.mul_add(ab.1, a.1),
         t.mul_add(ab.2, a.2),
     ); // (m) closest point on infinite line
     let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
-    let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
+    let perp_raw = norm3([dp.0, dp.1, dp.2]); // (m) Un-clamped perpendicular distance.
     let perp_hat = if perp_raw > T::ZERO {
         let inv = T::ONE / perp_raw;
         (dp.0 * inv, dp.1 * inv, dp.2 * inv)
@@ -277,7 +272,7 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
     let r_min = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
 
     // Parallel distances from each endpoint to the target
-    let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
+    let para_a = dot3([ap.0, ap.1, ap.2], [ab_norm.0, ab_norm.1, ab_norm.2]);
     let para_b = para_a - ab_len;
 
     // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.

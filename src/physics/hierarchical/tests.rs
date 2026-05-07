@@ -1,7 +1,6 @@
 use super::*;
 use crate::physics::hierarchical::kernels::{
-    DipoleFirstOrderKernel, DipoleMomentKernel, DipoleSource, DipoleTarget,
-    DipoleVectorPotentialKernel,
+    DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
 };
 
 #[derive(Clone, Copy)]
@@ -238,7 +237,7 @@ fn dipole_source_aabb_bounds_magnetized_sphere() {
 
 #[test]
 fn dipole_exact_uses_magnetized_sphere_radius() {
-    let kernel = DipoleMomentKernel::<f64>::new();
+    let kernel = DipoleFluxDensityKernel::<f64>::new();
     let source = DipoleSource {
         position: [0.0, 0.0, 0.0],
         outer_radius: 2.0,
@@ -265,7 +264,7 @@ fn dipole_exact_uses_magnetized_sphere_radius() {
 
 #[test]
 fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
-    let b_kernel = DipoleMomentKernel::<f64>::new();
+    let b_kernel = DipoleFluxDensityKernel::<f64>::new();
     let a_kernel = DipoleVectorPotentialKernel::<f64>::new();
     let sources = [
         DipoleSource {
@@ -293,9 +292,9 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
         DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
 
     let mut b_source_summaries =
-        SourceNodeSummaries::<DipoleMomentKernel<f64>>::new(source_tree.as_view());
+        SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut b_target_summaries =
-        TargetNodeSummaries::<DipoleMomentKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(target_tree.as_view());
     let mut a_source_summaries =
         SourceNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new(source_tree.as_view());
     let mut a_target_summaries =
@@ -667,8 +666,8 @@ fn run_theta_zero_matches_dense_direct_f64() {
 }
 
 #[test]
-fn dipole_moment_kernel_theta_zero_matches_dense() {
-    let kernel = DipoleMomentKernel::<f64>::new();
+fn dipole_flux_density_kernel_theta_zero_matches_dense() {
+    let kernel = DipoleFluxDensityKernel::<f64>::new();
     let sources = [
         DipoleSource {
             position: [0.0, 0.0, 0.0],
@@ -698,9 +697,9 @@ fn dipole_moment_kernel_theta_zero_matches_dense() {
     let plan =
         DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
     let mut source_summaries =
-        SourceNodeSummaries::<DipoleMomentKernel<f64>>::new(source_tree.as_view());
+        SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
-        TargetNodeSummaries::<DipoleMomentKernel<f64>>::new(target_tree.as_view());
+        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(target_tree.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -762,143 +761,4 @@ fn dipole_moment_kernel_theta_zero_matches_dense() {
             assert!((bh[i][axis] - dense[i][axis]).abs() < 1.0e-20);
         }
     }
-}
-
-#[test]
-fn dipole_first_order_far_summary_improves_over_single_moment() {
-    let moment_kernel = DipoleMomentKernel::<f64>::new();
-    let first_order_kernel = DipoleFirstOrderKernel::<f64>::new();
-    let sources = [
-        DipoleSource {
-            position: [-1.0, 0.0, 0.0],
-            outer_radius: 0.0,
-        },
-        DipoleSource {
-            position: [1.0, 0.0, 0.0],
-            outer_radius: 0.0,
-        },
-    ];
-    let targets = [DipoleTarget {
-        position: [20.0, 3.0, 1.0],
-    }];
-    let moments = [[0.0, 0.0, 1.0], [0.0, 0.0, 2.0]];
-
-    let source_tree = ClusterTree::build(&sources, 2).unwrap();
-    let target_tree = ClusterTree::build(&targets, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 1.0).unwrap();
-    assert_eq!(plan.far_target_node_ids.len(), 1);
-    assert!(plan.near_target_ids.is_empty());
-
-    let mut moment_source_summaries =
-        SourceNodeSummaries::<DipoleMomentKernel<f64>>::new(source_tree.as_view());
-    let mut moment_target_summaries =
-        TargetNodeSummaries::<DipoleMomentKernel<f64>>::new(target_tree.as_view());
-    let mut first_order_source_summaries =
-        SourceNodeSummaries::<DipoleFirstOrderKernel<f64>>::new(source_tree.as_view());
-    let mut first_order_target_summaries =
-        TargetNodeSummaries::<DipoleFirstOrderKernel<f64>>::new(target_tree.as_view());
-
-    assert_eq!(
-        update_source_summaries_into(
-            &moment_kernel,
-            source_tree.as_view(),
-            &sources,
-            &moments,
-            &mut moment_source_summaries.node_summaries,
-        ),
-        DualTreeError::Ok
-    );
-    assert_eq!(
-        update_target_summaries_into(
-            &moment_kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut moment_target_summaries.node_summaries,
-        ),
-        DualTreeError::Ok
-    );
-    assert_eq!(
-        update_source_summaries_into(
-            &first_order_kernel,
-            source_tree.as_view(),
-            &sources,
-            &moments,
-            &mut first_order_source_summaries.node_summaries,
-        ),
-        DualTreeError::Ok
-    );
-    assert_eq!(
-        update_target_summaries_into(
-            &first_order_kernel,
-            target_tree.as_view(),
-            &targets,
-            &mut first_order_target_summaries.node_summaries,
-        ),
-        DualTreeError::Ok
-    );
-
-    let mut scratch_value = [[0.0; 3]];
-    let mut scratch = EvaluationScratch {
-        contribution: &mut scratch_value,
-    };
-    let mut moment_out = [[0.0; 3]; 1];
-    let mut first_order_out = [[0.0; 3]; 1];
-    let mut dense = [[0.0; 3]; 1];
-
-    assert_eq!(
-        evaluate_into(
-            &moment_kernel,
-            plan.as_view(),
-            source_tree.as_view(),
-            target_tree.as_view(),
-            &moment_source_summaries.node_summaries,
-            &moment_target_summaries.node_summaries,
-            &sources,
-            &targets,
-            &moments,
-            &mut moment_out,
-            &mut scratch,
-        ),
-        DualTreeError::Ok
-    );
-    assert_eq!(
-        evaluate_into(
-            &first_order_kernel,
-            plan.as_view(),
-            source_tree.as_view(),
-            target_tree.as_view(),
-            &first_order_source_summaries.node_summaries,
-            &first_order_target_summaries.node_summaries,
-            &sources,
-            &targets,
-            &moments,
-            &mut first_order_out,
-            &mut scratch,
-        ),
-        DualTreeError::Ok
-    );
-    assert_eq!(
-        dense_direct_evaluate_into(
-            &moment_kernel,
-            &sources,
-            &targets,
-            &moments,
-            &mut dense,
-            &mut scratch,
-        ),
-        DualTreeError::Ok
-    );
-
-    let moment_err = vec_norm(sub_vec3(moment_out[0], dense[0]));
-    let first_order_err = vec_norm(sub_vec3(first_order_out[0], dense[0]));
-    assert!(first_order_err < moment_err);
-}
-
-fn sub_vec3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-fn vec_norm(a: [f64; 3]) -> f64 {
-    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
 }

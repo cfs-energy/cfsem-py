@@ -2,34 +2,34 @@ use core::marker::PhantomData;
 
 use super::dipole::{
     DipoleSource, DipoleTarget, DipoleTargetSummary, add_matrix_in_place, add_outer_in_place,
-    add3_in_place, combine_target, dipole_vector_potential,
-    dipole_vector_potential_derivative_component, sub3, summarize_centroid, summarize_target_leaf,
+    add3_in_place, combine_target, dipole_field, dipole_field_derivative_component, sub3,
+    summarize_centroid, summarize_target_leaf,
 };
 use crate::MU0_OVER_4PI;
 use crate::physics::hierarchical::{DualTreeError, DualTreeKernel, DualTreeScalar};
 
-/// First-order Taylor source summary for vector-potential dipole clusters.
+/// Source summary for dipole flux-density clusters.
 ///
 /// `first_moment[a][b] = sum_i (x_i[a] - centroid[a]) * moment_i[b]`.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleVectorPotentialFirstOrderSummary<T: DualTreeScalar> {
+pub struct DipoleFluxDensitySummary<T: DualTreeScalar> {
     pub centroid: [T; 3],
     pub moment: [T; 3],
     pub first_moment: [[T; 3]; 3],
     pub count: T,
 }
 
-/// Dipole vector-potential Barnes-Hut kernel with a first-order source-position Taylor correction.
+/// Dipole flux-density Barnes-Hut kernel.
 ///
 /// This is not a full multipole treatment. Far evaluation starts with one total
 /// dipole at the source centroid and adds the first spatial moment correction
 /// from the source cluster.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleVectorPotentialFirstOrderKernel<T: DualTreeScalar> {
+pub struct DipoleFluxDensityKernel<T: DualTreeScalar> {
     marker: PhantomData<T>,
 }
 
-impl<T: DualTreeScalar> DipoleVectorPotentialFirstOrderKernel<T> {
+impl<T: DualTreeScalar> DipoleFluxDensityKernel<T> {
     pub fn new() -> Self {
         Self {
             marker: PhantomData,
@@ -37,12 +37,12 @@ impl<T: DualTreeScalar> DipoleVectorPotentialFirstOrderKernel<T> {
     }
 }
 
-impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialFirstOrderKernel<T> {
+impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
     type Scalar = T;
     type SourceGeometry = DipoleSource<T>;
     type TargetGeometry = DipoleTarget<T>;
     type SourceMoment = [T; 3];
-    type SourceSummary = DipoleVectorPotentialFirstOrderSummary<T>;
+    type SourceSummary = DipoleFluxDensitySummary<T>;
     type TargetSummary = DipoleTargetSummary<T>;
     type Output = [T; 3];
 
@@ -53,7 +53,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialFirstOrderKernel
         moments: &[Self::SourceMoment],
         out: &mut Self::SourceSummary,
     ) -> DualTreeError {
-        *out = DipoleVectorPotentialFirstOrderSummary::default();
+        *out = DipoleFluxDensitySummary::default();
         summarize_centroid(source_ids, sources, &mut out.centroid, &mut out.count);
         for i in 0..source_ids.len() {
             let source_id = source_ids[i] as usize;
@@ -70,7 +70,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialFirstOrderKernel
         _child_ids: &[u32],
         out: &mut Self::SourceSummary,
     ) -> DualTreeError {
-        *out = DipoleVectorPotentialFirstOrderSummary::default();
+        *out = DipoleFluxDensitySummary::default();
         for i in 0..children.len() {
             out.count = out.count + children[i].count;
             for axis in 0..3 {
@@ -119,7 +119,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialFirstOrderKernel
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
     ) -> DualTreeError {
-        dipole_vector_potential(
+        dipole_field(
             target.position,
             source.position,
             *moment,
@@ -134,7 +134,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialFirstOrderKernel
         source: &Self::SourceSummary,
         out: &mut Self::Output,
     ) -> DualTreeError {
-        let err = dipole_vector_potential(
+        let err = dipole_field(
             target.centroid,
             source.centroid,
             source.moment,
@@ -153,8 +153,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialFirstOrderKernel
                 if coeff == T::ZERO {
                     continue;
                 }
-                let deriv =
-                    dipole_vector_potential_derivative_component(r, moment_axis, source_axis, c);
+                let deriv = dipole_field_derivative_component(r, moment_axis, source_axis, c);
                 for out_axis in 0..3 {
                     out[out_axis] = out[out_axis] - coeff * deriv[out_axis];
                 }

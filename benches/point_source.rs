@@ -1,8 +1,7 @@
 #![allow(clippy::all)] // Clippy will attempt to remove black_box() internals
 
 use cfsem::physics::hierarchical::kernels::{
-    DipoleFirstOrderKernel, DipoleMomentKernel, DipoleSource, DipoleTarget,
-    DipoleVectorPotentialFirstOrderKernel, DipoleVectorPotentialKernel,
+    DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
     ClusterTree, DualInteractionPlan, DualTreeError, DualTreeKernel, EvaluationScratch,
@@ -251,8 +250,8 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                 },
             );
 
-            let mut hierarchical_moment = HierarchicalDipoleSolve::new(
-                DipoleMomentKernel::<f64>::new(),
+            let mut hierarchical = HierarchicalDipoleSolve::new(
+                DipoleFluxDensityKernel::<f64>::new(),
                 (&locx, &locy, &locz),
                 (&momx, &momy, &momz),
                 &outer_radius,
@@ -261,7 +260,7 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new(
                     format!(
-                        "Flux Density of a Magnetic Dipole, Hierarchical Moment\n{} src × {} obs",
+                        "Flux Density of a Magnetic Dipole, Hierarchical\n{} src × {} obs",
                         ndipoles, nobs
                     ),
                     ntot,
@@ -269,14 +268,14 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                 &ntot,
                 |b, &_| {
                     b.iter(|| {
-                        black_box(hierarchical_moment.solve_into((&mut outx, &mut outy, &mut outz)))
+                        black_box(hierarchical.solve_into((&mut outx, &mut outy, &mut outz)))
                     });
                 },
             );
             group.bench_with_input(
                 BenchmarkId::new(
                     format!(
-                        "Flux Density of a Magnetic Dipole, Hierarchical Moment Build+Solve\n{} src × {} obs",
+                        "Flux Density of a Magnetic Dipole, Hierarchical Build+Solve\n{} src × {} obs",
                         ndipoles, nobs
                     ),
                     ntot,
@@ -285,54 +284,7 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                 |b, &_| {
                     b.iter(|| {
                         black_box(hierarchical_dipole_build_and_solve(
-                            DipoleMomentKernel::<f64>::new(),
-                            (&locx, &locy, &locz),
-                            (&momx, &momy, &momz),
-                            &outer_radius,
-                            (&obsx, &obsy, &obsz),
-                            (&mut outx, &mut outy, &mut outz),
-                        ))
-                    });
-                },
-            );
-
-            let mut hierarchical_first_order = HierarchicalDipoleSolve::new(
-                DipoleFirstOrderKernel::<f64>::new(),
-                (&locx, &locy, &locz),
-                (&momx, &momy, &momz),
-                &outer_radius,
-                (&obsx, &obsy, &obsz),
-            );
-            group.bench_with_input(
-                BenchmarkId::new(
-                    format!(
-                        "Flux Density of a Magnetic Dipole, Hierarchical First Order\n{} src × {} obs",
-                        ndipoles, nobs
-                    ),
-                    ntot,
-                ),
-                &ntot,
-                |b, &_| {
-                    b.iter(|| {
-                        black_box(hierarchical_first_order.solve_into((
-                            &mut outx, &mut outy, &mut outz,
-                        )))
-                    });
-                },
-            );
-            group.bench_with_input(
-                BenchmarkId::new(
-                    format!(
-                        "Flux Density of a Magnetic Dipole, Hierarchical First Order Build+Solve\n{} src × {} obs",
-                        ndipoles, nobs
-                    ),
-                    ntot,
-                ),
-                &ntot,
-                |b, &_| {
-                    b.iter(|| {
-                        black_box(hierarchical_dipole_build_and_solve(
-                            DipoleFirstOrderKernel::<f64>::new(),
+                            DipoleFluxDensityKernel::<f64>::new(),
                             (&locx, &locy, &locz),
                             (&momx, &momy, &momz),
                             &outer_radius,
@@ -436,7 +388,7 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new(
                     format!(
-                        "Vector Potential of a Magnetic Dipole, Hierarchical Moment\n{} src × {} obs",
+                        "Vector Potential of a Magnetic Dipole, Hierarchical\n{} src × {} obs",
                         ndipoles, nobs
                     ),
                     ntot,
@@ -444,16 +396,14 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                 &ntot,
                 |b, &_| {
                     b.iter(|| {
-                        black_box(hierarchical_moment.solve_into((
-                            &mut outx, &mut outy, &mut outz,
-                        )))
+                        black_box(hierarchical_moment.solve_into((&mut outx, &mut outy, &mut outz)))
                     });
                 },
             );
             group.bench_with_input(
                 BenchmarkId::new(
                     format!(
-                        "Vector Potential of a Magnetic Dipole, Hierarchical Moment Build+Solve\n{} src × {} obs",
+                        "Vector Potential of a Magnetic Dipole, Hierarchical Build+Solve\n{} src × {} obs",
                         ndipoles, nobs
                     ),
                     ntot,
@@ -463,53 +413,6 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                     b.iter(|| {
                         black_box(hierarchical_dipole_build_and_solve(
                             DipoleVectorPotentialKernel::<f64>::new(),
-                            (&locx, &locy, &locz),
-                            (&momx, &momy, &momz),
-                            &outer_radius,
-                            (&obsx, &obsy, &obsz),
-                            (&mut outx, &mut outy, &mut outz),
-                        ))
-                    });
-                },
-            );
-
-            let mut hierarchical_first_order = HierarchicalDipoleSolve::new(
-                DipoleVectorPotentialFirstOrderKernel::<f64>::new(),
-                (&locx, &locy, &locz),
-                (&momx, &momy, &momz),
-                &outer_radius,
-                (&obsx, &obsy, &obsz),
-            );
-            group.bench_with_input(
-                BenchmarkId::new(
-                    format!(
-                        "Vector Potential of a Magnetic Dipole, Hierarchical First Order\n{} src × {} obs",
-                        ndipoles, nobs
-                    ),
-                    ntot,
-                ),
-                &ntot,
-                |b, &_| {
-                    b.iter(|| {
-                        black_box(hierarchical_first_order.solve_into((
-                            &mut outx, &mut outy, &mut outz,
-                        )))
-                    });
-                },
-            );
-            group.bench_with_input(
-                BenchmarkId::new(
-                    format!(
-                        "Vector Potential of a Magnetic Dipole, Hierarchical First Order Build+Solve\n{} src × {} obs",
-                        ndipoles, nobs
-                    ),
-                    ntot,
-                ),
-                &ntot,
-                |b, &_| {
-                    b.iter(|| {
-                        black_box(hierarchical_dipole_build_and_solve(
-                            DipoleVectorPotentialFirstOrderKernel::<f64>::new(),
                             (&locx, &locy, &locz),
                             (&momx, &momy, &momz),
                             &outer_radius,

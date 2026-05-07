@@ -1,7 +1,8 @@
 use core::marker::PhantomData;
 
 use super::dipole::{
-    DipoleTarget, DipoleTargetSummary, add3_in_place, combine_target, summarize_target_leaf,
+    DipoleTarget, DipoleTargetSummary, add3_in_place, combine_target, dipole_field,
+    summarize_target_leaf,
 };
 use crate::physics::hierarchical::{
     Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar,
@@ -58,6 +59,8 @@ pub struct LinearFilamentFluxDensitySummary<T: DualTreeScalar> {
     pub origin: [T; 3],
     pub direction: [T; 3],
     pub magnitude: T,
+    pub dipole_origin: [T; 3],
+    pub dipole_moment: [T; 3],
     pub weight: T,
 }
 
@@ -67,7 +70,9 @@ pub struct LinearFilamentFluxDensitySummary<T: DualTreeScalar> {
 /// near/far plan is based on the full span of the included filaments. Once a
 /// source cluster is accepted as far, the source term is represented as a point
 /// current element with a length-weighted origin, unit direction, and
-/// `I*dL` magnitude.
+/// `I*dL` magnitude. A magnetic dipole term with its own weighted origin is
+/// also included so closed or locally cancelling current paths can still
+/// contribute to the far field.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LinearFilamentFluxDensityKernel<T: DualTreeScalar> {
     marker: PhantomData<T>,
@@ -104,7 +109,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
             let source_id = source_ids[i] as usize;
             add_source_to_summary(&sources[source_id], currents[source_id], out);
         }
-        finalize_source_summary(out);
+        finalize_leaf_source_summary(out);
         DualTreeError::Ok
     }
 
@@ -126,8 +131,31 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
                 &mut out.direction,
                 scale3(children[i].direction, children[i].magnitude),
             );
+            add3_in_place(
+                &mut out.dipole_origin,
+                scale3(children[i].dipole_origin, children[i].weight),
+            );
         }
-        finalize_source_summary(out);
+        if out.weight > T::ZERO {
+            out.origin = scale3(out.origin, T::ONE / out.weight);
+            out.dipole_origin = scale3(out.dipole_origin, T::ONE / out.weight);
+        }
+
+        for i in 0..children.len() {
+            let child_current = scale3(children[i].direction, children[i].magnitude);
+            add3_in_place(&mut out.dipole_moment, children[i].dipole_moment);
+            add3_in_place(
+                &mut out.dipole_moment,
+                scale3(
+                    cross3(
+                        sub3(children[i].dipole_origin, out.dipole_origin),
+                        child_current,
+                    ),
+                    half::<T>(),
+                ),
+            );
+        }
+        finalize_current_element(out);
         DualTreeError::Ok
     }
 
@@ -183,16 +211,28 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
             return DualTreeError::Ok;
         }
 
-        if source.magnitude <= T::ZERO {
-            return DualTreeError::Ok;
+        if source.magnitude > T::ZERO {
+            *out = point_segment_source_term(
+                source.origin,
+                source.direction,
+                source.magnitude,
+                target.centroid,
+            );
         }
 
-        *out = point_segment_source_term(
-            source.origin,
-            source.direction,
-            source.magnitude,
+        let mut dipole_out = [T::ZERO; 3];
+        let err = dipole_field(
             target.centroid,
+            source.dipole_origin,
+            source.dipole_moment,
+            T::ZERO,
+            &mut dipole_out,
         );
+        if err != DualTreeError::Ok {
+            return err;
+        }
+        add3_in_place(out, dipole_out);
+
         DualTreeError::Ok
     }
 
@@ -224,15 +264,42 @@ fn add_source_to_summary<T: DualTreeScalar>(
         &mut out.origin,
         scale3(source.representative_point(), length),
     );
-    add3_in_place(&mut out.direction, scale3(dl, current));
+    add3_in_place(
+        &mut out.dipole_origin,
+        scale3(source.representative_point(), length),
+    );
+    let current_element = scale3(dl, current);
+    add3_in_place(&mut out.direction, current_element);
+    add3_in_place(
+        &mut out.dipole_moment,
+        scale3(
+            cross3(source.representative_point(), current_element),
+            half::<T>(),
+        ),
+    );
 }
 
 #[inline]
-fn finalize_source_summary<T: DualTreeScalar>(summary: &mut LinearFilamentFluxDensitySummary<T>) {
+fn finalize_leaf_source_summary<T: DualTreeScalar>(
+    summary: &mut LinearFilamentFluxDensitySummary<T>,
+) {
     if summary.weight > T::ZERO {
         summary.origin = scale3(summary.origin, T::ONE / summary.weight);
+        summary.dipole_origin = scale3(summary.dipole_origin, T::ONE / summary.weight);
     }
 
+    add3_in_place(
+        &mut summary.dipole_moment,
+        scale3(
+            cross3(summary.dipole_origin, summary.direction),
+            T::ZERO - half::<T>(),
+        ),
+    );
+    finalize_current_element(summary);
+}
+
+#[inline]
+fn finalize_current_element<T: DualTreeScalar>(summary: &mut LinearFilamentFluxDensitySummary<T>) {
     summary.magnitude = norm3(summary.direction);
     if summary.magnitude > T::ZERO {
         summary.direction = scale3(summary.direction, T::ONE / summary.magnitude);
@@ -261,6 +328,11 @@ fn point_segment_source_term<T: DualTreeScalar>(
 }
 
 #[inline]
+fn half<T: DualTreeScalar>() -> T {
+    T::from_f64(0.5)
+}
+
+#[inline]
 fn array_to_tuple<T: DualTreeScalar>(value: [T; 3]) -> (T, T, T) {
     (value[0], value[1], value[2])
 }
@@ -283,6 +355,15 @@ fn scale3<T: DualTreeScalar>(value: [T; 3], scale: T) -> [T; 3] {
 #[inline]
 fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
     a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
+}
+
+#[inline]
+fn cross3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+    [
+        a[1].mul_add(b[2], (T::ZERO - b[1]) * a[2]),
+        a[2].mul_add(b[0], (T::ZERO - b[2]) * a[0]),
+        a[0].mul_add(b[1], (T::ZERO - b[0]) * a[1]),
+    ]
 }
 
 #[inline]

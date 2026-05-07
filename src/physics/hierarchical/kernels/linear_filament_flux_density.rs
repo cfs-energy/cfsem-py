@@ -7,6 +7,7 @@ use crate::physics::hierarchical::{
     Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar,
 };
 use crate::physics::linear_filament::flux_density_linear_filament_scalar;
+use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
 /// Finite linear filament source geometry.
 #[derive(Clone, Copy, Debug, Default)]
@@ -54,20 +55,19 @@ impl<T: DualTreeScalar> BoundedGeometry for LinearFilamentSource<T> {
 /// Source summary for finite linear filament flux-density clusters.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LinearFilamentFluxDensitySummary<T: DualTreeScalar> {
-    pub start_accum: [T; 3],
-    pub end_accum: [T; 3],
+    pub origin: [T; 3],
+    pub direction: [T; 3],
+    pub magnitude: T,
     pub weight: T,
-    pub current_element: [T; 3],
 }
 
 /// Linear filament flux-density Barnes-Hut kernel.
 ///
-/// Far evaluation represents each accepted source cluster as one equivalent
-/// finite filament segment. The equivalent segment uses length-weighted averaged
-/// endpoints for finite extent and the exact net `I*dL` vector for direction and
-/// current magnitude. Far evaluation uses zero wire radius because the
-/// finite-radius correction is only active inside the conductor radius, while
-/// accepted far interactions are separated from the source AABB.
+/// Tree construction still uses each finite source segment's full AABB, so the
+/// near/far plan is based on the full span of the included filaments. Once a
+/// source cluster is accepted as far, the source term is represented as a point
+/// current element with a length-weighted origin, unit direction, and
+/// `I*dL` magnitude.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LinearFilamentFluxDensityKernel<T: DualTreeScalar> {
     marker: PhantomData<T>,
@@ -104,6 +104,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
             let source_id = source_ids[i] as usize;
             add_source_to_summary(&sources[source_id], currents[source_id], out);
         }
+        finalize_source_summary(out);
         DualTreeError::Ok
     }
 
@@ -117,10 +118,16 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
         *out = LinearFilamentFluxDensitySummary::default();
         for i in 0..children.len() {
             out.weight = out.weight + children[i].weight;
-            add3_in_place(&mut out.start_accum, children[i].start_accum);
-            add3_in_place(&mut out.end_accum, children[i].end_accum);
-            add3_in_place(&mut out.current_element, children[i].current_element);
+            add3_in_place(
+                &mut out.origin,
+                scale3(children[i].origin, children[i].weight),
+            );
+            add3_in_place(
+                &mut out.direction,
+                scale3(children[i].direction, children[i].magnitude),
+            );
         }
+        finalize_source_summary(out);
         DualTreeError::Ok
     }
 
@@ -176,28 +183,16 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
             return DualTreeError::Ok;
         }
 
-        let inv_weight = T::ONE / source.weight;
-        let avg_start = scale3(source.start_accum, inv_weight);
-        let avg_end = scale3(source.end_accum, inv_weight);
-        let center = scale3(add3(avg_start, avg_end), T::from_f64(0.5));
-        let length_eq = norm3(sub3(avg_end, avg_start));
-        let current_element_norm = norm3(source.current_element);
-        if length_eq <= T::ZERO || current_element_norm <= T::ZERO {
+        if source.magnitude <= T::ZERO {
             return DualTreeError::Ok;
         }
 
-        let dir = scale3(source.current_element, T::ONE / current_element_norm);
-        let half_length = length_eq * T::from_f64(0.5);
-        let half_segment = scale3(dir, half_length);
-        let start = sub3(center, half_segment);
-        let end = add3(center, half_segment);
-        let current = current_element_norm / length_eq;
-
-        *out = tuple_to_array(flux_density_linear_filament_scalar(
-            (array_to_tuple(start), array_to_tuple(end), current),
-            T::ZERO,
-            array_to_tuple(target.centroid),
-        ));
+        *out = point_segment_source_term(
+            source.origin,
+            source.direction,
+            source.magnitude,
+            target.centroid,
+        );
         DualTreeError::Ok
     }
 
@@ -225,9 +220,44 @@ fn add_source_to_summary<T: DualTreeScalar>(
     }
 
     out.weight = out.weight + length;
-    add3_in_place(&mut out.start_accum, scale3(source.start, length));
-    add3_in_place(&mut out.end_accum, scale3(source.end, length));
-    add3_in_place(&mut out.current_element, scale3(dl, current));
+    add3_in_place(
+        &mut out.origin,
+        scale3(source.representative_point(), length),
+    );
+    add3_in_place(&mut out.direction, scale3(dl, current));
+}
+
+#[inline]
+fn finalize_source_summary<T: DualTreeScalar>(summary: &mut LinearFilamentFluxDensitySummary<T>) {
+    if summary.weight > T::ZERO {
+        summary.origin = scale3(summary.origin, T::ONE / summary.weight);
+    }
+
+    summary.magnitude = norm3(summary.direction);
+    if summary.magnitude > T::ZERO {
+        summary.direction = scale3(summary.direction, T::ONE / summary.magnitude);
+    }
+}
+
+#[inline]
+fn point_segment_source_term<T: DualTreeScalar>(
+    origin: [T; 3],
+    direction: [T; 3],
+    magnitude: T,
+    target: [T; 3],
+) -> [T; 3] {
+    let half = T::from_f64(0.5);
+    let half_direction = scale3(direction, half);
+    let start = sub3(origin, half_direction);
+    let end = [
+        origin[0] + half_direction[0],
+        origin[1] + half_direction[1],
+        origin[2] + half_direction[2],
+    ];
+    tuple_to_array(flux_density_point_segment_scalar(
+        (array_to_tuple(start), array_to_tuple(end), magnitude),
+        array_to_tuple(target),
+    ))
 }
 
 #[inline]
@@ -238,11 +268,6 @@ fn array_to_tuple<T: DualTreeScalar>(value: [T; 3]) -> (T, T, T) {
 #[inline]
 fn tuple_to_array<T: DualTreeScalar>(value: (T, T, T)) -> [T; 3] {
     [value.0, value.1, value.2]
-}
-
-#[inline]
-fn add3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
 #[inline]

@@ -3,6 +3,7 @@ use crate::physics::hierarchical::kernels::{
     DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
     LinearFilamentFluxDensityKernel, LinearFilamentSource,
 };
+use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
 #[derive(Clone, Copy)]
 struct MockPoint<T: DualTreeScalar> {
@@ -699,7 +700,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
 }
 
 #[test]
-fn linear_filament_far_cluster_uses_finite_equivalent_segment() {
+fn linear_filament_far_cluster_uses_point_segment_source_term() {
     let kernel = LinearFilamentFluxDensityKernel::<f64>::new();
     let sources = [
         LinearFilamentSource {
@@ -773,6 +774,18 @@ fn linear_filament_far_cluster_uses_finite_equivalent_segment() {
     assert!(out[0][1].is_finite());
     assert!(out[0][2].is_finite());
     assert!(vec_norm3(out[0]) > 0.0);
+
+    let expected = flux_density_point_segment_scalar(
+        ((0.0, 0.0, -0.5), (0.0, 0.0, 1.5), 1.0),
+        (
+            targets[0].position[0],
+            targets[0].position[1],
+            targets[0].position[2],
+        ),
+    );
+    assert!((out[0][0] - expected.0).abs() < 1e-18);
+    assert!((out[0][1] - expected.1).abs() < 1e-18);
+    assert!((out[0][2] - expected.2).abs() < 1e-18);
 }
 
 #[test]

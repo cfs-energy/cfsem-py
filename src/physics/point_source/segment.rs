@@ -9,10 +9,7 @@ use rayon::{
 use crate::physics::point_source::current_element::{
     flux_density_current_element_scalar, vector_potential_current_element_scalar,
 };
-use crate::{
-    chunksize,
-    math::{cross3, decompose_filament},
-};
+use crate::{chunksize, math::cross3, physics::hierarchical::DualTreeScalar};
 
 use crate::macros::*;
 
@@ -128,16 +125,21 @@ pub fn flux_density_point_segment(
 /// # Returns
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
-pub fn flux_density_point_segment_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
+#[inline]
+pub fn flux_density_point_segment_scalar<T: DualTreeScalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
     // Unpack
     let (xyz0, xyz1, ifil) = xyzifil;
     let (xp, yp, zp) = xyzobs;
 
     // Get filament midpoint and length vector
-    let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
+    let half = T::from_f64(0.5);
+    let xmid = half.mul_add(xyz0.0 + xyz1.0, T::ZERO);
+    let ymid = half.mul_add(xyz0.1 + xyz1.1, T::ZERO);
+    let zmid = half.mul_add(xyz0.2 + xyz1.2, T::ZERO);
+    let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
     let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
     let b = flux_density_current_element_scalar([xmid, ymid, zmid], moment, [xp, yp, zp]);
     (b[0], b[1], b[2])
@@ -256,15 +258,19 @@ pub fn vector_potential_point_segment(
 ///
 /// * `a`:        (V-s/m) Vector potential x, y, z components
 #[inline]
-pub fn vector_potential_point_segment_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
+pub fn vector_potential_point_segment_scalar<T: DualTreeScalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
     // Unpack
     let (xyz0, xyz1, ifil) = xyzifil;
 
     // Get filament midpoint and length vector
-    let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
+    let half = T::from_f64(0.5);
+    let xmid = half.mul_add(xyz0.0 + xyz1.0, T::ZERO);
+    let ymid = half.mul_add(xyz0.1 + xyz1.1, T::ZERO);
+    let zmid = half.mul_add(xyz0.2 + xyz1.2, T::ZERO);
+    let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
     let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
     let a = vector_potential_current_element_scalar(
         [xmid, ymid, zmid],
@@ -434,7 +440,10 @@ mod test {
         let ifil = -2.3;
         let obs = (1.4, -0.9, 0.6);
 
-        let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
+        let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
+        let xmid = dl.0.mul_add(0.5, xyz0.0);
+        let ymid = dl.1.mul_add(0.5, xyz0.1);
+        let zmid = dl.2.mul_add(0.5, xyz0.2);
         let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
 
         let b_segment = flux_density_point_segment_scalar((xyz0, xyz1, ifil), obs);
@@ -467,8 +476,8 @@ mod test {
 
     #[test]
     fn test_current_element_scalars_zero_inside_distance_tolerance() {
-        let src = [0.1, -0.2, 0.3];
-        let moment = [0.4, -0.7, 1.1];
+        let src = [0.1_f64, -0.2, 0.3];
+        let moment = [0.4_f64, -0.7, 1.1];
 
         let obs_near = [src[0] + 0.5e-14, src[1], src[2]];
         let b_near = flux_density_current_element_scalar(src, moment, obs_near);

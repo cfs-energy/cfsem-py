@@ -87,6 +87,9 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
 )
+from .cfsem import HierarchicalBoundaryElements as _HierarchicalBoundaryElements
+from .cfsem import HierarchicalDipoles as _HierarchicalDipoles
+from .cfsem import HierarchicalLinearFilaments as _HierarchicalLinearFilaments
 
 
 def flux_circular_filament(
@@ -1246,6 +1249,176 @@ def vector_potential_dipole(
     return ax, ay, az  # type: ignore
 
 
+class HierarchicalDipoles:
+    """Reusable hierarchical dipole field solver."""
+
+    def __init__(
+        self,
+        theta: float = 0.7,
+        source_leaf_size: int = 16,
+        target_leaf_size: int = 16,
+        num_chunks: int = 1,
+    ) -> None:
+        self._solver = _HierarchicalDipoles(theta, source_leaf_size, target_leaf_size, num_chunks)
+
+    def build(self, loc: Array3xN, obs: Array3xN, outer_radius: NDArray[float64] | None = None) -> None:
+        loc = _3tup_contig(loc)
+        obs = _3tup_contig(obs)
+        outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
+        outer_radius = ascontiguousarray(outer_radius, dtype=float64).ravel()
+        self._solver.build(loc, obs, outer_radius)
+
+    def build_sources(self, loc: Array3xN, outer_radius: NDArray[float64] | None = None) -> None:
+        loc = _3tup_contig(loc)
+        outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
+        outer_radius = ascontiguousarray(outer_radius, dtype=float64).ravel()
+        self._solver.build_sources(loc, outer_radius)
+
+    def update_sources(self, loc: Array3xN, outer_radius: NDArray[float64] | None = None) -> None:
+        self.build_sources(loc, outer_radius)
+
+    def build_targets(self, obs: Array3xN) -> None:
+        self._solver.build_targets(_3tup_contig(obs))
+
+    def update_targets(self, obs: Array3xN) -> None:
+        self.build_targets(obs)
+
+    def build_plan(self) -> None:
+        self._solver.build_plan()
+
+    def flux_density(self, moment: Array3xN, par: bool = False) -> Array3xN:
+        return self._solver.flux_density(_3tup_contig(moment), par)  # type: ignore
+
+    def vector_potential(self, moment: Array3xN, par: bool = False) -> Array3xN:
+        return self._solver.vector_potential(_3tup_contig(moment), par)  # type: ignore
+
+    def flux_density_into(self, moment: Array3xN, out: Array3xN, par: bool = False) -> None:
+        self._solver.flux_density_into(_3tup_contig(moment), out, par)
+
+    def vector_potential_into(self, moment: Array3xN, out: Array3xN, par: bool = False) -> None:
+        self._solver.vector_potential_into(_3tup_contig(moment), out, par)
+
+
+class HierarchicalLinearFilaments:
+    """Reusable hierarchical linear-filament field solver."""
+
+    def __init__(
+        self,
+        theta: float = 0.7,
+        source_leaf_size: int = 16,
+        target_leaf_size: int = 16,
+        num_chunks: int = 1,
+    ) -> None:
+        self._solver = _HierarchicalLinearFilaments(theta, source_leaf_size, target_leaf_size, num_chunks)
+
+    def build(
+        self,
+        xyzfil: Array3xN,
+        dlxyzfil: Array3xN,
+        wire_radius: NDArray[float64],
+        obs: Array3xN,
+    ) -> None:
+        self._solver.build(
+            _3tup_contig(xyzfil),
+            _3tup_contig(dlxyzfil),
+            ascontiguousarray(wire_radius, dtype=float64).ravel(),
+            _3tup_contig(obs),
+        )
+
+    def build_sources(self, xyzfil: Array3xN, dlxyzfil: Array3xN, wire_radius: NDArray[float64]) -> None:
+        self._solver.build_sources(
+            _3tup_contig(xyzfil),
+            _3tup_contig(dlxyzfil),
+            ascontiguousarray(wire_radius, dtype=float64).ravel(),
+        )
+
+    def update_sources(self, xyzfil: Array3xN, dlxyzfil: Array3xN, wire_radius: NDArray[float64]) -> None:
+        self.build_sources(xyzfil, dlxyzfil, wire_radius)
+
+    def build_targets(self, obs: Array3xN) -> None:
+        self._solver.build_targets(_3tup_contig(obs))
+
+    def update_targets(self, obs: Array3xN) -> None:
+        self.build_targets(obs)
+
+    def build_plan(self) -> None:
+        self._solver.build_plan()
+
+    def flux_density(self, current: NDArray[float64], par: bool = False) -> Array3xN:
+        current = ascontiguousarray(current, dtype=float64).ravel()
+        return self._solver.flux_density(current, par)  # type: ignore
+
+    def vector_potential(self, current: NDArray[float64], par: bool = False) -> Array3xN:
+        current = ascontiguousarray(current, dtype=float64).ravel()
+        return self._solver.vector_potential(current, par)  # type: ignore
+
+
+class HierarchicalBoundaryElements:
+    """Reusable hierarchical triangular boundary-element field solver."""
+
+    def __init__(
+        self,
+        theta: float = 0.7,
+        source_leaf_size: int = 16,
+        target_leaf_size: int = 16,
+        num_chunks: int = 1,
+        quad: str = "dunavant3",
+    ) -> None:
+        self._solver = _HierarchicalBoundaryElements(
+            theta, source_leaf_size, target_leaf_size, num_chunks, quad
+        )
+        self._triangles: NDArray[int64] | None = None
+
+    def build(self, nodes: NDArray[float64], triangles: NDArray[int64], obs: Array3xN) -> None:
+        triangles = ascontiguousarray(triangles, dtype=int64)
+        self._triangles = triangles
+        self._solver.build(
+            ascontiguousarray(nodes, dtype=float64),
+            triangles,
+            _3tup_contig(obs),
+        )
+
+    def build_sources(self, nodes: NDArray[float64], triangles: NDArray[int64]) -> None:
+        triangles = ascontiguousarray(triangles, dtype=int64)
+        self._triangles = triangles
+        self._solver.build_sources(
+            ascontiguousarray(nodes, dtype=float64),
+            triangles,
+        )
+
+    def update_sources(self, nodes: NDArray[float64], triangles: NDArray[int64]) -> None:
+        self.build_sources(nodes, triangles)
+
+    def build_targets(self, obs: Array3xN) -> None:
+        self._solver.build_targets(_3tup_contig(obs))
+
+    def update_targets(self, obs: Array3xN) -> None:
+        self.build_targets(obs)
+
+    def build_plan(self) -> None:
+        self._solver.build_plan()
+
+    def flux_density(self, s: NDArray[float64] | Array3xN, par: bool = False) -> Array3xN:
+        return self._solver.flux_density(self._source_values(s), par)  # type: ignore
+
+    def vector_potential(self, s: NDArray[float64] | Array3xN, par: bool = False) -> Array3xN:
+        return self._solver.vector_potential(self._source_values(s), par)  # type: ignore
+
+    def _source_values(self, s: NDArray[float64] | Array3xN) -> Array3xN:
+        values = asarray(s)
+        if values.ndim == 1:
+            if self._triangles is None:
+                msg = "boundary-element sources must be built before nodal source values can be mapped"
+                raise ValueError(msg)
+            values = ascontiguousarray(values, dtype=float64).ravel()
+            return (
+                ascontiguousarray(values[self._triangles[:, 0]]),
+                ascontiguousarray(values[self._triangles[:, 1]]),
+                ascontiguousarray(values[self._triangles[:, 2]]),
+            )
+        return _3tup_contig(s)
+
+
 def body_force_density_circular_filament_cartesian(
     ifil: NDArray[float64],
     rfil: NDArray[float64],
@@ -1324,11 +1497,27 @@ def _3tup_contig(
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 3-tuple.
     Only copies data if it is not already contiguous."""
-    return (
-        ascontiguousarray(t[0]).ravel(),
-        ascontiguousarray(t[1]).ravel(),
-        ascontiguousarray(t[2]).ravel(),
-    )
+    if isinstance(t, tuple):
+        return (
+            ascontiguousarray(t[0]).ravel(),
+            ascontiguousarray(t[1]).ravel(),
+            ascontiguousarray(t[2]).ravel(),
+        )
+    arr = asarray(t)
+    if arr.ndim == 2 and arr.shape[1] == 3:
+        return (
+            ascontiguousarray(arr[:, 0]).ravel(),
+            ascontiguousarray(arr[:, 1]).ravel(),
+            ascontiguousarray(arr[:, 2]).ravel(),
+        )
+    if arr.ndim == 2 and arr.shape[0] == 3:
+        return (
+            ascontiguousarray(arr[0, :]).ravel(),
+            ascontiguousarray(arr[1, :]).ravel(),
+            ascontiguousarray(arr[2, :]).ravel(),
+        )
+    msg = "Expected a tuple of three coordinate arrays or a 2D array with one dimension of length 3"
+    raise ValueError(msg)
 
 
 def _2tup_contig(

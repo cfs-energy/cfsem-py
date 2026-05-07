@@ -6,6 +6,7 @@ pub struct SourceNodeSummaries<K: DualTreeKernel> {
 }
 
 impl<K: DualTreeKernel> SourceNodeSummaries<K> {
+    #[inline]
     pub fn new(tree: ClusterTreeView<'_, K::Scalar>) -> Self {
         Self {
             node_summaries: vec![K::SourceSummary::default(); tree.n_nodes()],
@@ -19,6 +20,7 @@ pub struct TargetNodeSummaries<K: DualTreeKernel> {
 }
 
 impl<K: DualTreeKernel> TargetNodeSummaries<K> {
+    #[inline]
     pub fn new(tree: ClusterTreeView<'_, K::Scalar>) -> Self {
         Self {
             node_summaries: vec![K::TargetSummary::default(); tree.n_nodes()],
@@ -32,6 +34,7 @@ pub struct EvaluationScratch<'a, O> {
 }
 
 /// Update source summaries for a fixed source tree and changed source moments.
+#[inline]
 pub fn update_source_summaries_into<K: DualTreeKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
@@ -66,6 +69,7 @@ pub fn update_source_summaries_into<K: DualTreeKernel>(
 }
 
 /// Update target summaries for fixed target geometry.
+#[inline]
 pub fn update_target_summaries_into<K: DualTreeKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
@@ -95,6 +99,7 @@ pub fn update_target_summaries_into<K: DualTreeKernel>(
 }
 
 /// Evaluate the Barnes-Hut plan into `out`.
+#[inline]
 pub fn evaluate_into<K: DualTreeKernel>(
     kernel: &K,
     plan: DualInteractionPlanView<'_>,
@@ -169,6 +174,7 @@ pub fn evaluate_into<K: DualTreeKernel>(
 }
 
 /// Dense exact fallback using nested range loops.
+#[inline]
 pub fn dense_direct_evaluate_into<K: DualTreeKernel>(
     kernel: &K,
     sources: &[K::SourceGeometry],
@@ -206,6 +212,7 @@ pub fn dense_direct_evaluate_into<K: DualTreeKernel>(
     DualTreeError::Ok
 }
 
+#[inline]
 fn propagate_source_summaries<K: DualTreeKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
@@ -240,6 +247,7 @@ fn propagate_source_summaries<K: DualTreeKernel>(
     DualTreeError::Ok
 }
 
+#[inline]
 fn propagate_target_summaries<K: DualTreeKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,

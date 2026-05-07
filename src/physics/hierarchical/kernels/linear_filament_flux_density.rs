@@ -58,7 +58,6 @@ pub struct LinearFilamentFluxDensitySummary<T: DualTreeScalar> {
     pub end_accum: [T; 3],
     pub weight: T,
     pub current_element: [T; 3],
-    pub wire_radius: T,
 }
 
 /// Linear filament flux-density Barnes-Hut kernel.
@@ -66,13 +65,16 @@ pub struct LinearFilamentFluxDensitySummary<T: DualTreeScalar> {
 /// Far evaluation represents each accepted source cluster as one equivalent
 /// finite filament segment. The equivalent segment uses length-weighted averaged
 /// endpoints for finite extent and the exact net `I*dL` vector for direction and
-/// current magnitude.
+/// current magnitude. Far evaluation uses zero wire radius because the
+/// finite-radius correction is only active inside the conductor radius, while
+/// accepted far interactions are separated from the source AABB.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LinearFilamentFluxDensityKernel<T: DualTreeScalar> {
     marker: PhantomData<T>,
 }
 
 impl<T: DualTreeScalar> LinearFilamentFluxDensityKernel<T> {
+    #[inline]
     pub fn new() -> Self {
         Self {
             marker: PhantomData,
@@ -89,6 +91,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
     type TargetSummary = DipoleTargetSummary<T>;
     type Output = [T; 3];
 
+    #[inline]
     fn summarize_leaf_sources(
         &self,
         source_ids: &[u32],
@@ -104,6 +107,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
         DualTreeError::Ok
     }
 
+    #[inline]
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
@@ -116,13 +120,11 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
             add3_in_place(&mut out.start_accum, children[i].start_accum);
             add3_in_place(&mut out.end_accum, children[i].end_accum);
             add3_in_place(&mut out.current_element, children[i].current_element);
-            if children[i].wire_radius > out.wire_radius {
-                out.wire_radius = children[i].wire_radius;
-            }
         }
         DualTreeError::Ok
     }
 
+    #[inline]
     fn summarize_leaf_targets(
         &self,
         target_ids: &[u32],
@@ -132,6 +134,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
         summarize_target_leaf(target_ids, targets, out)
     }
 
+    #[inline]
     fn combine_target_summaries(
         &self,
         children: &[Self::TargetSummary],
@@ -141,6 +144,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
         combine_target(children, out)
     }
 
+    #[inline]
     fn eval_exact(
         &self,
         target: &Self::TargetGeometry,
@@ -160,6 +164,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
         DualTreeError::Ok
     }
 
+    #[inline]
     fn eval_far(
         &self,
         target: &Self::TargetSummary,
@@ -190,21 +195,24 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
 
         *out = tuple_to_array(flux_density_linear_filament_scalar(
             (array_to_tuple(start), array_to_tuple(end), current),
-            source.wire_radius,
+            T::ZERO,
             array_to_tuple(target.centroid),
         ));
         DualTreeError::Ok
     }
 
+    #[inline]
     fn zero_output(&self, out: &mut Self::Output) {
         *out = [T::ZERO; 3];
     }
 
+    #[inline]
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
         add3_in_place(out, *contribution);
     }
 }
 
+#[inline]
 fn add_source_to_summary<T: DualTreeScalar>(
     source: &LinearFilamentSource<T>,
     current: T,
@@ -213,9 +221,6 @@ fn add_source_to_summary<T: DualTreeScalar>(
     let dl = sub3(source.end, source.start);
     let length = norm3(dl);
     if length <= T::ZERO {
-        if source.wire_radius > out.wire_radius {
-            out.wire_radius = source.wire_radius;
-        }
         return;
     }
 
@@ -223,9 +228,6 @@ fn add_source_to_summary<T: DualTreeScalar>(
     add3_in_place(&mut out.start_accum, scale3(source.start, length));
     add3_in_place(&mut out.end_accum, scale3(source.end, length));
     add3_in_place(&mut out.current_element, scale3(dl, current));
-    if source.wire_radius > out.wire_radius {
-        out.wire_radius = source.wire_radius;
-    }
 }
 
 #[inline]

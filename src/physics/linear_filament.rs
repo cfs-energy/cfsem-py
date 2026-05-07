@@ -615,6 +615,7 @@ pub fn flux_density_linear_filament_matrix(
 /// # Returns
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
+#[inline]
 pub fn flux_density_linear_filament_scalar<T: DualTreeScalar>(
     xyzifil: ((T, T, T), (T, T, T), T),
     wire_radius: T,

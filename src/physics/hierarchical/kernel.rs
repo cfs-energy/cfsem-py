@@ -81,6 +81,7 @@ pub trait DualTreeKernel {
     fn zero_output(&self, out: &mut Self::Output);
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output);
 
+    #[inline]
     fn describe_error(&self, error: DualTreeError) -> &'static str {
         match error {
             DualTreeError::KernelError0 => "kernel error 0",

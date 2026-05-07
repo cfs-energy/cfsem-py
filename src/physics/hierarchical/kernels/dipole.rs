@@ -66,6 +66,7 @@ pub struct DipoleTargetSummary<T: DualTreeScalar> {
     pub count: T,
 }
 
+#[inline]
 pub(super) fn summarize_centroid<T: DualTreeScalar>(
     source_ids: &[u32],
     sources: &[DipoleSource<T>],
@@ -86,6 +87,7 @@ pub(super) fn summarize_centroid<T: DualTreeScalar>(
     }
 }
 
+#[inline]
 pub(super) fn summarize_target_leaf<T: DualTreeScalar>(
     target_ids: &[u32],
     targets: &[DipoleTarget<T>],
@@ -105,6 +107,7 @@ pub(super) fn summarize_target_leaf<T: DualTreeScalar>(
     DualTreeError::Ok
 }
 
+#[inline]
 pub(super) fn combine_target<T: DualTreeScalar>(
     children: &[DipoleTargetSummary<T>],
     out: &mut DipoleTargetSummary<T>,
@@ -125,6 +128,7 @@ pub(super) fn combine_target<T: DualTreeScalar>(
     DualTreeError::Ok
 }
 
+#[inline]
 pub(super) fn dipole_field<T: DualTreeScalar>(
     target: [T; 3],
     source: [T; 3],
@@ -136,6 +140,7 @@ pub(super) fn dipole_field<T: DualTreeScalar>(
     DualTreeError::Ok
 }
 
+#[inline]
 pub(super) fn dipole_field_derivative_component<T: DualTreeScalar>(
     r: [T; 3],
     moment_axis: usize,
@@ -174,6 +179,7 @@ pub(super) fn dipole_field_derivative_component<T: DualTreeScalar>(
     out
 }
 
+#[inline]
 pub(super) fn dipole_vector_potential<T: DualTreeScalar>(
     target: [T; 3],
     source: [T; 3],
@@ -185,6 +191,7 @@ pub(super) fn dipole_vector_potential<T: DualTreeScalar>(
     DualTreeError::Ok
 }
 
+#[inline]
 pub(super) fn dipole_vector_potential_derivative_component<T: DualTreeScalar>(
     r: [T; 3],
     moment_axis: usize,

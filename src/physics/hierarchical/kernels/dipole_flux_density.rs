@@ -30,6 +30,7 @@ pub struct DipoleFluxDensityKernel<T: DualTreeScalar> {
 }
 
 impl<T: DualTreeScalar> DipoleFluxDensityKernel<T> {
+    #[inline]
     pub fn new() -> Self {
         Self {
             marker: PhantomData,
@@ -46,6 +47,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
     type TargetSummary = DipoleTargetSummary<T>;
     type Output = [T; 3];
 
+    #[inline]
     fn summarize_leaf_sources(
         &self,
         source_ids: &[u32],
@@ -64,6 +66,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
         DualTreeError::Ok
     }
 
+    #[inline]
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
@@ -94,6 +97,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
         DualTreeError::Ok
     }
 
+    #[inline]
     fn summarize_leaf_targets(
         &self,
         target_ids: &[u32],
@@ -103,6 +107,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
         summarize_target_leaf(target_ids, targets, out)
     }
 
+    #[inline]
     fn combine_target_summaries(
         &self,
         children: &[Self::TargetSummary],
@@ -112,6 +117,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
         combine_target(children, out)
     }
 
+    #[inline]
     fn eval_exact(
         &self,
         target: &Self::TargetGeometry,
@@ -128,6 +134,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
         )
     }
 
+    #[inline]
     fn eval_far(
         &self,
         target: &Self::TargetSummary,
@@ -163,10 +170,12 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleFluxDensityKernel<T> {
         DualTreeError::Ok
     }
 
+    #[inline]
     fn zero_output(&self, out: &mut Self::Output) {
         *out = [T::ZERO; 3];
     }
 
+    #[inline]
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
         add3_in_place(out, *contribution);
     }

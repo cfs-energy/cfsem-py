@@ -959,18 +959,18 @@ pub fn vector_potential_linear_filament_matrix(
 ///
 /// * `a`:        (V-s/m) Vector potential x, y, z components
 #[inline]
-pub fn vector_potential_linear_filament_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    wire_radius: f64,
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
+pub fn vector_potential_linear_filament_scalar<T: DualTreeScalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    wire_radius: T,
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
     use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
 
     // Unpack
     let (start, end, ifil) = xyzifil;
 
     // Regularize the line-filament singularity with a minimum core radius.
-    let core_radius = wire_radius.max(MIN_WIRE_THICKNESS);
+    let core_radius = max_scalar(wire_radius, T::from_f64(MIN_WIRE_THICKNESS));
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing finite-thickness blending:
@@ -994,7 +994,7 @@ pub fn vector_potential_linear_filament_scalar(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let kappa = -MU0_OVER_4PI * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
+    let kappa = (T::ZERO - T::from_f64(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
 
     // NOTE: up to this point, this has been the same as the B-field calculation.
 
@@ -1005,7 +1005,7 @@ pub fn vector_potential_linear_filament_scalar(
     // The field shape inside the conductor is handled later; this separation
     // is necessary due to the discontinuity in the current density vector field.
     let perp2 = perp * perp;
-    let k1 = if para_b >= 0.0 {
+    let k1 = if para_b >= T::ZERO {
         // Each branch is equal, but numerically stable in different regimes.
         //
         // To keep the argument of the log term from going to zero near the
@@ -1039,13 +1039,15 @@ pub fn vector_potential_linear_filament_scalar(
         // `log(k1/k2)` is nonsingular everywhere.
         dist_b - para_b
     }; // (m)
-    let k2 = if para_a >= 0.0 {
+    let k2 = if para_a >= T::ZERO {
         // Each branch is equal, but numerically stable in different regimes
         perp2 / (dist_a + para_a)
     } else {
         dist_a - para_a
     }; // (m)
-    let a_edge = MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0)); // (V-s/m)
+    let a_edge = T::from_f64(MU0_OVER_4PI)
+        * ifil
+        * T::from_f64(libm::log(max_scalar(k1 / k2, T::ZERO).to_f64())); // (V-s/m)
 
     // Finite-thickness effect for points inside the conductor or near the endpoints.
     //
@@ -1068,7 +1070,7 @@ pub fn vector_potential_linear_filament_scalar(
     // both inside and outside the conductor.
 
     // (dimensionless) Quadratic fall-off (vs. linear for B-field)
-    let blend = 0.5 * frac.mul_add(-frac, 1.0); //  1/2 (1 - frac^2)
+    let blend = T::from_f64(0.5) * frac.mul_add(T::ZERO - frac, T::ONE); //  1/2 (1 - frac^2)
     // (V-s/m) a_mag = a_edge + 0.5 * kappa * (1 - frac^2), reworked for mul_add
     let a_mag = kappa.mul_add(blend, a_edge); // (V-s/m) Gauge-shifted magnitude
 
@@ -1078,6 +1080,11 @@ pub fn vector_potential_linear_filament_scalar(
 
     // Return continuous vector potential; avoid hard clipping at small radius.
     (ax, ay, az)
+}
+
+#[inline]
+fn max_scalar<T: DualTreeScalar>(a: T, b: T) -> T {
+    if a > b { a } else { b }
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current
@@ -2093,12 +2100,12 @@ mod test {
 
     #[test]
     fn test_vector_potential_no_endpoint_blend_differs_from_thin_outside_projection() {
-        let wire_radius = 0.1;
-        let start = (0.0, 0.0, -0.5);
-        let end = (0.0, 0.0, 0.5);
-        let ifil = 1.0;
-        let x = 0.02;
-        let overhangs = [0.0, 0.02, 0.05, 0.1, 0.2];
+        let wire_radius = 0.1_f64;
+        let start = (0.0_f64, 0.0, -0.5);
+        let end = (0.0_f64, 0.0, 0.5);
+        let ifil = 1.0_f64;
+        let x = 0.02_f64;
+        let overhangs = [0.0_f64, 0.02, 0.05, 0.1, 0.2];
 
         let mut diff = Vec::with_capacity(overhangs.len());
 
@@ -2162,13 +2169,13 @@ mod test {
     /// Explicitly check axis evaluations at both endpoints and midpoint are non-singular.
     #[test]
     fn test_vector_potential_axis_endpoint_midpoint_nonsingular_scalar() {
-        let start = (0.0, 0.0, -0.5);
-        let end = (0.0, 0.0, 0.5);
+        let start = (0.0_f64, 0.0, -0.5);
+        let end = (0.0_f64, 0.0, 0.5);
         let midpoint = (0.0, 0.0, 0.5 * (start.2 + end.2));
-        let ifil = 1.0;
+        let ifil = 1.0_f64;
         let axis_points = [("start", start), ("midpoint", midpoint), ("end", end)];
 
-        for &wire_radius in &[0.0, 0.01, 0.1] {
+        for &wire_radius in &[0.0_f64, 0.01, 0.1] {
             for &(label, p) in &axis_points {
                 let a = vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, p);
                 assert!(

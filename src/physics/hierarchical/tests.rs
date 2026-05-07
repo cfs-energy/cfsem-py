@@ -1,7 +1,7 @@
 use super::*;
 use crate::physics::hierarchical::kernels::{
     DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
-    LinearFilamentFluxDensityKernel, LinearFilamentSource,
+    LinearFilamentFluxDensityKernel, LinearFilamentSource, LinearFilamentVectorPotentialKernel,
 };
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
@@ -595,6 +595,136 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
         assert!((bh[i][0] - bx[i]).abs() < 1.0e-20);
         assert!((bh[i][1] - by[i]).abs() < 1.0e-20);
         assert!((bh[i][2] - bz[i]).abs() < 1.0e-20);
+    }
+}
+
+#[test]
+fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct() {
+    let kernel = LinearFilamentVectorPotentialKernel::<f64>::new();
+    let sources = [
+        LinearFilamentSource {
+            start: [0.0, 0.0, 0.0],
+            end: [0.0, 0.0, 1.0],
+            wire_radius: 0.01,
+        },
+        LinearFilamentSource {
+            start: [0.5, 0.0, 0.0],
+            end: [0.5, 0.2, 1.0],
+            wire_radius: 0.02,
+        },
+    ];
+    let targets = [
+        DipoleTarget {
+            position: [1.0, 0.0, 0.5],
+        },
+        DipoleTarget {
+            position: [0.25, 0.8, 0.25],
+        },
+    ];
+    let currents = [2.0, -1.5];
+
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let mut source_summaries =
+        SourceNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(target_tree.as_view());
+
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &currents,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut bh = [[0.0; 3]; 2];
+    let mut dense = [[0.0; 3]; 2];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &currents,
+            &mut bh,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &currents,
+            &mut dense,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    let xp = [targets[0].position[0], targets[1].position[0]];
+    let yp = [targets[0].position[1], targets[1].position[1]];
+    let zp = [targets[0].position[2], targets[1].position[2]];
+    let xfil = [sources[0].start[0], sources[1].start[0]];
+    let yfil = [sources[0].start[1], sources[1].start[1]];
+    let zfil = [sources[0].start[2], sources[1].start[2]];
+    let dlx = [
+        sources[0].end[0] - sources[0].start[0],
+        sources[1].end[0] - sources[1].start[0],
+    ];
+    let dly = [
+        sources[0].end[1] - sources[0].start[1],
+        sources[1].end[1] - sources[1].start[1],
+    ];
+    let dlz = [
+        sources[0].end[2] - sources[0].start[2],
+        sources[1].end[2] - sources[1].start[2],
+    ];
+    let wire_radius = [sources[0].wire_radius, sources[1].wire_radius];
+    let mut ax = [0.0; 2];
+    let mut ay = [0.0; 2];
+    let mut az = [0.0; 2];
+    crate::physics::linear_filament::vector_potential_linear_filament(
+        (&xp, &yp, &zp),
+        (&xfil, &yfil, &zfil),
+        (&dlx, &dly, &dlz),
+        &currents,
+        &wire_radius,
+        (&mut ax, &mut ay, &mut az),
+    )
+    .unwrap();
+
+    for i in 0..bh.len() {
+        for axis in 0..3 {
+            assert!((bh[i][axis] - dense[i][axis]).abs() < 1.0e-20);
+        }
+        assert!((bh[i][0] - ax[i]).abs() < 1.0e-20);
+        assert!((bh[i][1] - ay[i]).abs() < 1.0e-20);
+        assert!((bh[i][2] - az[i]).abs() < 1.0e-20);
     }
 }
 

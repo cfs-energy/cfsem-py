@@ -50,7 +50,7 @@ pub fn flux_density_dipole_scalar(
 ///
 /// Returns
 ///
-/// * (bx, by, bz) [T] magnetic field components at observation point
+/// * (bx, by, bz) \[T\] magnetic field components at observation point
 #[inline]
 pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
     loc: [T; 3],

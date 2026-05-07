@@ -44,7 +44,7 @@ use crate::{MU_0, MU0_OVER_4PI};
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -97,7 +97,7 @@ pub fn flux_circular_filament_par(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -162,7 +162,7 @@ pub fn flux_circular_filament(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
     // Unpack
@@ -210,7 +210,7 @@ pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64))
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_density_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -271,7 +271,7 @@ pub fn flux_density_circular_filament_par(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_density_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -349,7 +349,7 @@ pub fn flux_density_circular_filament(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn flux_density_circular_filament_scalar(
     rzifil: (f64, f64, f64),
@@ -505,7 +505,7 @@ pub fn flux_density_circular_filament_cartesian_par(
 ///
 ///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn vector_potential_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -548,7 +548,7 @@ pub fn vector_potential_circular_filament_par(
 ///
 ///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn vector_potential_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -601,7 +601,7 @@ pub fn vector_potential_circular_filament(
 ///
 ///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn vector_potential_circular_filament_scalar(
     rzifil: (f64, f64, f64),
@@ -648,11 +648,11 @@ pub fn vector_potential_circular_filament_scalar(
 /// # References
 ///
 /// \[1\] E. M. Purcell and D. J. Morin, “Electricity and Magnetism,”
-///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C
+///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C>
 ///
-/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential
+/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential>
 ///
 /// # Arguments
 ///
@@ -716,11 +716,11 @@ pub fn mutual_inductance_circular_to_linear_scalar(
 /// # References
 ///
 /// \[1\] E. M. Purcell and D. J. Morin, “Electricity and Magnetism,”
-///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C
+///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C>
 ///
-/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential
+/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential>
 ///
 /// # Arguments
 ///
@@ -783,11 +783,11 @@ pub fn mutual_inductance_circular_to_linear(
 /// # References
 ///
 /// \[1\] E. M. Purcell and D. J. Morin, “Electricity and Magnetism,”
-///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C
+///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C>
 ///
-/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential
+/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential>
 ///
 /// # Arguments
 ///

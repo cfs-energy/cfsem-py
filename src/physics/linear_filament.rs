@@ -601,10 +601,10 @@ pub fn flux_density_linear_filament_matrix(
 /// ## References
 ///
 /// * \[1\] D. J. Griffiths, Introduction to electrodynamics, Fourth edition. Boston: Pearson, 2014.
-/// * \[2\] J. van Nugteren and N. Deelen, “rat-mlfmm,” GitLab repository. Accessed: Jan. 16, 2026. [Online].
-///         Available: https://gitlab.com/Project-Rat/rat-mlfmm/-/tree/1e1d387522fafac50c0540af1ebb15d1d506d33d
-/// * \[3\] M. Zahn, “5.4: The Vector Potential,” Engineering LibreTexts. Accessed: Jan. 20, 2026. [Online].
-///         Available: https://eng.libretexts.org/Bookshelves/Electrical_Engineering/Electro-Optics/Electromagnetic_Field_Theory%3A_A_Problem_Solving_Approach_(Zahn)/05%3A_The_Magnetic_Field/5.04%3A_The_Vector_Potential
+/// * \[2\] J. van Nugteren and N. Deelen, “rat-mlfmm,” GitLab repository. Accessed: Jan. 16, 2026. \[Online\].
+///         Available: <https://gitlab.com/Project-Rat/rat-mlfmm/-/tree/1e1d387522fafac50c0540af1ebb15d1d506d33d>
+/// * \[3\] M. Zahn, “5.4: The Vector Potential,” Engineering LibreTexts. Accessed: Jan. 20, 2026. \[Online\].
+///         Available: <https://eng.libretexts.org/Bookshelves/Electrical_Engineering/Electro-Optics/Electromagnetic_Field_Theory%3A_A_Problem_Solving_Approach_(Zahn)/05%3A_The_Magnetic_Field/5.04%3A_The_Vector_Potential>
 ///
 /// # Arguments
 ///
@@ -927,7 +927,7 @@ pub fn vector_potential_linear_filament_matrix(
 /// Uses the formula for finite segment length and finite wire thickness.
 ///
 /// Because an infinitesimally-thick wire produces a nonphysical singularity
-/// at the axis, a minimum wire radius of [MIN_WIRE_THICKNESS] is imposed.
+/// at the axis, a minimum wire radius of `MIN_WIRE_THICKNESS` is imposed.
 ///
 /// The base formula implemented here is:
 ///

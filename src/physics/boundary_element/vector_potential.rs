@@ -75,11 +75,11 @@ fn triangle_vector_potential_inner<T: DualTreeScalar>(
 ///     Basis-function magnetic vector potential `[ax, ay, az]` (V*s/(A*m)).
 ///
 /// References:
-/// - [5], Eq. (3.24) for the stream-function surface current construction,
+/// - \[5\], Eq. (3.24) for the stream-function surface current construction,
 ///   Eq. (4.6) for the constant current density on a linear triangle, and
 ///   Eqs. (5.3)-(5.5) for triangle vector-potential integrals.
-/// - [3] for `1 / R` potential integrals on polygonal and polyhedral elements.
-/// - [2] for numerical treatment of triangle `1 / R` and `∇(1 / R)`
+/// - \[3\] for `1 / R` potential integrals on polygonal and polyhedral elements.
+/// - \[2\] for numerical treatment of triangle `1 / R` and `∇(1 / R)`
 ///   integrals with linear shape functions.
 #[inline]
 pub fn triangle_vector_potential_basis<T: DualTreeScalar>(
@@ -146,9 +146,9 @@ pub fn triangle_vector_potential_basis<T: DualTreeScalar>(
 ///     Magnetic vector potential `[ax, ay, az]` (V*s/m).
 ///
 /// References:
-/// - [5], Eq. (3.24), Eq. (4.6), and Eqs. (5.3)-(5.5).
-/// - [3], pp. 276-281.
-/// - [2], pp. 1448-1455.
+/// - \[5\], Eq. (3.24), Eq. (4.6), and Eqs. (5.3)-(5.5).
+/// - \[3\], pp. 276-281.
+/// - \[2\], pp. 1448-1455.
 #[inline]
 pub fn vector_potential_triangle<T: DualTreeScalar>(
     n0: [T; 3],

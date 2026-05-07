@@ -36,7 +36,7 @@ use crate::{MU0_OVER_4PI, physics::hierarchical::DualTreeScalar};
 ///
 /// Returns
 ///
-/// * (bx, by, bz) [T] magnetic field components anywhere inside the sphere
+/// * (bx, by, bz) \[T\] magnetic field components anywhere inside the sphere
 #[inline]
 pub(crate) fn flux_density_inside_magnetized_sphere<T: DualTreeScalar>(
     moment: [T; 3],

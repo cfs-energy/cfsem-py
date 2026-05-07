@@ -16,8 +16,8 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 /// quadrature.
 ///
 /// References:
-/// - [3], pp. 276-281, for `1 / R` potential integrals on flat polygonal elements.
-/// - [2], pp. 1448-1455, for triangle integration of Green-function kernels with linear
+/// - \[3\], pp. 276-281, for `1 / R` potential integrals on flat polygonal elements.
+/// - \[2\], pp. 1448-1455, for triangle integration of Green-function kernels with linear
 ///   shape functions.
 #[inline]
 fn triangle_scalar_potential_regular(
@@ -56,11 +56,11 @@ fn triangle_scalar_potential_regular(
 ///   midpoint rule.
 ///
 /// References:
-/// - [4], pp. 1260-1262, for the original Duffy transform for vertex singularities on
+/// - \[4\], pp. 1260-1262, for the original Duffy transform for vertex singularities on
 ///   simplices.
-/// - [1], abstract and Sec. 2, for the generalized Duffy mapping and the note that the
+/// - \[1\], abstract and Sec. 2, for the generalized Duffy mapping and the note that the
 ///   standard `1 / r` case corresponds to the classical Duffy choice.
-/// - [2], pp. 1448-1455, and [3], pp. 276-281, for related weakly singular triangle
+/// - \[2\], pp. 1448-1455, and \[3\], pp. 276-281, for related weakly singular triangle
 ///   Green-function integrals.
 #[inline]
 fn triangle_scalar_potential_self_duffy(
@@ -102,11 +102,11 @@ fn triangle_scalar_potential_self_duffy(
 /// for a well-separated triangle pair using plain nested quadrature.
 ///
 /// References:
-/// - [5], Eq. (3.16) on p. 68 for mutual inductance via `A · j`, Eq. (4.6) on p. 93
+/// - \[5\], Eq. (3.16) on p. 68 for mutual inductance via `A · j`, Eq. (4.6) on p. 93
 ///   for constant triangle current density, and Eqs. (5.3)-(5.5) on pp. 107-108 for
 ///   triangle vector-potential integrals.
-/// - [3], pp. 276-281.
-/// - [2], pp. 1448-1455.
+/// - \[3\], pp. 276-281.
+/// - \[2\], pp. 1448-1455.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -151,11 +151,11 @@ pub fn triangle_geometric_coupling_regular(
 ///   with the Duffy-style helper above.
 ///
 /// References:
-/// - [5], discussion on p. 106 and Eqs. (5.3)-(5.5) on pp. 107-108 for evaluation of
+/// - \[5\], discussion on p. 106 and Eqs. (5.3)-(5.5) on pp. 107-108 for evaluation of
 ///   vector potential on the source support.
-/// - [4], pp. 1260-1262.
-/// - [1], abstract and Sec. 2.
-/// - [2], pp. 1448-1455, and [3], pp. 276-281.
+/// - \[4\], pp. 1260-1262.
+/// - \[1\], abstract and Sec. 2.
+/// - \[2\], pp. 1448-1455, and \[3\], pp. 276-281.
 #[inline]
 fn triangle_geometric_coupling_self(
     n0: [f64; 3],
@@ -186,12 +186,12 @@ fn triangle_geometric_coupling_self(
 ///   explicitly symmetric.
 ///
 /// References:
-/// - [5], Eq. (3.16) on p. 68 and Sec. 3.5.1 on p. 85 for the symmetry of mutual
+/// - \[5\], Eq. (3.16) on p. 68 and Sec. 3.5.1 on p. 85 for the symmetry of mutual
 ///   inductance, together with Eqs. (5.3)-(5.5) on pp. 107-108 for triangle
 ///   vector-potential evaluation.
-/// - [2], pp. 1448-1455.
-/// - [3], pp. 276-281.
-/// - [1] and [4], for weakly singular integration background for the dedicated self term.
+/// - \[2\], pp. 1448-1455.
+/// - \[3\], pp. 276-281.
+/// - \[1\] and \[4\], for weakly singular integration background for the dedicated self term.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -233,11 +233,11 @@ pub fn triangle_geometric_coupling(
 ///   inductance matrix.
 ///
 /// References:
-/// - [5], Eq. (3.16) on p. 68 for `M_mn = ∬ A_m · j_n dS`, Eq. (3.24) on p. 70 for the
+/// - \[5\], Eq. (3.16) on p. 68 for `M_mn = ∬ A_m · j_n dS`, Eq. (3.24) on p. 70 for the
 ///   stream-function current representation, and Eq. (4.6) on p. 93 for the constant
 ///   current density induced by linear triangle nodal values.
-/// - [3], pp. 276-281.
-/// - [2], pp. 1448-1455.
+/// - \[3\], pp. 276-281.
+/// - \[2\], pp. 1448-1455.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -472,9 +472,9 @@ where
 ///     the mesh geometry or output dimensions are inconsistent.
 ///
 /// References:
-/// - [5], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
-/// - [3], pp. 276-281.
-/// - [2], pp. 1448-1455.
+/// - \[5\], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
+/// - \[3\], pp. 276-281.
+/// - \[2\], pp. 1448-1455.
 #[inline]
 pub fn triangle_mesh_inductance_matrix(
     mesh: &TriangleMeshView<'_>,
@@ -956,7 +956,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
 /// Single entry from the triangle-basis mutual-inductance block.
 ///
 /// References:
-/// - [5], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
+/// - \[5\], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -992,7 +992,7 @@ pub fn triangle_basis_mutual_inductance(
 /// distributions.
 ///
 /// References:
-/// - [5], Eq. (3.16) on p. 68 for the mutual-inductance bilinear form, together with
+/// - \[5\], Eq. (3.16) on p. 68 for the mutual-inductance bilinear form, together with
 ///   Eq. (4.6) on p. 93 for the linear dependence of triangle current density on nodal
 ///   stream-function values.
 ///

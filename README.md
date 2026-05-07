@@ -86,4 +86,4 @@ Anti-Goals
 
 ## License
 
-Licensed under the MIT license ([LICENSE](LICENSE) or http://opensource.org/licenses/MIT) .
+Licensed under the MIT license (see LICENSE or <http://opensource.org/licenses/MIT>) .

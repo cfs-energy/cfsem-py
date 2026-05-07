@@ -261,7 +261,7 @@
 //! from neighboring elements sum into the same global matrix entries, which is how the assembled
 //! matrix enforces compatibility and equilibrium across the mesh.
 //!
-//! The stress and strain recovery operators in [`recovery`] use the same quadrature-point objects.
+//! The stress and strain recovery operators in `recovery` use the same quadrature-point objects.
 //! The strain operator stores the action of `B_q`, while the stress operator stores the action of
 //! the local stress product `D B_q`.  As in stiffness assembly, this is done matrix-free
 //! with the individual per-material `4 x 4` elastic stress-strain matrix at each quadrature point
@@ -468,13 +468,13 @@
 //! - [`crate::mesh::quadrature`] provides the shared 1D Gauss-Legendre rules on an interval.
 //! - [`crate::mesh::elements::quad2d::quadrature`] builds the quadrilateral tensor-product square
 //!   and face rules from that 1D basis.
-//! - [`geometry`] adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
+//! - `geometry` adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
 //!   summaries needed by the structural solver.
-//! - [`axisym`] constructs the axisymmetric strain operator and local stiffness kernel.
-//! - [`loads`] builds sparse linear maps from load amplitudes or nodal temperatures to the global
+//! - `axisym` constructs the axisymmetric strain operator and local stiffness kernel.
+//! - `loads` builds sparse linear maps from load amplitudes or nodal temperatures to the global
 //!   right-hand side.
-//! - [`assembly`] assembles the stiffness matrix into sparse triplets.
-//! - [`recovery`] builds sparse operators for quadrature-point strain and stress recovery.
+//! - `assembly` assembles the stiffness matrix into sparse triplets.
+//! - `recovery` builds sparse operators for quadrature-point strain and stress recovery.
 //!
 //! References:
 //! - Allan F. Bower, *Applied Mechanics of Solids*, CRC Press, 2009.  See especially Section 8.1

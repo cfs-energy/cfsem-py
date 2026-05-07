@@ -3,6 +3,12 @@
 //! This module provides the generic geometry, tree, plan, kernel-trait, and
 //! evaluator pieces. Concrete physics kernels are intentionally implemented
 //! elsewhere.
+//!
+//! # References
+//!
+//! * \[1\] PhysicsNeMo Contributors, "NVIDIA PhysicsNeMo: An open-source
+//!     framework for physics-based deep learning in science and engineering,"
+//!     Feb. 24, 2023. \[Online\]. Available: <https://github.com/NVIDIA/physicsnemo>
 
 mod aabb;
 mod evaluator;

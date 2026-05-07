@@ -157,6 +157,22 @@ where
     }
 }
 
+fn hierarchical_dipole_build_and_solve<K>(
+    kernel: K,
+    loc: (&[f64], &[f64], &[f64]),
+    moment: (&[f64], &[f64], &[f64]),
+    outer_radius: &[f64],
+    obs: (&[f64], &[f64], &[f64]),
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) where
+    K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]>,
+    K::SourceGeometry: From<DipoleSource<f64>>,
+    K::TargetGeometry: From<DipoleTarget<f64>>,
+{
+    let mut solve = HierarchicalDipoleSolve::new(kernel, loc, moment, outer_radius, obs);
+    solve.solve_into(out);
+}
+
 fn bench_flux_density_dipole(c: &mut Criterion) {
     let mut group = c.benchmark_group("Flux Density of a Magnetic Dipole");
     group.sample_size(10);
@@ -257,6 +273,28 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                     });
                 },
             );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Flux Density of a Magnetic Dipole, Hierarchical Moment Build+Solve\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(hierarchical_dipole_build_and_solve(
+                            DipoleMomentKernel::<f64>::new(),
+                            (&locx, &locy, &locz),
+                            (&momx, &momy, &momz),
+                            &outer_radius,
+                            (&obsx, &obsy, &obsz),
+                            (&mut outx, &mut outy, &mut outz),
+                        ))
+                    });
+                },
+            );
 
             let mut hierarchical_first_order = HierarchicalDipoleSolve::new(
                 DipoleFirstOrderKernel::<f64>::new(),
@@ -279,6 +317,28 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                         black_box(hierarchical_first_order.solve_into((
                             &mut outx, &mut outy, &mut outz,
                         )))
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Flux Density of a Magnetic Dipole, Hierarchical First Order Build+Solve\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(hierarchical_dipole_build_and_solve(
+                            DipoleFirstOrderKernel::<f64>::new(),
+                            (&locx, &locy, &locz),
+                            (&momx, &momy, &momz),
+                            &outer_radius,
+                            (&obsx, &obsy, &obsz),
+                            (&mut outx, &mut outy, &mut outz),
+                        ))
                     });
                 },
             );
@@ -390,6 +450,28 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                     });
                 },
             );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Vector Potential of a Magnetic Dipole, Hierarchical Moment Build+Solve\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(hierarchical_dipole_build_and_solve(
+                            DipoleVectorPotentialKernel::<f64>::new(),
+                            (&locx, &locy, &locz),
+                            (&momx, &momy, &momz),
+                            &outer_radius,
+                            (&obsx, &obsy, &obsz),
+                            (&mut outx, &mut outy, &mut outz),
+                        ))
+                    });
+                },
+            );
 
             let mut hierarchical_first_order = HierarchicalDipoleSolve::new(
                 DipoleVectorPotentialFirstOrderKernel::<f64>::new(),
@@ -412,6 +494,28 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                         black_box(hierarchical_first_order.solve_into((
                             &mut outx, &mut outy, &mut outz,
                         )))
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Vector Potential of a Magnetic Dipole, Hierarchical First Order Build+Solve\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(hierarchical_dipole_build_and_solve(
+                            DipoleVectorPotentialFirstOrderKernel::<f64>::new(),
+                            (&locx, &locy, &locz),
+                            (&momx, &momy, &momz),
+                            &outer_radius,
+                            (&obsx, &obsy, &obsz),
+                            (&mut outx, &mut outy, &mut outz),
+                        ))
                     });
                 },
             );

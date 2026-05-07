@@ -1,7 +1,12 @@
 use super::*;
+use crate::physics::boundary_element::{
+    QuadratureKind, flux_density_triangle, vector_potential_triangle,
+};
 use crate::physics::hierarchical::kernels::{
-    DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
-    LinearFilamentFluxDensityKernel, LinearFilamentSource, LinearFilamentVectorPotentialKernel,
+    BoundaryElementFluxDensityKernel, BoundaryElementTriangle,
+    BoundaryElementVectorPotentialKernel, DipoleFluxDensityKernel, DipoleSource, DipoleTarget,
+    DipoleVectorPotentialKernel, LinearFilamentFluxDensityKernel, LinearFilamentSource,
+    LinearFilamentVectorPotentialKernel,
 };
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
@@ -725,6 +730,292 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
         assert!((bh[i][0] - ax[i]).abs() < 1.0e-20);
         assert!((bh[i][1] - ay[i]).abs() < 1.0e-20);
         assert!((bh[i][2] - az[i]).abs() < 1.0e-20);
+    }
+}
+
+#[test]
+fn boundary_element_exact_matches_scalar_and_supports_f32() {
+    let quad_kind = QuadratureKind::Dunavant3;
+    let source = BoundaryElementTriangle {
+        n0: [0.0_f64, 0.0, 0.0],
+        n1: [1.0, 0.0, 0.0],
+        n2: [0.0, 1.0, 0.0],
+    };
+    let target = DipoleTarget {
+        position: [0.25, 0.3, 0.8],
+    };
+    let moment = [0.0, 1.0, -0.25];
+
+    let b_kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let mut b_out = [0.0; 3];
+    assert_eq!(
+        b_kernel.eval_exact(&target, &source, &moment, &mut b_out),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        b_out,
+        flux_density_triangle(
+            source.n0,
+            source.n1,
+            source.n2,
+            moment,
+            target.position,
+            quad_kind
+        )
+    );
+
+    let a_kernel = BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind);
+    let mut a_out = [0.0; 3];
+    assert_eq!(
+        a_kernel.eval_exact(&target, &source, &moment, &mut a_out),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        a_out,
+        vector_potential_triangle(
+            source.n0,
+            source.n1,
+            source.n2,
+            moment,
+            target.position,
+            quad_kind
+        )
+    );
+
+    let bf32 = flux_density_triangle(
+        [0.0_f32, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, -0.25],
+        [0.25, 0.3, 0.8],
+        quad_kind,
+    );
+    assert!(bf32[0].is_finite());
+}
+
+#[test]
+fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
+    let quad_kind = QuadratureKind::Dunavant3;
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let sources = [
+        BoundaryElementTriangle {
+            n0: [0.0, 0.0, 0.0],
+            n1: [1.0, 0.0, 0.0],
+            n2: [0.0, 1.0, 0.0],
+        },
+        BoundaryElementTriangle {
+            n0: [1.0, 0.0, 0.0],
+            n1: [1.0, 1.0, 0.0],
+            n2: [0.0, 1.0, 0.0],
+        },
+    ];
+    let targets = [
+        DipoleTarget {
+            position: [0.25, 0.25, 0.5],
+        },
+        DipoleTarget {
+            position: [1.5, -0.2, 0.8],
+        },
+    ];
+    let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
+
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let mut source_summaries =
+        SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(target_tree.as_view());
+
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut bh = [[0.0; 3]; 2];
+    let mut dense = [[0.0; 3]; 2];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut bh,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &moments,
+            &mut dense,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    for target_id in 0..targets.len() {
+        let mut direct = [0.0; 3];
+        for source_id in 0..sources.len() {
+            let contrib = flux_density_triangle(
+                sources[source_id].n0,
+                sources[source_id].n1,
+                sources[source_id].n2,
+                moments[source_id],
+                targets[target_id].position,
+                quad_kind,
+            );
+            for axis in 0..3 {
+                direct[axis] += contrib[axis];
+            }
+        }
+        for axis in 0..3 {
+            assert!((bh[target_id][axis] - dense[target_id][axis]).abs() < 1.0e-20);
+            assert!((bh[target_id][axis] - direct[axis]).abs() < 1.0e-20);
+        }
+    }
+}
+
+#[test]
+fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct() {
+    let quad_kind = QuadratureKind::Dunavant3;
+    let kernel = BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind);
+    let sources = [
+        BoundaryElementTriangle {
+            n0: [0.0, 0.0, 0.0],
+            n1: [1.0, 0.0, 0.0],
+            n2: [0.0, 1.0, 0.0],
+        },
+        BoundaryElementTriangle {
+            n0: [1.0, 0.0, 0.0],
+            n1: [1.0, 1.0, 0.0],
+            n2: [0.0, 1.0, 0.0],
+        },
+    ];
+    let targets = [
+        DipoleTarget {
+            position: [0.25, 0.25, 0.5],
+        },
+        DipoleTarget {
+            position: [1.5, -0.2, 0.8],
+        },
+    ];
+    let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
+
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let mut source_summaries =
+        SourceNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new(
+            source_tree.as_view(),
+        );
+    let mut target_summaries =
+        TargetNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new(
+            target_tree.as_view(),
+        );
+
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut bh = [[0.0; 3]; 2];
+    let mut dense = [[0.0; 3]; 2];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut bh,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &moments,
+            &mut dense,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    for target_id in 0..targets.len() {
+        let mut direct = [0.0; 3];
+        for source_id in 0..sources.len() {
+            let contrib = vector_potential_triangle(
+                sources[source_id].n0,
+                sources[source_id].n1,
+                sources[source_id].n2,
+                moments[source_id],
+                targets[target_id].position,
+                quad_kind,
+            );
+            for axis in 0..3 {
+                direct[axis] += contrib[axis];
+            }
+        }
+        for axis in 0..3 {
+            assert!((bh[target_id][axis] - dense[target_id][axis]).abs() < 1.0e-20);
+            assert!((bh[target_id][axis] - direct[axis]).abs() < 1.0e-20);
+        }
     }
 }
 

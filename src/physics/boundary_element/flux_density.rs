@@ -17,6 +17,7 @@ use crate::mesh::elements::tri::tri3::{
     max_edge_length_squared as triangle_max_edge_length_squared,
     subdivide_about_point as triangle_subdivide_about_point,
 };
+use crate::physics::hierarchical::DualTreeScalar;
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
 /// Midpoint-rule samples for the Duffy-style transverse edge integral in
@@ -28,21 +29,21 @@ const TRIANGLE_B_DUFFY_EDGE_SAMPLES: usize = 32;
 const TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR: f64 = 1e-12;
 
 #[inline]
-fn triangle_flux_density_inner(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    current_density: [f64; 3],
-    obs: [f64; 3],
+fn triangle_flux_density_inner<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    current_density: [T; 3],
+    obs: [T; 3],
     quad_kind: QuadratureKind,
-) -> [f64; 3] {
+) -> [T; 3] {
     let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
     let quad_points = triangle_quadrature_points(quad_kind);
 
-    let mut b = [0.0; 3]; // [T/A]
+    let mut b = [T::ZERO; 3]; // [T/A]
 
     for qp in quad_points {
-        let (c, u, v) = (qp[0], qp[1], qp[2]);
+        let (c, u, v) = (T::from_f64(qp[0]), T::from_f64(qp[1]), T::from_f64(qp[2]));
         let src = map_tri_uv(n0, n1, n2, [u, v]); // [m]
         let moment = [
             current_density[0] * c * tri_area, // [m]
@@ -50,33 +51,33 @@ fn triangle_flux_density_inner(
             current_density[2] * c * tri_area, // [m]
         ];
         let contrib = flux_density_current_element_scalar(src, moment, obs); // [T/A]
-        b[0] += contrib[0]; // [T/A]
-        b[1] += contrib[1]; // [T/A]
-        b[2] += contrib[2]; // [T/A]
+        b[0] = b[0] + contrib[0]; // [T/A]
+        b[1] = b[1] + contrib[1]; // [T/A]
+        b[2] = b[2] + contrib[2]; // [T/A]
     }
 
     b
 }
 
 #[inline]
-fn accum_cross_scaled(out: &mut [f64; 3], k: [f64; 3], r: [f64; 3], scale: f64) {
+fn accum_cross_scaled<T: DualTreeScalar>(out: &mut [T; 3], k: [T; 3], r: [T; 3], scale: T) {
     let k_cross_r = cross3(k, r);
-    out[0] += scale * k_cross_r[0];
-    out[1] += scale * k_cross_r[1];
-    out[2] += scale * k_cross_r[2];
+    out[0] = out[0] + scale * k_cross_r[0];
+    out[1] = out[1] + scale * k_cross_r[1];
+    out[2] = out[2] + scale * k_cross_r[2];
 }
 
 #[inline]
-fn triangle_flux_density_surface_duffy(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    current_density: [f64; 3],
-    closest: [f64; 3],
-    min_sub_area: f64,
-    length_ref: f64,
-) -> [f64; 3] {
-    let mut b = [0.0; 3]; // [T/A]
+fn triangle_flux_density_surface_duffy<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    current_density: [T; 3],
+    closest: [T; 3],
+    min_sub_area: T,
+    length_ref: T,
+) -> [T; 3] {
+    let mut b = [T::ZERO; 3]; // [T/A]
 
     for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
         let [p, va, vb] = tri;
@@ -88,41 +89,43 @@ fn triangle_flux_density_surface_duffy(
         let qa = sub3(va, closest); // [m]
         let qb = sub3(vb, closest); // [m]
         let dq = sub3(qb, qa); // [m]
-        let mut sub_b = [0.0; 3]; // [1/m]
+        let mut sub_b = [T::ZERO; 3]; // [1/m]
 
         for i in 0..TRIANGLE_B_DUFFY_EDGE_SAMPLES {
-            let eta = (i as f64 + 0.5) / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64;
+            let eta = T::from_f64((i as f64 + 0.5) / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64);
             let q = add_scaled3(qa, dq, eta); // [m]
             let qnorm = norm3(q); // [m]
-            if qnorm == 0.0 {
+            if qnorm == T::ZERO {
                 continue;
             }
-            let scale = (qnorm / length_ref).ln() / qnorm.powi(3); // [1/m^3]
+            let scale = (qnorm / length_ref).ln() / qnorm.powf(3.0); // [1/m^3]
             accum_cross_scaled(&mut sub_b, current_density, q, scale); // [1/m^2]
         }
 
-        let scale = -MU0_OVER_4PI * 2.0 * area_sub / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64; // [H/m * m^2]
-        b[0] += scale * sub_b[0]; // [T/A]
-        b[1] += scale * sub_b[1]; // [T/A]
-        b[2] += scale * sub_b[2]; // [T/A]
+        let scale =
+            T::from_f64(-MU0_OVER_4PI * 2.0 / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64) * area_sub; // [H/m * m^2]
+        b[0] = b[0] + scale * sub_b[0]; // [T/A]
+        b[1] = b[1] + scale * sub_b[1]; // [T/A]
+        b[2] = b[2] + scale * sub_b[2]; // [T/A]
     }
 
     b
 }
 
 #[inline]
-fn triangle_flux_density_duffy(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    current_density: [f64; 3],
-    obs: [f64; 3],
-    closest: [f64; 3],
-    max_edge_sq: f64,
-) -> Option<[f64; 3]> {
+fn triangle_flux_density_duffy<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    current_density: [T; 3],
+    obs: [T; 3],
+    closest: [T; 3],
+    max_edge_sq: T,
+) -> Option<[T; 3]> {
     let h = sub3(obs, closest); // [m]
-    let surface_tol_sq = TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR.powi(2) * max_edge_sq; // [m^2]
-    let min_sub_area = max_edge_sq * 1e-14; // [m^2]
+    let surface_tol = T::from_f64(TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR);
+    let surface_tol_sq = surface_tol * surface_tol * max_edge_sq; // [m^2]
+    let min_sub_area = max_edge_sq * T::from_f64(1e-14); // [m^2]
     // The finite-part log needs a dimensionless argument. The reference length
     // is immaterial because the omitted log-divergent term cancels by angular
     // symmetry across the subtriangles around the singular point.
@@ -170,13 +173,13 @@ fn triangle_flux_density_duffy(
 /// Returns:
 ///     Basis-function magnetic flux density `[bx, by, bz]` (T/A).
 #[inline]
-pub fn triangle_flux_density_basis(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    obs: [f64; 3],
+pub fn triangle_flux_density_basis<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    obs: [T; 3],
     quad_kind: QuadratureKind,
-) -> [f64; 3] {
+) -> [T; 3] {
     let (_, jref) = triangle_basis_current_density(n0, n1, n2); // [m^2], [1/m]
     let max_edge_sq = triangle_max_edge_length_squared(n0, n1, n2); // [m^2]
     let closest = triangle_closest_point(obs, n0, n1, n2); // [m]
@@ -184,7 +187,8 @@ pub fn triangle_flux_density_basis(
     let dy = obs[1] - closest[1]; // [m]
     let dz = obs[2] - closest[2]; // [m]
     let dist_sq = dx.mul_add(dx, dy.mul_add(dy, dz * dz)); // [m^2]
-    let subdiv_threshold_sq = TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR.powi(2) * max_edge_sq; // [m^2]
+    let subdiv_factor = T::from_f64(TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR);
+    let subdiv_threshold_sq = subdiv_factor * subdiv_factor * max_edge_sq; // [m^2]
 
     if dist_sq > subdiv_threshold_sq {
         return triangle_flux_density_inner(n0, n1, n2, jref, obs, quad_kind);
@@ -196,17 +200,17 @@ pub fn triangle_flux_density_basis(
 
     // Single-level triangle subdivision for finite-offset near-field calcs
     // to keep quadrature points separated from the target point.
-    let mut b = [0.0; 3]; // [T/A]
-    let min_sub_area = max_edge_sq * 1e-14; // [m^2]
+    let mut b = [T::ZERO; 3]; // [T/A]
+    let min_sub_area = max_edge_sq * T::from_f64(1e-14); // [m^2]
     for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
         let [a, b0, c] = tri;
         if calc_tri_area(a, b0, c) <= min_sub_area {
             continue;
         }
         let contrib = triangle_flux_density_inner(a, b0, c, jref, obs, quad_kind);
-        b[0] += contrib[0]; // [T/A]
-        b[1] += contrib[1]; // [T/A]
-        b[2] += contrib[2]; // [T/A]
+        b[0] = b[0] + contrib[0]; // [T/A]
+        b[1] = b[1] + contrib[1]; // [T/A]
+        b[2] = b[2] + contrib[2]; // [T/A]
     }
 
     b
@@ -232,14 +236,14 @@ pub fn triangle_flux_density_basis(
 /// Returns:
 ///     Magnetic flux density `[bx, by, bz]` (T).
 #[inline]
-pub fn flux_density_triangle(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    s: [f64; 3],
-    obs: [f64; 3],
+pub fn flux_density_triangle<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    s: [T; 3],
+    obs: [T; 3],
     quad_kind: QuadratureKind,
-) -> [f64; 3] {
+) -> [T; 3] {
     let b_n0 = triangle_flux_density_basis(n0, n1, n2, obs, quad_kind);
     let b_n1 = triangle_flux_density_basis(n1, n2, n0, obs, quad_kind);
     let b_n2 = triangle_flux_density_basis(n2, n0, n1, obs, quad_kind);

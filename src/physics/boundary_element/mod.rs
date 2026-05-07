@@ -18,6 +18,7 @@ pub use crate::mesh::elements::tri::quadrature::{QuadratureKind, triangle_quadra
 pub(crate) use crate::mesh::elements::tri::quadrature::{
     TRIANGLE_MAX_QUADRATURE_POINTS, triangle_quadrature_points,
 };
+use crate::physics::hierarchical::DualTreeScalar;
 
 mod body_force_density;
 mod flux_density;
@@ -76,7 +77,11 @@ pub use vector_potential::{
 const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 
 #[inline]
-fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (f64, [f64; 3]) {
+fn triangle_basis_current_density<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+) -> (T, [T; 3]) {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]]; // [m]
     let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]]; // [m]
     let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
@@ -107,7 +112,11 @@ fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (
 ///     Three basis current-density vectors `[[jx, jy, jz]; 3]` [1/m], ordered
 ///     to match nodal basis functions `(n0, n1, n2)`.
 #[inline]
-pub fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [[f64; 3]; 3] {
+pub fn triangle_basis_current_densities<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+) -> [[T; 3]; 3] {
     [
         triangle_basis_current_density(n0, n1, n2).1, // [1/m]
         triangle_basis_current_density(n1, n2, n0).1, // [1/m]
@@ -127,7 +136,12 @@ pub fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]
 /// Returns:
 ///     Constant surface current density `[jx, jy, jz]` on the triangle (A/m).
 #[inline]
-pub fn triangle_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], s: [f64; 3]) -> [f64; 3] {
+pub fn triangle_current_density<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    s: [T; 3],
+) -> [T; 3] {
     let basis = triangle_basis_current_densities(n0, n1, n2);
     [
         s[0] * basis[0][0] + s[1] * basis[1][0] + s[2] * basis[2][0], // [A/m]

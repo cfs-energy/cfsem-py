@@ -15,24 +15,25 @@ use crate::mesh::elements::tri::tri3::{
     max_edge_length_squared as triangle_max_edge_length_squared,
     subdivide_about_point as triangle_subdivide_about_point,
 };
+use crate::physics::hierarchical::DualTreeScalar;
 use crate::physics::point_source::current_element::vector_potential_current_element_scalar;
 
 #[inline]
-fn triangle_vector_potential_inner(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    current_density: [f64; 3],
-    obs: [f64; 3],
+fn triangle_vector_potential_inner<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    current_density: [T; 3],
+    obs: [T; 3],
     quad_kind: QuadratureKind,
-) -> [f64; 3] {
+) -> [T; 3] {
     let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
     let quad_points = triangle_quadrature_points(quad_kind);
 
-    let mut a = [0.0; 3]; // [V*s/(A*m)]
+    let mut a = [T::ZERO; 3]; // [V*s/(A*m)]
 
     for qp in quad_points {
-        let (c, u, v) = (qp[0], qp[1], qp[2]);
+        let (c, u, v) = (T::from_f64(qp[0]), T::from_f64(qp[1]), T::from_f64(qp[2]));
         let src = map_tri_uv(n0, n1, n2, [u, v]); // [m]
         let moment = [
             current_density[0] * c * tri_area, // [m]
@@ -40,9 +41,9 @@ fn triangle_vector_potential_inner(
             current_density[2] * c * tri_area, // [m]
         ];
         let contrib = vector_potential_current_element_scalar(src, moment, obs); // [V*s/(A*m)]
-        a[0] += contrib[0]; // [V*s/(A*m)]
-        a[1] += contrib[1]; // [V*s/(A*m)]
-        a[2] += contrib[2]; // [V*s/(A*m)]
+        a[0] = a[0] + contrib[0]; // [V*s/(A*m)]
+        a[1] = a[1] + contrib[1]; // [V*s/(A*m)]
+        a[2] = a[2] + contrib[2]; // [V*s/(A*m)]
     }
 
     a
@@ -81,13 +82,13 @@ fn triangle_vector_potential_inner(
 /// - [2] for numerical treatment of triangle `1 / R` and `∇(1 / R)`
 ///   integrals with linear shape functions.
 #[inline]
-pub fn triangle_vector_potential_basis(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    obs: [f64; 3],
+pub fn triangle_vector_potential_basis<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    obs: [T; 3],
     quad_kind: QuadratureKind,
-) -> [f64; 3] {
+) -> [T; 3] {
     let (_, jref) = triangle_basis_current_density(n0, n1, n2); // [m^2], [1/m]
     let max_edge_sq = triangle_max_edge_length_squared(n0, n1, n2); // [m^2]
     let closest = triangle_closest_point(obs, n0, n1, n2); // [m]
@@ -95,7 +96,8 @@ pub fn triangle_vector_potential_basis(
     let dy = obs[1] - closest[1]; // [m]
     let dz = obs[2] - closest[2]; // [m]
     let dist_sq = dx.mul_add(dx, dy.mul_add(dy, dz * dz)); // [m^2]
-    let subdiv_threshold_sq = TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR.powi(2) * max_edge_sq; // [m^2]
+    let subdiv_factor = T::from_f64(TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR);
+    let subdiv_threshold_sq = subdiv_factor * subdiv_factor * max_edge_sq; // [m^2]
 
     if dist_sq > subdiv_threshold_sq {
         return triangle_vector_potential_inner(n0, n1, n2, jref, obs, quad_kind);
@@ -103,17 +105,17 @@ pub fn triangle_vector_potential_basis(
 
     // Single-level triangle subdivision for near-field calcs
     // to ensure that quad point singularities are separated from the target point.
-    let mut a = [0.0; 3]; // [V*s/(A*m)]
-    let min_sub_area = max_edge_sq * 1e-14; // [m^2]
+    let mut a = [T::ZERO; 3]; // [V*s/(A*m)]
+    let min_sub_area = max_edge_sq * T::from_f64(1e-14); // [m^2]
     for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
         let [a0, b0, c0] = tri;
         if calc_tri_area(a0, b0, c0) <= min_sub_area {
             continue;
         }
         let contrib = triangle_vector_potential_inner(a0, b0, c0, jref, obs, quad_kind);
-        a[0] += contrib[0]; // [V*s/(A*m)]
-        a[1] += contrib[1]; // [V*s/(A*m)]
-        a[2] += contrib[2]; // [V*s/(A*m)]
+        a[0] = a[0] + contrib[0]; // [V*s/(A*m)]
+        a[1] = a[1] + contrib[1]; // [V*s/(A*m)]
+        a[2] = a[2] + contrib[2]; // [V*s/(A*m)]
     }
 
     a
@@ -148,14 +150,14 @@ pub fn triangle_vector_potential_basis(
 /// - [3], pp. 276-281.
 /// - [2], pp. 1448-1455.
 #[inline]
-pub fn vector_potential_triangle(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    s: [f64; 3],
-    obs: [f64; 3],
+pub fn vector_potential_triangle<T: DualTreeScalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    s: [T; 3],
+    obs: [T; 3],
     quad_kind: QuadratureKind,
-) -> [f64; 3] {
+) -> [T; 3] {
     let a_n0 = triangle_vector_potential_basis(n0, n1, n2, obs, quad_kind);
     let a_n1 = triangle_vector_potential_basis(n1, n2, n0, obs, quad_kind);
     let a_n2 = triangle_vector_potential_basis(n2, n0, n1, obs, quad_kind);

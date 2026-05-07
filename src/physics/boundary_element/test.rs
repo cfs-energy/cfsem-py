@@ -1085,7 +1085,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
         let mut a_scale: f64 = 0.0;
 
         for s_basis in basis_vectors {
-            let b = flux_density_triangle(
+            let b: [f64; 3] = flux_density_triangle(
                 tri[0],
                 tri[1],
                 tri[2],
@@ -1093,7 +1093,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
                 obs,
                 QuadratureKind::Dunavant3,
             );
-            let a = vector_potential_triangle(
+            let a: [f64; 3] = vector_potential_triangle(
                 tri[0],
                 tri[1],
                 tri[2],

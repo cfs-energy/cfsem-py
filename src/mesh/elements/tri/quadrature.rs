@@ -48,7 +48,7 @@ const TABLE_DUNAVANT_5: [[f64; 3]; 7] = [
 pub const TRIANGLE_MAX_QUADRATURE_POINTS: usize = TABLE_DUNAVANT_5.len();
 
 /// Supported reference-triangle quadrature rules for boundary-element kernels.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum QuadratureKind {
     /// One-point Dunavant rule, exact through total polynomial degree 1.
     Dunavant1,

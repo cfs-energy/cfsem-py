@@ -1,5 +1,16 @@
 # Changelog
 
+## 9.0.0 2026-05-07
+
+* Rust
+    * !Consolidate math helper functions and use consistent array argument format
+    * !Update filament, dipole, and boundary-element kernel functions and their dependencies to be generic over float type
+    * Implement dual-tree Barnes-Hut system under `hierarchical` module
+    * Implement tree kernels for filaments, dipoles, and boundary-element mesh
+    * Fix rustdoc lints
+* Python
+    * Add bindings to new hierarchical solver methods
+
 ## 8.3.0 2026-05-04
 
 * Rust

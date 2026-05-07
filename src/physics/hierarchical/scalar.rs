@@ -20,6 +20,7 @@ pub trait DualTreeScalar:
     fn from_f64(value: f64) -> Self;
     fn sqrt(self) -> Self;
     fn abs(self) -> Self;
+    fn mul_add(self, a: Self, b: Self) -> Self;
 }
 
 impl DualTreeScalar for f32 {
@@ -40,6 +41,11 @@ impl DualTreeScalar for f32 {
     fn abs(self) -> Self {
         self.abs()
     }
+
+    #[inline]
+    fn mul_add(self, a: Self, b: Self) -> Self {
+        self.mul_add(a, b)
+    }
 }
 
 impl DualTreeScalar for f64 {
@@ -59,5 +65,10 @@ impl DualTreeScalar for f64 {
     #[inline]
     fn abs(self) -> Self {
         self.abs()
+    }
+
+    #[inline]
+    fn mul_add(self, a: Self, b: Self) -> Self {
+        self.mul_add(a, b)
     }
 }

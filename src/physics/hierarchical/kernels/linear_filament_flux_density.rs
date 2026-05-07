@@ -44,9 +44,9 @@ impl<T: DualTreeScalar> BoundedGeometry for LinearFilamentSource<T> {
     fn representative_point(&self) -> [Self::Scalar; 3] {
         let half = T::from_f64(0.5);
         [
-            (self.start[0] + self.end[0]) * half,
-            (self.start[1] + self.end[1]) * half,
-            (self.start[2] + self.end[2]) * half,
+            half.mul_add(self.start[0] + self.end[0], T::ZERO),
+            half.mul_add(self.start[1] + self.end[1], T::ZERO),
+            half.mul_add(self.start[2] + self.end[2], T::ZERO),
         ]
     }
 }
@@ -255,7 +255,7 @@ fn scale3<T: DualTreeScalar>(value: [T; 3], scale: T) -> [T; 3] {
 
 #[inline]
 fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 #[inline]

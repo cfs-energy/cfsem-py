@@ -89,7 +89,7 @@ pub fn ellipe(m: f64) -> f64 {
 /// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to reduce roundoff error.
 #[inline]
 pub fn rss3<T: DualTreeScalar>(x: T, y: T, z: T) -> T {
-    (x * x + y * y + z * z).sqrt()
+    x.mul_add(x, y.mul_add(y, z * z)).sqrt()
 }
 
 /// Evaluate the cross products for each axis component
@@ -97,7 +97,14 @@ pub fn rss3<T: DualTreeScalar>(x: T, y: T, z: T) -> T {
 /// in a more general implementation.
 #[inline]
 pub fn cross3<T: DualTreeScalar>(x0: T, y0: T, z0: T, x1: T, y1: T, z1: T) -> (T, T, T) {
-    (y0 * z1 - z0 * y1, z0 * x1 - x0 * z1, x0 * y1 - y0 * x1)
+    let xy = (T::ZERO - x1) * y0;
+    let yz = (T::ZERO - y1) * z0;
+    let zx = (T::ZERO - z1) * x0;
+    let cx = y0.mul_add(z1, yz);
+    let cy = z0.mul_add(x1, zx);
+    let cz = x0.mul_add(y1, xy);
+
+    (cx, cy, cz)
 }
 
 /// Evaluate the cross products for each axis component
@@ -119,7 +126,7 @@ pub fn cross3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> (f32, f3
 /// Scalar dot product using `mul_add`.
 #[inline]
 pub fn dot3<T: DualTreeScalar>(x0: T, y0: T, z0: T, x1: T, y1: T, z1: T) -> T {
-    x0 * x1 + y0 * y1 + z0 * z1
+    x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
 }
 
 /// Elementwise subtraction of fixed-size 3D vectors.
@@ -269,7 +276,11 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
 
     // Find the closest point on the infinite line defined by this segment to the target point.
     let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2; // Normed projected location
-    let closest = (a.0 + t * ab.0, a.1 + t * ab.1, a.2 + t * ab.2); // (m) closest point on infinite line
+    let closest = (
+        t.mul_add(ab.0, a.0),
+        t.mul_add(ab.1, a.1),
+        t.mul_add(ab.2, a.2),
+    ); // (m) closest point on infinite line
     let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
     let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
     let perp_hat = if perp_raw > T::ZERO {
@@ -293,8 +304,8 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
     let perp = max_scalar(perp_raw, r_min);
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
-    let dist_a = (perp * perp + para_a * para_a).sqrt();
-    let dist_b = (perp * perp + para_b * para_b).sqrt();
+    let dist_a = perp.mul_add(perp, para_a * para_a).sqrt();
+    let dist_b = perp.mul_add(perp, para_b * para_b).sqrt();
 
     PointLineDistance {
         perp,

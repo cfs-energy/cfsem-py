@@ -75,7 +75,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
             out.count = out.count + children[i].count;
             for axis in 0..3 {
                 out.centroid[axis] =
-                    out.centroid[axis] + children[i].centroid[axis] * children[i].count;
+                    children[i].centroid[axis].mul_add(children[i].count, out.centroid[axis]);
             }
         }
         if out.count > T::ZERO {
@@ -156,7 +156,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
                 let deriv =
                     dipole_vector_potential_derivative_component(r, moment_axis, source_axis, c);
                 for out_axis in 0..3 {
-                    out[out_axis] = out[out_axis] - coeff * deriv[out_axis];
+                    out[out_axis] = (T::ZERO - coeff).mul_add(deriv[out_axis], out[out_axis]);
                 }
             }
         }

@@ -71,9 +71,9 @@ pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
     let c = T::from_f64(MU0_OVER_4PI) / r3; // [H/m^4]
     let c1 = T::from_f64(3.0) * m_dot_rhat; // [A-m^2]
     let tsum = [
-        rhat[0] * c1 - moment[0],
-        rhat[1] * c1 - moment[1],
-        rhat[2] * c1 - moment[2],
+        rhat[0].mul_add(c1, T::ZERO - moment[0]),
+        rhat[1].mul_add(c1, T::ZERO - moment[1]),
+        rhat[2].mul_add(c1, T::ZERO - moment[2]),
     ];
 
     // Defer to magnetized sphere if necessary
@@ -98,7 +98,7 @@ pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
 
 #[inline]
 fn dot3_generic<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 #[inline]
@@ -274,9 +274,9 @@ pub fn vector_potential_dipole_scalar_generic<T: DualTreeScalar>(
 #[inline]
 fn cross3_generic<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
     [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
+        a[1].mul_add(b[2], (T::ZERO - b[1]) * a[2]),
+        a[2].mul_add(b[0], (T::ZERO - b[2]) * a[0]),
+        a[0].mul_add(b[1], (T::ZERO - b[0]) * a[1]),
     ]
 }
 

@@ -114,7 +114,7 @@ pub(super) fn combine_target<T: DualTreeScalar>(
         out.count = out.count + children[i].count;
         for axis in 0..3 {
             out.centroid[axis] =
-                out.centroid[axis] + children[i].centroid[axis] * children[i].count;
+                children[i].centroid[axis].mul_add(children[i].count, out.centroid[axis]);
         }
     }
     if out.count > T::ZERO {
@@ -167,9 +167,9 @@ pub(super) fn dipole_field_derivative_component<T: DualTreeScalar>(
         } else {
             T::ZERO
         };
-        out[out_axis] = c
-            * (three * (delta_ia * r_m + r[out_axis] * delta_ma + delta_im * r_a) / r5
-                - T::from_f64(15.0) * r[out_axis] * r_m * r_a / r7);
+        let numerator = delta_ia.mul_add(r_m, r[out_axis].mul_add(delta_ma, delta_im * r_a));
+        let second = r[out_axis] * r_m * r_a / r7;
+        out[out_axis] = c * T::from_f64(-15.0).mul_add(second, three * numerator / r5);
     }
     out
 }
@@ -210,7 +210,7 @@ pub(super) fn dipole_vector_potential_derivative_component<T: DualTreeScalar>(
             } else {
                 T::ZERO
             };
-            let term = delta / r3 - three * r[r_axis] * r[derivative_axis] / r5;
+            let term = (T::ZERO - three).mul_add(r[r_axis] * r[derivative_axis] / r5, delta / r3);
             if epsilon > 0 {
                 sum = sum + term;
             } else {
@@ -243,7 +243,7 @@ pub(super) fn add_matrix_in_place<T: DualTreeScalar>(out: &mut [[T; 3]; 3], valu
 pub(super) fn add_outer_in_place<T: DualTreeScalar>(out: &mut [[T; 3]; 3], a: [T; 3], b: [T; 3]) {
     for i in 0..3 {
         for j in 0..3 {
-            out[i][j] = out[i][j] + a[i] * b[j];
+            out[i][j] = a[i].mul_add(b[j], out[i][j]);
         }
     }
 }
@@ -255,7 +255,7 @@ pub(super) fn sub3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
 
 #[inline]
 fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 #[inline]

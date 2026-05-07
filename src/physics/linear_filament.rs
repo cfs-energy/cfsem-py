@@ -6,8 +6,12 @@ use rayon::{
 };
 
 use crate::mesh::quadrature::{GaussLegendreRule, gauss_legendre_unit_interval_table};
-use crate::{chunksize, math::cross3};
+use crate::{
+    chunksize,
+    math::{PointLineDistance, cross3, point_line_distance_with_endpoints},
+};
 
+use crate::physics::hierarchical::DualTreeScalar;
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.
@@ -611,13 +615,11 @@ pub fn flux_density_linear_filament_matrix(
 /// # Returns
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
-pub fn flux_density_linear_filament_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    wire_radius: f64,
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
-    use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
-
+pub fn flux_density_linear_filament_scalar<T: DualTreeScalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    wire_radius: T,
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
     // Unpack
     let (start, end, ifil) = xyzifil;
 
@@ -642,7 +644,7 @@ pub fn flux_density_linear_filament_scalar(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let kappa = -MU0_OVER_4PI * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
+    let kappa = (T::ZERO - T::from_f64(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
 
     // This factor is constant across all x, y, and z components.
     let c = frac * kappa / perp; // (A/m)
@@ -658,10 +660,10 @@ pub fn flux_density_linear_filament_scalar(
     let bz = c * cz; // [T]
 
     // Finally, determine whether we are clipping to zero.
-    if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {
+    if frac > T::from_f64(1e6 * f64::EPSILON) && perp > T::from_f64(MIN_WIRE_THICKNESS) {
         (bx, by, bz)
     } else {
-        (0.0, 0.0, 0.0)
+        (T::ZERO, T::ZERO, T::ZERO)
     }
 }
 
@@ -980,8 +982,9 @@ pub fn vector_potential_linear_filament_scalar(
         para_a,
         para_b,
         ab_norm: dlhat,
-        perp_hat: _,
+        perp_hat,
     } = point_line_distance_with_endpoints(start, end, xyzobs, core_radius);
+    let _ = perp_hat;
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
@@ -1714,7 +1717,7 @@ mod test {
         let x = 0.02;
         let overhangs = [0.0, 0.02, 0.05, 0.1, 0.2];
 
-        let mut diff = Vec::with_capacity(overhangs.len());
+        let mut diff: Vec<f64> = Vec::with_capacity(overhangs.len());
 
         for &overhang in &overhangs {
             let obs = (x, 0.0, end.2 + overhang);
@@ -1776,10 +1779,10 @@ mod test {
     /// Explicitly check axis evaluations at both endpoints and midpoint are non-singular.
     #[test]
     fn test_flux_density_axis_endpoint_midpoint_nonsingular_scalar() {
-        let start = (0.0, 0.0, -0.5);
-        let end = (0.0, 0.0, 0.5);
+        let start = (0.0_f64, 0.0, -0.5);
+        let end = (0.0_f64, 0.0, 0.5);
         let midpoint = (0.0, 0.0, 0.5 * (start.2 + end.2));
-        let ifil = 1.0;
+        let ifil = 1.0_f64;
         let axis_points = [("start", start), ("midpoint", midpoint), ("end", end)];
 
         for &wire_radius in &[0.0, 0.01, 0.1] {
@@ -2372,7 +2375,7 @@ mod test {
                     let z = &(z - 1e-2);
 
                     // Scale tolerance and step size based on distance
-                    let r = rss3(*x, *y, *z);
+                    let r: f64 = rss3(*x, *y, *z);
                     let atol = 1e-12 / r.max(1.0); // Smaller absolute tolerance as field falls off
                     let eps = 1e-8 * r; // Larger finite difference delta in far-field for resolution
 

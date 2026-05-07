@@ -1,5 +1,7 @@
 //! Pure-math functions supporting physics calculations.
 
+use crate::physics::hierarchical::DualTreeScalar;
+
 // Curvefit coeffs for elliptic integrals
 const ELLIPK_A: [f64; 5] = [
     1.38629436112,
@@ -86,23 +88,16 @@ pub fn ellipe(m: f64) -> f64 {
 
 /// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to reduce roundoff error.
 #[inline]
-pub fn rss3(x: f64, y: f64, z: f64) -> f64 {
-    x.mul_add(x, y.mul_add(y, z.powi(2))).sqrt()
+pub fn rss3<T: DualTreeScalar>(x: T, y: T, z: T) -> T {
+    (x * x + y * y + z * z).sqrt()
 }
 
 /// Evaluate the cross products for each axis component
 /// separately using `mul_add` which would not be assumed usable
 /// in a more general implementation.
 #[inline]
-pub fn cross3(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> (f64, f64, f64) {
-    let xy = -x1 * y0;
-    let yz = -y1 * z0;
-    let zx = -z1 * x0;
-    let cx = y0.mul_add(z1, yz);
-    let cy = z0.mul_add(x1, zx);
-    let cz = x0.mul_add(y1, xy);
-
-    (cx, cy, cz)
+pub fn cross3<T: DualTreeScalar>(x0: T, y0: T, z0: T, x1: T, y1: T, z1: T) -> (T, T, T) {
+    (y0 * z1 - z0 * y1, z0 * x1 - x0 * z1, x0 * y1 - y0 * x1)
 }
 
 /// Evaluate the cross products for each axis component
@@ -123,15 +118,8 @@ pub fn cross3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> (f32, f3
 
 /// Scalar dot product using `mul_add`.
 #[inline]
-pub fn dot3(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> f64 {
-    x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
-}
-
-/// Scalar dot product using `mul_add`.
-/// 32-bit float variant.
-#[inline]
-pub fn dot3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> f32 {
-    x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
+pub fn dot3<T: DualTreeScalar>(x0: T, y0: T, z0: T, x1: T, y1: T, z1: T) -> T {
+    x0 * x1 + y0 * y1 + z0 * z1
 }
 
 /// Elementwise subtraction of fixed-size 3D vectors.
@@ -202,32 +190,32 @@ pub(crate) fn decompose_filament(
 ///   /    |    \
 ///  a-----m-----b  -> I  
 ///```
-pub(crate) struct PointLineDistance {
+pub(crate) struct PointLineDistance<T: DualTreeScalar> {
     /// Perpendicular distance from the infinite line defined by segment `ab` to the point `p`,
     /// clamped to the wire radius.
-    pub(crate) perp: f64,
+    pub(crate) perp: T,
 
     /// The normalized direction of the perpendicular distance.
-    pub(crate) perp_hat: (f64, f64, f64),
+    pub(crate) perp_hat: (T, T, T),
 
     /// Length of segment `ap` using clamped perpendicular distance.
-    pub(crate) dist_a: f64,
+    pub(crate) dist_a: T,
 
     /// Length of segment `bp` using clamped perpendicular distance.
-    pub(crate) dist_b: f64,
+    pub(crate) dist_b: T,
 
     /// Fraction of perpendicular distance of point `p` from the filament axis to the wire radius,
     /// before clamping of the perpendicular distance.
-    pub(crate) frac: f64,
+    pub(crate) frac: T,
 
     /// Length of segment `am` using unclamped perpendicular distance.
-    pub(crate) para_a: f64,
+    pub(crate) para_a: T,
 
     /// Length of segment `bm` using unclamped perpendicular distance.
-    pub(crate) para_b: f64,
+    pub(crate) para_b: T,
 
     /// Length of the filament, segment `ab`.
-    pub(crate) ab_norm: (f64, f64, f64),
+    pub(crate) ab_norm: (T, T, T),
 }
 
 /// Minimum perpendicular distance of point p to the infinite line defined by endpoints a and b,
@@ -237,12 +225,12 @@ pub(crate) struct PointLineDistance {
 /// Finite-thickness clamping is based only on wire radius and does not
 /// taper outside segment endpoint projections.
 #[inline]
-pub(crate) fn point_line_distance_with_endpoints(
-    a: (f64, f64, f64),
-    b: (f64, f64, f64),
-    p: (f64, f64, f64),
-    r_min: f64,
-) -> PointLineDistance {
+pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
+    a: (T, T, T),
+    b: (T, T, T),
+    p: (T, T, T),
+    r_min: T,
+) -> PointLineDistance<T> {
     // Vectors and distances between points.
     let ab = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
     let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
@@ -253,64 +241,60 @@ pub(crate) fn point_line_distance_with_endpoints(
     // calculations in nominal non-zero-length cases.
     let ab2 = dot3(ab.0, ab.1, ab.2, ab.0, ab.1, ab.2); // (m^2) squared length.
     // Handle zero-length special case before any division by segment length.
-    if ab2 == 0.0 {
-        let r_min = r_min.max(0.0);
-        let r_min_frac = r_min.max(f64::MIN_POSITIVE);
+    if ab2 == T::ZERO {
+        let r_min = max_scalar(r_min, T::ZERO);
+        let r_min_frac = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
         let dist_a = rss3(ap.0, ap.1, ap.2);
         let dist_b = rss3(bp.0, bp.1, bp.2);
-        let frac = (dist_a / r_min_frac).min(1.0);
-        let dist_a = dist_a.max(r_min);
-        let dist_b = dist_b.max(r_min);
+        let frac = min_scalar(dist_a / r_min_frac, T::ONE);
+        let dist_a = max_scalar(dist_a, r_min);
+        let dist_b = max_scalar(dist_b, r_min);
         let perp = dist_a;
         return PointLineDistance {
             perp,
-            perp_hat: (0.0, 0.0, 0.0),
+            perp_hat: (T::ZERO, T::ZERO, T::ZERO),
             dist_a,
             dist_b,
             frac,
-            para_a: 0.0,
-            para_b: 0.0,
-            ab_norm: (0.0, 0.0, 0.0),
+            para_a: T::ZERO,
+            para_b: T::ZERO,
+            ab_norm: (T::ZERO, T::ZERO, T::ZERO),
         };
     }
 
     // Filament vector, length, and normalized direction
     let ab_len = ab2.sqrt();
-    let ab_len_inv = ab_len.recip();
+    let ab_len_inv = T::ONE / ab_len;
     let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
 
     // Find the closest point on the infinite line defined by this segment to the target point.
     let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2; // Normed projected location
-    let closest = (
-        t.mul_add(ab.0, a.0),
-        t.mul_add(ab.1, a.1),
-        t.mul_add(ab.2, a.2),
-    ); // (m) closest point on infinite line
+    let closest = (a.0 + t * ab.0, a.1 + t * ab.1, a.2 + t * ab.2); // (m) closest point on infinite line
     let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
     let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
-    let perp_hat = if perp_raw > 0.0 {
-        let inv = perp_raw.recip();
+    let perp_hat = if perp_raw > T::ZERO {
+        let inv = T::ONE / perp_raw;
         (dp.0 * inv, dp.1 * inv, dp.2 * inv)
     } else {
-        (0.0, 0.0, 0.0)
+        (T::ZERO, T::ZERO, T::ZERO)
     };
 
     // Clamp r_min to prevent div/0
-    let r_min = r_min.max(f64::MIN_POSITIVE);
+    let r_min = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
 
     // Parallel distances from each endpoint to the target
     let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
     let para_b = para_a - ab_len;
 
     // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.
-    let frac = (perp_raw / r_min).min(1.0);
+    let frac = min_scalar(perp_raw / r_min, T::ONE);
 
     // Clamp distances only if we are inside the minimum radius.
-    let perp = perp_raw.max(r_min);
+    let perp = max_scalar(perp_raw, r_min);
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
-    let dist_a = perp.mul_add(perp, para_a * para_a).sqrt();
-    let dist_b = perp.mul_add(perp, para_b * para_b).sqrt();
+    let dist_a = (perp * perp + para_a * para_a).sqrt();
+    let dist_b = (perp * perp + para_b * para_b).sqrt();
 
     PointLineDistance {
         perp,
@@ -322,6 +306,16 @@ pub(crate) fn point_line_distance_with_endpoints(
         para_b,
         ab_norm,
     }
+}
+
+#[inline]
+fn min_scalar<T: DualTreeScalar>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+#[inline]
+fn max_scalar<T: DualTreeScalar>(a: T, b: T) -> T {
+    if a > b { a } else { b }
 }
 
 /// Clip NaN values to the provided value.

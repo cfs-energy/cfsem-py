@@ -1,6 +1,7 @@
 use super::*;
 use crate::physics::hierarchical::kernels::{
     DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
+    LinearFilamentFluxDensityKernel, LinearFilamentSource,
 };
 
 #[derive(Clone, Copy)]
@@ -184,6 +185,10 @@ fn dist2<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
         out = out + d * d;
     }
     out
+}
+
+fn vec_norm3(a: [f64; 3]) -> f64 {
+    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
 }
 
 fn points_f64(values: &[[f64; 3]]) -> Vec<MockPoint<f64>> {
@@ -410,6 +415,364 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             assert!((a_out[target_id][axis] - expected_a[axis]).abs() < 1.0e-20);
         }
     }
+}
+
+#[test]
+fn linear_filament_source_aabb_bounds_full_segment() {
+    let source = LinearFilamentSource {
+        start: [1.0_f64, -2.0, 3.0],
+        end: [-1.0, 4.0, 2.5],
+        wire_radius: 0.25,
+    };
+    let aabb = source.aabb();
+    assert_eq!(aabb.min, [-1.25, -2.25, 2.25]);
+    assert_eq!(aabb.max, [1.25, 4.25, 3.25]);
+    assert_eq!(source.representative_point(), [0.0, 1.0, 2.75]);
+}
+
+#[test]
+fn linear_filament_exact_matches_scalar_and_supports_f32() {
+    let kernel = LinearFilamentFluxDensityKernel::<f64>::new();
+    let source = LinearFilamentSource {
+        start: [0.0, 0.0, 0.0],
+        end: [0.0, 0.0, 1.0],
+        wire_radius: 0.01,
+    };
+    let target = DipoleTarget {
+        position: [0.2, 0.0, 0.5],
+    };
+    let current = 3.0;
+    let mut out = [0.0; 3];
+
+    assert_eq!(
+        kernel.eval_exact(&target, &source, &current, &mut out),
+        DualTreeError::Ok
+    );
+    let expected = crate::physics::linear_filament::flux_density_linear_filament_scalar(
+        (
+            (source.start[0], source.start[1], source.start[2]),
+            (source.end[0], source.end[1], source.end[2]),
+            current,
+        ),
+        source.wire_radius,
+        (target.position[0], target.position[1], target.position[2]),
+    );
+    assert_eq!(out, [expected.0, expected.1, expected.2]);
+
+    let bf32 = crate::physics::linear_filament::flux_density_linear_filament_scalar(
+        ((0.0_f32, 0.0, 0.0), (0.0, 0.0, 1.0), 3.0),
+        0.01,
+        (0.2, 0.0, 0.5),
+    );
+    assert!(bf32.1.abs() > 0.0);
+}
+
+#[test]
+fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
+    let kernel = LinearFilamentFluxDensityKernel::<f64>::new();
+    let sources = [
+        LinearFilamentSource {
+            start: [0.0, 0.0, 0.0],
+            end: [0.0, 0.0, 1.0],
+            wire_radius: 0.01,
+        },
+        LinearFilamentSource {
+            start: [0.5, 0.0, 0.0],
+            end: [0.5, 0.2, 1.0],
+            wire_radius: 0.02,
+        },
+    ];
+    let targets = [
+        DipoleTarget {
+            position: [1.0, 0.0, 0.5],
+        },
+        DipoleTarget {
+            position: [0.25, 0.8, 0.25],
+        },
+    ];
+    let currents = [2.0, -1.5];
+
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let mut source_summaries =
+        SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(target_tree.as_view());
+
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &currents,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut bh = [[0.0; 3]; 2];
+    let mut dense = [[0.0; 3]; 2];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &currents,
+            &mut bh,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &currents,
+            &mut dense,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    let xp = [targets[0].position[0], targets[1].position[0]];
+    let yp = [targets[0].position[1], targets[1].position[1]];
+    let zp = [targets[0].position[2], targets[1].position[2]];
+    let xfil = [sources[0].start[0], sources[1].start[0]];
+    let yfil = [sources[0].start[1], sources[1].start[1]];
+    let zfil = [sources[0].start[2], sources[1].start[2]];
+    let dlx = [
+        sources[0].end[0] - sources[0].start[0],
+        sources[1].end[0] - sources[1].start[0],
+    ];
+    let dly = [
+        sources[0].end[1] - sources[0].start[1],
+        sources[1].end[1] - sources[1].start[1],
+    ];
+    let dlz = [
+        sources[0].end[2] - sources[0].start[2],
+        sources[1].end[2] - sources[1].start[2],
+    ];
+    let wire_radius = [sources[0].wire_radius, sources[1].wire_radius];
+    let mut bx = [0.0; 2];
+    let mut by = [0.0; 2];
+    let mut bz = [0.0; 2];
+    crate::physics::linear_filament::flux_density_linear_filament(
+        (&xp, &yp, &zp),
+        (&xfil, &yfil, &zfil),
+        (&dlx, &dly, &dlz),
+        &currents,
+        &wire_radius,
+        (&mut bx, &mut by, &mut bz),
+    )
+    .unwrap();
+
+    for i in 0..bh.len() {
+        for axis in 0..3 {
+            assert!((bh[i][axis] - dense[i][axis]).abs() < 1.0e-20);
+        }
+        assert!((bh[i][0] - bx[i]).abs() < 1.0e-20);
+        assert!((bh[i][1] - by[i]).abs() < 1.0e-20);
+        assert!((bh[i][2] - bz[i]).abs() < 1.0e-20);
+    }
+}
+
+#[test]
+fn linear_filament_reuses_tree_for_current_updates() {
+    let kernel = LinearFilamentFluxDensityKernel::<f64>::new();
+    let sources = [
+        LinearFilamentSource {
+            start: [0.0, 0.0, 0.0],
+            end: [0.0, 0.0, 1.0],
+            wire_radius: 0.01,
+        },
+        LinearFilamentSource {
+            start: [0.5, 0.0, 0.0],
+            end: [0.5, 0.0, 1.0],
+            wire_radius: 0.01,
+        },
+    ];
+    let targets = [DipoleTarget {
+        position: [1.0, 0.0, 0.5],
+    }];
+    let currents0 = [1.0, 1.0];
+    let currents1 = [2.0, -1.0];
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let mut source_summaries =
+        SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(target_tree.as_view());
+    assert_eq!(
+        update_target_summaries_into(
+            &kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut out0 = [[0.0; 3]; 1];
+    let mut out1 = [[0.0; 3]; 1];
+
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &currents0,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &currents0,
+            &mut out0,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &currents1,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &currents1,
+            &mut out1,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_ne!(out0, out1);
+}
+
+#[test]
+fn linear_filament_far_cluster_uses_finite_equivalent_segment() {
+    let kernel = LinearFilamentFluxDensityKernel::<f64>::new();
+    let sources = [
+        LinearFilamentSource {
+            start: [-1.0, 0.0, 0.0],
+            end: [-1.0, 0.0, 1.0],
+            wire_radius: 0.01,
+        },
+        LinearFilamentSource {
+            start: [1.0, 0.0, 0.0],
+            end: [1.0, 0.0, 1.0],
+            wire_radius: 0.01,
+        },
+    ];
+    let targets = [DipoleTarget {
+        position: [30.0, 2.0, 0.5],
+    }];
+    let currents = [1.0, 1.0];
+    let source_tree = ClusterTree::build(&sources, 2).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 1.0).unwrap();
+    assert_eq!(plan.far_target_node_ids.len(), 1);
+    assert!(plan.near_target_ids.is_empty());
+
+    let mut source_summaries =
+        SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(target_tree.as_view());
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &currents,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut out = [[0.0; 3]; 1];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &currents,
+            &mut out,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert!(out[0][0].is_finite());
+    assert!(out[0][1].is_finite());
+    assert!(out[0][2].is_finite());
+    assert!(vec_norm3(out[0]) > 0.0);
 }
 
 #[test]

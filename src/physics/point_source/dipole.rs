@@ -8,11 +8,11 @@ use rayon::{
 use crate::{
     MU0_OVER_4PI, chunksize,
     macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{clip_nan, cross3, dot3, rss3},
     physics::{
         hierarchical::DualTreeScalar,
         volumetric::{
-            flux_density_inside_magnetized_sphere, vector_potential_inside_magnetized_sphere,
+            flux_density_inside_magnetized_sphere,
+            vector_potential_inside_magnetized_sphere_generic,
         },
     },
 };
@@ -193,18 +193,49 @@ pub fn vector_potential_dipole_scalar(
     outer_radius: f64,
     obs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
+    let out = vector_potential_dipole_scalar_generic(
+        [loc.0, loc.1, loc.2],
+        [moment.0, moment.1, moment.2],
+        outer_radius,
+        [obs.0, obs.1, obs.2],
+    );
+    (out[0], out[1], out[2])
+}
+
+/// Vector potential of a dipole in cartesian coordinates.
+///
+/// Generic scalar helper used by both the f64 public point-source API and
+/// generic hierarchical dipole kernels.
+///
+/// Arguments
+///
+/// * loc: (m) location of the point source
+/// * moment: (A-m^2) magnetic moment vector of the point source
+/// * obs: (m) observation point to examine
+/// * outer_radius: (m) radius inside which to defer to magnetized sphere calc
+///
+/// Returns
+///
+/// * (ax, ay, az) [V-s/m] vector potential components at observation point
+#[inline]
+pub fn vector_potential_dipole_scalar_generic<T: DualTreeScalar>(
+    loc: [T; 3],
+    moment: [T; 3],
+    outer_radius: T,
+    obs: [T; 3],
+) -> [T; 3] {
     // Radius and moment vectors decomposed into direction and magnitude
-    let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
-    let r2 = dot3(r.0, r.1, r.2, r.0, r.1, r.2); // [m^2]
+    let r = [obs[0] - loc[0], obs[1] - loc[1], obs[2] - loc[2]]; // [m]
+    let r2 = dot3_generic(r, r); // [m^2]
     let rmag = r2.sqrt(); // [m]
-    let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
+    let rhat = [r[0] / rmag, r[1] / rmag, r[2] / rmag]; // [dimensionless]
     let m = moment;
-    let mmag = rss3(m.0, m.1, m.2); // [A-m^2]
-    let mhat = (m.0 / mmag, m.1 / mmag, m.2 / mmag); // [dimensionless]
+    let mmag = dot3_generic(m, m).sqrt(); // [A-m^2]
+    let mhat = [m[0] / mmag, m[1] / mmag, m[2] / mmag]; // [dimensionless]
 
     // mhat x rhat
     // Use normalized vectors for cross product to improve float roundoff
-    let mhat_cross_rhat = cross3(mhat.0, mhat.1, mhat.2, rhat.0, rhat.1, rhat.2);
+    let mhat_cross_rhat = cross3_generic(mhat, rhat);
 
     // Defer to magnetized sphere if necessary.
     // This branch does not cause a cache miss because the conditional
@@ -213,28 +244,40 @@ pub fn vector_potential_dipole_scalar(
     // branch is extremely predictable, and can be resolved consistently
     // between when rmag is calculated and when the other dependencies are done.
     let inside = rmag < outer_radius;
-    let (mut ax, mut ay, mut az) = match inside {
+    let mut out = match inside {
         // Magnetized sphere internal field
-        true => {
-            vector_potential_inside_magnetized_sphere(mhat_cross_rhat, mmag, rmag, outer_radius)
-        }
+        true => vector_potential_inside_magnetized_sphere_generic(
+            mhat_cross_rhat,
+            mmag,
+            rmag,
+            outer_radius,
+        ),
         // Dipole field
         false => {
-            let c = MU0_OVER_4PI * mmag / r2; // [V-s/m] Shared factor
-            (
-                mhat_cross_rhat.0 * c,
-                mhat_cross_rhat.1 * c,
-                mhat_cross_rhat.2 * c,
-            )
+            let c = T::from_f64(MU0_OVER_4PI) * mmag / r2; // [V-s/m] Shared factor
+            [
+                mhat_cross_rhat[0] * c,
+                mhat_cross_rhat[1] * c,
+                mhat_cross_rhat[2] * c,
+            ]
         }
     };
 
     // This does not produce a jmp
-    ax = clip_nan(ax, 0.0);
-    ay = clip_nan(ay, 0.0);
-    az = clip_nan(az, 0.0);
+    for item in &mut out {
+        *item = clip_nan_generic(*item, T::ZERO);
+    }
 
-    (ax, ay, az) // [V-s/m]
+    out // [V-s/m]
+}
+
+#[inline]
+fn cross3_generic<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 /// Magnetic vector potential of a dipole in cartesian coordinates.

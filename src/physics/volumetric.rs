@@ -84,17 +84,17 @@ pub(crate) fn flux_density_inside_magnetized_sphere<T: DualTreeScalar>(
 ///
 /// * (ax, ay, az) [V-s/m] magnetic vector potential components at the target location
 #[inline]
-pub(crate) fn vector_potential_inside_magnetized_sphere(
-    mhat_cross_rhat: (f64, f64, f64),
-    mmag: f64,
-    rmag: f64,
-    outer_radius: f64,
-) -> (f64, f64, f64) {
+pub(crate) fn vector_potential_inside_magnetized_sphere_generic<T: DualTreeScalar>(
+    mhat_cross_rhat: [T; 3],
+    mmag: T,
+    rmag: T,
+    outer_radius: T,
+) -> [T; 3] {
     let r3 = outer_radius * outer_radius * outer_radius;
-    let c = MU0_OVER_4PI * mmag * rmag / r3;
-    (
-        mhat_cross_rhat.0 * c,
-        mhat_cross_rhat.1 * c,
-        mhat_cross_rhat.2 * c,
-    )
+    let c = T::from_f64(MU0_OVER_4PI) * mmag * rmag / r3;
+    [
+        mhat_cross_rhat[0] * c,
+        mhat_cross_rhat[1] * c,
+        mhat_cross_rhat[2] * c,
+    ]
 }

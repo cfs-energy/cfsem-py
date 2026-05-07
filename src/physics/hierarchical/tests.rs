@@ -1,6 +1,7 @@
 use super::*;
 use crate::physics::hierarchical::kernels::{
     DipoleFirstOrderKernel, DipoleMomentKernel, DipoleSource, DipoleTarget,
+    DipoleVectorPotentialKernel,
 };
 
 #[derive(Clone, Copy)]
@@ -260,6 +261,156 @@ fn dipole_exact_uses_magnetized_sphere_radius() {
         (target.position[0], target.position[1], target.position[2]),
     );
     assert_eq!(out, [expected.0, expected.1, expected.2]);
+}
+
+#[test]
+fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
+    let b_kernel = DipoleMomentKernel::<f64>::new();
+    let a_kernel = DipoleVectorPotentialKernel::<f64>::new();
+    let sources = [
+        DipoleSource {
+            position: [0.0, 0.0, 0.0],
+            outer_radius: 0.5,
+        },
+        DipoleSource {
+            position: [1.0, 0.5, 0.0],
+            outer_radius: 0.0,
+        },
+    ];
+    let targets = [
+        DipoleTarget {
+            position: [0.25, 0.0, 0.0],
+        },
+        DipoleTarget {
+            position: [3.0, 1.0, 0.5],
+        },
+    ];
+    let moments = [[0.0, 0.0, 2.0], [0.0, 1.0, 0.5]];
+
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+
+    let mut b_source_summaries =
+        SourceNodeSummaries::<DipoleMomentKernel<f64>>::new(source_tree.as_view());
+    let mut b_target_summaries =
+        TargetNodeSummaries::<DipoleMomentKernel<f64>>::new(target_tree.as_view());
+    let mut a_source_summaries =
+        SourceNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new(source_tree.as_view());
+    let mut a_target_summaries =
+        TargetNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new(target_tree.as_view());
+
+    assert_eq!(
+        update_source_summaries_into(
+            &b_kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut b_source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &b_kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut b_target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_source_summaries_into(
+            &a_kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut a_source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &a_kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut a_target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut b_out = [[0.0; 3]; 2];
+    let mut a_out = [[0.0; 3]; 2];
+
+    assert_eq!(
+        evaluate_into(
+            &b_kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &b_source_summaries.node_summaries,
+            &b_target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut b_out,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        evaluate_into(
+            &a_kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &a_source_summaries.node_summaries,
+            &a_target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut a_out,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    for target_id in 0..targets.len() {
+        let mut expected_b = [0.0; 3];
+        let mut expected_a = [0.0; 3];
+        for source_id in 0..sources.len() {
+            let source = sources[source_id];
+            let moment = moments[source_id];
+            let target = targets[target_id];
+            let b = crate::physics::point_source::dipole::flux_density_dipole_scalar(
+                (source.position[0], source.position[1], source.position[2]),
+                (moment[0], moment[1], moment[2]),
+                source.outer_radius,
+                (target.position[0], target.position[1], target.position[2]),
+            );
+            let a = crate::physics::point_source::dipole::vector_potential_dipole_scalar(
+                (source.position[0], source.position[1], source.position[2]),
+                (moment[0], moment[1], moment[2]),
+                source.outer_radius,
+                (target.position[0], target.position[1], target.position[2]),
+            );
+            expected_b[0] += b.0;
+            expected_b[1] += b.1;
+            expected_b[2] += b.2;
+            expected_a[0] += a.0;
+            expected_a[1] += a.1;
+            expected_a[2] += a.2;
+        }
+        for axis in 0..3 {
+            assert!((b_out[target_id][axis] - expected_b[axis]).abs() < 1.0e-20);
+            assert!((a_out[target_id][axis] - expected_a[axis]).abs() < 1.0e-20);
+        }
+    }
 }
 
 #[test]

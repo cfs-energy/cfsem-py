@@ -1,5 +1,7 @@
 use crate::physics::hierarchical::{Aabb, BoundedGeometry, DualTreeError, DualTreeScalar};
-use crate::physics::point_source::dipole::flux_density_dipole_scalar_generic;
+use crate::physics::point_source::dipole::{
+    flux_density_dipole_scalar_generic, vector_potential_dipole_scalar_generic,
+};
 
 /// Point source location for generic dipole kernels.
 #[derive(Clone, Copy, Debug, Default)]
@@ -172,6 +174,55 @@ pub(super) fn dipole_field_derivative_component<T: DualTreeScalar>(
     out
 }
 
+pub(super) fn dipole_vector_potential<T: DualTreeScalar>(
+    target: [T; 3],
+    source: [T; 3],
+    moment: [T; 3],
+    outer_radius: T,
+    out: &mut [T; 3],
+) -> DualTreeError {
+    *out = vector_potential_dipole_scalar_generic(source, moment, outer_radius, target);
+    DualTreeError::Ok
+}
+
+pub(super) fn dipole_vector_potential_derivative_component<T: DualTreeScalar>(
+    r: [T; 3],
+    moment_axis: usize,
+    derivative_axis: usize,
+    c: T,
+) -> [T; 3] {
+    let r2 = dot3(r, r);
+    let rmag = r2.sqrt();
+    let r3 = r2 * rmag;
+    let r5 = r3 * r2;
+    let three = T::from_f64(3.0);
+    let mut out = [T::ZERO; 3];
+
+    for out_axis in 0..3 {
+        let mut sum = T::ZERO;
+        for r_axis in 0..3 {
+            let epsilon = levi_civita(out_axis, moment_axis, r_axis);
+            if epsilon == 0 {
+                continue;
+            }
+            let delta = if r_axis == derivative_axis {
+                T::ONE
+            } else {
+                T::ZERO
+            };
+            let term = delta / r3 - three * r[r_axis] * r[derivative_axis] / r5;
+            if epsilon > 0 {
+                sum = sum + term;
+            } else {
+                sum = sum - term;
+            }
+        }
+        out[out_axis] = c * sum;
+    }
+
+    out
+}
+
 #[inline]
 pub(super) fn add3_in_place<T: DualTreeScalar>(out: &mut [T; 3], value: [T; 3]) {
     for axis in 0..3 {
@@ -205,4 +256,18 @@ pub(super) fn sub3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
 #[inline]
 fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+#[inline]
+fn levi_civita(a: usize, b: usize, c: usize) -> i32 {
+    if a == b || b == c || a == c {
+        0
+    } else if (a == 0 && b == 1 && c == 2)
+        || (a == 1 && b == 2 && c == 0)
+        || (a == 2 && b == 0 && c == 1)
+    {
+        1
+    } else {
+        -1
+    }
 }

@@ -2,7 +2,7 @@
 /// These are context-heavy and require some care to apply
 /// in a way that is consistent with assumptions,
 /// so they are kept out of the public API.
-use crate::MU0_OVER_4PI;
+use crate::{MU0_OVER_4PI, physics::hierarchical::DualTreeScalar};
 
 /// Magnetic flux density inside a uniformly magnetized sphere
 /// with some radius and total magnetic moment.
@@ -38,13 +38,13 @@ use crate::MU0_OVER_4PI;
 ///
 /// * (bx, by, bz) [T] magnetic field components anywhere inside the sphere
 #[inline]
-pub(crate) fn flux_density_inside_magnetized_sphere(
-    moment: (f64, f64, f64),
-    outer_radius: f64,
-) -> (f64, f64, f64) {
+pub(crate) fn flux_density_inside_magnetized_sphere<T: DualTreeScalar>(
+    moment: [T; 3],
+    outer_radius: T,
+) -> [T; 3] {
     let r3 = outer_radius * outer_radius * outer_radius;
-    let c = 2.0 * MU0_OVER_4PI / r3;
-    (moment.0 * c, moment.1 * c, moment.2 * c)
+    let c = T::from_f64(2.0 * MU0_OVER_4PI) / r3;
+    [moment[0] * c, moment[1] * c, moment[2] * c]
 }
 
 /// Magnetic vector potential inside a uniformly magnetized sphere

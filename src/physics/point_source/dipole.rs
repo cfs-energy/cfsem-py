@@ -9,12 +9,36 @@ use crate::{
     MU0_OVER_4PI, chunksize,
     macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
     math::{clip_nan, cross3, dot3, rss3},
-    physics::volumetric::{
-        flux_density_inside_magnetized_sphere, vector_potential_inside_magnetized_sphere,
+    physics::{
+        hierarchical::DualTreeScalar,
+        volumetric::{
+            flux_density_inside_magnetized_sphere, vector_potential_inside_magnetized_sphere,
+        },
     },
 };
 
 /// Magnetic flux density of a dipole in cartesian coordinates.
+/// For more details, see [flux_density_dipole_scalar_generic].
+#[inline]
+pub fn flux_density_dipole_scalar(
+    loc: (f64, f64, f64),
+    moment: (f64, f64, f64),
+    outer_radius: f64,
+    obs: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let out = flux_density_dipole_scalar_generic(
+        [loc.0, loc.1, loc.2],
+        [moment.0, moment.1, moment.2],
+        outer_radius,
+        [obs.0, obs.1, obs.2],
+    );
+    (out[0], out[1], out[2])
+}
+
+/// Magnetic flux density of a dipole in cartesian coordinates.
+///
+/// Generic scalar helper used by both the f64 public point-source API and
+/// generic hierarchical dipole kernels.
 ///
 /// Arguments
 ///
@@ -27,30 +51,30 @@ use crate::{
 ///
 /// * (bx, by, bz) [T] magnetic field components at observation point
 #[inline]
-pub fn flux_density_dipole_scalar(
-    loc: (f64, f64, f64),
-    moment: (f64, f64, f64),
-    outer_radius: f64,
-    obs: (f64, f64, f64),
-) -> (f64, f64, f64) {
+pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
+    loc: [T; 3],
+    moment: [T; 3],
+    outer_radius: T,
+    obs: [T; 3],
+) -> [T; 3] {
     // Radius vector decomposed into direction and magnitude
-    let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
-    let r2 = dot3(r.0, r.1, r.2, r.0, r.1, r.2);
+    let r = [obs[0] - loc[0], obs[1] - loc[1], obs[2] - loc[2]]; // [m]
+    let r2 = dot3_generic(r, r);
     let rmag = r2.sqrt(); // [m]
-    let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
+    let rhat = [r[0] / rmag, r[1] / rmag, r[2] / rmag]; // [dimensionless]
     let r3 = r2 * rmag; // [m^3]
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
-    let m_dot_rhat = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
+    let m_dot_rhat = dot3_generic(moment, rhat);
 
     // Assemble components
-    let c = MU0_OVER_4PI / r3; // [H/m^4]
-    let c1 = 3.0 * m_dot_rhat; // [A-m^2]
-    let tsum = (
-        rhat.0.mul_add(c1, -moment.0),
-        rhat.1.mul_add(c1, -moment.1),
-        rhat.2.mul_add(c1, -moment.2),
-    );
+    let c = T::from_f64(MU0_OVER_4PI) / r3; // [H/m^4]
+    let c1 = T::from_f64(3.0) * m_dot_rhat; // [A-m^2]
+    let tsum = [
+        rhat[0] * c1 - moment[0],
+        rhat[1] * c1 - moment[1],
+        rhat[2] * c1 - moment[2],
+    ];
 
     // Defer to magnetized sphere if necessary
     // This branch does not cause a cache miss because the conditional
@@ -59,17 +83,27 @@ pub fn flux_density_dipole_scalar(
     // branch is extremely predictable, and can be resolved consistently
     // between when rmag is calculated and when the other dependencies are done.
     let inside = rmag < outer_radius;
-    let (mut bx, mut by, mut bz) = match inside {
+    let mut out = match inside {
         true => flux_density_inside_magnetized_sphere(moment, outer_radius),
-        false => (c * tsum.0, c * tsum.1, c * tsum.2),
+        false => [c * tsum[0], c * tsum[1], c * tsum[2]],
     }; // [T]
 
     // This does not produce a jmp
-    bx = clip_nan(bx, 0.0);
-    by = clip_nan(by, 0.0);
-    bz = clip_nan(bz, 0.0);
+    for item in &mut out {
+        *item = clip_nan_generic(*item, T::ZERO);
+    }
 
-    (bx, by, bz) // [T]
+    out // [T]
+}
+
+#[inline]
+fn dot3_generic<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+#[inline]
+fn clip_nan_generic<T: DualTreeScalar>(value: T, fallback: T) -> T {
+    if value != value { fallback } else { value }
 }
 
 /// Magnetic flux density of a dipole in cartesian coordinates.

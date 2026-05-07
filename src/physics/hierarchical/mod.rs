@@ -7,6 +7,7 @@
 mod aabb;
 mod evaluator;
 mod kernel;
+pub mod kernels;
 mod plan;
 mod scalar;
 mod tree;

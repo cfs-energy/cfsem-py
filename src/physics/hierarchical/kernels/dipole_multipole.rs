@@ -1,0 +1,169 @@
+use core::marker::PhantomData;
+
+use super::dipole::{
+    DipoleSource, DipoleTarget, DipoleTargetSummary, add_matrix_in_place, add_outer_in_place,
+    add3_in_place, combine_target, dipole_field, dipole_field_derivative_component, sub3,
+    summarize_centroid, summarize_target_leaf,
+};
+use crate::MU0_OVER_4PI;
+use crate::physics::hierarchical::{DualTreeError, DualTreeKernel, DualTreeScalar};
+
+/// First-order source multipole summary for a cluster of point dipoles.
+///
+/// `first_moment[a][b] = sum_i (x_i[a] - centroid[a]) * moment_i[b]`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DipoleMultipoleSummary<T: DualTreeScalar> {
+    pub centroid: [T; 3],
+    pub moment: [T; 3],
+    pub first_moment: [[T; 3]; 3],
+    pub count: T,
+}
+
+/// Dipole Barnes-Hut kernel using a first-order source multipole expansion.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DipoleMultipoleKernel<T: DualTreeScalar> {
+    marker: PhantomData<T>,
+}
+
+impl<T: DualTreeScalar> DipoleMultipoleKernel<T> {
+    pub fn new() -> Self {
+        Self {
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<T: DualTreeScalar> DualTreeKernel for DipoleMultipoleKernel<T> {
+    type Scalar = T;
+    type SourceGeometry = DipoleSource<T>;
+    type TargetGeometry = DipoleTarget<T>;
+    type SourceMoment = [T; 3];
+    type SourceSummary = DipoleMultipoleSummary<T>;
+    type TargetSummary = DipoleTargetSummary<T>;
+    type Output = [T; 3];
+
+    fn summarize_leaf_sources(
+        &self,
+        source_ids: &[u32],
+        sources: &[Self::SourceGeometry],
+        moments: &[Self::SourceMoment],
+        out: &mut Self::SourceSummary,
+    ) -> DualTreeError {
+        *out = DipoleMultipoleSummary::default();
+        summarize_centroid(source_ids, sources, &mut out.centroid, &mut out.count);
+        for i in 0..source_ids.len() {
+            let source_id = source_ids[i] as usize;
+            let delta = sub3(sources[source_id].position, out.centroid);
+            add3_in_place(&mut out.moment, moments[source_id]);
+            add_outer_in_place(&mut out.first_moment, delta, moments[source_id]);
+        }
+        DualTreeError::Ok
+    }
+
+    fn combine_source_summaries(
+        &self,
+        children: &[Self::SourceSummary],
+        _child_ids: &[u32],
+        out: &mut Self::SourceSummary,
+    ) -> DualTreeError {
+        *out = DipoleMultipoleSummary::default();
+        for i in 0..children.len() {
+            out.count = out.count + children[i].count;
+            for axis in 0..3 {
+                out.centroid[axis] =
+                    out.centroid[axis] + children[i].centroid[axis] * children[i].count;
+            }
+        }
+        if out.count > T::ZERO {
+            for axis in 0..3 {
+                out.centroid[axis] = out.centroid[axis] / out.count;
+            }
+        }
+
+        for i in 0..children.len() {
+            add3_in_place(&mut out.moment, children[i].moment);
+            add_matrix_in_place(&mut out.first_moment, children[i].first_moment);
+            let shift = sub3(children[i].centroid, out.centroid);
+            add_outer_in_place(&mut out.first_moment, shift, children[i].moment);
+        }
+
+        DualTreeError::Ok
+    }
+
+    fn summarize_leaf_targets(
+        &self,
+        target_ids: &[u32],
+        targets: &[Self::TargetGeometry],
+        out: &mut Self::TargetSummary,
+    ) -> DualTreeError {
+        summarize_target_leaf(target_ids, targets, out)
+    }
+
+    fn combine_target_summaries(
+        &self,
+        children: &[Self::TargetSummary],
+        _child_ids: &[u32],
+        out: &mut Self::TargetSummary,
+    ) -> DualTreeError {
+        combine_target(children, out)
+    }
+
+    fn eval_exact(
+        &self,
+        target: &Self::TargetGeometry,
+        source: &Self::SourceGeometry,
+        moment: &Self::SourceMoment,
+        out: &mut Self::Output,
+    ) -> DualTreeError {
+        dipole_field(
+            target.position,
+            source.position,
+            *moment,
+            source.outer_radius,
+            out,
+        )
+    }
+
+    fn eval_far(
+        &self,
+        target: &Self::TargetSummary,
+        source: &Self::SourceSummary,
+        out: &mut Self::Output,
+    ) -> DualTreeError {
+        let err = dipole_field(
+            target.centroid,
+            source.centroid,
+            source.moment,
+            T::ZERO,
+            out,
+        );
+        if err != DualTreeError::Ok {
+            return err;
+        }
+
+        let r = sub3(target.centroid, source.centroid);
+        let c = T::from_f64(MU0_OVER_4PI);
+        for source_axis in 0..3 {
+            for moment_axis in 0..3 {
+                let coeff = source.first_moment[source_axis][moment_axis];
+                if coeff == T::ZERO {
+                    continue;
+                }
+                let deriv = dipole_field_derivative_component(r, moment_axis, source_axis, c);
+                for out_axis in 0..3 {
+                    out[out_axis] = out[out_axis] - coeff * deriv[out_axis];
+                }
+            }
+        }
+
+        DualTreeError::Ok
+    }
+
+    fn zero_output(&self, out: &mut Self::Output) {
+        *out = [T::ZERO; 3];
+    }
+
+    fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
+        add3_in_place(out, *contribution);
+    }
+}

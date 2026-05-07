@@ -1,4 +1,7 @@
 use super::*;
+use crate::physics::hierarchical::kernels::{
+    DipoleMomentKernel, DipoleMultipoleKernel, DipoleSource, DipoleTarget,
+};
 
 #[derive(Clone, Copy)]
 struct MockPoint<T: DualTreeScalar> {
@@ -213,6 +216,50 @@ fn aabb_union_and_gap() {
         max: [5.0, 4.0, 1.0],
     };
     assert_eq!(c.gap_distance_sq(&d), 4.0);
+}
+
+#[test]
+fn dipole_source_aabb_bounds_magnetized_sphere() {
+    let source = DipoleSource {
+        position: [1.0_f64, -2.0, 3.0],
+        outer_radius: 0.25,
+    };
+    let aabb = source.aabb();
+    assert_eq!(aabb.min, [0.75, -2.25, 2.75]);
+    assert_eq!(aabb.max, [1.25, -1.75, 3.25]);
+
+    let point_source = DipoleSource {
+        position: [1.0_f64, -2.0, 3.0],
+        outer_radius: 0.0,
+    };
+    assert_eq!(point_source.aabb(), Aabb::from_point(point_source.position));
+}
+
+#[test]
+fn dipole_exact_uses_magnetized_sphere_radius() {
+    let kernel = DipoleMomentKernel::<f64>::new();
+    let source = DipoleSource {
+        position: [0.0, 0.0, 0.0],
+        outer_radius: 2.0,
+    };
+    let target = DipoleTarget {
+        position: [0.5, 0.0, 0.0],
+    };
+    let moment = [0.0, 0.0, 3.0];
+    let mut out = [0.0; 3];
+
+    assert_eq!(
+        kernel.eval_exact(&target, &source, &moment, &mut out),
+        DualTreeError::Ok
+    );
+
+    let expected = crate::physics::point_source::dipole::flux_density_dipole_scalar(
+        (0.0, 0.0, 0.0),
+        (moment[0], moment[1], moment[2]),
+        source.outer_radius,
+        (target.position[0], target.position[1], target.position[2]),
+    );
+    assert_eq!(out, [expected.0, expected.1, expected.2]);
 }
 
 #[test]
@@ -466,4 +513,241 @@ fn run_theta_zero_matches_dense_direct_f64() {
     for i in 0..bh.len() {
         assert!((bh[i] - dense[i]).abs() < 1e-12);
     }
+}
+
+#[test]
+fn dipole_moment_kernel_theta_zero_matches_dense() {
+    let kernel = DipoleMomentKernel::<f64>::new();
+    let sources = [
+        DipoleSource {
+            position: [0.0, 0.0, 0.0],
+            outer_radius: 0.0,
+        },
+        DipoleSource {
+            position: [1.0, 0.5, 0.0],
+            outer_radius: 0.0,
+        },
+        DipoleSource {
+            position: [2.0, 0.0, 0.0],
+            outer_radius: 0.0,
+        },
+    ];
+    let targets = [
+        DipoleTarget {
+            position: [3.0, 0.0, 0.0],
+        },
+        DipoleTarget {
+            position: [4.0, 1.0, 0.5],
+        },
+    ];
+    let moments = [[0.0, 0.0, 1.0], [0.0, 1.0, 0.5], [1.0, 0.0, 0.0]];
+
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 0.0).unwrap();
+    let mut source_summaries =
+        SourceNodeSummaries::<DipoleMomentKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<DipoleMomentKernel<f64>>::new(target_tree.as_view());
+
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut bh = [[0.0; 3]; 2];
+    let mut dense = [[0.0; 3]; 2];
+
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut bh,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &moments,
+            &mut dense,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    for i in 0..bh.len() {
+        for axis in 0..3 {
+            assert!((bh[i][axis] - dense[i][axis]).abs() < 1.0e-20);
+        }
+    }
+}
+
+#[test]
+fn dipole_multipole_far_summary_improves_over_single_moment() {
+    let moment_kernel = DipoleMomentKernel::<f64>::new();
+    let multipole_kernel = DipoleMultipoleKernel::<f64>::new();
+    let sources = [
+        DipoleSource {
+            position: [-1.0, 0.0, 0.0],
+            outer_radius: 0.0,
+        },
+        DipoleSource {
+            position: [1.0, 0.0, 0.0],
+            outer_radius: 0.0,
+        },
+    ];
+    let targets = [DipoleTarget {
+        position: [20.0, 3.0, 1.0],
+    }];
+    let moments = [[0.0, 0.0, 1.0], [0.0, 0.0, 2.0]];
+
+    let source_tree = ClusterTree::build(&sources, 2).unwrap();
+    let target_tree = ClusterTree::build(&targets, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), target_tree.as_view(), 1.0).unwrap();
+    assert_eq!(plan.far_target_node_ids.len(), 1);
+    assert!(plan.near_target_ids.is_empty());
+
+    let mut moment_source_summaries =
+        SourceNodeSummaries::<DipoleMomentKernel<f64>>::new(source_tree.as_view());
+    let mut moment_target_summaries =
+        TargetNodeSummaries::<DipoleMomentKernel<f64>>::new(target_tree.as_view());
+    let mut multipole_source_summaries =
+        SourceNodeSummaries::<DipoleMultipoleKernel<f64>>::new(source_tree.as_view());
+    let mut multipole_target_summaries =
+        TargetNodeSummaries::<DipoleMultipoleKernel<f64>>::new(target_tree.as_view());
+
+    assert_eq!(
+        update_source_summaries_into(
+            &moment_kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut moment_source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &moment_kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut moment_target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_source_summaries_into(
+            &multipole_kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut multipole_source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_target_summaries_into(
+            &multipole_kernel,
+            target_tree.as_view(),
+            &targets,
+            &mut multipole_target_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut moment_out = [[0.0; 3]; 1];
+    let mut multipole_out = [[0.0; 3]; 1];
+    let mut dense = [[0.0; 3]; 1];
+
+    assert_eq!(
+        evaluate_into(
+            &moment_kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &moment_source_summaries.node_summaries,
+            &moment_target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut moment_out,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        evaluate_into(
+            &multipole_kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            target_tree.as_view(),
+            &multipole_source_summaries.node_summaries,
+            &multipole_target_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut multipole_out,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &moment_kernel,
+            &sources,
+            &targets,
+            &moments,
+            &mut dense,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    let moment_err = vec_norm(sub_vec3(moment_out[0], dense[0]));
+    let multipole_err = vec_norm(sub_vec3(multipole_out[0], dense[0]));
+    assert!(multipole_err < moment_err);
+}
+
+fn sub_vec3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn vec_norm(a: [f64; 3]) -> f64 {
+    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
 }

@@ -20,6 +20,7 @@ SOURCE_SPAN = 1.4
 DEFAULT_TWIST_PITCH = 0.36
 DEFAULT_HELIX_WIDTH = HELICAL_WIRE_RADIUS
 DEFAULT_BEND_CURVATURE = 2.0 / SOURCE_SPAN
+DEFAULT_LOOP_FRACTION = 0.5
 DEFAULT_THETA = 0.1
 LOG10_MIN_SOURCE_COUNT = float(np.log10(MIN_SOURCE_COUNT))
 LOG10_DEFAULT_SOURCE_COUNT = float(np.log10(DEFAULT_SOURCE_COUNT))
@@ -46,16 +47,20 @@ class Geometry:
     extent: float
 
 
-def fixed_span_arc_centerline(span: float, curvature: float, n: int) -> np.ndarray:
+def fixed_span_arc_centerline(span: float, curvature: float, loop_fraction: float, n: int) -> np.ndarray:
     curvature = max(0.0, float(curvature))
     x = np.linspace(-0.5 * span, 0.5 * span, n, endpoint=True)
-    if curvature <= 1.0e-12:
+    loop_fraction = max(0.0, min(1.0, float(loop_fraction)))
+    if curvature <= 1.0e-12 or loop_fraction <= 1.0e-12:
         return np.vstack((x, np.zeros_like(x), np.zeros_like(x)))
 
     max_curvature = 2.0 / span
     curvature = min(curvature, max_curvature)
     radius = 1.0 / curvature
     half_angle = np.arcsin(0.5 * span / radius)
+    half_angle = min(np.pi, half_angle * loop_fraction / DEFAULT_LOOP_FRACTION)
+    if half_angle <= 1.0e-12:
+        return np.vstack((x, np.zeros_like(x), np.zeros_like(x)))
     theta = np.linspace(-half_angle, half_angle, n, endpoint=True)
     x = radius * np.sin(theta)
     z = radius * np.cos(theta)
@@ -79,8 +84,9 @@ def build_geometry(
     twist_pitch: float,
     helix_width: float,
     bend_curvature: float,
+    loop_fraction: float,
 ) -> Geometry:
-    centerline = fixed_span_arc_centerline(SOURCE_SPAN, bend_curvature, n_centerline)
+    centerline = fixed_span_arc_centerline(SOURCE_SPAN, bend_curvature, loop_fraction, n_centerline)
     helix = np.asarray(
         cfsem.filament_helix_path(
             path=centerline,
@@ -470,6 +476,15 @@ def make_app():
                             round(DEFAULT_BEND_CURVATURE, 2): f"{DEFAULT_BEND_CURVATURE:.2f}",
                         },
                     ),
+                    html.Label("Loop fraction"),
+                    dcc.Slider(
+                        id="loop-fraction",
+                        min=0.0,
+                        max=1.0,
+                        step=0.01,
+                        value=DEFAULT_LOOP_FRACTION,
+                        marks={0.0: "0", 0.25: "0.25", 0.5: "0.5", 0.75: "0.75", 1.0: "1"},
+                    ),
                     html.Label("Construction"),
                     dcc.Dropdown(
                         id="construction",
@@ -552,6 +567,7 @@ def make_app():
         Input("twist-pitch", "value"),
         Input("helix-width", "value"),
         Input("bend-curvature", "value"),
+        Input("loop-fraction", "value"),
         Input("construction", "value"),
         Input("field", "value"),
         Input("theta", "value"),
@@ -563,6 +579,7 @@ def make_app():
         twist_pitch,
         helix_width,
         bend_curvature,
+        loop_fraction,
         construction,
         field,
         theta,
@@ -576,6 +593,7 @@ def make_app():
             float(twist_pitch),
             float(helix_width),
             float(bend_curvature),
+            float(loop_fraction),
         )
         opts = set(options or [])
         results = solve_fields(
@@ -591,7 +609,7 @@ def make_app():
             f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
             f"theta={float(theta):.2f}\n"
             f"twist_pitch={float(twist_pitch):.3f}, helix_width={float(helix_width):.3f}, "
-            f"bend_curvature={float(bend_curvature):.3f}\n"
+            f"bend_curvature={float(bend_curvature):.3f}, loop_fraction={float(loop_fraction):.2f}\n"
             f"original source-target interactions={results['source_target_interactions']:.1E}\n"
             f"direct:       construction={results['direct_build_time']:.3f}s, "
             f"evaluation={results['direct_time']:.3f}s\n"

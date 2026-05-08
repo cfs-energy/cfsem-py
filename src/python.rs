@@ -887,7 +887,7 @@ struct HierarchicalBoundaryElements {
 #[pymethods]
 impl HierarchicalBoundaryElements {
     #[new]
-    #[pyo3(signature = (theta=0.1, quad="dunavant3", construction_method="morton_lbvh"))]
+    #[pyo3(signature = (theta=0.05, quad="dunavant3", construction_method="morton_lbvh"))]
     fn new(theta: f64, quad: &str, construction_method: &str) -> PyResult<Self> {
         Ok(Self {
             theta,

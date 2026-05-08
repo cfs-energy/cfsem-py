@@ -1379,7 +1379,7 @@ class HierarchicalBoundaryElements:
 
     def __init__(
         self,
-        theta: float = 0.1,
+        theta: float = 0.05,
         quad: str = "dunavant3",
         construction_method: str = "morton_lbvh",
     ) -> None:

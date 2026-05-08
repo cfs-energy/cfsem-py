@@ -548,8 +548,8 @@ def make_figure(
         axis.update(title="z [m]", scaleanchor="x")
     fig.update_layout(
         template="plotly_white",
-        height=720,
-        margin={"l": 40, "r": 40, "t": 70, "b": 40},
+        height=360,
+        margin={"l": 40, "r": 40, "t": 54, "b": 8},
         title=f"{'B-field' if field == 'b' else 'A-field'} comparison on the centerline plane",
     )
     return fig
@@ -562,14 +562,14 @@ def make_self_field_figure(results: dict[str, object], field: str):
     self_field = results.get("self_field")
     fig = make_subplots(
         rows=1,
-        cols=3,
-        subplot_titles=("Self Direct", "Self Hierarchical", "Self Relative Error"),
-        horizontal_spacing=0.055,
+        cols=2,
+        subplot_titles=("Self Magnitude", "Self Relative Error"),
+        horizontal_spacing=0.08,
     )
     fig.update_layout(
         template="plotly_white",
-        height=380,
-        margin={"l": 40, "r": 40, "t": 60, "b": 40},
+        height=190,
+        margin={"l": 40, "r": 40, "t": 48, "b": 24},
         title=f"Self-field {'B' if field == 'b' else 'A'} by source index",
     )
     for axis in fig.select_xaxes():
@@ -594,37 +594,48 @@ def make_self_field_figure(results: dict[str, object], field: str):
     source_index = np.arange(hierarchical[0].size)
     hierarchical_log = np.log10(np.maximum(field_magnitude(hierarchical), 1e-30))
     fig.add_trace(
-        go.Scatter(x=source_index, y=hierarchical_log, mode="lines", line={"color": "#3b6fb6"}),
+        go.Scatter(
+            x=source_index,
+            y=hierarchical_log,
+            mode="lines",
+            name="Hierarchical",
+            line={"color": "#3b6fb6"},
+        ),
         row=1,
-        col=2,
+        col=1,
     )
 
     if direct is None:
-        for col in (1, 3):
-            fig.add_annotation(
-                text="Direct self-field skipped",
-                xref=f"x{col} domain" if col > 1 else "x domain",
-                yref=f"y{col} domain" if col > 1 else "y domain",
-                x=0.5,
-                y=0.5,
-                showarrow=False,
-            )
+        fig.add_annotation(
+            text="Direct self-field skipped",
+            xref="x2 domain",
+            yref="y2 domain",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+        )
         return fig
 
     assert isinstance(direct, tuple)
     direct_log = np.log10(np.maximum(field_magnitude(direct), 1e-30))
     error_log = np.log10(np.maximum(relative_error(hierarchical, direct), 1e-16))
     fig.add_trace(
-        go.Scatter(x=source_index, y=direct_log, mode="lines", line={"color": "#555"}),
+        go.Scatter(
+            x=source_index,
+            y=direct_log,
+            mode="lines",
+            name="Direct",
+            line={"color": "#555"},
+        ),
         row=1,
         col=1,
     )
     fig.add_trace(
         go.Scatter(x=source_index, y=error_log, mode="lines", line={"color": "#b63b4a"}),
         row=1,
-        col=3,
+        col=2,
     )
-    fig.update_yaxes(title="log10 relative error", row=1, col=3)
+    fig.update_yaxes(title="log10 relative error", row=1, col=2)
     return fig
 
 
@@ -726,10 +737,10 @@ def make_app():
                     dcc.Slider(
                         id="theta",
                         min=0.0,
-                        max=0.3,
+                        max=0.6,
                         step=0.01,
                         value=DEFAULT_THETA,
-                        marks={round(i * 0.1, 1): f"{i * 0.1:.1f}" for i in range(4)},
+                        marks={round(i * 0.1, 1): f"{i * 0.1:.1f}" for i in range(7)},
                     ),
                     html.Label("Sources"),
                     dcc.Slider(
@@ -766,8 +777,16 @@ def make_app():
                             "whiteSpace": "pre-wrap",
                         },
                     ),
-                    dcc.Graph(id="field-figure", config={"responsive": True}),
-                    dcc.Graph(id="self-field-figure", config={"responsive": True}),
+                    dcc.Graph(
+                        id="field-figure",
+                        config={"responsive": True},
+                        style={"height": "360px", "marginBottom": "0"},
+                    ),
+                    dcc.Graph(
+                        id="self-field-figure",
+                        config={"responsive": True},
+                        style={"height": "190px", "marginTop": "0"},
+                    ),
                 ],
                 style=content_style,
             ),

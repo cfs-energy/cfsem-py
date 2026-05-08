@@ -15,6 +15,7 @@ MAX_SOURCE_COUNT = 255 if os.getenv("CFSEM_TESTING") else 100_000
 CURRENT = 1.0
 WIRE_RADIUS = 0.015
 HELICAL_WIRE_RADIUS = 0.055
+TRIANGLE_STRIP_WIDTH = 0.08
 DEFAULT_THETA = 0.1
 DEFAULT_NUM_CHUNKS = 4
 DEFAULT_LEAF_SIZE = 1
@@ -32,6 +33,12 @@ class Geometry:
     dlxyzfil: tuple[np.ndarray, np.ndarray, np.ndarray]
     current: np.ndarray
     wire_radius: np.ndarray
+    dipole_loc: tuple[np.ndarray, np.ndarray, np.ndarray]
+    dipole_moment: tuple[np.ndarray, np.ndarray, np.ndarray]
+    dipole_outer_radius: np.ndarray
+    strip_nodes: np.ndarray
+    strip_triangles: np.ndarray
+    strip_stream_function: np.ndarray
     obs: tuple[np.ndarray, np.ndarray, np.ndarray]
     obs_grid: tuple[np.ndarray, np.ndarray]
     extent: float
@@ -83,9 +90,74 @@ def build_geometry(case: str, n_centerline: int, grid_n: int) -> Geometry:
     dlxyzfil = (dl[:, 0], dl[:, 1], dl[:, 2])
     current = np.full(starts.shape[0], CURRENT)
     wire_radius = np.full(starts.shape[0], WIRE_RADIUS)
+    dipole_loc, dipole_moment, dipole_outer_radius = build_segment_dipoles(starts, dl, current)
+    strip_nodes, strip_triangles, strip_stream_function = build_triangle_strip(
+        helix,
+        TRIANGLE_STRIP_WIDTH,
+        CURRENT,
+    )
     extent = 4.0 * (center_radius + 3.0 * helix_radius)
     obs, obs_grid = section_observation_plane(extent, grid_n)
-    return Geometry(centerline, helix, xyzfil, dlxyzfil, current, wire_radius, obs, obs_grid, extent)
+    return Geometry(
+        centerline,
+        helix,
+        xyzfil,
+        dlxyzfil,
+        current,
+        wire_radius,
+        dipole_loc,
+        dipole_moment,
+        dipole_outer_radius,
+        strip_nodes,
+        strip_triangles,
+        strip_stream_function,
+        obs,
+        obs_grid,
+        extent,
+    )
+
+
+def build_segment_dipoles(
+    starts: np.ndarray,
+    dl: np.ndarray,
+    current: np.ndarray,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]:
+    centers = starts + 0.5 * dl
+    # This is a compact source distribution for comparing direct and hierarchical dipole kernels.
+    moments = current[:, None] * dl
+    return (
+        (centers[:, 0], centers[:, 1], centers[:, 2]),
+        (moments[:, 0], moments[:, 1], moments[:, 2]),
+        np.zeros(starts.shape[0]),
+    )
+
+
+def build_triangle_strip(
+    helix: np.ndarray,
+    strip_width: float,
+    stream_function_jump: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    offset = np.array([[0.0], [0.5 * strip_width], [0.0]])
+    lower = (helix - offset).T
+    upper = (helix + offset).T
+    n_path = helix.shape[1]
+    nodes = np.empty((2 * n_path, 3))
+    nodes[0::2] = lower
+    nodes[1::2] = upper
+
+    triangles = np.empty((2 * (n_path - 1), 3), dtype=np.int64)
+    for i in range(n_path - 1):
+        lower0 = 2 * i
+        upper0 = lower0 + 1
+        lower1 = lower0 + 2
+        upper1 = lower0 + 3
+        triangles[2 * i] = [lower0, lower1, upper0]
+        triangles[2 * i + 1] = [upper0, lower1, upper1]
+
+    stream_function = np.empty(2 * n_path)
+    stream_function[0::2] = 0.0
+    stream_function[1::2] = stream_function_jump
+    return nodes, triangles, stream_function
 
 
 def source_count_from_log10(log10_source_count: float) -> int:
@@ -114,6 +186,7 @@ def relative_error(
 
 def solve_fields(
     geometry: Geometry,
+    source_geometry: str,
     construction_method: str,
     theta: float,
     num_chunks: int,
@@ -125,38 +198,102 @@ def solve_fields(
     direct_build_time = 0.0
 
     t0 = time.perf_counter()
-    direct_b = cfsem.flux_density_linear_filament(
-        geometry.obs,
-        geometry.xyzfil,
-        geometry.dlxyzfil,
-        geometry.current,
-        geometry.wire_radius,
-        par=par,
-    )
-    direct_a = cfsem.vector_potential_linear_filament(
-        geometry.obs,
-        geometry.xyzfil,
-        geometry.dlxyzfil,
-        geometry.current,
-        geometry.wire_radius,
-        par=par,
-    )
+    if source_geometry == "dipole":
+        direct_b = cfsem.flux_density_dipole(
+            geometry.dipole_loc,
+            geometry.dipole_moment,
+            geometry.obs,
+            par=par,
+            outer_radius=geometry.dipole_outer_radius,
+        )
+        direct_a = cfsem.vector_potential_dipole(
+            geometry.dipole_loc,
+            geometry.dipole_moment,
+            geometry.obs,
+            par=par,
+            outer_radius=geometry.dipole_outer_radius,
+        )
+    elif source_geometry == "boundary":
+        obs_array = np.column_stack(geometry.obs)
+        direct_b = cfsem.flux_density_triangle_mesh(
+            obs_array,
+            geometry.strip_nodes,
+            geometry.strip_triangles,
+            geometry.strip_stream_function,
+            par=par,
+        )
+        direct_a = cfsem.vector_potential_triangle_mesh(
+            obs_array,
+            geometry.strip_nodes,
+            geometry.strip_triangles,
+            geometry.strip_stream_function,
+            par=par,
+        )
+    else:
+        direct_b = cfsem.flux_density_linear_filament(
+            geometry.obs,
+            geometry.xyzfil,
+            geometry.dlxyzfil,
+            geometry.current,
+            geometry.wire_radius,
+            par=par,
+        )
+        direct_a = cfsem.vector_potential_linear_filament(
+            geometry.obs,
+            geometry.xyzfil,
+            geometry.dlxyzfil,
+            geometry.current,
+            geometry.wire_radius,
+            par=par,
+        )
     direct_time = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    solver = cfsem.HierarchicalLinearFilaments(
-        theta=theta,
-        source_leaf_size=source_leaf_size,
-        target_leaf_size=target_leaf_size,
-        num_chunks=max(1, int(num_chunks)),
-        construction_method=construction_method,
-    )
-    solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, geometry.obs, par=build_par)
-    build_time = time.perf_counter() - t0
+    if source_geometry == "dipole":
+        solver = cfsem.HierarchicalDipoles(
+            theta=theta,
+            source_leaf_size=source_leaf_size,
+            target_leaf_size=target_leaf_size,
+            num_chunks=max(1, int(num_chunks)),
+            construction_method=construction_method,
+        )
+        solver.build(geometry.dipole_loc, geometry.obs, geometry.dipole_outer_radius, par=build_par)
+        source_count = geometry.dipole_outer_radius.size
+        build_time = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
-    hierarchical_b = solver.flux_density(geometry.current, par=par)
-    hierarchical_a = solver.vector_potential(geometry.current, par=par)
+        t0 = time.perf_counter()
+        hierarchical_b = solver.flux_density(geometry.dipole_moment, par=par)
+        hierarchical_a = solver.vector_potential(geometry.dipole_moment, par=par)
+    elif source_geometry == "boundary":
+        solver = cfsem.HierarchicalBoundaryElements(
+            theta=theta,
+            source_leaf_size=source_leaf_size,
+            target_leaf_size=target_leaf_size,
+            num_chunks=max(1, int(num_chunks)),
+            construction_method=construction_method,
+        )
+        solver.build(geometry.strip_nodes, geometry.strip_triangles, geometry.obs, par=build_par)
+        source_count = geometry.strip_triangles.shape[0]
+        build_time = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        hierarchical_b = solver.flux_density(geometry.strip_stream_function, par=par)
+        hierarchical_a = solver.vector_potential(geometry.strip_stream_function, par=par)
+    else:
+        solver = cfsem.HierarchicalLinearFilaments(
+            theta=theta,
+            source_leaf_size=source_leaf_size,
+            target_leaf_size=target_leaf_size,
+            num_chunks=max(1, int(num_chunks)),
+            construction_method=construction_method,
+        )
+        solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, geometry.obs, par=build_par)
+        source_count = geometry.current.size
+        build_time = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        hierarchical_b = solver.flux_density(geometry.current, par=par)
+        hierarchical_a = solver.vector_potential(geometry.current, par=par)
     eval_time = time.perf_counter() - t0
 
     return {
@@ -168,7 +305,8 @@ def solve_fields(
         "direct_time": direct_time,
         "build_time": build_time,
         "eval_time": eval_time,
-        "source_target_interactions": geometry.current.size * geometry.obs[0].size,
+        "source_count": source_count,
+        "source_target_interactions": source_count * geometry.obs[0].size,
     }
 
 
@@ -303,6 +441,17 @@ def make_app():
                             {"label": "Wider helix", "value": "wide"},
                         ],
                     ),
+                    html.Label("Field geometry"),
+                    dcc.Dropdown(
+                        id="source-geometry",
+                        value="linear",
+                        clearable=False,
+                        options=[
+                            {"label": "Linear filament", "value": "linear"},
+                            {"label": "Dipole", "value": "dipole"},
+                            {"label": "Boundary-element triangle strip", "value": "boundary"},
+                        ],
+                    ),
                     html.Label("Construction"),
                     dcc.Dropdown(
                         id="construction",
@@ -372,7 +521,7 @@ def make_app():
                     ),
                     dcc.Checklist(
                         id="options",
-                        value=["parallel", "relative-error"],
+                        value=["parallel-build", "parallel", "relative-error"],
                         options=[
                             {"label": "Parallel build", "value": "parallel-build"},
                             {"label": "Parallel evaluation", "value": "parallel"},
@@ -408,6 +557,7 @@ def make_app():
         Output("field-figure", "figure"),
         Output("timing", "children"),
         Input("geometry", "value"),
+        Input("source-geometry", "value"),
         Input("construction", "value"),
         Input("field", "value"),
         Input("theta", "value"),
@@ -419,6 +569,7 @@ def make_app():
     )
     def update(
         case,
+        source_geometry,
         construction,
         field,
         theta,
@@ -433,6 +584,7 @@ def make_app():
         opts = set(options or [])
         results = solve_fields(
             geometry,
+            source_geometry=source_geometry,
             construction_method=construction,
             theta=float(theta),
             num_chunks=int(num_chunks),
@@ -443,7 +595,7 @@ def make_app():
         )
         fig = make_figure(geometry, results, field, "relative-error" in opts)
         timing = (
-            f"nfil={geometry.current.size}, nobs={geometry.obs[0].size}, "
+            f"nsrc={results['source_count']}, nobs={geometry.obs[0].size}, "
             f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
             f"original source-target interactions={results['source_target_interactions']:.1E}\n"
             f"direct:       construction={results['direct_build_time']:.3f}s, "

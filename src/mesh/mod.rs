@@ -69,6 +69,13 @@ pub fn filament_helix_path(
         return Err("Output dimension mismatch");
     }
 
+    if tuplerss(helix_start_offset) < f64::EPSILON.sqrt() {
+        xfil.copy_from_slice(xp);
+        yfil.copy_from_slice(yp);
+        zfil.copy_from_slice(zp);
+        return Ok(());
+    }
+
     {
         let ds = (xp[1] - xp[0], yp[1] - yp[0], zp[1] - zp[0]);
         let ds_unit = tuplenormalize(ds);

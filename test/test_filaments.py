@@ -79,6 +79,23 @@ def test_filament_helix_path(r, nt, twist_pitch, angle_offset):
     assert np.allclose(helix, helix_post_rotated)
 
 
+def test_filament_helix_path_zero_offset_returns_centerline():
+    path = np.array(
+        [
+            np.linspace(0.0, 1.0, 12),
+            0.2 * np.sin(np.linspace(0.0, 1.0, 12)),
+            0.1 * np.cos(np.linspace(0.0, 1.0, 12)),
+        ]
+    )
+    helix = cfsem.filament_helix_path(
+        path=path,
+        helix_start_offset=(0.0, 0.0, 0.0),
+        twist_pitch=0.2,
+        angle_offset=np.pi / 3.0,
+    )
+    assert np.allclose(helix, path)
+
+
 def test_filament_coil():
     r, z, dr, dz, nt, nr, nz = (1.0, 0.0, 0.1, 0.1, 7.0, 2, 2)
     f = cfsem.filament_coil(r, z, dr, dz, nt, nr, nz)

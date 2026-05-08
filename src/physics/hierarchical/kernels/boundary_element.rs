@@ -50,10 +50,15 @@ impl<T: DualTreeScalar> BoundedGeometry for BoundaryElementTriangle<T> {
 /// Source summary for boundary-element clusters.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BoundaryElementSummary<T: DualTreeScalar> {
+    /// Position used by the collapsed point-current element term.
     pub origin: [T; 3],
+    /// Net `K dS` current element for the accepted source cluster.
     pub current_element: [T; 3],
+    /// Reference position for the magnetic-dipole correction.
     pub dipole_origin: [T; 3],
+    /// Magnetic-dipole moment about `dipole_origin`.
     pub dipole_moment: [T; 3],
+    /// Current-element magnitude weight used for source-position averages.
     pub weight: T,
 }
 
@@ -119,17 +124,30 @@ fn add_source_to_summary<T: DualTreeScalar>(
     moment: [T; 3],
     out: &mut BoundaryElementSummary<T>,
 ) {
-    let area = calc_tri_area(source.n0, source.n1, source.n2);
-    if area <= T::ZERO {
+    let physical_area = calc_tri_area(source.n0, source.n1, source.n2);
+    if physical_area <= T::ZERO {
         return;
     }
+    // The upstream triangle kernels multiply physical area by Dunavant
+    // reference-triangle weights that sum to 0.5. Use the same effective area
+    // here so accepted far-field summaries stay normalized to the direct path.
+    let area = physical_area * T::from_f64(0.5);
     let centroid = source.representative_point();
     let current_density = triangle_current_density(source.n0, source.n1, source.n2, moment);
     let current_element = scale3(current_density, area);
+    let current_weight = norm3(current_element);
+    if current_weight <= T::ZERO {
+        return;
+    }
 
-    out.weight = out.weight + area;
-    add3_in_place(&mut out.origin, scale3(centroid, area));
-    add3_in_place(&mut out.dipole_origin, scale3(centroid, area));
+    // The far-field surrogate represents the physical current distribution,
+    // not just the mesh geometry. Weighting by area lets a zero-current
+    // triangle move the collapsed source position, which produces coherent
+    // artifacts when inactive or weak-current elements are grouped with active
+    // elements.
+    out.weight = out.weight + current_weight;
+    add3_in_place(&mut out.origin, scale3(centroid, current_weight));
+    add3_in_place(&mut out.dipole_origin, scale3(centroid, current_weight));
     add3_in_place(&mut out.current_element, current_element);
     add3_in_place(
         &mut out.dipole_moment,

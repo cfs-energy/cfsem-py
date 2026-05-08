@@ -779,6 +779,226 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
 }
 
 #[test]
+fn boundary_element_zero_current_source_does_not_shift_far_summary() {
+    let quad_kind = QuadratureKind::Dunavant3;
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let active_source = BoundaryElementTriangle {
+        n0: [0.0, 0.0, 0.0],
+        n1: [1.0, 0.0, 0.0],
+        n2: [0.0, 1.0, 0.0],
+    };
+    let inactive_source = BoundaryElementTriangle {
+        n0: [40.0, 0.0, 0.0],
+        n1: [41.0, 0.0, 0.0],
+        n2: [40.0, 1.0, 0.0],
+    };
+    let targets = [DipoleTarget {
+        position: [120.0, 15.0, 25.0],
+    }];
+    let active_moment = [0.0, 1.0, -0.25];
+    let inactive_moment = [3.0, 3.0, 3.0];
+
+    let active_only_sources = [active_source];
+    let active_only_moments = [active_moment];
+    let source_tree = ClusterTree::build(&active_only_sources, 1).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 1.0e9, 1, false).unwrap();
+    assert_eq!(plan.near_target_ids.len(), 0);
+    assert_eq!(plan.far_source_node_ids.len(), 1);
+    let mut source_summaries =
+        SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &active_only_sources,
+            &active_only_moments,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries),
+        DualTreeError::Ok
+    );
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut active_only = [[0.0; 3]; 1];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries,
+            &active_only_sources,
+            &targets,
+            &active_only_moments,
+            &mut active_only,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    let sources_with_inactive = [active_source, inactive_source];
+    let moments_with_inactive = [active_moment, inactive_moment];
+    let source_tree = ClusterTree::build(&sources_with_inactive, 2).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 1.0e9, 1, false).unwrap();
+    assert_eq!(plan.near_target_ids.len(), 0);
+    assert_eq!(plan.far_source_node_ids.len(), 1);
+    let mut source_summaries =
+        SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources_with_inactive,
+            &moments_with_inactive,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries),
+        DualTreeError::Ok
+    );
+    let mut with_inactive = [[0.0; 3]; 1];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries,
+            &sources_with_inactive,
+            &targets,
+            &moments_with_inactive,
+            &mut with_inactive,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    for axis in 0..3 {
+        assert!((active_only[0][axis] - with_inactive[0][axis]).abs() < 1.0e-30);
+    }
+}
+
+#[test]
+fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
+    let quad_kind = QuadratureKind::Dunavant3;
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let sources = [
+        BoundaryElementTriangle {
+            n0: [0.0, -0.05, 0.0],
+            n1: [1.0, -0.05, 0.0],
+            n2: [0.0, 0.05, 0.0],
+        },
+        BoundaryElementTriangle {
+            n0: [0.0, 0.05, 0.0],
+            n1: [1.0, -0.05, 0.0],
+            n2: [1.0, 0.05, 0.0],
+        },
+        BoundaryElementTriangle {
+            n0: [1.0, -0.05, 0.0],
+            n1: [1.05, 1.0, 0.0],
+            n2: [1.0, 0.05, 0.0],
+        },
+        BoundaryElementTriangle {
+            n0: [1.0, 0.05, 0.0],
+            n1: [1.05, 1.0, 0.0],
+            n2: [0.95, 1.0, 0.0],
+        },
+    ];
+    let moments = [
+        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 1.0],
+    ];
+    let targets = [DipoleTarget {
+        position: [20.0, 10.0, 7.0],
+    }];
+
+    let source_tree = ClusterTree::build(&sources, sources.len()).unwrap();
+    let plan =
+        DualInteractionPlan::build(source_tree.as_view(), &targets, 1, 1.0e9, 1, false).unwrap();
+    assert_eq!(plan.near_target_ids.len(), 0);
+    assert_eq!(plan.far_source_node_ids.len(), 1);
+    let mut source_summaries =
+        SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
+    let mut target_summaries =
+        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        update_plan_target_summaries_into(&kernel, plan.as_view(), &targets, &mut target_summaries),
+        DualTreeError::Ok
+    );
+
+    let mut scratch_value = [[0.0; 3]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    let mut far = [[0.0; 3]; 1];
+    let mut direct = [[0.0; 3]; 1];
+    assert_eq!(
+        evaluate_into(
+            &kernel,
+            plan.as_view(),
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            &target_summaries,
+            &sources,
+            &targets,
+            &moments,
+            &mut far,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &moments,
+            &mut direct,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+
+    let err = vec_norm3([
+        far[0][0] - direct[0][0],
+        far[0][1] - direct[0][1],
+        far[0][2] - direct[0][2],
+    ]);
+    let rel = err / vec_norm3(direct[0]);
+    assert!(
+        rel < 1.0e-1,
+        "relative error {rel:e}, far={:?}, direct={:?}",
+        far[0],
+        direct[0]
+    );
+}
+
+#[test]
 fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     let quad_kind = QuadratureKind::Dunavant3;
     let kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);

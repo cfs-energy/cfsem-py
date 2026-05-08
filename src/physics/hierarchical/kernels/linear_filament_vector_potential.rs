@@ -218,16 +218,21 @@ fn add_source_to_summary<T: DualTreeScalar>(
         return;
     }
 
-    out.weight = out.weight + length;
+    let current_element = scale3(dl, current);
+    let current_element_weight = norm3(current_element);
+    if current_element_weight <= T::ZERO {
+        return;
+    }
+
+    out.weight = out.weight + current_element_weight;
     add3_in_place(
         &mut out.origin,
-        scale3(source.representative_point(), length),
+        scale3(source.representative_point(), current_element_weight),
     );
     add3_in_place(
         &mut out.dipole_origin,
-        scale3(source.representative_point(), length),
+        scale3(source.representative_point(), current_element_weight),
     );
-    let current_element = scale3(dl, current);
     add3_in_place(&mut out.direction, current_element);
     add3_in_place(
         &mut out.dipole_moment,

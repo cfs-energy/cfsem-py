@@ -113,7 +113,7 @@ def build_geometry(
         TRIANGLE_STRIP_WIDTH,
         CURRENT,
     )
-    extent = 4.0 * (SOURCE_SPAN + 3.0 * helix_width)
+    extent = 8.0 * (SOURCE_SPAN + 3.0 * helix_width)
     obs, obs_grid = section_observation_plane(extent, grid_n)
     return Geometry(
         centerline,
@@ -505,6 +505,9 @@ def make_figure(
         (right, right_title),
     ]
     for col, (values, title) in enumerate(traces, start=1):
+        colorscale = "Viridis"
+        if col == 3:
+            colorscale = [[0.0, "white"], [1.0, "red"]] if show_error else "RdBu"
         fig.add_trace(
             go.Heatmap(
                 x=xg[0, :],
@@ -512,7 +515,7 @@ def make_figure(
                 z=heatmap_values(values, geometry),
                 showscale=col == 3,
                 colorbar={"title": title} if col == 3 else None,
-                colorscale="Viridis" if col < 3 else "RdBu",
+                colorscale=colorscale,
             ),
             row=1,
             col=col,

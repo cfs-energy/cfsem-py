@@ -1254,37 +1254,56 @@ class HierarchicalDipoles:
 
     def __init__(
         self,
-        theta: float = 0.7,
-        source_leaf_size: int = 16,
-        target_leaf_size: int = 16,
+        theta: float = 0.1,
+        source_leaf_size: int = 1,
+        target_leaf_size: int = 1,
         num_chunks: int = 1,
+        construction_method: str = "morton_lbvh",
     ) -> None:
-        self._solver = _HierarchicalDipoles(theta, source_leaf_size, target_leaf_size, num_chunks)
+        self._solver = _HierarchicalDipoles(
+            theta, source_leaf_size, target_leaf_size, num_chunks, construction_method
+        )
 
-    def build(self, loc: Array3xN, obs: Array3xN, outer_radius: NDArray[float64] | None = None) -> None:
+    def build(
+        self,
+        loc: Array3xN,
+        obs: Array3xN,
+        outer_radius: NDArray[float64] | None = None,
+        par: bool = False,
+    ) -> None:
         loc = _3tup_contig(loc)
         obs = _3tup_contig(obs)
         outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
         outer_radius = ascontiguousarray(outer_radius, dtype=float64).ravel()
-        self._solver.build(loc, obs, outer_radius)
+        self._solver.build(loc, obs, outer_radius, par)
 
-    def build_sources(self, loc: Array3xN, outer_radius: NDArray[float64] | None = None) -> None:
+    def build_sources(
+        self,
+        loc: Array3xN,
+        outer_radius: NDArray[float64] | None = None,
+        par: bool = False,
+    ) -> None:
         loc = _3tup_contig(loc)
         outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
         outer_radius = ascontiguousarray(outer_radius, dtype=float64).ravel()
-        self._solver.build_sources(loc, outer_radius)
+        self._solver.build_sources(loc, outer_radius, par)
 
-    def update_sources(self, loc: Array3xN, outer_radius: NDArray[float64] | None = None) -> None:
-        self.build_sources(loc, outer_radius)
+    def update_sources(
+        self,
+        loc: Array3xN,
+        outer_radius: NDArray[float64] | None = None,
+        par: bool = False,
+    ) -> None:
+        self.build_sources(loc, outer_radius, par)
 
-    def build_targets(self, obs: Array3xN) -> None:
-        self._solver.build_targets(_3tup_contig(obs))
+    def build_targets(self, obs: Array3xN, par: bool = False) -> None:
+        self._solver.build_targets(_3tup_contig(obs), par)
 
-    def update_targets(self, obs: Array3xN) -> None:
-        self.build_targets(obs)
+    def update_targets(self, obs: Array3xN, par: bool = False) -> None:
+        self.build_targets(obs, par)
 
-    def build_plan(self) -> None:
-        self._solver.build_plan()
+    def build_plan(self, par: bool = False) -> None:
+        self._solver.build_plan(par)
 
     def flux_density(self, moment: Array3xN, par: bool = False) -> Array3xN:
         return self._solver.flux_density(_3tup_contig(moment), par)  # type: ignore
@@ -1304,12 +1323,15 @@ class HierarchicalLinearFilaments:
 
     def __init__(
         self,
-        theta: float = 0.7,
-        source_leaf_size: int = 16,
-        target_leaf_size: int = 16,
+        theta: float = 0.1,
+        source_leaf_size: int = 1,
+        target_leaf_size: int = 1,
         num_chunks: int = 1,
+        construction_method: str = "morton_lbvh",
     ) -> None:
-        self._solver = _HierarchicalLinearFilaments(theta, source_leaf_size, target_leaf_size, num_chunks)
+        self._solver = _HierarchicalLinearFilaments(
+            theta, source_leaf_size, target_leaf_size, num_chunks, construction_method
+        )
 
     def build(
         self,
@@ -1317,32 +1339,50 @@ class HierarchicalLinearFilaments:
         dlxyzfil: Array3xN,
         wire_radius: NDArray[float64],
         obs: Array3xN,
+        par: bool = False,
     ) -> None:
         self._solver.build(
             _3tup_contig(xyzfil),
             _3tup_contig(dlxyzfil),
             ascontiguousarray(wire_radius, dtype=float64).ravel(),
             _3tup_contig(obs),
+            par,
         )
 
-    def build_sources(self, xyzfil: Array3xN, dlxyzfil: Array3xN, wire_radius: NDArray[float64]) -> None:
+    def build_sources(
+        self,
+        xyzfil: Array3xN,
+        dlxyzfil: Array3xN,
+        wire_radius: NDArray[float64],
+        par: bool = False,
+    ) -> None:
         self._solver.build_sources(
             _3tup_contig(xyzfil),
             _3tup_contig(dlxyzfil),
             ascontiguousarray(wire_radius, dtype=float64).ravel(),
+            par,
         )
 
-    def update_sources(self, xyzfil: Array3xN, dlxyzfil: Array3xN, wire_radius: NDArray[float64]) -> None:
-        self.build_sources(xyzfil, dlxyzfil, wire_radius)
+    def update_sources(
+        self,
+        xyzfil: Array3xN,
+        dlxyzfil: Array3xN,
+        wire_radius: NDArray[float64],
+        par: bool = False,
+    ) -> None:
+        self.build_sources(xyzfil, dlxyzfil, wire_radius, par)
 
-    def build_targets(self, obs: Array3xN) -> None:
-        self._solver.build_targets(_3tup_contig(obs))
+    def build_targets(self, obs: Array3xN, par: bool = False) -> None:
+        self._solver.build_targets(_3tup_contig(obs), par)
 
-    def update_targets(self, obs: Array3xN) -> None:
-        self.build_targets(obs)
+    def update_targets(self, obs: Array3xN, par: bool = False) -> None:
+        self.build_targets(obs, par)
 
-    def build_plan(self) -> None:
-        self._solver.build_plan()
+    def build_plan(self, par: bool = False) -> None:
+        self._solver.build_plan(par)
+
+    def interaction_counts(self) -> tuple[int, int, int]:
+        return self._solver.interaction_counts()  # type: ignore
 
     def flux_density(self, current: NDArray[float64], par: bool = False) -> Array3xN:
         current = ascontiguousarray(current, dtype=float64).ravel()
@@ -1358,45 +1398,64 @@ class HierarchicalBoundaryElements:
 
     def __init__(
         self,
-        theta: float = 0.7,
-        source_leaf_size: int = 16,
-        target_leaf_size: int = 16,
+        theta: float = 0.1,
+        source_leaf_size: int = 1,
+        target_leaf_size: int = 1,
         num_chunks: int = 1,
         quad: str = "dunavant3",
+        construction_method: str = "morton_lbvh",
     ) -> None:
         self._solver = _HierarchicalBoundaryElements(
-            theta, source_leaf_size, target_leaf_size, num_chunks, quad
+            theta, source_leaf_size, target_leaf_size, num_chunks, quad, construction_method
         )
         self._triangles: NDArray[int64] | None = None
 
-    def build(self, nodes: NDArray[float64], triangles: NDArray[int64], obs: Array3xN) -> None:
+    def build(
+        self,
+        nodes: NDArray[float64],
+        triangles: NDArray[int64],
+        obs: Array3xN,
+        par: bool = False,
+    ) -> None:
         triangles = ascontiguousarray(triangles, dtype=int64)
         self._triangles = triangles
         self._solver.build(
             ascontiguousarray(nodes, dtype=float64),
             triangles,
             _3tup_contig(obs),
+            par,
         )
 
-    def build_sources(self, nodes: NDArray[float64], triangles: NDArray[int64]) -> None:
+    def build_sources(
+        self,
+        nodes: NDArray[float64],
+        triangles: NDArray[int64],
+        par: bool = False,
+    ) -> None:
         triangles = ascontiguousarray(triangles, dtype=int64)
         self._triangles = triangles
         self._solver.build_sources(
             ascontiguousarray(nodes, dtype=float64),
             triangles,
+            par,
         )
 
-    def update_sources(self, nodes: NDArray[float64], triangles: NDArray[int64]) -> None:
-        self.build_sources(nodes, triangles)
+    def update_sources(
+        self,
+        nodes: NDArray[float64],
+        triangles: NDArray[int64],
+        par: bool = False,
+    ) -> None:
+        self.build_sources(nodes, triangles, par)
 
-    def build_targets(self, obs: Array3xN) -> None:
-        self._solver.build_targets(_3tup_contig(obs))
+    def build_targets(self, obs: Array3xN, par: bool = False) -> None:
+        self._solver.build_targets(_3tup_contig(obs), par)
 
-    def update_targets(self, obs: Array3xN) -> None:
-        self.build_targets(obs)
+    def update_targets(self, obs: Array3xN, par: bool = False) -> None:
+        self.build_targets(obs, par)
 
-    def build_plan(self) -> None:
-        self._solver.build_plan()
+    def build_plan(self, par: bool = False) -> None:
+        self._solver.build_plan(par)
 
     def flux_density(self, s: NDArray[float64] | Array3xN, par: bool = False) -> Array3xN:
         return self._solver.flux_density(self._source_values(s), par)  # type: ignore

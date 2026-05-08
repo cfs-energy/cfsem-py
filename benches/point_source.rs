@@ -86,6 +86,7 @@ where
             HIERARCHICAL_LEAF_SIZE,
             HIERARCHICAL_THETA,
             HIERARCHICAL_NUM_CHUNKS,
+            false,
         )
         .unwrap();
 

@@ -1,4 +1,5 @@
 use super::{BoundedGeometry, ClusterTree, ClusterTreeView, DualTreeError, DualTreeScalar};
+use rayon::prelude::*;
 
 /// One target-owned chunk of a finalized dual interaction plan.
 #[derive(Clone, Debug)]
@@ -40,9 +41,10 @@ impl<T: DualTreeScalar> DualInteractionPlan<T> {
         target_leaf_size: usize,
         theta: T,
         num_chunks: usize,
+        par: bool,
     ) -> Result<Self, DualTreeError>
     where
-        G: BoundedGeometry<Scalar = T>,
+        G: BoundedGeometry<Scalar = T> + Sync,
     {
         if theta < T::ZERO {
             return Err(DualTreeError::InvalidTheta);
@@ -56,29 +58,35 @@ impl<T: DualTreeScalar> DualInteractionPlan<T> {
 
         let chunk_count = num_chunks.min(targets.len());
         let target_chunk_size = targets.len().div_ceil(chunk_count);
-        let mut chunks = Vec::with_capacity(chunk_count);
-
-        for chunk_id in 0..chunk_count {
-            let target_start = chunk_id * target_chunk_size;
-            if target_start >= targets.len() {
-                break;
+        let chunks = match par {
+            true => (0..chunk_count)
+                .into_par_iter()
+                .map(|chunk_id| {
+                    build_plan_chunk(
+                        source_tree,
+                        targets,
+                        target_leaf_size,
+                        theta,
+                        target_chunk_size,
+                        chunk_id,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            false => {
+                let mut chunks = Vec::with_capacity(chunk_count);
+                for chunk_id in 0..chunk_count {
+                    chunks.push(build_plan_chunk(
+                        source_tree,
+                        targets,
+                        target_leaf_size,
+                        theta,
+                        target_chunk_size,
+                        chunk_id,
+                    )?);
+                }
+                chunks
             }
-            let target_end = (target_start + target_chunk_size).min(targets.len());
-            let target_tree =
-                ClusterTree::build(&targets[target_start..target_end], target_leaf_size)?;
-            let mut chunk = DualInteractionPlanChunk {
-                target_start,
-                target_count: target_end - target_start,
-                target_tree,
-                near_target_ids: Vec::new(),
-                near_source_ids: Vec::new(),
-                far_target_node_ids: Vec::new(),
-                far_source_node_ids: Vec::new(),
-            };
-            build_chunk_pairs(&mut chunk, source_tree, theta);
-            chunk.sort_pairs();
-            chunks.push(chunk);
-        }
+        };
 
         let mut near_target_ids = Vec::new();
         let mut near_source_ids = Vec::new();
@@ -114,6 +122,35 @@ impl<T: DualTreeScalar> DualInteractionPlan<T> {
             target_chunk_size: self.target_chunk_size,
         }
     }
+}
+
+fn build_plan_chunk<T, G>(
+    source_tree: ClusterTreeView<'_, T>,
+    targets: &[G],
+    target_leaf_size: usize,
+    theta: T,
+    target_chunk_size: usize,
+    chunk_id: usize,
+) -> Result<DualInteractionPlanChunk<T>, DualTreeError>
+where
+    T: DualTreeScalar,
+    G: BoundedGeometry<Scalar = T>,
+{
+    let target_start = chunk_id * target_chunk_size;
+    let target_end = (target_start + target_chunk_size).min(targets.len());
+    let target_tree = ClusterTree::build(&targets[target_start..target_end], target_leaf_size)?;
+    let mut chunk = DualInteractionPlanChunk {
+        target_start,
+        target_count: target_end - target_start,
+        target_tree,
+        near_target_ids: Vec::new(),
+        near_source_ids: Vec::new(),
+        far_target_node_ids: Vec::new(),
+        far_source_node_ids: Vec::new(),
+    };
+    build_chunk_pairs(&mut chunk, source_tree, theta);
+    chunk.sort_pairs();
+    Ok(chunk)
 }
 
 impl<T: DualTreeScalar> DualInteractionPlanChunk<T> {

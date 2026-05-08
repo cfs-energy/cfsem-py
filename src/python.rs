@@ -110,6 +110,46 @@ fn py_dual_tree_error(context: &str, error: physics::hierarchical::DualTreeError
     .into()
 }
 
+#[derive(Clone, Copy)]
+enum HierarchicalConstructionMethod {
+    Recursive,
+    MortonLbvh,
+}
+
+fn parse_hierarchical_construction_method(
+    construction_method: &str,
+) -> PyResult<HierarchicalConstructionMethod> {
+    match construction_method {
+        "recursive" => Ok(HierarchicalConstructionMethod::Recursive),
+        "morton_lbvh" | "morton-lbvh" | "lbvh" => Ok(HierarchicalConstructionMethod::MortonLbvh),
+        _ => Err(PyInteropError::ValueError {
+            msg: format!(
+                "Unsupported hierarchical construction method: {construction_method}. \
+                 Expected 'recursive' or 'morton_lbvh'."
+            ),
+        }
+        .into()),
+    }
+}
+
+fn build_hierarchical_source_tree<G>(
+    sources: &[G],
+    leaf_size: usize,
+    construction_method: HierarchicalConstructionMethod,
+) -> Result<physics::hierarchical::ClusterTree<f64>, physics::hierarchical::DualTreeError>
+where
+    G: physics::hierarchical::BoundedGeometry<Scalar = f64>,
+{
+    match construction_method {
+        HierarchicalConstructionMethod::Recursive => {
+            physics::hierarchical::ClusterTree::build(sources, leaf_size)
+        }
+        HierarchicalConstructionMethod::MortonLbvh => {
+            physics::hierarchical::ClusterTree::build_morton_lbvh(sources, leaf_size)
+        }
+    }
+}
+
 fn read_xyz_tuple(
     xyz: (
         PyReadonlyArray1<f64>,
@@ -420,6 +460,7 @@ struct HierarchicalDipoles {
     source_leaf_size: usize,
     target_leaf_size: usize,
     num_chunks: usize,
+    construction_method: HierarchicalConstructionMethod,
     sources: Vec<physics::hierarchical::kernels::DipoleSource<f64>>,
     targets: Vec<physics::hierarchical::kernels::DipoleTarget<f64>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
@@ -429,26 +470,28 @@ struct HierarchicalDipoles {
 #[pymethods]
 impl HierarchicalDipoles {
     #[new]
-    #[pyo3(signature = (theta=0.7, source_leaf_size=16, target_leaf_size=16, num_chunks=1))]
+    #[pyo3(signature = (theta=0.1, source_leaf_size=1, target_leaf_size=1, num_chunks=1, construction_method="morton_lbvh"))]
     fn new(
         theta: f64,
         source_leaf_size: usize,
         target_leaf_size: usize,
         num_chunks: usize,
-    ) -> Self {
-        Self {
+        construction_method: &str,
+    ) -> PyResult<Self> {
+        Ok(Self {
             theta,
             source_leaf_size,
             target_leaf_size,
             num_chunks,
+            construction_method: parse_hierarchical_construction_method(construction_method)?,
             sources: Vec::new(),
             targets: Vec::new(),
             source_tree: None,
             plan: None,
-        }
+        })
     }
 
-    #[pyo3(signature = (loc, obs, outer_radius))]
+    #[pyo3(signature = (loc, obs, outer_radius, par=false))]
     fn build(
         &mut self,
         loc: (
@@ -462,12 +505,13 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
         ),
         outer_radius: PyReadonlyArray1<f64>,
+        par: bool,
     ) -> PyResult<()> {
         self.targets = build_dipole_targets(obs)?;
-        self.build_sources(loc, outer_radius)
+        self.build_sources(loc, outer_radius, par)
     }
 
-    #[pyo3(signature = (obs))]
+    #[pyo3(signature = (obs, par=false))]
     fn build_targets(
         &mut self,
         obs: (
@@ -475,12 +519,13 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
         self.targets = build_dipole_targets(obs)?;
-        self.rebuild_plan()
+        self.rebuild_plan(par)
     }
 
-    #[pyo3(signature = (obs))]
+    #[pyo3(signature = (obs, par=false))]
     fn update_targets(
         &mut self,
         obs: (
@@ -488,11 +533,12 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
-        self.build_targets(obs)
+        self.build_targets(obs, par)
     }
 
-    #[pyo3(signature = (loc, outer_radius))]
+    #[pyo3(signature = (loc, outer_radius, par=false))]
     fn build_sources(
         &mut self,
         loc: (
@@ -501,19 +547,21 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
         ),
         outer_radius: PyReadonlyArray1<f64>,
+        par: bool,
     ) -> PyResult<()> {
         self.sources = build_dipole_sources(loc, outer_radius)?;
         self.source_tree = Some(
-            physics::hierarchical::ClusterTree::build_morton_lbvh(
+            build_hierarchical_source_tree(
                 &self.sources,
                 self.source_leaf_size,
+                self.construction_method,
             )
             .map_err(|err| py_dual_tree_error("source tree build", err))?,
         );
-        self.rebuild_plan()
+        self.rebuild_plan(par)
     }
 
-    #[pyo3(signature = (loc, outer_radius))]
+    #[pyo3(signature = (loc, outer_radius, par=false))]
     fn update_sources(
         &mut self,
         loc: (
@@ -522,12 +570,14 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
         ),
         outer_radius: PyReadonlyArray1<f64>,
+        par: bool,
     ) -> PyResult<()> {
-        self.build_sources(loc, outer_radius)
+        self.build_sources(loc, outer_radius, par)
     }
 
-    fn build_plan(&mut self) -> PyResult<()> {
-        self.rebuild_plan()
+    #[pyo3(signature = (par=false))]
+    fn build_plan(&mut self, par: bool) -> PyResult<()> {
+        self.rebuild_plan(par)
     }
 
     #[pyo3(signature = (moment, par=false))]
@@ -602,7 +652,7 @@ impl HierarchicalDipoles {
 }
 
 impl HierarchicalDipoles {
-    fn rebuild_plan(&mut self) -> PyResult<()> {
+    fn rebuild_plan(&mut self, par: bool) -> PyResult<()> {
         if self.sources.is_empty() || self.targets.is_empty() {
             self.plan = None;
             return Ok(());
@@ -620,6 +670,7 @@ impl HierarchicalDipoles {
                 self.target_leaf_size,
                 self.theta,
                 self.num_chunks,
+                par,
             )
             .map_err(|err| py_dual_tree_error("plan build", err))?,
         );
@@ -698,6 +749,7 @@ struct HierarchicalLinearFilaments {
     source_leaf_size: usize,
     target_leaf_size: usize,
     num_chunks: usize,
+    construction_method: HierarchicalConstructionMethod,
     sources: Vec<physics::hierarchical::kernels::LinearFilamentSource<f64>>,
     targets: Vec<physics::hierarchical::kernels::DipoleTarget<f64>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
@@ -707,26 +759,28 @@ struct HierarchicalLinearFilaments {
 #[pymethods]
 impl HierarchicalLinearFilaments {
     #[new]
-    #[pyo3(signature = (theta=0.7, source_leaf_size=16, target_leaf_size=16, num_chunks=1))]
+    #[pyo3(signature = (theta=0.1, source_leaf_size=1, target_leaf_size=1, num_chunks=1, construction_method="morton_lbvh"))]
     fn new(
         theta: f64,
         source_leaf_size: usize,
         target_leaf_size: usize,
         num_chunks: usize,
-    ) -> Self {
-        Self {
+        construction_method: &str,
+    ) -> PyResult<Self> {
+        Ok(Self {
             theta,
             source_leaf_size,
             target_leaf_size,
             num_chunks,
+            construction_method: parse_hierarchical_construction_method(construction_method)?,
             sources: Vec::new(),
             targets: Vec::new(),
             source_tree: None,
             plan: None,
-        }
+        })
     }
 
-    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, obs))]
+    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, obs, par=false))]
     fn build(
         &mut self,
         xyzfil: (
@@ -745,12 +799,13 @@ impl HierarchicalLinearFilaments {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
         self.targets = build_dipole_targets(obs)?;
-        self.build_sources(xyzfil, dlxyzfil, wire_radius)
+        self.build_sources(xyzfil, dlxyzfil, wire_radius, par)
     }
 
-    #[pyo3(signature = (obs))]
+    #[pyo3(signature = (obs, par=false))]
     fn build_targets(
         &mut self,
         obs: (
@@ -758,12 +813,13 @@ impl HierarchicalLinearFilaments {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
         self.targets = build_dipole_targets(obs)?;
-        self.rebuild_plan()
+        self.rebuild_plan(par)
     }
 
-    #[pyo3(signature = (obs))]
+    #[pyo3(signature = (obs, par=false))]
     fn update_targets(
         &mut self,
         obs: (
@@ -771,11 +827,12 @@ impl HierarchicalLinearFilaments {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
-        self.build_targets(obs)
+        self.build_targets(obs, par)
     }
 
-    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius))]
+    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, par=false))]
     fn build_sources(
         &mut self,
         xyzfil: (
@@ -789,19 +846,21 @@ impl HierarchicalLinearFilaments {
             PyReadonlyArray1<f64>,
         ),
         wire_radius: PyReadonlyArray1<f64>,
+        par: bool,
     ) -> PyResult<()> {
         self.sources = build_linear_filament_sources(xyzfil, dlxyzfil, wire_radius)?;
         self.source_tree = Some(
-            physics::hierarchical::ClusterTree::build_morton_lbvh(
+            build_hierarchical_source_tree(
                 &self.sources,
                 self.source_leaf_size,
+                self.construction_method,
             )
             .map_err(|err| py_dual_tree_error("source tree build", err))?,
         );
-        self.rebuild_plan()
+        self.rebuild_plan(par)
     }
 
-    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius))]
+    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, par=false))]
     fn update_sources(
         &mut self,
         xyzfil: (
@@ -815,12 +874,26 @@ impl HierarchicalLinearFilaments {
             PyReadonlyArray1<f64>,
         ),
         wire_radius: PyReadonlyArray1<f64>,
+        par: bool,
     ) -> PyResult<()> {
-        self.build_sources(xyzfil, dlxyzfil, wire_radius)
+        self.build_sources(xyzfil, dlxyzfil, wire_radius, par)
     }
 
-    fn build_plan(&mut self) -> PyResult<()> {
-        self.rebuild_plan()
+    #[pyo3(signature = (par=false))]
+    fn build_plan(&mut self, par: bool) -> PyResult<()> {
+        self.rebuild_plan(par)
+    }
+
+    fn interaction_counts(&self) -> PyResult<(usize, usize, usize)> {
+        let plan = self
+            .plan
+            .as_ref()
+            .ok_or_else(|| PyInteropError::ValueError {
+                msg: "targets have not been built, so no interaction plan is available".to_string(),
+            })?;
+        let near = plan.near_source_ids.len();
+        let far = plan.far_source_node_ids.len();
+        Ok((near, far, near + far))
     }
 
     #[pyo3(signature = (current, par=false))]
@@ -847,7 +920,7 @@ impl HierarchicalLinearFilaments {
 }
 
 impl HierarchicalLinearFilaments {
-    fn rebuild_plan(&mut self) -> PyResult<()> {
+    fn rebuild_plan(&mut self, par: bool) -> PyResult<()> {
         if self.sources.is_empty() || self.targets.is_empty() {
             self.plan = None;
             return Ok(());
@@ -865,6 +938,7 @@ impl HierarchicalLinearFilaments {
                 self.target_leaf_size,
                 self.theta,
                 self.num_chunks,
+                par,
             )
             .map_err(|err| py_dual_tree_error("plan build", err))?,
         );
@@ -935,6 +1009,7 @@ struct HierarchicalBoundaryElements {
     source_leaf_size: usize,
     target_leaf_size: usize,
     num_chunks: usize,
+    construction_method: HierarchicalConstructionMethod,
     quad_kind: physics::boundary_element::QuadratureKind,
     sources: Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>,
     targets: Vec<physics::hierarchical::kernels::DipoleTarget<f64>>,
@@ -945,19 +1020,21 @@ struct HierarchicalBoundaryElements {
 #[pymethods]
 impl HierarchicalBoundaryElements {
     #[new]
-    #[pyo3(signature = (theta=0.7, source_leaf_size=16, target_leaf_size=16, num_chunks=1, quad="dunavant3"))]
+    #[pyo3(signature = (theta=0.1, source_leaf_size=1, target_leaf_size=1, num_chunks=1, quad="dunavant3", construction_method="morton_lbvh"))]
     fn new(
         theta: f64,
         source_leaf_size: usize,
         target_leaf_size: usize,
         num_chunks: usize,
         quad: &str,
+        construction_method: &str,
     ) -> PyResult<Self> {
         Ok(Self {
             theta,
             source_leaf_size,
             target_leaf_size,
             num_chunks,
+            construction_method: parse_hierarchical_construction_method(construction_method)?,
             quad_kind: parse_triangle_quadrature(quad)?,
             sources: Vec::new(),
             targets: Vec::new(),
@@ -966,7 +1043,7 @@ impl HierarchicalBoundaryElements {
         })
     }
 
-    #[pyo3(signature = (nodes, triangles, obs))]
+    #[pyo3(signature = (nodes, triangles, obs, par=false))]
     fn build(
         &mut self,
         nodes: PyReadonlyArray2<f64>,
@@ -976,12 +1053,13 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
         self.targets = build_dipole_targets(obs)?;
-        self.build_sources(nodes, triangles)
+        self.build_sources(nodes, triangles, par)
     }
 
-    #[pyo3(signature = (obs))]
+    #[pyo3(signature = (obs, par=false))]
     fn build_targets(
         &mut self,
         obs: (
@@ -989,12 +1067,13 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
         self.targets = build_dipole_targets(obs)?;
-        self.rebuild_plan()
+        self.rebuild_plan(par)
     }
 
-    #[pyo3(signature = (obs))]
+    #[pyo3(signature = (obs, par=false))]
     fn update_targets(
         &mut self,
         obs: (
@@ -1002,38 +1081,43 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
+        par: bool,
     ) -> PyResult<()> {
-        self.build_targets(obs)
+        self.build_targets(obs, par)
     }
 
-    #[pyo3(signature = (nodes, triangles))]
+    #[pyo3(signature = (nodes, triangles, par=false))]
     fn build_sources(
         &mut self,
         nodes: PyReadonlyArray2<f64>,
         triangles: PyReadonlyArray2<i64>,
+        par: bool,
     ) -> PyResult<()> {
         self.sources = build_boundary_element_sources(nodes, triangles)?;
         self.source_tree = Some(
-            physics::hierarchical::ClusterTree::build_morton_lbvh(
+            build_hierarchical_source_tree(
                 &self.sources,
                 self.source_leaf_size,
+                self.construction_method,
             )
             .map_err(|err| py_dual_tree_error("source tree build", err))?,
         );
-        self.rebuild_plan()
+        self.rebuild_plan(par)
     }
 
-    #[pyo3(signature = (nodes, triangles))]
+    #[pyo3(signature = (nodes, triangles, par=false))]
     fn update_sources(
         &mut self,
         nodes: PyReadonlyArray2<f64>,
         triangles: PyReadonlyArray2<i64>,
+        par: bool,
     ) -> PyResult<()> {
-        self.build_sources(nodes, triangles)
+        self.build_sources(nodes, triangles, par)
     }
 
-    fn build_plan(&mut self) -> PyResult<()> {
-        self.rebuild_plan()
+    #[pyo3(signature = (par=false))]
+    fn build_plan(&mut self, par: bool) -> PyResult<()> {
+        self.rebuild_plan(par)
     }
 
     #[pyo3(signature = (current_density, par=false))]
@@ -1068,7 +1152,7 @@ impl HierarchicalBoundaryElements {
 }
 
 impl HierarchicalBoundaryElements {
-    fn rebuild_plan(&mut self) -> PyResult<()> {
+    fn rebuild_plan(&mut self, par: bool) -> PyResult<()> {
         if self.sources.is_empty() || self.targets.is_empty() {
             self.plan = None;
             return Ok(());
@@ -1086,6 +1170,7 @@ impl HierarchicalBoundaryElements {
                 self.target_leaf_size,
                 self.theta,
                 self.num_chunks,
+                par,
             )
             .map_err(|err| py_dual_tree_error("plan build", err))?,
         );

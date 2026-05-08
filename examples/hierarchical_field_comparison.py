@@ -1,0 +1,468 @@
+from __future__ import annotations
+
+import os
+import time
+from dataclasses import dataclass
+
+import numpy as np
+
+import cfsem
+
+GRID_N = 124 if os.getenv("CFSEM_TESTING") else 228
+DEFAULT_SOURCE_COUNT = 63 if os.getenv("CFSEM_TESTING") else 159
+MIN_SOURCE_COUNT = 8
+MAX_SOURCE_COUNT = 255 if os.getenv("CFSEM_TESTING") else 100_000
+CURRENT = 1.0
+WIRE_RADIUS = 0.015
+HELICAL_WIRE_RADIUS = 0.055
+DEFAULT_THETA = 0.1
+DEFAULT_NUM_CHUNKS = 4
+DEFAULT_LEAF_SIZE = 1
+LOG10_MIN_SOURCE_COUNT = float(np.log10(MIN_SOURCE_COUNT))
+LOG10_DEFAULT_SOURCE_COUNT = float(np.log10(DEFAULT_SOURCE_COUNT))
+LOG10_MAX_SOURCE_COUNT = float(np.log10(MAX_SOURCE_COUNT))
+MAX_PLOTTED_PATH_POINTS = 400
+
+
+@dataclass(frozen=True)
+class Geometry:
+    centerline: np.ndarray
+    helix: np.ndarray
+    xyzfil: tuple[np.ndarray, np.ndarray, np.ndarray]
+    dlxyzfil: tuple[np.ndarray, np.ndarray, np.ndarray]
+    current: np.ndarray
+    wire_radius: np.ndarray
+    obs: tuple[np.ndarray, np.ndarray, np.ndarray]
+    obs_grid: tuple[np.ndarray, np.ndarray]
+    extent: float
+
+
+def circular_centerline(radius: float, n: int) -> np.ndarray:
+    theta = np.linspace(0.0, np.pi, n, endpoint=True)
+    return np.vstack((radius * np.cos(theta), np.zeros_like(theta), radius * np.sin(theta)))
+
+
+def section_observation_plane(
+    extent: float,
+    n: int,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+    x = np.linspace(-extent, extent, n)
+    z = np.linspace(-extent, extent, n)
+    xg, zg = np.meshgrid(x, z, indexing="xy")
+    yg = np.zeros_like(xg)
+    return (xg.ravel(), yg.ravel(), zg.ravel()), (xg, zg)
+
+
+def build_geometry(case: str, n_centerline: int, grid_n: int) -> Geometry:
+    if case == "tight":
+        center_radius = 0.65
+        helix_radius = HELICAL_WIRE_RADIUS
+        twist_pitch = 0.28
+    elif case == "wide":
+        center_radius = 0.8
+        helix_radius = 0.075
+        twist_pitch = 0.45
+    else:
+        center_radius = 0.7
+        helix_radius = HELICAL_WIRE_RADIUS
+        twist_pitch = 0.36
+
+    centerline = circular_centerline(center_radius, n_centerline)
+    helix = np.asarray(
+        cfsem.filament_helix_path(
+            path=centerline,
+            helix_start_offset=(0.0, helix_radius, 0.0),
+            twist_pitch=twist_pitch,
+            angle_offset=0.0,
+        )
+    )
+    starts = helix[:, :-1].T
+    ends = helix[:, 1:].T
+    dl = ends - starts
+    xyzfil = (starts[:, 0], starts[:, 1], starts[:, 2])
+    dlxyzfil = (dl[:, 0], dl[:, 1], dl[:, 2])
+    current = np.full(starts.shape[0], CURRENT)
+    wire_radius = np.full(starts.shape[0], WIRE_RADIUS)
+    extent = 4.0 * (center_radius + 3.0 * helix_radius)
+    obs, obs_grid = section_observation_plane(extent, grid_n)
+    return Geometry(centerline, helix, xyzfil, dlxyzfil, current, wire_radius, obs, obs_grid, extent)
+
+
+def source_count_from_log10(log10_source_count: float) -> int:
+    count = int(round(10.0 ** float(log10_source_count)))
+    return max(MIN_SOURCE_COUNT, min(MAX_SOURCE_COUNT, count))
+
+
+def field_magnitude(field: tuple[np.ndarray, np.ndarray, np.ndarray]) -> np.ndarray:
+    return np.sqrt(field[0] * field[0] + field[1] * field[1] + field[2] * field[2])
+
+
+def relative_error(
+    hierarchical: tuple[np.ndarray, np.ndarray, np.ndarray],
+    direct: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> np.ndarray:
+    err = field_magnitude(
+        (
+            hierarchical[0] - direct[0],
+            hierarchical[1] - direct[1],
+            hierarchical[2] - direct[2],
+        )
+    )
+    ref = np.maximum(field_magnitude(direct), 1e-30)
+    return err / ref
+
+
+def solve_fields(
+    geometry: Geometry,
+    construction_method: str,
+    theta: float,
+    num_chunks: int,
+    source_leaf_size: int,
+    target_leaf_size: int,
+    build_par: bool,
+    par: bool,
+) -> dict[str, object]:
+    direct_build_time = 0.0
+
+    t0 = time.perf_counter()
+    direct_b = cfsem.flux_density_linear_filament(
+        geometry.obs,
+        geometry.xyzfil,
+        geometry.dlxyzfil,
+        geometry.current,
+        geometry.wire_radius,
+        par=par,
+    )
+    direct_a = cfsem.vector_potential_linear_filament(
+        geometry.obs,
+        geometry.xyzfil,
+        geometry.dlxyzfil,
+        geometry.current,
+        geometry.wire_radius,
+        par=par,
+    )
+    direct_time = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    solver = cfsem.HierarchicalLinearFilaments(
+        theta=theta,
+        source_leaf_size=source_leaf_size,
+        target_leaf_size=target_leaf_size,
+        num_chunks=max(1, int(num_chunks)),
+        construction_method=construction_method,
+    )
+    solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, geometry.obs, par=build_par)
+    build_time = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    hierarchical_b = solver.flux_density(geometry.current, par=par)
+    hierarchical_a = solver.vector_potential(geometry.current, par=par)
+    eval_time = time.perf_counter() - t0
+
+    return {
+        "direct_b": direct_b,
+        "direct_a": direct_a,
+        "direct_build_time": direct_build_time,
+        "hierarchical_b": hierarchical_b,
+        "hierarchical_a": hierarchical_a,
+        "direct_time": direct_time,
+        "build_time": build_time,
+        "eval_time": eval_time,
+        "source_target_interactions": geometry.current.size * geometry.obs[0].size,
+    }
+
+
+def heatmap_values(values: np.ndarray, geometry: Geometry) -> np.ndarray:
+    return values.reshape(geometry.obs_grid[0].shape)
+
+
+def decimate_path_for_plot(path: np.ndarray, max_points: int = MAX_PLOTTED_PATH_POINTS) -> np.ndarray:
+    if path.shape[1] <= max_points:
+        return path
+    step = max(1, int(np.ceil(path.shape[1] / max_points)))
+    decimated = path[:, ::step]
+    if decimated.shape[1] == 0 or not np.array_equal(decimated[:, -1], path[:, -1]):
+        decimated = np.column_stack((decimated, path[:, -1]))
+    return decimated
+
+
+def make_figure(
+    geometry: Geometry,
+    results: dict[str, object],
+    field: str,
+    show_error: bool,
+):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    direct = results[f"direct_{field}"]
+    hierarchical = results[f"hierarchical_{field}"]
+    assert isinstance(direct, tuple)
+    assert isinstance(hierarchical, tuple)
+
+    left = np.log10(np.maximum(field_magnitude(direct), 1e-30))
+    middle = np.log10(np.maximum(field_magnitude(hierarchical), 1e-30))
+    right = np.log10(np.maximum(relative_error(hierarchical, direct), 1e-16)) if show_error else middle - left
+    right_title = "log10 relative error" if show_error else "log10 magnitude difference"
+
+    fig = make_subplots(
+        rows=1,
+        cols=3,
+        subplot_titles=("Direct", "Hierarchical", right_title),
+        horizontal_spacing=0.055,
+    )
+    xg, zg = geometry.obs_grid
+    centerline_plot = decimate_path_for_plot(geometry.centerline)
+    helix_plot = decimate_path_for_plot(geometry.helix)
+    traces = [
+        (left, "log10 |direct|"),
+        (middle, "log10 |hierarchical|"),
+        (right, right_title),
+    ]
+    for col, (values, title) in enumerate(traces, start=1):
+        fig.add_trace(
+            go.Heatmap(
+                x=xg[0, :],
+                y=zg[:, 0],
+                z=heatmap_values(values, geometry),
+                showscale=col == 3,
+                colorbar={"title": title} if col == 3 else None,
+                colorscale="Viridis" if col < 3 else "RdBu",
+            ),
+            row=1,
+            col=col,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=centerline_plot[0],
+                y=centerline_plot[2],
+                mode="lines",
+                line={"color": "white", "width": 2, "dash": "dash"},
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=1,
+            col=col,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=helix_plot[0],
+                y=helix_plot[2],
+                mode="lines",
+                line={"color": "black", "width": 1},
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=1,
+            col=col,
+        )
+
+    for axis in fig.select_xaxes():
+        axis.update(title="x [m]", scaleanchor=None)
+    for axis in fig.select_yaxes():
+        axis.update(title="z [m]", scaleanchor="x")
+    fig.update_layout(
+        template="plotly_white",
+        height=720,
+        margin={"l": 40, "r": 40, "t": 70, "b": 40},
+        title=f"{'B-field' if field == 'b' else 'A-field'} comparison on the centerline plane",
+    )
+    return fig
+
+
+def make_app():
+    from dash import Dash, Input, Output, dcc, html
+
+    app = Dash(__name__)
+    sidebar_style = {
+        "width": "320px",
+        "minWidth": "320px",
+        "height": "100vh",
+        "overflowY": "auto",
+        "padding": "16px",
+        "borderRight": "1px solid #d9dde3",
+        "boxSizing": "border-box",
+        "background": "#f7f8fa",
+    }
+    content_style = {
+        "flex": "1 1 auto",
+        "minWidth": "0",
+    }
+    app.layout = html.Div(
+        [
+            html.Div(
+                [
+                    html.Label("Geometry"),
+                    dcc.Dropdown(
+                        id="geometry",
+                        value="standard",
+                        clearable=False,
+                        options=[
+                            {"label": "Standard circular helix", "value": "standard"},
+                            {"label": "Tighter pitch", "value": "tight"},
+                            {"label": "Wider helix", "value": "wide"},
+                        ],
+                    ),
+                    html.Label("Construction"),
+                    dcc.Dropdown(
+                        id="construction",
+                        value="morton_lbvh",
+                        clearable=False,
+                        options=[
+                            {"label": "Morton/LBVH source tree", "value": "morton_lbvh"},
+                            {"label": "Recursive source tree", "value": "recursive"},
+                        ],
+                    ),
+                    html.Label("Field"),
+                    dcc.RadioItems(
+                        id="field",
+                        value="b",
+                        inline=True,
+                        options=[
+                            {"label": "B", "value": "b"},
+                            {"label": "A", "value": "a"},
+                        ],
+                    ),
+                    html.Label("Theta"),
+                    dcc.Slider(
+                        id="theta",
+                        min=0.0,
+                        max=0.7,
+                        step=0.01,
+                        value=DEFAULT_THETA,
+                        marks={round(i * 0.1, 1): f"{i * 0.1:.1f}" for i in range(8)},
+                    ),
+                    html.Label("Source leaf size"),
+                    dcc.Input(
+                        id="source-leaf-size",
+                        type="text",
+                        value=str(DEFAULT_LEAF_SIZE),
+                        debounce=True,
+                        style={"width": "100%", "boxSizing": "border-box"},
+                    ),
+                    html.Label("Target leaf size"),
+                    dcc.Input(
+                        id="target-leaf-size",
+                        type="text",
+                        value=str(DEFAULT_LEAF_SIZE),
+                        debounce=True,
+                        style={"width": "100%", "boxSizing": "border-box"},
+                    ),
+                    html.Label("Target chunks"),
+                    dcc.Slider(
+                        id="num-chunks",
+                        min=1,
+                        max=12,
+                        step=1,
+                        value=DEFAULT_NUM_CHUNKS,
+                        marks={1: "1", 4: "4", 8: "8", 12: "12"},
+                    ),
+                    html.Label("Sources"),
+                    dcc.Slider(
+                        id="source-count",
+                        min=LOG10_MIN_SOURCE_COUNT,
+                        max=LOG10_MAX_SOURCE_COUNT,
+                        step=0.01,
+                        value=LOG10_DEFAULT_SOURCE_COUNT,
+                        marks={
+                            LOG10_MIN_SOURCE_COUNT: f"{MIN_SOURCE_COUNT}",
+                            LOG10_DEFAULT_SOURCE_COUNT: f"{DEFAULT_SOURCE_COUNT}",
+                            LOG10_MAX_SOURCE_COUNT: f"{MAX_SOURCE_COUNT:.0E}",
+                        },
+                    ),
+                    dcc.Checklist(
+                        id="options",
+                        value=["parallel", "relative-error"],
+                        options=[
+                            {"label": "Parallel build", "value": "parallel-build"},
+                            {"label": "Parallel evaluation", "value": "parallel"},
+                            {"label": "Show relative error", "value": "relative-error"},
+                        ],
+                    ),
+                ],
+                style=sidebar_style,
+            ),
+            html.Div(
+                [
+                    dcc.Graph(id="field-figure", config={"responsive": True}),
+                    html.Div(
+                        id="timing",
+                        style={
+                            "fontFamily": "monospace",
+                            "padding": "0 16px 16px",
+                            "whiteSpace": "pre",
+                        },
+                    ),
+                ],
+                style=content_style,
+            ),
+        ],
+        style={
+            "fontFamily": "system-ui, sans-serif",
+            "display": "flex",
+            "minHeight": "100vh",
+        },
+    )
+
+    @app.callback(
+        Output("field-figure", "figure"),
+        Output("timing", "children"),
+        Input("geometry", "value"),
+        Input("construction", "value"),
+        Input("field", "value"),
+        Input("theta", "value"),
+        Input("source-leaf-size", "value"),
+        Input("target-leaf-size", "value"),
+        Input("num-chunks", "value"),
+        Input("source-count", "value"),
+        Input("options", "value"),
+    )
+    def update(
+        case,
+        construction,
+        field,
+        theta,
+        source_leaf_size,
+        target_leaf_size,
+        num_chunks,
+        log10_source_count,
+        options,
+    ):
+        source_count = source_count_from_log10(float(log10_source_count))
+        geometry = build_geometry(case, int(source_count) + 1, GRID_N)
+        opts = set(options or [])
+        results = solve_fields(
+            geometry,
+            construction_method=construction,
+            theta=float(theta),
+            num_chunks=int(num_chunks),
+            source_leaf_size=parse_leaf_size(source_leaf_size),
+            target_leaf_size=parse_leaf_size(target_leaf_size),
+            build_par="parallel-build" in opts,
+            par="parallel" in opts,
+        )
+        fig = make_figure(geometry, results, field, "relative-error" in opts)
+        timing = (
+            f"nfil={geometry.current.size}, nobs={geometry.obs[0].size}, "
+            f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
+            f"original source-target interactions={results['source_target_interactions']:.1E}\n"
+            f"direct:       construction={results['direct_build_time']:.3f}s, "
+            f"evaluation={results['direct_time']:.3f}s\n"
+            f"hierarchical: construction={results['build_time']:.3f}s, "
+            f"evaluation={results['eval_time']:.3f}s"
+        )
+        return fig, timing
+
+    return app
+
+
+def parse_leaf_size(value) -> int:
+    try:
+        leaf_size = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_LEAF_SIZE
+    return max(1, leaf_size)
+
+
+if __name__ == "__main__":
+    make_app().run(debug=True)

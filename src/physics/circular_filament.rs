@@ -402,7 +402,7 @@ pub fn flux_density_circular_filament_cartesian_scalar(
     // Unpack
     let (x, y, z) = xyzobs;
     // Convert cartesian point to cylindrical
-    let (robs, phiobs, zobs) = crate::math::cartesian_to_cylindrical(x, y, z);
+    let [robs, phiobs, zobs] = crate::math::cartesian_to_cylindrical([x, y, z]);
     // Get axisymmetric B-field
     let (br, bz) = flux_density_circular_filament_scalar(rzifil, (robs, zobs));
     // Convert axisymmetric B-field to cartesian

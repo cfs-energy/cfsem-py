@@ -636,7 +636,12 @@ pub fn flux_density_linear_filament_scalar<T: DualTreeScalar>(
         para_a,
         para_b,
         ab_norm: dlhat,
-    } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
+    } = point_line_distance_with_endpoints(
+        [start.0, start.1, start.2],
+        [end.0, end.1, end.2],
+        [xyzobs.0, xyzobs.1, xyzobs.2],
+        wire_radius,
+    );
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
@@ -651,10 +656,7 @@ pub fn flux_density_linear_filament_scalar<T: DualTreeScalar>(
     let c = frac * kappa / perp; // (A/m)
 
     // Direction of cross(dL, r), the direction of the field.
-    let cxyz = cross3(
-        [dlhat.0, dlhat.1, dlhat.2],
-        [perp_hat.0, perp_hat.1, perp_hat.2],
-    ); // (dimensionless)
+    let cxyz = cross3(dlhat, perp_hat); // (dimensionless)
 
     // Assemble final B-field components.
     let bx = c * cxyz[0]; // [T]
@@ -985,7 +987,12 @@ pub fn vector_potential_linear_filament_scalar<T: DualTreeScalar>(
         para_b,
         ab_norm: dlhat,
         perp_hat,
-    } = point_line_distance_with_endpoints(start, end, xyzobs, core_radius);
+    } = point_line_distance_with_endpoints(
+        [start.0, start.1, start.2],
+        [end.0, end.1, end.2],
+        [xyzobs.0, xyzobs.1, xyzobs.2],
+        core_radius,
+    );
     let _ = perp_hat;
 
     // Sine of the angle formed by the lines from the target to each endpoint
@@ -1077,7 +1084,7 @@ pub fn vector_potential_linear_filament_scalar<T: DualTreeScalar>(
 
     // Direction is always aligned with the segment.
     // (V-s) final vector potential
-    let (ax, ay, az) = (a_mag * dlhat.0, a_mag * dlhat.1, a_mag * dlhat.2);
+    let (ax, ay, az) = (a_mag * dlhat[0], a_mag * dlhat[1], a_mag * dlhat[2]);
 
     // Return continuous vector potential; avoid hard clipping at small radius.
     (ax, ay, az)
@@ -1700,20 +1707,32 @@ mod test {
         let x = 0.02;
 
         // At the endpoint plane, behavior should match in-segment clamping.
-        let at_endpoint =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2), wire_radius);
+        let at_endpoint = point_line_distance_with_endpoints(
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [x, 0.0, end.2],
+            wire_radius,
+        );
         assert!(approx(0.1, at_endpoint.perp, rtol, atol));
         assert!(approx(0.2, at_endpoint.frac, rtol, atol));
 
         // Outside endpoint projection, clamping behavior is unchanged without endpoint blending.
-        let halfway =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.05), wire_radius);
+        let halfway = point_line_distance_with_endpoints(
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [x, 0.0, end.2 + 0.05],
+            wire_radius,
+        );
         assert!(approx(0.1, halfway.perp, rtol, atol));
         assert!(approx(0.2, halfway.frac, rtol, atol));
 
         // One wire radius beyond the endpoint projection remains clamped the same way.
-        let outside =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.1), wire_radius);
+        let outside = point_line_distance_with_endpoints(
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [x, 0.0, end.2 + 0.1],
+            wire_radius,
+        );
         assert!(approx(0.1, outside.perp, rtol, atol));
         assert!(approx(0.2, outside.frac, rtol, atol));
     }
@@ -1972,9 +1991,9 @@ mod test {
 
         let a_edge = amag[0];
         let pld = crate::math::point_line_distance_with_endpoints(
-            start,
-            end,
-            (wire_radius, 0.0, 0.0),
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [wire_radius, 0.0, 0.0],
             wire_radius,
         );
         let sin_theta_a = pld.para_a / pld.dist_a;

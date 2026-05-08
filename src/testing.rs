@@ -92,7 +92,7 @@ pub(crate) fn example_helix() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let mut z = xc.clone();
     crate::mesh::filament_helix_path(
         (&xc, &yc, &zc),
-        (2.0 * E / 3.0, 0.0, 0.0),
+        [2.0 * E / 3.0, 0.0, 0.0],
         0.5,
         0.0,
         (&mut x, &mut y, &mut z),

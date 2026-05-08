@@ -2783,7 +2783,17 @@ fn filament_helix_path(
     _3tup_slice_mut!(out);
 
     // Calculate
-    match mesh::filament_helix_path(path, helix_start_offset, twist_pitch, angle_offset, out) {
+    match mesh::filament_helix_path(
+        path,
+        [
+            helix_start_offset.0,
+            helix_start_offset.1,
+            helix_start_offset.2,
+        ],
+        twist_pitch,
+        angle_offset,
+        out,
+    ) {
         Ok(_) => (),
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

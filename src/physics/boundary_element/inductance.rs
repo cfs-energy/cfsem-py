@@ -825,7 +825,7 @@ pub fn triangle_mesh_inductance_mapping_from_circular_filaments(
         quad_kind,
         out,
         |ifil, obs| {
-            let (robs, phiobs, zobs) = cartesian_to_cylindrical(obs[0], obs[1], obs[2]);
+            let [robs, phiobs, zobs] = cartesian_to_cylindrical(obs);
             let a_phi = vector_potential_circular_filament_scalar(
                 (rfil[ifil], zfil[ifil], 1.0),
                 (robs, zobs),
@@ -855,7 +855,7 @@ pub fn triangle_mesh_inductance_mapping_from_circular_filaments_par(
         quad_kind,
         out,
         |ifil, obs| {
-            let (robs, phiobs, zobs) = cartesian_to_cylindrical(obs[0], obs[1], obs[2]);
+            let [robs, phiobs, zobs] = cartesian_to_cylindrical(obs);
             let a_phi = vector_potential_circular_filament_scalar(
                 (rfil[ifil], zfil[ifil], 1.0),
                 (robs, zobs),

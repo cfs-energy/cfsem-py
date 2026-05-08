@@ -1620,7 +1620,7 @@ fn test_triangle_mesh_inductance_mapping_from_circular_filaments_matches_direct_
             .unwrap();
 
     let psi_ref = explicit_nodal_flux_linkage_from_vector_potential_fn(&mesh_tgt, |obs| {
-        let (robs, phiobs, zobs) = cartesian_to_cylindrical(obs[0], obs[1], obs[2]);
+        let [robs, phiobs, zobs] = cartesian_to_cylindrical(obs);
         let mut out = [0.0; 3];
         for i in 0..coeffs.len() {
             let a_phi = vector_potential_circular_filament_scalar(
@@ -2231,7 +2231,7 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
         b_loop.push([b_ref.0, b_ref.1, b_ref.2]);
 
         a_strip.push(strip_vector_potential(&strip, point));
-        let (r_obs, phi_obs, z_obs) = cartesian_to_cylindrical(point[0], point[1], point[2]);
+        let [r_obs, phi_obs, z_obs] = cartesian_to_cylindrical(point);
         let a_phi =
             vector_potential_circular_filament_scalar((radius, 0.0, loop_current), (r_obs, z_obs));
         a_loop.push([-a_phi * libm::sin(phi_obs), a_phi * libm::cos(phi_obs), 0.0]);

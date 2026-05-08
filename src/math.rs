@@ -92,6 +92,12 @@ pub fn norm3<T: DualTreeScalar>(v: [T; 3]) -> T {
     dot3(v, v).sqrt()
 }
 
+/// Normalize a fixed-size 3D vector.
+#[inline]
+pub fn normalize3<T: DualTreeScalar>(v: [T; 3]) -> [T; 3] {
+    scale3(v, T::ONE / norm3(v))
+}
+
 /// Evaluate the cross products for each axis component
 /// separately using `mul_add` which would not be assumed usable
 /// in a more general implementation.
@@ -148,18 +154,20 @@ pub fn add_scaled3<T: DualTreeScalar>(a: [T; 3], b: [T; 3], scale: T) -> [T; 3] 
 
 /// Convert a point from cartesian to cylindrical coordinates.
 #[inline]
-pub fn cartesian_to_cylindrical(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+pub fn cartesian_to_cylindrical(point: [f64; 3]) -> [f64; 3] {
+    let [x, y, z] = point;
     let r = norm3([x, y, 0.0]);
     let phi = libm::atan2(y, x);
-    (r, phi, z)
+    [r, phi, z]
 }
 
 /// Convert a point in cylindrical coordinates to cartesian.
 #[inline]
-pub fn cylindrical_to_cartesian(r: f64, phi: f64, z: f64) -> (f64, f64, f64) {
+pub fn cylindrical_to_cartesian(point: [f64; 3]) -> [f64; 3] {
+    let [r, phi, z] = point;
     let x = r * libm::cos(phi);
     let y = r * libm::sin(phi);
-    (x, y, z)
+    [x, y, z]
 }
 
 /// Geometric components of the system of a filament and an observation point
@@ -181,7 +189,7 @@ pub(crate) struct PointLineDistance<T: DualTreeScalar> {
     pub(crate) perp: T,
 
     /// The normalized direction of the perpendicular distance.
-    pub(crate) perp_hat: (T, T, T),
+    pub(crate) perp_hat: [T; 3],
 
     /// Length of segment `ap` using clamped perpendicular distance.
     pub(crate) dist_a: T,
@@ -200,7 +208,7 @@ pub(crate) struct PointLineDistance<T: DualTreeScalar> {
     pub(crate) para_b: T,
 
     /// Length of the filament, segment `ab`.
-    pub(crate) ab_norm: (T, T, T),
+    pub(crate) ab_norm: [T; 3],
 }
 
 /// Minimum perpendicular distance of point p to the infinite line defined by endpoints a and b,
@@ -211,68 +219,64 @@ pub(crate) struct PointLineDistance<T: DualTreeScalar> {
 /// taper outside segment endpoint projections.
 #[inline]
 pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
-    a: (T, T, T),
-    b: (T, T, T),
-    p: (T, T, T),
+    a: [T; 3],
+    b: [T; 3],
+    p: [T; 3],
     r_min: T,
 ) -> PointLineDistance<T> {
     // Vectors and distances between points.
-    let ab = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
-    let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
-    let bp = (p.0 - b.0, p.1 - b.1, p.2 - b.2);
+    let ab = sub3(b, a);
+    let ap = sub3(p, a);
+    let bp = sub3(p, b);
 
     // Normalized segment vector.
     // This might be zero, and that will be handled as late as possible to avoid disrupting
     // calculations in nominal non-zero-length cases.
-    let ab2 = dot3([ab.0, ab.1, ab.2], [ab.0, ab.1, ab.2]); // (m^2) squared length.
+    let ab2 = dot3(ab, ab); // (m^2) squared length.
     // Handle zero-length special case before any division by segment length.
     if ab2 == T::ZERO {
         let r_min = max_scalar(r_min, T::ZERO);
         let r_min_frac = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
-        let dist_a = norm3([ap.0, ap.1, ap.2]);
-        let dist_b = norm3([bp.0, bp.1, bp.2]);
+        let dist_a = norm3(ap);
+        let dist_b = norm3(bp);
         let frac = min_scalar(dist_a / r_min_frac, T::ONE);
         let dist_a = max_scalar(dist_a, r_min);
         let dist_b = max_scalar(dist_b, r_min);
         let perp = dist_a;
         return PointLineDistance {
             perp,
-            perp_hat: (T::ZERO, T::ZERO, T::ZERO),
+            perp_hat: [T::ZERO; 3],
             dist_a,
             dist_b,
             frac,
             para_a: T::ZERO,
             para_b: T::ZERO,
-            ab_norm: (T::ZERO, T::ZERO, T::ZERO),
+            ab_norm: [T::ZERO; 3],
         };
     }
 
     // Filament vector, length, and normalized direction
     let ab_len = ab2.sqrt();
     let ab_len_inv = T::ONE / ab_len;
-    let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
+    let ab_norm = scale3(ab, ab_len_inv);
 
     // Find the closest point on the infinite line defined by this segment to the target point.
-    let t = dot3([ap.0, ap.1, ap.2], [ab.0, ab.1, ab.2]) / ab2; // Normed projected location
-    let closest = (
-        t.mul_add(ab.0, a.0),
-        t.mul_add(ab.1, a.1),
-        t.mul_add(ab.2, a.2),
-    ); // (m) closest point on infinite line
-    let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
-    let perp_raw = norm3([dp.0, dp.1, dp.2]); // (m) Un-clamped perpendicular distance.
+    let t = dot3(ap, ab) / ab2; // Normed projected location
+    let closest = add_scaled3(a, ab, t); // (m) closest point on infinite line
+    let dp = sub3(p, closest); // (m) Vector from target to infinite line.
+    let perp_raw = norm3(dp); // (m) Un-clamped perpendicular distance.
     let perp_hat = if perp_raw > T::ZERO {
         let inv = T::ONE / perp_raw;
-        (dp.0 * inv, dp.1 * inv, dp.2 * inv)
+        scale3(dp, inv)
     } else {
-        (T::ZERO, T::ZERO, T::ZERO)
+        [T::ZERO; 3]
     };
 
     // Clamp r_min to prevent div/0
     let r_min = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
 
     // Parallel distances from each endpoint to the target
-    let para_a = dot3([ap.0, ap.1, ap.2], [ab_norm.0, ab_norm.1, ab_norm.2]);
+    let para_a = dot3(ap, ab_norm);
     let para_b = para_a - ab_len;
 
     // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.

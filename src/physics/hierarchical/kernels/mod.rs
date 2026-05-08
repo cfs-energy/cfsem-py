@@ -1,4 +1,4 @@
-//! Concrete kernels for the generic dual-tree infrastructure.
+//! Concrete kernels for the generic single-source-tree infrastructure.
 
 mod boundary_element;
 mod boundary_element_flux_density;

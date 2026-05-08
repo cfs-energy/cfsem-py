@@ -1,3 +1,9 @@
+use super::evaluator::{
+    TargetNodeSummaries, evaluate_into, evaluate_into_par, output_len,
+    parallel_evaluation_scratch_len, serial_evaluation_scratch_len,
+    update_plan_target_summaries_into,
+};
+use super::plan::DualInteractionPlan;
 use super::*;
 use crate::physics::boundary_element::{
     QuadratureKind, flux_density_triangle, vector_potential_triangle,
@@ -1521,6 +1527,50 @@ fn source_summary_update_tracks_moments() {
 }
 
 #[test]
+fn dipole_source_summary_centroid_tracks_moment_weights() {
+    let kernel = DipoleFluxDensityKernel::<f64>::new();
+    let sources = [
+        DipoleSource {
+            position: [0.0, 0.0, 0.0],
+            outer_radius: 0.0,
+        },
+        DipoleSource {
+            position: [10.0, 0.0, 0.0],
+            outer_radius: 0.0,
+        },
+    ];
+    let source_tree = ClusterTree::build(&sources, 2).unwrap();
+    let mut summaries =
+        SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
+
+    let moments_a = [[1.0, 0.0, 0.0], [3.0, 0.0, 0.0]];
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments_a,
+            &mut summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert!((summaries.node_summaries[0].centroid[0] - 7.5).abs() < 1.0e-14);
+
+    let moments_b = [[4.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments_b,
+            &mut summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+    assert!((summaries.node_summaries[0].centroid[0] - 2.0).abs() < 1.0e-14);
+}
+
+#[test]
 fn theta_zero_matches_dense_direct_f64() {
     run_theta_zero_matches_dense_direct_f64();
 }
@@ -1734,6 +1784,61 @@ fn theta_zero_matches_dense_direct_f32() {
     );
     for i in 0..bh.len() {
         assert!((bh[i] - dense[i]).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn source_tree_theta_zero_matches_dense_direct() {
+    let kernel = MockKernel::<f64>::new();
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.2, 0.0], [2.0, -0.1, 0.0]]);
+    let targets = points_f64(&[[0.3, 0.0, 0.0], [3.0, 0.4, 0.0]]);
+    let moments = [1.0, -2.0, 0.5];
+    let source_tree = ClusterTree::build(&sources, 1).unwrap();
+    let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
+    assert_eq!(
+        update_source_summaries_into(
+            &kernel,
+            source_tree.as_view(),
+            &sources,
+            &moments,
+            &mut source_summaries.node_summaries,
+        ),
+        DualTreeError::Ok
+    );
+
+    let mut source_tree_out = [0.0; 2];
+    let mut dense = [0.0; 2];
+    let mut scratch_value = [0.0];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut scratch_value,
+    };
+    assert_eq!(
+        evaluate_source_tree_into(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            0.0,
+            &mut source_tree_out,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    assert_eq!(
+        dense_direct_evaluate_into(
+            &kernel,
+            &sources,
+            &targets,
+            &moments,
+            &mut dense,
+            &mut scratch,
+        ),
+        DualTreeError::Ok
+    );
+    for i in 0..targets.len() {
+        assert!((source_tree_out[i] - dense[i]).abs() < 1.0e-14);
     }
 }
 

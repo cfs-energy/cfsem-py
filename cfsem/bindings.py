@@ -1250,19 +1250,14 @@ def vector_potential_dipole(
 
 
 class HierarchicalDipoles:
-    """Reusable hierarchical dipole field solver."""
+    """Reusable single-source-tree hierarchical dipole field solver."""
 
     def __init__(
         self,
         theta: float = 0.1,
-        source_leaf_size: int = 1,
-        target_leaf_size: int = 1,
-        num_chunks: int = 1,
         construction_method: str = "morton_lbvh",
     ) -> None:
-        self._solver = _HierarchicalDipoles(
-            theta, source_leaf_size, target_leaf_size, num_chunks, construction_method
-        )
+        self._solver = _HierarchicalDipoles(theta, construction_method)
 
     def build(
         self,
@@ -1302,9 +1297,6 @@ class HierarchicalDipoles:
     def update_targets(self, obs: Array3xN, par: bool = False) -> None:
         self.build_targets(obs, par)
 
-    def build_plan(self, par: bool = False) -> None:
-        self._solver.build_plan(par)
-
     def flux_density(self, moment: Array3xN, par: bool = False) -> Array3xN:
         return self._solver.flux_density(_3tup_contig(moment), par)  # type: ignore
 
@@ -1319,19 +1311,14 @@ class HierarchicalDipoles:
 
 
 class HierarchicalLinearFilaments:
-    """Reusable hierarchical linear-filament field solver."""
+    """Reusable single-source-tree hierarchical linear-filament field solver."""
 
     def __init__(
         self,
         theta: float = 0.1,
-        source_leaf_size: int = 1,
-        target_leaf_size: int = 1,
-        num_chunks: int = 1,
         construction_method: str = "morton_lbvh",
     ) -> None:
-        self._solver = _HierarchicalLinearFilaments(
-            theta, source_leaf_size, target_leaf_size, num_chunks, construction_method
-        )
+        self._solver = _HierarchicalLinearFilaments(theta, construction_method)
 
     def build(
         self,
@@ -1378,12 +1365,6 @@ class HierarchicalLinearFilaments:
     def update_targets(self, obs: Array3xN, par: bool = False) -> None:
         self.build_targets(obs, par)
 
-    def build_plan(self, par: bool = False) -> None:
-        self._solver.build_plan(par)
-
-    def interaction_counts(self) -> tuple[int, int, int]:
-        return self._solver.interaction_counts()  # type: ignore
-
     def flux_density(self, current: NDArray[float64], par: bool = False) -> Array3xN:
         current = ascontiguousarray(current, dtype=float64).ravel()
         return self._solver.flux_density(current, par)  # type: ignore
@@ -1394,20 +1375,15 @@ class HierarchicalLinearFilaments:
 
 
 class HierarchicalBoundaryElements:
-    """Reusable hierarchical triangular boundary-element field solver."""
+    """Reusable single-source-tree hierarchical triangular boundary-element field solver."""
 
     def __init__(
         self,
         theta: float = 0.1,
-        source_leaf_size: int = 1,
-        target_leaf_size: int = 1,
-        num_chunks: int = 1,
         quad: str = "dunavant3",
         construction_method: str = "morton_lbvh",
     ) -> None:
-        self._solver = _HierarchicalBoundaryElements(
-            theta, source_leaf_size, target_leaf_size, num_chunks, quad, construction_method
-        )
+        self._solver = _HierarchicalBoundaryElements(theta, quad, construction_method)
         self._triangles: NDArray[int64] | None = None
 
     def build(
@@ -1453,9 +1429,6 @@ class HierarchicalBoundaryElements:
 
     def update_targets(self, obs: Array3xN, par: bool = False) -> None:
         self.build_targets(obs, par)
-
-    def build_plan(self, par: bool = False) -> None:
-        self._solver.build_plan(par)
 
     def flux_density(self, s: NDArray[float64] | Array3xN, par: bool = False) -> Array3xN:
         return self._solver.flux_density(self._source_values(s), par)  # type: ignore

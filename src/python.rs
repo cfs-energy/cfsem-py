@@ -376,23 +376,21 @@ fn read_scalar_moments(moment: PyReadonlyArray1<f64>, n: usize, name: &str) -> P
     Ok(moment.to_vec())
 }
 
-fn hierarchical_eval_vec3<K>(
+const HIERARCHICAL_SOURCE_LEAF_SIZE: usize = 1;
+
+fn hierarchical_eval_source_tree_vec3<K>(
     kernel: K,
     source_tree: &physics::hierarchical::ClusterTree<f64>,
-    plan: &physics::hierarchical::DualInteractionPlan<f64>,
     sources: &[K::SourceGeometry],
     targets: &[K::TargetGeometry],
     moments: &[K::SourceMoment],
-    par: bool,
+    theta: f64,
 ) -> PyResult<Vec<[f64; 3]>>
 where
-    K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]>,
 {
     let mut source_summaries =
         physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
-    let mut target_summaries =
-        physics::hierarchical::TargetNodeSummaries::<K>::new_for_plan(plan.as_view());
-
     let mut err = physics::hierarchical::update_source_summaries_into(
         &kernel,
         source_tree.as_view(),
@@ -403,53 +401,29 @@ where
     if err != physics::hierarchical::DualTreeError::Ok {
         return Err(py_dual_tree_error("source summary update", err));
     }
-    err = physics::hierarchical::update_plan_target_summaries_into(
-        &kernel,
-        plan.as_view(),
-        targets,
-        &mut target_summaries,
-    );
-    if err != physics::hierarchical::DualTreeError::Ok {
-        return Err(py_dual_tree_error("target summary update", err));
-    }
 
-    let mut out = vec![[0.0; 3]; physics::hierarchical::output_len(plan.as_view())];
-    let scratch_len = match par {
-        true => physics::hierarchical::parallel_evaluation_scratch_len(plan.as_view()),
-        false => physics::hierarchical::serial_evaluation_scratch_len(plan.as_view()),
-    };
-    let mut scratch_value = vec![[0.0; 3]; scratch_len];
+    let mut out = vec![[0.0; 3]; targets.len()];
+    let mut scratch_value =
+        vec![[0.0; 3]; physics::hierarchical::source_tree_evaluation_scratch_len()];
     let mut scratch = physics::hierarchical::EvaluationScratch {
         contribution: &mut scratch_value,
     };
-    err = match par {
-        true => physics::hierarchical::evaluate_into_par(
-            &kernel,
-            plan.as_view(),
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            &target_summaries,
-            sources,
-            targets,
-            moments,
-            &mut out,
-            &mut scratch,
-        ),
-        false => physics::hierarchical::evaluate_into(
-            &kernel,
-            plan.as_view(),
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            &target_summaries,
-            sources,
-            targets,
-            moments,
-            &mut out,
-            &mut scratch,
-        ),
-    };
+    err = physics::hierarchical::evaluate_source_tree_into(
+        &kernel,
+        source_tree.as_view(),
+        &source_summaries.node_summaries,
+        sources,
+        targets,
+        moments,
+        theta,
+        &mut out,
+        &mut scratch,
+    );
     if err != physics::hierarchical::DualTreeError::Ok {
-        return Err(py_dual_tree_error("hierarchical evaluation", err));
+        return Err(py_dual_tree_error(
+            "source-tree hierarchical evaluation",
+            err,
+        ));
     }
     Ok(out)
 }
@@ -457,37 +431,23 @@ where
 #[pyclass(module = "cfsem", unsendable)]
 struct HierarchicalDipoles {
     theta: f64,
-    source_leaf_size: usize,
-    target_leaf_size: usize,
-    num_chunks: usize,
     construction_method: HierarchicalConstructionMethod,
     sources: Vec<physics::hierarchical::kernels::DipoleSource<f64>>,
     targets: Vec<physics::hierarchical::kernels::DipoleTarget<f64>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
-    plan: Option<physics::hierarchical::DualInteractionPlan<f64>>,
 }
 
 #[pymethods]
 impl HierarchicalDipoles {
     #[new]
-    #[pyo3(signature = (theta=0.1, source_leaf_size=1, target_leaf_size=1, num_chunks=1, construction_method="morton_lbvh"))]
-    fn new(
-        theta: f64,
-        source_leaf_size: usize,
-        target_leaf_size: usize,
-        num_chunks: usize,
-        construction_method: &str,
-    ) -> PyResult<Self> {
+    #[pyo3(signature = (theta=0.1, construction_method="morton_lbvh"))]
+    fn new(theta: f64, construction_method: &str) -> PyResult<Self> {
         Ok(Self {
             theta,
-            source_leaf_size,
-            target_leaf_size,
-            num_chunks,
             construction_method: parse_hierarchical_construction_method(construction_method)?,
             sources: Vec::new(),
             targets: Vec::new(),
             source_tree: None,
-            plan: None,
         })
     }
 
@@ -521,8 +481,9 @@ impl HierarchicalDipoles {
         ),
         par: bool,
     ) -> PyResult<()> {
+        let _ = par;
         self.targets = build_dipole_targets(obs)?;
-        self.rebuild_plan(par)
+        Ok(())
     }
 
     #[pyo3(signature = (obs, par=false))]
@@ -549,16 +510,17 @@ impl HierarchicalDipoles {
         outer_radius: PyReadonlyArray1<f64>,
         par: bool,
     ) -> PyResult<()> {
+        let _ = par;
         self.sources = build_dipole_sources(loc, outer_radius)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(
                 &self.sources,
-                self.source_leaf_size,
+                HIERARCHICAL_SOURCE_LEAF_SIZE,
                 self.construction_method,
             )
             .map_err(|err| py_dual_tree_error("source tree build", err))?,
         );
-        self.rebuild_plan(par)
+        Ok(())
     }
 
     #[pyo3(signature = (loc, outer_radius, par=false))]
@@ -573,11 +535,6 @@ impl HierarchicalDipoles {
         par: bool,
     ) -> PyResult<()> {
         self.build_sources(loc, outer_radius, par)
-    }
-
-    #[pyo3(signature = (par=false))]
-    fn build_plan(&mut self, par: bool) -> PyResult<()> {
-        self.rebuild_plan(par)
     }
 
     #[pyo3(signature = (moment, par=false))]
@@ -652,50 +609,13 @@ impl HierarchicalDipoles {
 }
 
 impl HierarchicalDipoles {
-    fn rebuild_plan(&mut self, par: bool) -> PyResult<()> {
-        if self.sources.is_empty() || self.targets.is_empty() {
-            self.plan = None;
-            return Ok(());
-        }
-        let source_tree = self
-            .source_tree
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "sources must be built before the plan".to_string(),
-            })?;
-        self.plan = Some(
-            physics::hierarchical::DualInteractionPlan::build(
-                source_tree.as_view(),
-                &self.targets,
-                self.target_leaf_size,
-                self.theta,
-                self.num_chunks,
-                par,
-            )
-            .map_err(|err| py_dual_tree_error("plan build", err))?,
-        );
-        Ok(())
-    }
-
-    fn source_tree_and_plan(
-        &self,
-    ) -> PyResult<(
-        &physics::hierarchical::ClusterTree<f64>,
-        &physics::hierarchical::DualInteractionPlan<f64>,
-    )> {
-        let source_tree = self
-            .source_tree
+    fn source_tree(&self) -> PyResult<&physics::hierarchical::ClusterTree<f64>> {
+        self.source_tree
             .as_ref()
             .ok_or_else(|| PyInteropError::ValueError {
                 msg: "sources have not been built".to_string(),
-            })?;
-        let plan = self
-            .plan
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "targets have not been built, so no interaction plan is available".to_string(),
-            })?;
-        Ok((source_tree, plan))
+            })
+            .map_err(Into::into)
     }
 
     fn eval_dipole_flux_density(
@@ -705,18 +625,17 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        par: bool,
+        _par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
-        let (source_tree, plan) = self.source_tree_and_plan()?;
-        hierarchical_eval_vec3(
+        let source_tree = self.source_tree()?;
+        hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
             source_tree,
-            plan,
             &self.sources,
             &self.targets,
             &moments,
-            par,
+            self.theta,
         )
     }
 
@@ -727,18 +646,17 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        par: bool,
+        _par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
-        let (source_tree, plan) = self.source_tree_and_plan()?;
-        hierarchical_eval_vec3(
+        let source_tree = self.source_tree()?;
+        hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
             source_tree,
-            plan,
             &self.sources,
             &self.targets,
             &moments,
-            par,
+            self.theta,
         )
     }
 }
@@ -746,37 +664,23 @@ impl HierarchicalDipoles {
 #[pyclass(module = "cfsem", unsendable)]
 struct HierarchicalLinearFilaments {
     theta: f64,
-    source_leaf_size: usize,
-    target_leaf_size: usize,
-    num_chunks: usize,
     construction_method: HierarchicalConstructionMethod,
     sources: Vec<physics::hierarchical::kernels::LinearFilamentSource<f64>>,
     targets: Vec<physics::hierarchical::kernels::DipoleTarget<f64>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
-    plan: Option<physics::hierarchical::DualInteractionPlan<f64>>,
 }
 
 #[pymethods]
 impl HierarchicalLinearFilaments {
     #[new]
-    #[pyo3(signature = (theta=0.1, source_leaf_size=1, target_leaf_size=1, num_chunks=1, construction_method="morton_lbvh"))]
-    fn new(
-        theta: f64,
-        source_leaf_size: usize,
-        target_leaf_size: usize,
-        num_chunks: usize,
-        construction_method: &str,
-    ) -> PyResult<Self> {
+    #[pyo3(signature = (theta=0.1, construction_method="morton_lbvh"))]
+    fn new(theta: f64, construction_method: &str) -> PyResult<Self> {
         Ok(Self {
             theta,
-            source_leaf_size,
-            target_leaf_size,
-            num_chunks,
             construction_method: parse_hierarchical_construction_method(construction_method)?,
             sources: Vec::new(),
             targets: Vec::new(),
             source_tree: None,
-            plan: None,
         })
     }
 
@@ -815,8 +719,9 @@ impl HierarchicalLinearFilaments {
         ),
         par: bool,
     ) -> PyResult<()> {
+        let _ = par;
         self.targets = build_dipole_targets(obs)?;
-        self.rebuild_plan(par)
+        Ok(())
     }
 
     #[pyo3(signature = (obs, par=false))]
@@ -848,16 +753,17 @@ impl HierarchicalLinearFilaments {
         wire_radius: PyReadonlyArray1<f64>,
         par: bool,
     ) -> PyResult<()> {
+        let _ = par;
         self.sources = build_linear_filament_sources(xyzfil, dlxyzfil, wire_radius)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(
                 &self.sources,
-                self.source_leaf_size,
+                HIERARCHICAL_SOURCE_LEAF_SIZE,
                 self.construction_method,
             )
             .map_err(|err| py_dual_tree_error("source tree build", err))?,
         );
-        self.rebuild_plan(par)
+        Ok(())
     }
 
     #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, par=false))]
@@ -877,23 +783,6 @@ impl HierarchicalLinearFilaments {
         par: bool,
     ) -> PyResult<()> {
         self.build_sources(xyzfil, dlxyzfil, wire_radius, par)
-    }
-
-    #[pyo3(signature = (par=false))]
-    fn build_plan(&mut self, par: bool) -> PyResult<()> {
-        self.rebuild_plan(par)
-    }
-
-    fn interaction_counts(&self) -> PyResult<(usize, usize, usize)> {
-        let plan = self
-            .plan
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "targets have not been built, so no interaction plan is available".to_string(),
-            })?;
-        let near = plan.near_source_ids.len();
-        let far = plan.far_source_node_ids.len();
-        Ok((near, far, near + far))
     }
 
     #[pyo3(signature = (current, par=false))]
@@ -920,85 +809,46 @@ impl HierarchicalLinearFilaments {
 }
 
 impl HierarchicalLinearFilaments {
-    fn rebuild_plan(&mut self, par: bool) -> PyResult<()> {
-        if self.sources.is_empty() || self.targets.is_empty() {
-            self.plan = None;
-            return Ok(());
-        }
-        let source_tree = self
-            .source_tree
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "sources must be built before the plan".to_string(),
-            })?;
-        self.plan = Some(
-            physics::hierarchical::DualInteractionPlan::build(
-                source_tree.as_view(),
-                &self.targets,
-                self.target_leaf_size,
-                self.theta,
-                self.num_chunks,
-                par,
-            )
-            .map_err(|err| py_dual_tree_error("plan build", err))?,
-        );
-        Ok(())
-    }
-
-    fn source_tree_and_plan(
-        &self,
-    ) -> PyResult<(
-        &physics::hierarchical::ClusterTree<f64>,
-        &physics::hierarchical::DualInteractionPlan<f64>,
-    )> {
-        let source_tree = self
-            .source_tree
+    fn source_tree(&self) -> PyResult<&physics::hierarchical::ClusterTree<f64>> {
+        self.source_tree
             .as_ref()
             .ok_or_else(|| PyInteropError::ValueError {
                 msg: "sources have not been built".to_string(),
-            })?;
-        let plan = self
-            .plan
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "targets have not been built, so no interaction plan is available".to_string(),
-            })?;
-        Ok((source_tree, plan))
+            })
+            .map_err(Into::into)
     }
 
     fn eval_linear_filament_flux_density(
         &self,
         current: PyReadonlyArray1<f64>,
-        par: bool,
+        _par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let currents = read_scalar_moments(current, self.sources.len(), "current")?;
-        let (source_tree, plan) = self.source_tree_and_plan()?;
-        hierarchical_eval_vec3(
+        let source_tree = self.source_tree()?;
+        hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(),
             source_tree,
-            plan,
             &self.sources,
             &self.targets,
             &currents,
-            par,
+            self.theta,
         )
     }
 
     fn eval_linear_filament_vector_potential(
         &self,
         current: PyReadonlyArray1<f64>,
-        par: bool,
+        _par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let currents = read_scalar_moments(current, self.sources.len(), "current")?;
-        let (source_tree, plan) = self.source_tree_and_plan()?;
-        hierarchical_eval_vec3(
+        let source_tree = self.source_tree()?;
+        hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(),
             source_tree,
-            plan,
             &self.sources,
             &self.targets,
             &currents,
-            par,
+            self.theta,
         )
     }
 }
@@ -1006,40 +856,25 @@ impl HierarchicalLinearFilaments {
 #[pyclass(module = "cfsem", unsendable)]
 struct HierarchicalBoundaryElements {
     theta: f64,
-    source_leaf_size: usize,
-    target_leaf_size: usize,
-    num_chunks: usize,
     construction_method: HierarchicalConstructionMethod,
     quad_kind: physics::boundary_element::QuadratureKind,
     sources: Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>,
     targets: Vec<physics::hierarchical::kernels::DipoleTarget<f64>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
-    plan: Option<physics::hierarchical::DualInteractionPlan<f64>>,
 }
 
 #[pymethods]
 impl HierarchicalBoundaryElements {
     #[new]
-    #[pyo3(signature = (theta=0.1, source_leaf_size=1, target_leaf_size=1, num_chunks=1, quad="dunavant3", construction_method="morton_lbvh"))]
-    fn new(
-        theta: f64,
-        source_leaf_size: usize,
-        target_leaf_size: usize,
-        num_chunks: usize,
-        quad: &str,
-        construction_method: &str,
-    ) -> PyResult<Self> {
+    #[pyo3(signature = (theta=0.1, quad="dunavant3", construction_method="morton_lbvh"))]
+    fn new(theta: f64, quad: &str, construction_method: &str) -> PyResult<Self> {
         Ok(Self {
             theta,
-            source_leaf_size,
-            target_leaf_size,
-            num_chunks,
             construction_method: parse_hierarchical_construction_method(construction_method)?,
             quad_kind: parse_triangle_quadrature(quad)?,
             sources: Vec::new(),
             targets: Vec::new(),
             source_tree: None,
-            plan: None,
         })
     }
 
@@ -1069,8 +904,9 @@ impl HierarchicalBoundaryElements {
         ),
         par: bool,
     ) -> PyResult<()> {
+        let _ = par;
         self.targets = build_dipole_targets(obs)?;
-        self.rebuild_plan(par)
+        Ok(())
     }
 
     #[pyo3(signature = (obs, par=false))]
@@ -1093,16 +929,17 @@ impl HierarchicalBoundaryElements {
         triangles: PyReadonlyArray2<i64>,
         par: bool,
     ) -> PyResult<()> {
+        let _ = par;
         self.sources = build_boundary_element_sources(nodes, triangles)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(
                 &self.sources,
-                self.source_leaf_size,
+                HIERARCHICAL_SOURCE_LEAF_SIZE,
                 self.construction_method,
             )
             .map_err(|err| py_dual_tree_error("source tree build", err))?,
         );
-        self.rebuild_plan(par)
+        Ok(())
     }
 
     #[pyo3(signature = (nodes, triangles, par=false))]
@@ -1113,11 +950,6 @@ impl HierarchicalBoundaryElements {
         par: bool,
     ) -> PyResult<()> {
         self.build_sources(nodes, triangles, par)
-    }
-
-    #[pyo3(signature = (par=false))]
-    fn build_plan(&mut self, par: bool) -> PyResult<()> {
-        self.rebuild_plan(par)
     }
 
     #[pyo3(signature = (current_density, par=false))]
@@ -1152,50 +984,13 @@ impl HierarchicalBoundaryElements {
 }
 
 impl HierarchicalBoundaryElements {
-    fn rebuild_plan(&mut self, par: bool) -> PyResult<()> {
-        if self.sources.is_empty() || self.targets.is_empty() {
-            self.plan = None;
-            return Ok(());
-        }
-        let source_tree = self
-            .source_tree
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "sources must be built before the plan".to_string(),
-            })?;
-        self.plan = Some(
-            physics::hierarchical::DualInteractionPlan::build(
-                source_tree.as_view(),
-                &self.targets,
-                self.target_leaf_size,
-                self.theta,
-                self.num_chunks,
-                par,
-            )
-            .map_err(|err| py_dual_tree_error("plan build", err))?,
-        );
-        Ok(())
-    }
-
-    fn source_tree_and_plan(
-        &self,
-    ) -> PyResult<(
-        &physics::hierarchical::ClusterTree<f64>,
-        &physics::hierarchical::DualInteractionPlan<f64>,
-    )> {
-        let source_tree = self
-            .source_tree
+    fn source_tree(&self) -> PyResult<&physics::hierarchical::ClusterTree<f64>> {
+        self.source_tree
             .as_ref()
             .ok_or_else(|| PyInteropError::ValueError {
                 msg: "sources have not been built".to_string(),
-            })?;
-        let plan = self
-            .plan
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "targets have not been built, so no interaction plan is available".to_string(),
-            })?;
-        Ok((source_tree, plan))
+            })
+            .map_err(Into::into)
     }
 
     fn eval_boundary_element_flux_density(
@@ -1205,20 +1000,19 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        par: bool,
+        _par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
-        let (source_tree, plan) = self.source_tree_and_plan()?;
-        hierarchical_eval_vec3(
+        let source_tree = self.source_tree()?;
+        hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
                 self.quad_kind,
             ),
             source_tree,
-            plan,
             &self.sources,
             &self.targets,
             &moments,
-            par,
+            self.theta,
         )
     }
 
@@ -1229,20 +1023,19 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        par: bool,
+        _par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
-        let (source_tree, plan) = self.source_tree_and_plan()?;
-        hierarchical_eval_vec3(
+        let source_tree = self.source_tree()?;
+        hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
                 self.quad_kind,
             ),
             source_tree,
-            plan,
             &self.sources,
             &self.targets,
             &moments,
-            par,
+            self.theta,
         )
     }
 }

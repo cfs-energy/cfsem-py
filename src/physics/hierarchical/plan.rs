@@ -154,11 +154,6 @@ where
 }
 
 impl<T: DualTreeScalar> DualInteractionPlanChunk<T> {
-    #[inline]
-    pub fn target_tree_view(&self) -> ClusterTreeView<'_, T> {
-        self.target_tree.as_view()
-    }
-
     fn sort_pairs(&mut self) {
         let mut near_pairs = Vec::with_capacity(self.near_source_ids.len());
         for i in 0..self.near_source_ids.len() {

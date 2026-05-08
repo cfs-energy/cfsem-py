@@ -1,6 +1,6 @@
 use super::{Aabb, DualTreeScalar};
 
-/// Runtime error code for dual-tree operations.
+/// Runtime error code for hierarchical tree operations.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DualTreeError {
@@ -41,7 +41,7 @@ pub trait BoundedGeometry {
     fn representative_point(&self) -> [Self::Scalar; 3];
 }
 
-/// Trait implemented by physics kernels that can use the generic dual-tree evaluator.
+/// Trait implemented by physics kernels that can use the generic hierarchical evaluator.
 pub trait DualTreeKernel {
     type Scalar: DualTreeScalar;
     type SourceGeometry: BoundedGeometry<Scalar = Self::Scalar> + Sync;

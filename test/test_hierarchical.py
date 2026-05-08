@@ -10,7 +10,7 @@ def _assert_vec_close(actual, expected, rtol=1e-12, atol=1e-18):
         np.testing.assert_allclose(actual_component, expected_component, rtol=rtol, atol=atol)
 
 
-def test_hierarchical_dipoles_match_direct_and_reuse_plan():
+def test_hierarchical_dipoles_match_direct_and_reuse_tree():
     loc = (
         np.array([0.0, 0.5, -0.25]),
         np.array([0.0, 0.2, 0.1]),
@@ -29,7 +29,7 @@ def test_hierarchical_dipoles_match_direct_and_reuse_plan():
         np.array([0.5, 0.2, -0.2, 0.7]),
     )
 
-    solver = cfsem.HierarchicalDipoles(theta=0.0, source_leaf_size=1, target_leaf_size=1, num_chunks=2)
+    solver = cfsem.HierarchicalDipoles(theta=0.0)
     solver.build_targets(obs)
     solver.build_sources(loc, outer_radius)
 
@@ -64,9 +64,7 @@ def test_hierarchical_linear_filaments_match_direct():
         np.array([0.5, 0.2, -0.2]),
     )
 
-    solver = cfsem.HierarchicalLinearFilaments(
-        theta=0.0, source_leaf_size=1, target_leaf_size=1, num_chunks=2
-    )
+    solver = cfsem.HierarchicalLinearFilaments(theta=0.0)
     solver.build(xyzfil, dlxyzfil, wire_radius, obs)
 
     direct_b = cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
@@ -94,9 +92,7 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     )
     obs_array = np.column_stack(obs)
 
-    solver = cfsem.HierarchicalBoundaryElements(
-        theta=0.0, source_leaf_size=1, target_leaf_size=1, num_chunks=2, quad="dunavant3"
-    )
+    solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
     solver.build(nodes, triangles, obs)
 
     direct_b = cfsem.flux_density_triangle_mesh(

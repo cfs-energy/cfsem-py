@@ -1,8 +1,9 @@
-use super::{
-    ClusterTreeView, DualInteractionPlanChunk, DualInteractionPlanView, DualTreeError,
-    DualTreeKernel,
-};
+#[cfg(test)]
+use super::plan::{DualInteractionPlanChunk, DualInteractionPlanView};
+use super::{BoundedGeometry, ClusterTreeView, DualTreeError, DualTreeKernel, DualTreeScalar};
+#[cfg(test)]
 use rayon::prelude::*;
+#[cfg(test)]
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// CPU-owned source summary storage.
@@ -20,20 +21,14 @@ impl<K: DualTreeKernel> SourceNodeSummaries<K> {
 }
 
 /// CPU-owned target summary storage.
+#[cfg(test)]
 pub struct TargetNodeSummaries<K: DualTreeKernel> {
     pub node_summaries: Vec<K::TargetSummary>,
     pub chunk_offsets: Vec<u32>,
 }
 
+#[cfg(test)]
 impl<K: DualTreeKernel> TargetNodeSummaries<K> {
-    #[inline]
-    pub fn new(tree: ClusterTreeView<'_, K::Scalar>) -> Self {
-        Self {
-            node_summaries: vec![K::TargetSummary::default(); tree.n_nodes()],
-            chunk_offsets: vec![0, tree.n_nodes() as u32],
-        }
-    }
-
     #[inline]
     pub fn new_for_plan(plan: DualInteractionPlanView<'_, K::Scalar>) -> Self {
         let mut chunk_offsets = Vec::with_capacity(plan.chunks.len() + 1);
@@ -70,12 +65,14 @@ pub struct EvaluationScratch<'a, O> {
 }
 
 /// Number of output entries required by a plan.
+#[cfg(test)]
 #[inline]
 pub fn output_len<T: super::DualTreeScalar>(plan: DualInteractionPlanView<'_, T>) -> usize {
     plan.target_count
 }
 
 /// Number of contribution scratch entries required by serial evaluation.
+#[cfg(test)]
 #[inline]
 pub fn serial_evaluation_scratch_len<T: super::DualTreeScalar>(
     _plan: DualInteractionPlanView<'_, T>,
@@ -84,11 +81,18 @@ pub fn serial_evaluation_scratch_len<T: super::DualTreeScalar>(
 }
 
 /// Number of contribution scratch entries required by parallel evaluation.
+#[cfg(test)]
 #[inline]
 pub fn parallel_evaluation_scratch_len<T: super::DualTreeScalar>(
     plan: DualInteractionPlanView<'_, T>,
 ) -> usize {
     plan.chunks.len()
+}
+
+/// Number of contribution scratch entries required by source-tree-only evaluation.
+#[inline]
+pub fn source_tree_evaluation_scratch_len() -> usize {
+    1
 }
 
 /// Update source summaries for a fixed source tree and changed source moments.
@@ -127,6 +131,7 @@ pub fn update_source_summaries_into<K: DualTreeKernel>(
 }
 
 /// Update target summaries for fixed target geometry.
+#[cfg(test)]
 #[inline]
 pub fn update_target_summaries_into<K: DualTreeKernel>(
     kernel: &K,
@@ -157,6 +162,7 @@ pub fn update_target_summaries_into<K: DualTreeKernel>(
 }
 
 /// Update all target summaries owned by a chunked interaction plan.
+#[cfg(test)]
 #[inline]
 pub fn update_plan_target_summaries_into<K: DualTreeKernel>(
     kernel: &K,
@@ -186,6 +192,7 @@ pub fn update_plan_target_summaries_into<K: DualTreeKernel>(
 }
 
 /// Evaluate the Barnes-Hut plan into `out`.
+#[cfg(test)]
 #[inline]
 pub fn evaluate_into<K: DualTreeKernel>(
     kernel: &K,
@@ -246,6 +253,7 @@ pub fn evaluate_into<K: DualTreeKernel>(
 }
 
 /// Evaluate the Barnes-Hut plan into `out` in parallel over target chunks.
+#[cfg(test)]
 #[inline]
 pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
     kernel: &K,
@@ -317,6 +325,116 @@ pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
     DualTreeError::from_u32(error_code.load(Ordering::Relaxed))
 }
 
+/// Evaluate targets independently against the source tree.
+///
+/// This is the public hierarchical evaluation path. Each target is summarized
+/// as a single target leaf, then walked against the source tree using the same
+/// source-side acceptance criterion as the lower-level interaction-plan
+/// evaluator.
+#[inline]
+pub fn evaluate_source_tree_into<K: DualTreeKernel>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_summaries: &[K::SourceSummary],
+    sources: &[K::SourceGeometry],
+    targets: &[K::TargetGeometry],
+    moments: &[K::SourceMoment],
+    theta: K::Scalar,
+    out: &mut [K::Output],
+    scratch: &mut EvaluationScratch<'_, K::Output>,
+) -> DualTreeError {
+    if sources.len() != source_tree.n_items()
+        || moments.len() != source_tree.n_items()
+        || targets.len() != out.len()
+    {
+        return DualTreeError::LengthMismatch;
+    }
+    if source_summaries.len() < source_tree.n_nodes() || scratch.contribution.is_empty() {
+        return DualTreeError::ScratchTooSmall;
+    }
+
+    let mut target_summary = K::TargetSummary::default();
+    let mut active = Vec::new();
+    let target_ids = [0_u32];
+
+    for target_id in 0..targets.len() {
+        kernel.zero_output(&mut out[target_id]);
+        let err = kernel.summarize_leaf_targets(
+            &target_ids,
+            &targets[target_id..target_id + 1],
+            &mut target_summary,
+        );
+        if err != DualTreeError::Ok {
+            return err;
+        }
+
+        active.clear();
+        active.push(0_u32);
+        while let Some(source_node) = active.pop() {
+            if source_node_is_far::<K>(source_tree, &targets[target_id], source_node, theta) {
+                let err = kernel.eval_far(
+                    &target_summary,
+                    &source_summaries[source_node as usize],
+                    &mut scratch.contribution[0],
+                );
+                if err != DualTreeError::Ok {
+                    return err;
+                }
+                kernel.accumulate(&mut out[target_id], &scratch.contribution[0]);
+                continue;
+            }
+
+            if source_tree.is_leaf(source_node) {
+                let start = source_tree.leaf_start[source_node as usize] as usize;
+                let count = source_tree.leaf_count[source_node as usize] as usize;
+                for i in 0..count {
+                    let source_id = source_tree.sorted_indices[start + i] as usize;
+                    let err = kernel.eval_exact(
+                        &targets[target_id],
+                        &sources[source_id],
+                        &moments[source_id],
+                        &mut scratch.contribution[0],
+                    );
+                    if err != DualTreeError::Ok {
+                        return err;
+                    }
+                    kernel.accumulate(&mut out[target_id], &scratch.contribution[0]);
+                }
+            } else {
+                active.push(source_tree.node_left_child[source_node as usize]);
+                active.push(source_tree.node_right_child[source_node as usize]);
+            }
+        }
+    }
+
+    DualTreeError::Ok
+}
+
+#[inline]
+fn source_node_is_far<K: DualTreeKernel>(
+    source_tree: ClusterTreeView<'_, K::Scalar>,
+    target: &K::TargetGeometry,
+    source_node: u32,
+    theta: K::Scalar,
+) -> bool {
+    if theta <= K::Scalar::ZERO {
+        return false;
+    }
+
+    let target_aabb = target.aabb();
+    let source_aabb = source_tree.node_aabb[source_node as usize];
+    let gap_sq = target_aabb.gap_distance_sq(&source_aabb);
+    if gap_sq <= K::Scalar::ZERO {
+        return false;
+    }
+
+    let target_diam = target_aabb.diameter_sq().sqrt();
+    let source_diam = source_aabb.diameter_sq().sqrt();
+    let combined = target_diam + source_diam;
+    gap_sq * theta * theta > combined * combined
+}
+
+#[cfg(test)]
 #[inline]
 fn validate_target_summaries<K: DualTreeKernel>(
     plan: DualInteractionPlanView<'_, K::Scalar>,
@@ -335,6 +453,7 @@ fn validate_target_summaries<K: DualTreeKernel>(
     DualTreeError::Ok
 }
 
+#[cfg(test)]
 #[inline]
 fn evaluate_chunk_into<K: DualTreeKernel>(
     kernel: &K,
@@ -475,6 +594,7 @@ fn propagate_source_summaries<K: DualTreeKernel>(
     DualTreeError::Ok
 }
 
+#[cfg(test)]
 #[inline]
 fn propagate_target_summaries<K: DualTreeKernel>(
     kernel: &K,

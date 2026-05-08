@@ -16,9 +16,11 @@ CURRENT = 1.0
 WIRE_RADIUS = 0.015
 HELICAL_WIRE_RADIUS = 0.055
 TRIANGLE_STRIP_WIDTH = 0.08
+SOURCE_SPAN = 1.4
+DEFAULT_TWIST_PITCH = 0.36
+DEFAULT_HELIX_WIDTH = HELICAL_WIRE_RADIUS
+DEFAULT_BEND_CURVATURE = 2.0 / SOURCE_SPAN
 DEFAULT_THETA = 0.1
-DEFAULT_NUM_CHUNKS = 4
-DEFAULT_LEAF_SIZE = 1
 LOG10_MIN_SOURCE_COUNT = float(np.log10(MIN_SOURCE_COUNT))
 LOG10_DEFAULT_SOURCE_COUNT = float(np.log10(DEFAULT_SOURCE_COUNT))
 LOG10_MAX_SOURCE_COUNT = float(np.log10(MAX_SOURCE_COUNT))
@@ -44,9 +46,20 @@ class Geometry:
     extent: float
 
 
-def circular_centerline(radius: float, n: int) -> np.ndarray:
-    theta = np.linspace(0.0, np.pi, n, endpoint=True)
-    return np.vstack((radius * np.cos(theta), np.zeros_like(theta), radius * np.sin(theta)))
+def fixed_span_arc_centerline(span: float, curvature: float, n: int) -> np.ndarray:
+    curvature = max(0.0, float(curvature))
+    x = np.linspace(-0.5 * span, 0.5 * span, n, endpoint=True)
+    if curvature <= 1.0e-12:
+        return np.vstack((x, np.zeros_like(x), np.zeros_like(x)))
+
+    max_curvature = 2.0 / span
+    curvature = min(curvature, max_curvature)
+    radius = 1.0 / curvature
+    half_angle = np.arcsin(0.5 * span / radius)
+    theta = np.linspace(-half_angle, half_angle, n, endpoint=True)
+    x = radius * np.sin(theta)
+    z = radius * np.cos(theta)
+    return np.vstack((x, np.zeros_like(x), z))
 
 
 def section_observation_plane(
@@ -60,29 +73,26 @@ def section_observation_plane(
     return (xg.ravel(), yg.ravel(), zg.ravel()), (xg, zg)
 
 
-def build_geometry(case: str, n_centerline: int, grid_n: int) -> Geometry:
-    if case == "tight":
-        center_radius = 0.65
-        helix_radius = HELICAL_WIRE_RADIUS
-        twist_pitch = 0.28
-    elif case == "wide":
-        center_radius = 0.8
-        helix_radius = 0.075
-        twist_pitch = 0.45
-    else:
-        center_radius = 0.7
-        helix_radius = HELICAL_WIRE_RADIUS
-        twist_pitch = 0.36
-
-    centerline = circular_centerline(center_radius, n_centerline)
+def build_geometry(
+    n_centerline: int,
+    grid_n: int,
+    twist_pitch: float,
+    helix_width: float,
+    bend_curvature: float,
+) -> Geometry:
+    centerline = fixed_span_arc_centerline(SOURCE_SPAN, bend_curvature, n_centerline)
     helix = np.asarray(
         cfsem.filament_helix_path(
             path=centerline,
-            helix_start_offset=(0.0, helix_radius, 0.0),
-            twist_pitch=twist_pitch,
+            helix_start_offset=(0.0, helix_width, 0.0),
+            twist_pitch=float(twist_pitch),
             angle_offset=0.0,
         )
     )
+    segment_centers = 0.5 * (helix[:, :-1] + helix[:, 1:])
+    source_centroid = np.mean(segment_centers, axis=1, keepdims=True)
+    centerline = centerline - source_centroid
+    helix = helix - source_centroid
     starts = helix[:, :-1].T
     ends = helix[:, 1:].T
     dl = ends - starts
@@ -96,7 +106,7 @@ def build_geometry(case: str, n_centerline: int, grid_n: int) -> Geometry:
         TRIANGLE_STRIP_WIDTH,
         CURRENT,
     )
-    extent = 4.0 * (center_radius + 3.0 * helix_radius)
+    extent = 4.0 * (SOURCE_SPAN + 3.0 * helix_width)
     obs, obs_grid = section_observation_plane(extent, grid_n)
     return Geometry(
         centerline,
@@ -189,10 +199,6 @@ def solve_fields(
     source_geometry: str,
     construction_method: str,
     theta: float,
-    num_chunks: int,
-    source_leaf_size: int,
-    target_leaf_size: int,
-    build_par: bool,
     par: bool,
 ) -> dict[str, object]:
     direct_build_time = 0.0
@@ -252,12 +258,9 @@ def solve_fields(
     if source_geometry == "dipole":
         solver = cfsem.HierarchicalDipoles(
             theta=theta,
-            source_leaf_size=source_leaf_size,
-            target_leaf_size=target_leaf_size,
-            num_chunks=max(1, int(num_chunks)),
             construction_method=construction_method,
         )
-        solver.build(geometry.dipole_loc, geometry.obs, geometry.dipole_outer_radius, par=build_par)
+        solver.build(geometry.dipole_loc, geometry.obs, geometry.dipole_outer_radius)
         source_count = geometry.dipole_outer_radius.size
         build_time = time.perf_counter() - t0
 
@@ -267,12 +270,9 @@ def solve_fields(
     elif source_geometry == "boundary":
         solver = cfsem.HierarchicalBoundaryElements(
             theta=theta,
-            source_leaf_size=source_leaf_size,
-            target_leaf_size=target_leaf_size,
-            num_chunks=max(1, int(num_chunks)),
             construction_method=construction_method,
         )
-        solver.build(geometry.strip_nodes, geometry.strip_triangles, geometry.obs, par=build_par)
+        solver.build(geometry.strip_nodes, geometry.strip_triangles, geometry.obs)
         source_count = geometry.strip_triangles.shape[0]
         build_time = time.perf_counter() - t0
 
@@ -282,12 +282,9 @@ def solve_fields(
     else:
         solver = cfsem.HierarchicalLinearFilaments(
             theta=theta,
-            source_leaf_size=source_leaf_size,
-            target_leaf_size=target_leaf_size,
-            num_chunks=max(1, int(num_chunks)),
             construction_method=construction_method,
         )
-        solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, geometry.obs, par=build_par)
+        solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, geometry.obs)
         source_count = geometry.current.size
         build_time = time.perf_counter() - t0
 
@@ -430,17 +427,6 @@ def make_app():
         [
             html.Div(
                 [
-                    html.Label("Geometry"),
-                    dcc.Dropdown(
-                        id="geometry",
-                        value="standard",
-                        clearable=False,
-                        options=[
-                            {"label": "Standard circular helix", "value": "standard"},
-                            {"label": "Tighter pitch", "value": "tight"},
-                            {"label": "Wider helix", "value": "wide"},
-                        ],
-                    ),
                     html.Label("Field geometry"),
                     dcc.Dropdown(
                         id="source-geometry",
@@ -451,6 +437,38 @@ def make_app():
                             {"label": "Dipole", "value": "dipole"},
                             {"label": "Boundary-element triangle strip", "value": "boundary"},
                         ],
+                    ),
+                    html.Label("Twist pitch"),
+                    dcc.Slider(
+                        id="twist-pitch",
+                        min=0.12,
+                        max=0.8,
+                        step=0.01,
+                        value=DEFAULT_TWIST_PITCH,
+                        marks={0.12: "0.12", 0.36: "0.36", 0.8: "0.8"},
+                    ),
+                    html.Label("Helix width"),
+                    dcc.Slider(
+                        id="helix-width",
+                        min=0.0,
+                        max=0.16,
+                        step=0.005,
+                        value=DEFAULT_HELIX_WIDTH,
+                        marks={0.0: "0", 0.055: "0.055", 0.16: "0.16"},
+                    ),
+                    html.Label("Bend curvature"),
+                    dcc.Slider(
+                        id="bend-curvature",
+                        min=0.0,
+                        max=DEFAULT_BEND_CURVATURE,
+                        step=0.05,
+                        value=DEFAULT_BEND_CURVATURE,
+                        marks={
+                            0.0: "0",
+                            0.5: "0.5",
+                            1.0: "1.0",
+                            round(DEFAULT_BEND_CURVATURE, 2): f"{DEFAULT_BEND_CURVATURE:.2f}",
+                        },
                     ),
                     html.Label("Construction"),
                     dcc.Dropdown(
@@ -476,35 +494,10 @@ def make_app():
                     dcc.Slider(
                         id="theta",
                         min=0.0,
-                        max=0.7,
+                        max=0.3,
                         step=0.01,
                         value=DEFAULT_THETA,
-                        marks={round(i * 0.1, 1): f"{i * 0.1:.1f}" for i in range(8)},
-                    ),
-                    html.Label("Source leaf size"),
-                    dcc.Input(
-                        id="source-leaf-size",
-                        type="text",
-                        value=str(DEFAULT_LEAF_SIZE),
-                        debounce=True,
-                        style={"width": "100%", "boxSizing": "border-box"},
-                    ),
-                    html.Label("Target leaf size"),
-                    dcc.Input(
-                        id="target-leaf-size",
-                        type="text",
-                        value=str(DEFAULT_LEAF_SIZE),
-                        debounce=True,
-                        style={"width": "100%", "boxSizing": "border-box"},
-                    ),
-                    html.Label("Target chunks"),
-                    dcc.Slider(
-                        id="num-chunks",
-                        min=1,
-                        max=12,
-                        step=1,
-                        value=DEFAULT_NUM_CHUNKS,
-                        marks={1: "1", 4: "4", 8: "8", 12: "12"},
+                        marks={round(i * 0.1, 1): f"{i * 0.1:.1f}" for i in range(4)},
                     ),
                     html.Label("Sources"),
                     dcc.Slider(
@@ -521,10 +514,9 @@ def make_app():
                     ),
                     dcc.Checklist(
                         id="options",
-                        value=["parallel-build", "parallel", "relative-error"],
+                        value=["parallel", "relative-error"],
                         options=[
-                            {"label": "Parallel build", "value": "parallel-build"},
-                            {"label": "Parallel evaluation", "value": "parallel"},
+                            {"label": "Parallel direct solve", "value": "parallel"},
                             {"label": "Show relative error", "value": "relative-error"},
                         ],
                     ),
@@ -533,15 +525,15 @@ def make_app():
             ),
             html.Div(
                 [
-                    dcc.Graph(id="field-figure", config={"responsive": True}),
                     html.Div(
                         id="timing",
                         style={
                             "fontFamily": "monospace",
-                            "padding": "0 16px 16px",
-                            "whiteSpace": "pre",
+                            "padding": "16px 16px 0",
+                            "whiteSpace": "pre-wrap",
                         },
                     ),
+                    dcc.Graph(id="field-figure", config={"responsive": True}),
                 ],
                 style=content_style,
             ),
@@ -556,47 +548,50 @@ def make_app():
     @app.callback(
         Output("field-figure", "figure"),
         Output("timing", "children"),
-        Input("geometry", "value"),
         Input("source-geometry", "value"),
+        Input("twist-pitch", "value"),
+        Input("helix-width", "value"),
+        Input("bend-curvature", "value"),
         Input("construction", "value"),
         Input("field", "value"),
         Input("theta", "value"),
-        Input("source-leaf-size", "value"),
-        Input("target-leaf-size", "value"),
-        Input("num-chunks", "value"),
         Input("source-count", "value"),
         Input("options", "value"),
     )
     def update(
-        case,
         source_geometry,
+        twist_pitch,
+        helix_width,
+        bend_curvature,
         construction,
         field,
         theta,
-        source_leaf_size,
-        target_leaf_size,
-        num_chunks,
         log10_source_count,
         options,
     ):
         source_count = source_count_from_log10(float(log10_source_count))
-        geometry = build_geometry(case, int(source_count) + 1, GRID_N)
+        geometry = build_geometry(
+            int(source_count) + 1,
+            GRID_N,
+            float(twist_pitch),
+            float(helix_width),
+            float(bend_curvature),
+        )
         opts = set(options or [])
         results = solve_fields(
             geometry,
             source_geometry=source_geometry,
             construction_method=construction,
             theta=float(theta),
-            num_chunks=int(num_chunks),
-            source_leaf_size=parse_leaf_size(source_leaf_size),
-            target_leaf_size=parse_leaf_size(target_leaf_size),
-            build_par="parallel-build" in opts,
             par="parallel" in opts,
         )
         fig = make_figure(geometry, results, field, "relative-error" in opts)
         timing = (
             f"nsrc={results['source_count']}, nobs={geometry.obs[0].size}, "
             f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
+            f"theta={float(theta):.2f}\n"
+            f"twist_pitch={float(twist_pitch):.3f}, helix_width={float(helix_width):.3f}, "
+            f"bend_curvature={float(bend_curvature):.3f}\n"
             f"original source-target interactions={results['source_target_interactions']:.1E}\n"
             f"direct:       construction={results['direct_build_time']:.3f}s, "
             f"evaluation={results['direct_time']:.3f}s\n"
@@ -606,14 +601,6 @@ def make_app():
         return fig, timing
 
     return app
-
-
-def parse_leaf_size(value) -> int:
-    try:
-        leaf_size = int(value)
-    except (TypeError, ValueError):
-        return DEFAULT_LEAF_SIZE
-    return max(1, leaf_size)
 
 
 if __name__ == "__main__":

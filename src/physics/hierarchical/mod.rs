@@ -1,8 +1,13 @@
-//! Generic dual-tree Barnes-Hut infrastructure.
+//! Generic single-tree Barnes-Hut infrastructure.
 //!
-//! This module provides the generic geometry, tree, plan, kernel-trait, and
-//! evaluator pieces. Concrete physics kernels are intentionally implemented
-//! elsewhere.
+//! The public hierarchical evaluation path builds one source tree over fixed
+//! source geometry and evaluates target points directly against that source
+//! tree. Source leaves are fixed at one primitive per leaf, which is the most
+//! conservative acceptance choice and has also been the fastest configuration
+//! for the current kernels. Concrete physics kernels are implemented in the
+//! [`kernels`] submodule.
+//!
+//! Lower-level interaction-plan experiments remain internal to this module.
 //!
 //! # References
 //!
@@ -14,19 +19,17 @@ mod aabb;
 mod evaluator;
 mod kernel;
 pub mod kernels;
+#[cfg(test)]
 mod plan;
 mod scalar;
 mod tree;
 
 pub use aabb::Aabb;
 pub use evaluator::{
-    EvaluationScratch, SourceNodeSummaries, TargetNodeSummaries, dense_direct_evaluate_into,
-    evaluate_into, evaluate_into_par, output_len, parallel_evaluation_scratch_len,
-    serial_evaluation_scratch_len, update_plan_target_summaries_into, update_source_summaries_into,
-    update_target_summaries_into,
+    EvaluationScratch, SourceNodeSummaries, dense_direct_evaluate_into, evaluate_source_tree_into,
+    source_tree_evaluation_scratch_len, update_source_summaries_into,
 };
 pub use kernel::{BoundedGeometry, DualTreeError, DualTreeKernel};
-pub use plan::{DualInteractionPlan, DualInteractionPlanChunk, DualInteractionPlanView};
 pub use scalar::DualTreeScalar;
 pub use tree::{ClusterTree, ClusterTreeBuildMethod, ClusterTreeView};
 

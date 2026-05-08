@@ -1,6 +1,6 @@
 use core::ops::{Add, Div, Mul, Sub};
 
-/// Scalar type supported by the generic dual-tree infrastructure.
+/// Scalar type supported by the generic hierarchical tree infrastructure.
 pub trait DualTreeScalar:
     Copy
     + Clone

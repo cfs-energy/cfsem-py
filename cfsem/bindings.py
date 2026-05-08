@@ -1254,7 +1254,7 @@ class HierarchicalDipoles:
 
     def __init__(
         self,
-        theta: float = 0.1,
+        theta: float = 0.01,
         construction_method: str = "morton_lbvh",
     ) -> None:
         self._solver = _HierarchicalDipoles(theta, construction_method)
@@ -1315,7 +1315,7 @@ class HierarchicalLinearFilaments:
 
     def __init__(
         self,
-        theta: float = 0.1,
+        theta: float = 0.05,
         construction_method: str = "morton_lbvh",
     ) -> None:
         self._solver = _HierarchicalLinearFilaments(theta, construction_method)

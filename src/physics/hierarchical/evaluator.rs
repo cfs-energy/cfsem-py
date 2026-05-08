@@ -96,7 +96,8 @@ pub fn source_tree_evaluation_scratch_len() -> usize {
 /// Number of contribution scratch entries required by parallel source-tree evaluation.
 #[inline]
 pub fn parallel_source_tree_evaluation_scratch_len(target_count: usize) -> usize {
-    target_count.min(rayon::current_num_threads()).max(1)
+    let chunk_size = crate::chunksize(target_count);
+    target_count.div_ceil(chunk_size).max(1)
 }
 
 /// Update source summaries for a fixed source tree and changed source moments.
@@ -445,12 +446,12 @@ pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
         return DualTreeError::Ok;
     }
 
-    let chunk_count = parallel_source_tree_evaluation_scratch_len(targets.len());
+    let chunk_size = crate::chunksize(targets.len());
+    let chunk_count = targets.len().div_ceil(chunk_size);
     if scratch.contribution.len() < chunk_count {
         return DualTreeError::ScratchTooSmall;
     }
 
-    let chunk_size = targets.len().div_ceil(chunk_count);
     let error_code = AtomicU32::new(DualTreeError::Ok as u32);
 
     (

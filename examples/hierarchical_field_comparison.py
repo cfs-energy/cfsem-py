@@ -12,6 +12,7 @@ GRID_N = 124 if os.getenv("CFSEM_TESTING") else 228
 DEFAULT_SOURCE_COUNT = 63 if os.getenv("CFSEM_TESTING") else 159
 MIN_SOURCE_COUNT = 8
 MAX_SOURCE_COUNT = 255 if os.getenv("CFSEM_TESTING") else 100_000
+MAX_DIRECT_SELF_INTERACTIONS = 1_000_000_000
 CURRENT = 1.0
 WIRE_RADIUS = 0.015
 HELICAL_WIRE_RADIUS = 0.055
@@ -200,12 +201,146 @@ def relative_error(
     return err / ref
 
 
+def linear_filament_centers(geometry: Geometry) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    return (
+        geometry.xyzfil[0] + 0.5 * geometry.dlxyzfil[0],
+        geometry.xyzfil[1] + 0.5 * geometry.dlxyzfil[1],
+        geometry.xyzfil[2] + 0.5 * geometry.dlxyzfil[2],
+    )
+
+
+def triangle_centroids(geometry: Geometry) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    tri_nodes = geometry.strip_nodes[geometry.strip_triangles]
+    centroids = np.mean(tri_nodes, axis=1)
+    return (centroids[:, 0], centroids[:, 1], centroids[:, 2])
+
+
+def solve_self_fields(
+    geometry: Geometry,
+    source_geometry: str,
+    construction_method: str,
+    theta: float,
+    par: bool,
+) -> dict[str, object]:
+    if source_geometry == "dipole":
+        self_obs = geometry.dipole_loc
+        source_count = geometry.dipole_outer_radius.size
+    elif source_geometry == "boundary":
+        self_obs = triangle_centroids(geometry)
+        source_count = geometry.strip_triangles.shape[0]
+    else:
+        self_obs = linear_filament_centers(geometry)
+        source_count = geometry.current.size
+
+    interactions = source_count * source_count
+    direct_time: float | None = None
+    direct_b = None
+    direct_a = None
+    if interactions <= MAX_DIRECT_SELF_INTERACTIONS:
+        t0 = time.perf_counter()
+        if source_geometry == "dipole":
+            direct_b = cfsem.flux_density_dipole(
+                geometry.dipole_loc,
+                geometry.dipole_moment,
+                self_obs,
+                par=par,
+                outer_radius=geometry.dipole_outer_radius,
+            )
+            direct_a = cfsem.vector_potential_dipole(
+                geometry.dipole_loc,
+                geometry.dipole_moment,
+                self_obs,
+                par=par,
+                outer_radius=geometry.dipole_outer_radius,
+            )
+        elif source_geometry == "boundary":
+            self_obs_array = np.column_stack(self_obs)
+            direct_b = cfsem.flux_density_triangle_mesh(
+                self_obs_array,
+                geometry.strip_nodes,
+                geometry.strip_triangles,
+                geometry.strip_stream_function,
+                par=par,
+            )
+            direct_a = cfsem.vector_potential_triangle_mesh(
+                self_obs_array,
+                geometry.strip_nodes,
+                geometry.strip_triangles,
+                geometry.strip_stream_function,
+                par=par,
+            )
+        else:
+            direct_b = cfsem.flux_density_linear_filament(
+                self_obs,
+                geometry.xyzfil,
+                geometry.dlxyzfil,
+                geometry.current,
+                geometry.wire_radius,
+                par=par,
+            )
+            direct_a = cfsem.vector_potential_linear_filament(
+                self_obs,
+                geometry.xyzfil,
+                geometry.dlxyzfil,
+                geometry.current,
+                geometry.wire_radius,
+                par=par,
+            )
+        direct_time = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    if source_geometry == "dipole":
+        solver = cfsem.HierarchicalDipoles(theta=theta, construction_method=construction_method)
+        solver.build(geometry.dipole_loc, self_obs, geometry.dipole_outer_radius)
+        build_time = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        hierarchical_b = solver.flux_density(geometry.dipole_moment, par=par)
+        hierarchical_a = solver.vector_potential(geometry.dipole_moment, par=par)
+    elif source_geometry == "boundary":
+        solver = cfsem.HierarchicalBoundaryElements(
+            theta=theta,
+            construction_method=construction_method,
+        )
+        solver.build(geometry.strip_nodes, geometry.strip_triangles, self_obs)
+        build_time = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        hierarchical_b = solver.flux_density(geometry.strip_stream_function, par=par)
+        hierarchical_a = solver.vector_potential(geometry.strip_stream_function, par=par)
+    else:
+        solver = cfsem.HierarchicalLinearFilaments(
+            theta=theta,
+            construction_method=construction_method,
+        )
+        solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, self_obs)
+        build_time = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        hierarchical_b = solver.flux_density(geometry.current, par=par)
+        hierarchical_a = solver.vector_potential(geometry.current, par=par)
+    eval_time = time.perf_counter() - t0
+
+    return {
+        "direct_b": direct_b,
+        "direct_a": direct_a,
+        "hierarchical_b": hierarchical_b,
+        "hierarchical_a": hierarchical_a,
+        "interactions": interactions,
+        "direct_time": direct_time,
+        "direct_skipped": direct_time is None,
+        "hierarchical_build_time": build_time,
+        "hierarchical_eval_time": eval_time,
+    }
+
+
 def solve_fields(
     geometry: Geometry,
     source_geometry: str,
     construction_method: str,
     theta: float,
     par: bool,
+    calc_self_field: bool,
 ) -> dict[str, object]:
     direct_build_time = 0.0
 
@@ -299,7 +434,7 @@ def solve_fields(
         hierarchical_a = solver.vector_potential(geometry.current, par=par)
     eval_time = time.perf_counter() - t0
 
-    return {
+    results: dict[str, object] = {
         "direct_b": direct_b,
         "direct_a": direct_a,
         "direct_build_time": direct_build_time,
@@ -311,6 +446,15 @@ def solve_fields(
         "source_count": source_count,
         "source_target_interactions": source_count * geometry.obs[0].size,
     }
+    if calc_self_field:
+        results["self_field"] = solve_self_fields(
+            geometry,
+            source_geometry=source_geometry,
+            construction_method=construction_method,
+            theta=theta,
+            par=par,
+        )
+    return results
 
 
 def heatmap_values(values: np.ndarray, geometry: Geometry) -> np.ndarray:
@@ -408,6 +552,79 @@ def make_figure(
         margin={"l": 40, "r": 40, "t": 70, "b": 40},
         title=f"{'B-field' if field == 'b' else 'A-field'} comparison on the centerline plane",
     )
+    return fig
+
+
+def make_self_field_figure(results: dict[str, object], field: str):
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    self_field = results.get("self_field")
+    fig = make_subplots(
+        rows=1,
+        cols=3,
+        subplot_titles=("Self Direct", "Self Hierarchical", "Self Relative Error"),
+        horizontal_spacing=0.055,
+    )
+    fig.update_layout(
+        template="plotly_white",
+        height=380,
+        margin={"l": 40, "r": 40, "t": 60, "b": 40},
+        title=f"Self-field {'B' if field == 'b' else 'A'} by source index",
+    )
+    for axis in fig.select_xaxes():
+        axis.update(title="source index")
+    for axis in fig.select_yaxes():
+        axis.update(title="log10 magnitude")
+
+    if not isinstance(self_field, dict):
+        fig.add_annotation(
+            text="Enable Calculate self-field to show source-index diagnostics",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+        )
+        return fig
+
+    direct = self_field[f"direct_{field}"]
+    hierarchical = self_field[f"hierarchical_{field}"]
+    assert isinstance(hierarchical, tuple)
+    source_index = np.arange(hierarchical[0].size)
+    hierarchical_log = np.log10(np.maximum(field_magnitude(hierarchical), 1e-30))
+    fig.add_trace(
+        go.Scatter(x=source_index, y=hierarchical_log, mode="lines", line={"color": "#3b6fb6"}),
+        row=1,
+        col=2,
+    )
+
+    if direct is None:
+        for col in (1, 3):
+            fig.add_annotation(
+                text="Direct self-field skipped",
+                xref=f"x{col} domain" if col > 1 else "x domain",
+                yref=f"y{col} domain" if col > 1 else "y domain",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+            )
+        return fig
+
+    assert isinstance(direct, tuple)
+    direct_log = np.log10(np.maximum(field_magnitude(direct), 1e-30))
+    error_log = np.log10(np.maximum(relative_error(hierarchical, direct), 1e-16))
+    fig.add_trace(
+        go.Scatter(x=source_index, y=direct_log, mode="lines", line={"color": "#555"}),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(x=source_index, y=error_log, mode="lines", line={"color": "#b63b4a"}),
+        row=1,
+        col=3,
+    )
+    fig.update_yaxes(title="log10 relative error", row=1, col=3)
     return fig
 
 
@@ -533,6 +750,7 @@ def make_app():
                         options=[
                             {"label": "Parallel evaluation", "value": "parallel"},
                             {"label": "Show relative error", "value": "relative-error"},
+                            {"label": "Calculate self-field", "value": "self-field"},
                         ],
                     ),
                 ],
@@ -549,6 +767,7 @@ def make_app():
                         },
                     ),
                     dcc.Graph(id="field-figure", config={"responsive": True}),
+                    dcc.Graph(id="self-field-figure", config={"responsive": True}),
                 ],
                 style=content_style,
             ),
@@ -562,6 +781,7 @@ def make_app():
 
     @app.callback(
         Output("field-figure", "figure"),
+        Output("self-field-figure", "figure"),
         Output("timing", "children"),
         Input("source-geometry", "value"),
         Input("twist-pitch", "value"),
@@ -602,8 +822,24 @@ def make_app():
             construction_method=construction,
             theta=float(theta),
             par="parallel" in opts,
+            calc_self_field="self-field" in opts,
         )
         fig = make_figure(geometry, results, field, "relative-error" in opts)
+        self_fig = make_self_field_figure(results, field)
+        self_field = results.get("self_field")
+        self_text = ""
+        if isinstance(self_field, dict):
+            direct_self = (
+                "skipped"
+                if self_field["direct_skipped"]
+                else f"{float(self_field['direct_time']):.3f}s"
+            )
+            self_text = (
+                f"\nself-field source-source interactions={self_field['interactions']:.1E}\n"
+                f"self direct:       evaluation={direct_self}\n"
+                f"self hierarchical: construction={self_field['hierarchical_build_time']:.3f}s, "
+                f"evaluation={self_field['hierarchical_eval_time']:.3f}s"
+            )
         timing = (
             f"nsrc={results['source_count']}, nobs={geometry.obs[0].size}, "
             f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
@@ -615,8 +851,9 @@ def make_app():
             f"evaluation={results['direct_time']:.3f}s\n"
             f"hierarchical: construction={results['build_time']:.3f}s, "
             f"evaluation={results['eval_time']:.3f}s"
+            f"{self_text}"
         )
-        return fig, timing
+        return fig, self_fig, timing
 
     return app
 

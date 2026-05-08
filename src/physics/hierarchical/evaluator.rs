@@ -1,9 +1,7 @@
 #[cfg(test)]
 use super::plan::{DualInteractionPlanChunk, DualInteractionPlanView};
 use super::{BoundedGeometry, ClusterTreeView, DualTreeError, DualTreeKernel, DualTreeScalar};
-#[cfg(test)]
 use rayon::prelude::*;
-#[cfg(test)]
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// CPU-owned source summary storage.
@@ -93,6 +91,12 @@ pub fn parallel_evaluation_scratch_len<T: super::DualTreeScalar>(
 #[inline]
 pub fn source_tree_evaluation_scratch_len() -> usize {
     1
+}
+
+/// Number of contribution scratch entries required by parallel source-tree evaluation.
+#[inline]
+pub fn parallel_source_tree_evaluation_scratch_len(target_count: usize) -> usize {
+    target_count.min(rayon::current_num_threads()).max(1)
 }
 
 /// Update source summaries for a fixed source tree and changed source moments.
@@ -408,6 +412,82 @@ pub fn evaluate_source_tree_into<K: DualTreeKernel>(
     }
 
     DualTreeError::Ok
+}
+
+/// Evaluate targets independently against the source tree in parallel over target chunks.
+///
+/// This is intentionally the simplest parallelization of the single-tree
+/// solver: each worker owns a disjoint target/output slice and runs the serial
+/// source-tree evaluator on that slice. It shares the source tree and source
+/// summaries between workers, and avoids any cross-thread output accumulation.
+#[inline]
+pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_summaries: &[K::SourceSummary],
+    sources: &[K::SourceGeometry],
+    targets: &[K::TargetGeometry],
+    moments: &[K::SourceMoment],
+    theta: K::Scalar,
+    out: &mut [K::Output],
+    scratch: &mut EvaluationScratch<'_, K::Output>,
+) -> DualTreeError {
+    if sources.len() != source_tree.n_items()
+        || moments.len() != source_tree.n_items()
+        || targets.len() != out.len()
+    {
+        return DualTreeError::LengthMismatch;
+    }
+    if source_summaries.len() < source_tree.n_nodes() {
+        return DualTreeError::ScratchTooSmall;
+    }
+    if targets.is_empty() {
+        return DualTreeError::Ok;
+    }
+
+    let chunk_count = parallel_source_tree_evaluation_scratch_len(targets.len());
+    if scratch.contribution.len() < chunk_count {
+        return DualTreeError::ScratchTooSmall;
+    }
+
+    let chunk_size = targets.len().div_ceil(chunk_count);
+    let error_code = AtomicU32::new(DualTreeError::Ok as u32);
+
+    (
+        targets.par_chunks(chunk_size),
+        out.par_chunks_mut(chunk_size),
+        scratch.contribution[..chunk_count].par_iter_mut(),
+    )
+        .into_par_iter()
+        .for_each(|(target_chunk, out_chunk, contribution)| {
+            if error_code.load(Ordering::Relaxed) != DualTreeError::Ok as u32 {
+                return;
+            }
+            let mut chunk_scratch = EvaluationScratch {
+                contribution: core::slice::from_mut(contribution),
+            };
+            let err = evaluate_source_tree_into(
+                kernel,
+                source_tree,
+                source_summaries,
+                sources,
+                target_chunk,
+                moments,
+                theta,
+                out_chunk,
+                &mut chunk_scratch,
+            );
+            if err != DualTreeError::Ok {
+                let _ = error_code.compare_exchange(
+                    DualTreeError::Ok as u32,
+                    err as u32,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                );
+            }
+        });
+
+    DualTreeError::from_u32(error_code.load(Ordering::Relaxed))
 }
 
 #[inline]

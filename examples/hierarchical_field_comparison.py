@@ -516,7 +516,7 @@ def make_app():
                         id="options",
                         value=["parallel", "relative-error"],
                         options=[
-                            {"label": "Parallel direct solve", "value": "parallel"},
+                            {"label": "Parallel evaluation", "value": "parallel"},
                             {"label": "Show relative error", "value": "relative-error"},
                         ],
                     ),

@@ -1807,6 +1807,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
     );
 
     let mut source_tree_out = [0.0; 2];
+    let mut source_tree_out_par = [0.0; 2];
     let mut dense = [0.0; 2];
     let mut scratch_value = [0.0];
     let mut scratch = EvaluationScratch {
@@ -1826,6 +1827,25 @@ fn source_tree_theta_zero_matches_dense_direct() {
         ),
         DualTreeError::Ok
     );
+    let mut par_scratch_value =
+        vec![0.0; parallel_source_tree_evaluation_scratch_len(targets.len())];
+    let mut par_scratch = EvaluationScratch {
+        contribution: &mut par_scratch_value,
+    };
+    assert_eq!(
+        evaluate_source_tree_into_par(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            &sources,
+            &targets,
+            &moments,
+            0.0,
+            &mut source_tree_out_par,
+            &mut par_scratch,
+        ),
+        DualTreeError::Ok
+    );
     assert_eq!(
         dense_direct_evaluate_into(
             &kernel,
@@ -1839,6 +1859,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
     );
     for i in 0..targets.len() {
         assert!((source_tree_out[i] - dense[i]).abs() < 1.0e-14);
+        assert!((source_tree_out_par[i] - dense[i]).abs() < 1.0e-14);
     }
 }
 

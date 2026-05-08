@@ -385,9 +385,10 @@ fn hierarchical_eval_source_tree_vec3<K>(
     targets: &[K::TargetGeometry],
     moments: &[K::SourceMoment],
     theta: f64,
+    par: bool,
 ) -> PyResult<Vec<[f64; 3]>>
 where
-    K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]>,
+    K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
 {
     let mut source_summaries =
         physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
@@ -403,22 +404,38 @@ where
     }
 
     let mut out = vec![[0.0; 3]; targets.len()];
-    let mut scratch_value =
-        vec![[0.0; 3]; physics::hierarchical::source_tree_evaluation_scratch_len()];
+    let scratch_len = match par {
+        true => physics::hierarchical::parallel_source_tree_evaluation_scratch_len(targets.len()),
+        false => physics::hierarchical::source_tree_evaluation_scratch_len(),
+    };
+    let mut scratch_value = vec![[0.0; 3]; scratch_len];
     let mut scratch = physics::hierarchical::EvaluationScratch {
         contribution: &mut scratch_value,
     };
-    err = physics::hierarchical::evaluate_source_tree_into(
-        &kernel,
-        source_tree.as_view(),
-        &source_summaries.node_summaries,
-        sources,
-        targets,
-        moments,
-        theta,
-        &mut out,
-        &mut scratch,
-    );
+    err = match par {
+        true => physics::hierarchical::evaluate_source_tree_into_par(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            &mut out,
+            &mut scratch,
+        ),
+        false => physics::hierarchical::evaluate_source_tree_into(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            &mut out,
+            &mut scratch,
+        ),
+    };
     if err != physics::hierarchical::DualTreeError::Ok {
         return Err(py_dual_tree_error(
             "source-tree hierarchical evaluation",
@@ -625,7 +642,7 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        _par: bool,
+        par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
         let source_tree = self.source_tree()?;
@@ -636,6 +653,7 @@ impl HierarchicalDipoles {
             &self.targets,
             &moments,
             self.theta,
+            par,
         )
     }
 
@@ -646,7 +664,7 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        _par: bool,
+        par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
         let source_tree = self.source_tree()?;
@@ -657,6 +675,7 @@ impl HierarchicalDipoles {
             &self.targets,
             &moments,
             self.theta,
+            par,
         )
     }
 }
@@ -821,7 +840,7 @@ impl HierarchicalLinearFilaments {
     fn eval_linear_filament_flux_density(
         &self,
         current: PyReadonlyArray1<f64>,
-        _par: bool,
+        par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let currents = read_scalar_moments(current, self.sources.len(), "current")?;
         let source_tree = self.source_tree()?;
@@ -832,13 +851,14 @@ impl HierarchicalLinearFilaments {
             &self.targets,
             &currents,
             self.theta,
+            par,
         )
     }
 
     fn eval_linear_filament_vector_potential(
         &self,
         current: PyReadonlyArray1<f64>,
-        _par: bool,
+        par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let currents = read_scalar_moments(current, self.sources.len(), "current")?;
         let source_tree = self.source_tree()?;
@@ -849,6 +869,7 @@ impl HierarchicalLinearFilaments {
             &self.targets,
             &currents,
             self.theta,
+            par,
         )
     }
 }
@@ -1000,7 +1021,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        _par: bool,
+        par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
         let source_tree = self.source_tree()?;
@@ -1013,6 +1034,7 @@ impl HierarchicalBoundaryElements {
             &self.targets,
             &moments,
             self.theta,
+            par,
         )
     }
 
@@ -1023,7 +1045,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        _par: bool,
+        par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
         let source_tree = self.source_tree()?;
@@ -1036,6 +1058,7 @@ impl HierarchicalBoundaryElements {
             &self.targets,
             &moments,
             self.theta,
+            par,
         )
     }
 }

@@ -634,7 +634,13 @@ def make_self_field_figure(results: dict[str, object], field: str):
         col=1,
     )
     fig.add_trace(
-        go.Scatter(x=source_index, y=error_log, mode="lines", line={"color": "#b63b4a"}),
+        go.Scatter(
+            x=source_index,
+            y=error_log,
+            mode="lines",
+            name="Error",
+            line={"color": "#b63b4a"},
+        ),
         row=1,
         col=2,
     )

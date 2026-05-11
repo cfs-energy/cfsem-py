@@ -507,7 +507,7 @@ def make_figure(
     for col, (values, title) in enumerate(traces, start=1):
         colorscale = "Viridis"
         if col == 3:
-            colorscale = [[0.0, "white"], [1.0, "red"]] if show_error else "RdBu"
+            colorscale = [[0.0, "#2c7bb6"], [0.5, "#ffffbf"], [1.0, "#d7191c"]] if show_error else "RdBu"
         fig.add_trace(
             go.Heatmap(
                 x=xg[0, :],

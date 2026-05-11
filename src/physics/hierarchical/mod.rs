@@ -26,9 +26,10 @@ mod tree;
 
 pub use aabb::Aabb;
 pub use evaluator::{
-    EvaluationScratch, SourceNodeSummaries, dense_direct_evaluate_into, evaluate_source_tree_into,
-    evaluate_source_tree_into_par, parallel_source_tree_evaluation_scratch_len,
-    source_tree_evaluation_scratch_len, update_source_summaries_into,
+    EvaluationScratch, SourceNodeSummaries, accepted_source_level_diagnostic_into,
+    dense_direct_evaluate_into, evaluate_source_tree_into, evaluate_source_tree_into_par,
+    parallel_source_tree_evaluation_scratch_len, source_tree_evaluation_scratch_len,
+    update_source_summaries_into,
 };
 pub(crate) use kernel::geometric_accept_far;
 pub use kernel::{BoundedGeometry, DualTreeError, DualTreeKernel};

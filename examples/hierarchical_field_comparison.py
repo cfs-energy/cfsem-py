@@ -433,6 +433,9 @@ def solve_fields(
         hierarchical_b = solver.flux_density(geometry.current, par=par)
         hierarchical_a = solver.vector_potential(geometry.current, par=par)
     eval_time = time.perf_counter() - t0
+    if source_geometry == "linear":
+        accepted_source_levels_b = solver.accepted_source_levels(geometry.current, field="b")
+        accepted_source_levels_a = solver.accepted_source_levels(geometry.current, field="a")
 
     results: dict[str, object] = {
         "direct_b": direct_b,
@@ -446,6 +449,9 @@ def solve_fields(
         "source_count": source_count,
         "source_target_interactions": source_count * geometry.obs[0].size,
     }
+    if source_geometry == "linear":
+        results["accepted_source_levels_b"] = accepted_source_levels_b
+        results["accepted_source_levels_a"] = accepted_source_levels_a
     if calc_self_field:
         results["self_field"] = solve_self_fields(
             geometry,
@@ -489,11 +495,18 @@ def make_figure(
     middle = np.log10(np.maximum(field_magnitude(hierarchical), 1e-30))
     right = np.log10(np.maximum(relative_error(hierarchical, direct), 1e-16)) if show_error else middle - left
     right_title = "log10 relative error" if show_error else "log10 magnitude difference"
+    accepted_source_levels = results.get(f"accepted_source_levels_{field}")
+    show_level_diagnostic = isinstance(accepted_source_levels, np.ndarray)
+    col_count = 4 if show_level_diagnostic else 3
 
     fig = make_subplots(
         rows=1,
-        cols=3,
-        subplot_titles=("Direct", "Hierarchical", right_title),
+        cols=col_count,
+        subplot_titles=(
+            ("Direct", "Hierarchical", right_title, "Accepted Source Level")
+            if show_level_diagnostic
+            else ("Direct", "Hierarchical", right_title)
+        ),
         horizontal_spacing=0.055,
     )
     xg, zg = geometry.obs_grid
@@ -504,10 +517,14 @@ def make_figure(
         (middle, "log10 |hierarchical|"),
         (right, right_title),
     ]
+    if show_level_diagnostic:
+        traces.append((accepted_source_levels, "mean terminal source level"))
     for col, (values, title) in enumerate(traces, start=1):
         colorscale = "Viridis"
         if col == 3:
             colorscale = [[0.0, "#2c7bb6"], [0.5, "#ffffbf"], [1.0, "#d7191c"]] if show_error else "RdBu"
+        if col == 4:
+            colorscale = "Cividis"
         fig.add_trace(
             go.Heatmap(
                 x=xg[0, :],

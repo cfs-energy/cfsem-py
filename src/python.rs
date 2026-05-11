@@ -445,6 +445,45 @@ where
     Ok(out)
 }
 
+fn hierarchical_source_level_diagnostic<K>(
+    kernel: K,
+    source_tree: &physics::hierarchical::ClusterTree<f64>,
+    sources: &[K::SourceGeometry],
+    targets: &[K::TargetGeometry],
+    moments: &[K::SourceMoment],
+    theta: f64,
+) -> PyResult<Vec<f64>>
+where
+    K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+{
+    let mut source_summaries =
+        physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
+    let mut err = physics::hierarchical::update_source_summaries_into(
+        &kernel,
+        source_tree.as_view(),
+        sources,
+        moments,
+        &mut source_summaries.node_summaries,
+    );
+    if err != physics::hierarchical::DualTreeError::Ok {
+        return Err(py_dual_tree_error("source summary update", err));
+    }
+
+    let mut out = vec![0.0; targets.len()];
+    err = physics::hierarchical::accepted_source_level_diagnostic_into(
+        &kernel,
+        source_tree.as_view(),
+        &source_summaries.node_summaries,
+        targets,
+        theta,
+        &mut out,
+    );
+    if err != physics::hierarchical::DualTreeError::Ok {
+        return Err(py_dual_tree_error("source-level diagnostic", err));
+    }
+    Ok(out)
+}
+
 #[pyclass(module = "cfsem", unsendable)]
 struct HierarchicalDipoles {
     theta: f64,
@@ -825,6 +864,17 @@ impl HierarchicalLinearFilaments {
         let out = self.eval_linear_filament_vector_potential(current, par)?;
         Ok(vec3_to_py_tuple(py, &out))
     }
+
+    #[pyo3(signature = (current, field="b"))]
+    fn accepted_source_levels(
+        &self,
+        py: Python<'_>,
+        current: PyReadonlyArray1<f64>,
+        field: &str,
+    ) -> PyResult<Py<PyArray1<f64>>> {
+        let out = self.eval_linear_filament_source_levels(current, field)?;
+        Ok(PyArray1::from_vec(py, out).unbind())
+    }
 }
 
 impl HierarchicalLinearFilaments {
@@ -871,6 +921,37 @@ impl HierarchicalLinearFilaments {
             self.theta,
             par,
         )
+    }
+
+    fn eval_linear_filament_source_levels(
+        &self,
+        current: PyReadonlyArray1<f64>,
+        field: &str,
+    ) -> PyResult<Vec<f64>> {
+        let currents = read_scalar_moments(current, self.sources.len(), "current")?;
+        let source_tree = self.source_tree()?;
+        match field {
+            "b" => hierarchical_source_level_diagnostic(
+                physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(),
+                source_tree,
+                &self.sources,
+                &self.targets,
+                &currents,
+                self.theta,
+            ),
+            "a" => hierarchical_source_level_diagnostic(
+                physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(),
+                source_tree,
+                &self.sources,
+                &self.targets,
+                &currents,
+                self.theta,
+            ),
+            _ => Err(PyInteropError::ValueError {
+                msg: format!("Unsupported linear filament diagnostic field: {field}"),
+            }
+            .into()),
+        }
     }
 }
 

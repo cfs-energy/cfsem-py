@@ -1373,6 +1373,14 @@ class HierarchicalLinearFilaments:
         current = ascontiguousarray(current, dtype=float64).ravel()
         return self._solver.vector_potential(current, par)  # type: ignore
 
+    def accepted_source_levels(
+        self,
+        current: NDArray[float64],
+        field: Literal["b", "a"] = "b",
+    ) -> NDArray[float64]:
+        current = ascontiguousarray(current, dtype=float64).ravel()
+        return self._solver.accepted_source_levels(current, field)  # type: ignore
+
 
 class HierarchicalBoundaryElements:
     """Reusable single-source-tree hierarchical triangular boundary-element field solver."""

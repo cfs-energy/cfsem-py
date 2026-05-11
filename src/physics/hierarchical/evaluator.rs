@@ -498,6 +498,73 @@ pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
     DualTreeError::from_u32(error_code.load(Ordering::Relaxed))
 }
 
+/// Compute the source-tree level represented at each target by the terminal traversal nodes.
+///
+/// This is a diagnostic companion to [`evaluate_source_tree_into`]. It mirrors
+/// the same source-tree walk but does not evaluate field values. Far-accepted
+/// nodes contribute their traversal depth, while direct leaf fallbacks
+/// contribute the leaf depth. Each contribution is weighted by the number of
+/// original source items represented by that terminal node, giving a per-target
+/// mean accepted source level.
+#[inline]
+pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_summaries: &[K::SourceSummary],
+    targets: &[K::TargetGeometry],
+    theta: K::Scalar,
+    out: &mut [f64],
+) -> DualTreeError {
+    if targets.len() != out.len() {
+        return DualTreeError::LengthMismatch;
+    }
+    if source_summaries.len() < source_tree.n_nodes() {
+        return DualTreeError::ScratchTooSmall;
+    }
+
+    let mut active = Vec::new();
+    for target_id in 0..targets.len() {
+        let mut weighted_level = 0.0_f64;
+        let mut represented_sources = 0.0_f64;
+
+        active.clear();
+        active.push((0_u32, 0_u32));
+        while let Some((source_node, source_level)) = active.pop() {
+            let source_node_index = source_node as usize;
+            let source_count = source_tree.node_range_count[source_node_index] as f64;
+            if source_node_is_far::<K>(
+                kernel,
+                source_tree,
+                &targets[target_id],
+                source_node,
+                &source_summaries[source_node_index],
+                theta,
+            ) {
+                weighted_level += f64::from(source_level) * source_count;
+                represented_sources += source_count;
+                continue;
+            }
+
+            if source_tree.is_leaf(source_node) {
+                weighted_level += f64::from(source_level) * source_count;
+                represented_sources += source_count;
+            } else {
+                let next_level = source_level + 1;
+                active.push((source_tree.node_left_child[source_node_index], next_level));
+                active.push((source_tree.node_right_child[source_node_index], next_level));
+            }
+        }
+
+        out[target_id] = if represented_sources > 0.0 {
+            weighted_level / represented_sources
+        } else {
+            f64::NAN
+        };
+    }
+
+    DualTreeError::Ok
+}
+
 #[inline]
 fn source_node_is_far<K: DualTreeKernel>(
     kernel: &K,

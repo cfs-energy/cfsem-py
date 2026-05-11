@@ -7,19 +7,30 @@ use super::dipole::{
 use super::linear_filament_flux_density::LinearFilamentSource;
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::hierarchical::{
-    BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar,
+    Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar, geometric_accept_far,
 };
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::segment::vector_potential_point_segment_scalar;
 
+/// Source nodes with larger `|sum(I*dL)| / sum(|I*dL|)` are treated as open arcs.
+const OPEN_NODE_CLOSURE_RATIO: f64 = 0.2;
+/// Additional A-field acceptance scale for open arc-like filament nodes.
+const OPEN_NODE_THETA_SCALE: f64 = 0.25;
+
 /// Source summary for finite linear filament vector-potential clusters.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LinearFilamentVectorPotentialSummary<T: DualTreeScalar> {
+    /// `|I*dL|`-weighted origin for the net current-element source term.
     pub origin: [T; 3],
+    /// Unit direction of the net current element after finalization.
     pub direction: [T; 3],
+    /// Magnitude of the net current element `|sum(I*dL)|`.
     pub magnitude: T,
+    /// Origin used for the residual magnetic dipole correction.
     pub dipole_origin: [T; 3],
+    /// Magnetic dipole moment translated to `dipole_origin`.
     pub dipole_moment: [T; 3],
+    /// Total current-element weight `sum(|I*dL|)`.
     pub weight: T,
 }
 
@@ -193,6 +204,26 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         add3_in_place(out, dipole_out);
 
         DualTreeError::Ok
+    }
+
+    #[inline]
+    fn accept_far(
+        &self,
+        target_aabb: Aabb<Self::Scalar>,
+        source_aabb: Aabb<Self::Scalar>,
+        source: &Self::SourceSummary,
+        theta: Self::Scalar,
+    ) -> bool {
+        let mut effective_theta = theta;
+        if source.weight > T::ZERO {
+            let closure_ratio = source.magnitude / source.weight;
+            // Open arc-like nodes need a stricter far-field criterion than closed
+            // current-cancelling nodes, even for the less sensitive A-field.
+            if closure_ratio > T::from_f64(OPEN_NODE_CLOSURE_RATIO) {
+                effective_theta = effective_theta * T::from_f64(OPEN_NODE_THETA_SCALE);
+            }
+        }
+        geometric_accept_far(target_aabb, source_aabb, effective_theta)
     }
 
     #[inline]

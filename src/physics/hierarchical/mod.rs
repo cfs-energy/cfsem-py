@@ -30,6 +30,7 @@ pub use evaluator::{
     evaluate_source_tree_into_par, parallel_source_tree_evaluation_scratch_len,
     source_tree_evaluation_scratch_len, update_source_summaries_into,
 };
+pub(crate) use kernel::geometric_accept_far;
 pub use kernel::{BoundedGeometry, DualTreeError, DualTreeKernel};
 pub use scalar::DualTreeScalar;
 pub use tree::{ClusterTree, ClusterTreeBuildMethod, ClusterTreeView};

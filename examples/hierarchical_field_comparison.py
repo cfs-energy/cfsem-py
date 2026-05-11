@@ -22,7 +22,7 @@ DEFAULT_TWIST_PITCH = 0.36
 DEFAULT_HELIX_WIDTH = HELICAL_WIRE_RADIUS
 DEFAULT_BEND_CURVATURE = 2.0 / SOURCE_SPAN
 DEFAULT_LOOP_FRACTION = 0.5
-DEFAULT_THETA = 0.1
+DEFAULT_THETA = 0.05
 LOG10_MIN_SOURCE_COUNT = float(np.log10(MIN_SOURCE_COUNT))
 LOG10_DEFAULT_SOURCE_COUNT = float(np.log10(DEFAULT_SOURCE_COUNT))
 LOG10_MAX_SOURCE_COUNT = float(np.log10(MAX_SOURCE_COUNT))
@@ -719,11 +719,11 @@ def make_app():
                     html.Label("Construction"),
                     dcc.Dropdown(
                         id="construction",
-                        value="morton_lbvh",
+                        value="recursive",
                         clearable=False,
                         options=[
-                            {"label": "Morton/LBVH source tree", "value": "morton_lbvh"},
                             {"label": "Recursive source tree", "value": "recursive"},
+                            {"label": "Morton/LBVH source tree", "value": "morton_lbvh"},
                         ],
                     ),
                     html.Label("Field"),
@@ -881,4 +881,5 @@ def make_app():
 
 
 if __name__ == "__main__":
-    make_app().run(debug=True)
+    if not os.getenv("CFSEM_TESTING"):
+        make_app().run(debug=True)

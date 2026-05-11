@@ -11,8 +11,9 @@ use crate::physics::boundary_element::{
 use crate::physics::hierarchical::kernels::{
     BoundaryElementFluxDensityKernel, BoundaryElementTriangle,
     BoundaryElementVectorPotentialKernel, DipoleFluxDensityKernel, DipoleSource, DipoleTarget,
-    DipoleVectorPotentialKernel, LinearFilamentFluxDensityKernel, LinearFilamentSource,
-    LinearFilamentVectorPotentialKernel,
+    DipoleVectorPotentialKernel, LinearFilamentFluxDensityKernel, LinearFilamentFluxDensitySummary,
+    LinearFilamentSource, LinearFilamentVectorPotentialKernel,
+    LinearFilamentVectorPotentialSummary,
 };
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
@@ -1307,6 +1308,43 @@ fn linear_filament_reuses_tree_for_current_updates() {
         DualTreeError::Ok
     );
     assert_ne!(out0, out1);
+}
+
+#[test]
+fn linear_filament_acceptance_is_stricter_for_open_nodes() {
+    let b_kernel = LinearFilamentFluxDensityKernel::<f64>::new();
+    let a_kernel = LinearFilamentVectorPotentialKernel::<f64>::new();
+    let target_aabb = Aabb::from_point([20.0, 0.0, 0.5]);
+    let source_aabb = Aabb {
+        min: [0.0, 0.0, 0.0],
+        max: [0.0, 0.0, 1.0],
+    };
+    let open_b_summary = LinearFilamentFluxDensitySummary {
+        magnitude: 1.0,
+        weight: 1.0,
+        ..Default::default()
+    };
+    let closed_b_summary = LinearFilamentFluxDensitySummary {
+        magnitude: 0.0,
+        weight: 1.0,
+        ..Default::default()
+    };
+    let open_a_summary = LinearFilamentVectorPotentialSummary {
+        magnitude: 1.0,
+        weight: 1.0,
+        ..Default::default()
+    };
+    let closed_a_summary = LinearFilamentVectorPotentialSummary {
+        magnitude: 0.0,
+        weight: 1.0,
+        ..Default::default()
+    };
+
+    assert!(!b_kernel.accept_far(target_aabb, source_aabb, &open_b_summary, 0.1));
+    assert!(!b_kernel.accept_far(target_aabb, source_aabb, &closed_b_summary, 0.1));
+    assert!(b_kernel.accept_far(target_aabb, source_aabb, &closed_b_summary, 0.2));
+    assert!(!a_kernel.accept_far(target_aabb, source_aabb, &open_a_summary, 0.1));
+    assert!(a_kernel.accept_far(target_aabb, source_aabb, &closed_a_summary, 0.1));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 #[cfg(test)]
 use super::plan::{DualInteractionPlanChunk, DualInteractionPlanView};
-use super::{BoundedGeometry, ClusterTreeView, DualTreeError, DualTreeKernel, DualTreeScalar};
+use super::{BoundedGeometry, ClusterTreeView, DualTreeError, DualTreeKernel};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -376,7 +376,14 @@ pub fn evaluate_source_tree_into<K: DualTreeKernel>(
         active.clear();
         active.push(0_u32);
         while let Some(source_node) = active.pop() {
-            if source_node_is_far::<K>(source_tree, &targets[target_id], source_node, theta) {
+            if source_node_is_far::<K>(
+                kernel,
+                source_tree,
+                &targets[target_id],
+                source_node,
+                &source_summaries[source_node as usize],
+                theta,
+            ) {
                 let err = kernel.eval_far(
                     &target_summary,
                     &source_summaries[source_node as usize],
@@ -493,26 +500,16 @@ pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
 
 #[inline]
 fn source_node_is_far<K: DualTreeKernel>(
+    kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     target: &K::TargetGeometry,
     source_node: u32,
+    source_summary: &K::SourceSummary,
     theta: K::Scalar,
 ) -> bool {
-    if theta <= K::Scalar::ZERO {
-        return false;
-    }
-
     let target_aabb = target.aabb();
     let source_aabb = source_tree.node_aabb[source_node as usize];
-    let gap_sq = target_aabb.gap_distance_sq(&source_aabb);
-    if gap_sq <= K::Scalar::ZERO {
-        return false;
-    }
-
-    let target_diam = target_aabb.diameter_sq().sqrt();
-    let source_diam = source_aabb.diameter_sq().sqrt();
-    let combined = target_diam + source_diam;
-    gap_sq * theta * theta > combined * combined
+    kernel.accept_far(target_aabb, source_aabb, source_summary, theta)
 }
 
 #[cfg(test)]

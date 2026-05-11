@@ -96,6 +96,22 @@ pub trait DualTreeKernel {
         out: &mut Self::Output,
     ) -> DualTreeError;
 
+    /// Decide whether a source node is far enough from a target to use its summary.
+    ///
+    /// The default implementation uses the standard AABB Barnes-Hut criterion.
+    /// Kernels can override this to apply source-summary-specific constraints,
+    /// such as stricter acceptance for open filament arcs.
+    #[inline]
+    fn accept_far(
+        &self,
+        target_aabb: Aabb<Self::Scalar>,
+        source_aabb: Aabb<Self::Scalar>,
+        _source: &Self::SourceSummary,
+        theta: Self::Scalar,
+    ) -> bool {
+        geometric_accept_far(target_aabb, source_aabb, theta)
+    }
+
     fn zero_output(&self, out: &mut Self::Output);
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output);
 
@@ -107,4 +123,29 @@ pub trait DualTreeKernel {
             _ => "not a kernel error",
         }
     }
+}
+
+/// Standard geometric Barnes-Hut acceptance test for two AABBs.
+///
+/// This helper is shared by the default kernel implementation and kernel-specific
+/// acceptance hooks that first modify the effective `theta` value.
+#[inline]
+pub(crate) fn geometric_accept_far<T: DualTreeScalar>(
+    target_aabb: Aabb<T>,
+    source_aabb: Aabb<T>,
+    theta: T,
+) -> bool {
+    if theta <= T::ZERO {
+        return false;
+    }
+
+    let gap_sq = target_aabb.gap_distance_sq(&source_aabb);
+    if gap_sq <= T::ZERO {
+        return false;
+    }
+
+    let target_diam = target_aabb.diameter_sq().sqrt();
+    let source_diam = source_aabb.diameter_sq().sqrt();
+    let combined = target_diam + source_diam;
+    gap_sq * theta * theta > combined * combined
 }

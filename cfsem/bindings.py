@@ -1255,7 +1255,7 @@ class HierarchicalDipoles:
     def __init__(
         self,
         theta: float = 0.01,
-        construction_method: str = "morton_lbvh",
+        construction_method: str = "recursive",
     ) -> None:
         self._solver = _HierarchicalDipoles(theta, construction_method)
 
@@ -1316,7 +1316,7 @@ class HierarchicalLinearFilaments:
     def __init__(
         self,
         theta: float = 0.05,
-        construction_method: str = "morton_lbvh",
+        construction_method: str = "recursive",
     ) -> None:
         self._solver = _HierarchicalLinearFilaments(theta, construction_method)
 
@@ -1381,7 +1381,7 @@ class HierarchicalBoundaryElements:
         self,
         theta: float = 0.05,
         quad: str = "dunavant3",
-        construction_method: str = "morton_lbvh",
+        construction_method: str = "recursive",
     ) -> None:
         self._solver = _HierarchicalBoundaryElements(theta, quad, construction_method)
         self._triangles: NDArray[int64] | None = None

@@ -457,7 +457,7 @@ struct HierarchicalDipoles {
 #[pymethods]
 impl HierarchicalDipoles {
     #[new]
-    #[pyo3(signature = (theta=0.01, construction_method="morton_lbvh"))]
+    #[pyo3(signature = (theta=0.01, construction_method="recursive"))]
     fn new(theta: f64, construction_method: &str) -> PyResult<Self> {
         Ok(Self {
             theta,
@@ -692,7 +692,7 @@ struct HierarchicalLinearFilaments {
 #[pymethods]
 impl HierarchicalLinearFilaments {
     #[new]
-    #[pyo3(signature = (theta=0.05, construction_method="morton_lbvh"))]
+    #[pyo3(signature = (theta=0.05, construction_method="recursive"))]
     fn new(theta: f64, construction_method: &str) -> PyResult<Self> {
         Ok(Self {
             theta,
@@ -887,7 +887,7 @@ struct HierarchicalBoundaryElements {
 #[pymethods]
 impl HierarchicalBoundaryElements {
     #[new]
-    #[pyo3(signature = (theta=0.05, quad="dunavant3", construction_method="morton_lbvh"))]
+    #[pyo3(signature = (theta=0.05, quad="dunavant3", construction_method="recursive"))]
     fn new(theta: f64, quad: &str, construction_method: &str) -> PyResult<Self> {
         Ok(Self {
             theta,

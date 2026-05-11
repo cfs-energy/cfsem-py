@@ -5,16 +5,26 @@ use super::dipole::{
 };
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::hierarchical::{
-    Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar,
+    Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar, geometric_accept_far,
 };
 use crate::physics::linear_filament::flux_density_linear_filament_scalar;
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
+/// Source nodes with larger `|sum(I*dL)| / sum(|I*dL|)` are treated as open arcs.
+const OPEN_NODE_CLOSURE_RATIO: f64 = 0.2;
+/// Global B-field acceptance scale; B is more sensitive to source-summary placement than A.
+const FLUX_DENSITY_THETA_SCALE: f64 = 0.5;
+/// Additional B-field acceptance scale for open arc-like filament nodes.
+const OPEN_NODE_THETA_SCALE: f64 = 0.1;
+
 /// Finite linear filament source geometry.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LinearFilamentSource<T: DualTreeScalar> {
+    /// Segment start point.
     pub start: [T; 3],
+    /// Segment end point.
     pub end: [T; 3],
+    /// Wire radius used by the exact near-field filament kernel.
     pub wire_radius: T,
 }
 
@@ -56,11 +66,17 @@ impl<T: DualTreeScalar> BoundedGeometry for LinearFilamentSource<T> {
 /// Source summary for finite linear filament flux-density clusters.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LinearFilamentFluxDensitySummary<T: DualTreeScalar> {
+    /// `|I*dL|`-weighted origin for the net current-element source term.
     pub origin: [T; 3],
+    /// Unit direction of the net current element after finalization.
     pub direction: [T; 3],
+    /// Magnitude of the net current element `|sum(I*dL)|`.
     pub magnitude: T,
+    /// Origin used for the residual magnetic dipole correction.
     pub dipole_origin: [T; 3],
+    /// Magnetic dipole moment translated to `dipole_origin`.
     pub dipole_moment: [T; 3],
+    /// Total current-element weight `sum(|I*dL|)`.
     pub weight: T,
 }
 
@@ -234,6 +250,28 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
         add3_in_place(out, dipole_out);
 
         DualTreeError::Ok
+    }
+
+    #[inline]
+    fn accept_far(
+        &self,
+        target_aabb: Aabb<Self::Scalar>,
+        source_aabb: Aabb<Self::Scalar>,
+        source: &Self::SourceSummary,
+        theta: Self::Scalar,
+    ) -> bool {
+        // B is a derivative of A, so it is more sensitive to accepting a compact
+        // filament summary in the midfield. Scale every B-field acceptance test down.
+        let mut effective_theta = theta * T::from_f64(FLUX_DENSITY_THETA_SCALE);
+        if source.weight > T::ZERO {
+            let closure_ratio = source.magnitude / source.weight;
+            // Open arc-like nodes are especially poorly represented by a compact
+            // source summary, so require them to be farther away than closed nodes.
+            if closure_ratio > T::from_f64(OPEN_NODE_CLOSURE_RATIO) {
+                effective_theta = effective_theta * T::from_f64(OPEN_NODE_THETA_SCALE);
+            }
+        }
+        geometric_accept_far(target_aabb, source_aabb, effective_theta)
     }
 
     #[inline]

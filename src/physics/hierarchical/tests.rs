@@ -1350,11 +1350,11 @@ fn linear_filament_acceptance_rejects_intermediate_closure_ratio() {
         ..Default::default()
     };
 
-    assert!(b_kernel.accept_far(target_aabb, source_aabb, &open_b_summary, 0.1));
-    assert!(b_kernel.accept_far(target_aabb, source_aabb, &closed_b_summary, 0.1));
+    assert!(b_kernel.accept_far(target_aabb, source_aabb, &open_b_summary, 0.2));
+    assert!(b_kernel.accept_far(target_aabb, source_aabb, &closed_b_summary, 0.2));
     assert!(!b_kernel.accept_far(target_aabb, source_aabb, &partial_b_summary, 1.0));
-    assert!(a_kernel.accept_far(target_aabb, source_aabb, &open_a_summary, 0.1));
-    assert!(a_kernel.accept_far(target_aabb, source_aabb, &closed_a_summary, 0.1));
+    assert!(a_kernel.accept_far(target_aabb, source_aabb, &open_a_summary, 0.2));
+    assert!(a_kernel.accept_far(target_aabb, source_aabb, &closed_a_summary, 0.2));
     assert!(!a_kernel.accept_far(target_aabb, source_aabb, &partial_a_summary, 1.0));
 }
 

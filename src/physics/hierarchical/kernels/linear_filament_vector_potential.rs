@@ -16,6 +16,8 @@ use crate::physics::point_source::segment::vector_potential_point_segment_scalar
 const CLOSED_SUMMARY_CLOSURE_RATIO_MAX: f64 = 0.2;
 /// Upper closure-ratio bound for source summaries that can be represented as segments.
 const OPEN_SUMMARY_CLOSURE_RATIO_MIN: f64 = 0.8;
+/// Linear filament opening-angle scale factor for stricter geometric acceptance.
+const LINEAR_FILAMENT_THETA_SCALE: f64 = 0.5;
 
 /// Source summary for finite linear filament vector-potential clusters.
 #[derive(Clone, Copy, Debug, Default)]
@@ -222,7 +224,11 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
                 return false;
             }
         }
-        geometric_accept_far(target_aabb, source_aabb, theta)
+        geometric_accept_far(
+            target_aabb,
+            source_aabb,
+            theta * T::from_f64(LINEAR_FILAMENT_THETA_SCALE),
+        )
     }
 
     #[inline]

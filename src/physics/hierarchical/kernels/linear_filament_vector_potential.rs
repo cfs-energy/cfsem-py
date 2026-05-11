@@ -12,10 +12,10 @@ use crate::physics::hierarchical::{
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::segment::vector_potential_point_segment_scalar;
 
-/// Source nodes with larger `|sum(I*dL)| / sum(|I*dL|)` are treated as open arcs.
-const OPEN_NODE_CLOSURE_RATIO: f64 = 0.2;
-/// Additional A-field acceptance scale for open arc-like filament nodes.
-const OPEN_NODE_THETA_SCALE: f64 = 0.25;
+/// Lower closure-ratio bound for source summaries that can be represented as loops.
+const CLOSED_SUMMARY_CLOSURE_RATIO_MAX: f64 = 0.2;
+/// Upper closure-ratio bound for source summaries that can be represented as segments.
+const OPEN_SUMMARY_CLOSURE_RATIO_MIN: f64 = 0.8;
 
 /// Source summary for finite linear filament vector-potential clusters.
 #[derive(Clone, Copy, Debug, Default)]
@@ -214,16 +214,15 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         source: &Self::SourceSummary,
         theta: Self::Scalar,
     ) -> bool {
-        let mut effective_theta = theta;
         if source.weight > T::ZERO {
             let closure_ratio = source.magnitude / source.weight;
-            // Open arc-like nodes need a stricter far-field criterion than closed
-            // current-cancelling nodes, even for the less sensitive A-field.
-            if closure_ratio > T::from_f64(OPEN_NODE_CLOSURE_RATIO) {
-                effective_theta = effective_theta * T::from_f64(OPEN_NODE_THETA_SCALE);
+            if closure_ratio >= T::from_f64(CLOSED_SUMMARY_CLOSURE_RATIO_MAX)
+                && closure_ratio <= T::from_f64(OPEN_SUMMARY_CLOSURE_RATIO_MIN)
+            {
+                return false;
             }
         }
-        geometric_accept_far(target_aabb, source_aabb, effective_theta)
+        geometric_accept_far(target_aabb, source_aabb, theta)
     }
 
     #[inline]

@@ -10,12 +10,10 @@ use crate::physics::hierarchical::{
 use crate::physics::linear_filament::flux_density_linear_filament_scalar;
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
-/// Source nodes with larger `|sum(I*dL)| / sum(|I*dL|)` are treated as open arcs.
-const OPEN_NODE_CLOSURE_RATIO: f64 = 0.2;
-/// Global B-field acceptance scale; B is more sensitive to source-summary placement than A.
-const FLUX_DENSITY_THETA_SCALE: f64 = 0.5;
-/// Additional B-field acceptance scale for open arc-like filament nodes.
-const OPEN_NODE_THETA_SCALE: f64 = 0.1;
+/// Lower closure-ratio bound for source summaries that can be represented as loops.
+const CLOSED_SUMMARY_CLOSURE_RATIO_MAX: f64 = 0.2;
+/// Upper closure-ratio bound for source summaries that can be represented as segments.
+const OPEN_SUMMARY_CLOSURE_RATIO_MIN: f64 = 0.8;
 
 /// Finite linear filament source geometry.
 #[derive(Clone, Copy, Debug, Default)]
@@ -260,18 +258,15 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentFluxDensityKernel<T> {
         source: &Self::SourceSummary,
         theta: Self::Scalar,
     ) -> bool {
-        // B is a derivative of A, so it is more sensitive to accepting a compact
-        // filament summary in the midfield. Scale every B-field acceptance test down.
-        let mut effective_theta = theta * T::from_f64(FLUX_DENSITY_THETA_SCALE);
         if source.weight > T::ZERO {
             let closure_ratio = source.magnitude / source.weight;
-            // Open arc-like nodes are especially poorly represented by a compact
-            // source summary, so require them to be farther away than closed nodes.
-            if closure_ratio > T::from_f64(OPEN_NODE_CLOSURE_RATIO) {
-                effective_theta = effective_theta * T::from_f64(OPEN_NODE_THETA_SCALE);
+            if closure_ratio >= T::from_f64(CLOSED_SUMMARY_CLOSURE_RATIO_MAX)
+                && closure_ratio <= T::from_f64(OPEN_SUMMARY_CLOSURE_RATIO_MIN)
+            {
+                return false;
             }
         }
-        geometric_accept_far(target_aabb, source_aabb, effective_theta)
+        geometric_accept_far(target_aabb, source_aabb, theta)
     }
 
     #[inline]

@@ -1311,7 +1311,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
 }
 
 #[test]
-fn linear_filament_acceptance_is_stricter_for_open_nodes() {
+fn linear_filament_acceptance_rejects_intermediate_closure_ratio() {
     let b_kernel = LinearFilamentFluxDensityKernel::<f64>::new();
     let a_kernel = LinearFilamentVectorPotentialKernel::<f64>::new();
     let target_aabb = Aabb::from_point([20.0, 0.0, 0.5]);
@@ -1329,6 +1329,11 @@ fn linear_filament_acceptance_is_stricter_for_open_nodes() {
         weight: 1.0,
         ..Default::default()
     };
+    let partial_b_summary = LinearFilamentFluxDensitySummary {
+        magnitude: 0.5,
+        weight: 1.0,
+        ..Default::default()
+    };
     let open_a_summary = LinearFilamentVectorPotentialSummary {
         magnitude: 1.0,
         weight: 1.0,
@@ -1339,12 +1344,18 @@ fn linear_filament_acceptance_is_stricter_for_open_nodes() {
         weight: 1.0,
         ..Default::default()
     };
+    let partial_a_summary = LinearFilamentVectorPotentialSummary {
+        magnitude: 0.5,
+        weight: 1.0,
+        ..Default::default()
+    };
 
-    assert!(!b_kernel.accept_far(target_aabb, source_aabb, &open_b_summary, 0.1));
-    assert!(!b_kernel.accept_far(target_aabb, source_aabb, &closed_b_summary, 0.1));
-    assert!(b_kernel.accept_far(target_aabb, source_aabb, &closed_b_summary, 0.2));
-    assert!(!a_kernel.accept_far(target_aabb, source_aabb, &open_a_summary, 0.1));
+    assert!(b_kernel.accept_far(target_aabb, source_aabb, &open_b_summary, 0.1));
+    assert!(b_kernel.accept_far(target_aabb, source_aabb, &closed_b_summary, 0.1));
+    assert!(!b_kernel.accept_far(target_aabb, source_aabb, &partial_b_summary, 1.0));
+    assert!(a_kernel.accept_far(target_aabb, source_aabb, &open_a_summary, 0.1));
     assert!(a_kernel.accept_far(target_aabb, source_aabb, &closed_a_summary, 0.1));
+    assert!(!a_kernel.accept_far(target_aabb, source_aabb, &partial_a_summary, 1.0));
 }
 
 #[test]

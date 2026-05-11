@@ -4,9 +4,9 @@ use cfsem::physics::hierarchical::kernels::{
     DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
-    ClusterTree, DualInteractionPlan, DualTreeError, DualTreeKernel, EvaluationScratch,
-    SourceNodeSummaries, TargetNodeSummaries, evaluate_into, evaluate_into_par,
-    update_plan_target_summaries_into, update_source_summaries_into,
+    ClusterTree, DualTreeError, DualTreeKernel, EvaluationScratch, SourceNodeSummaries,
+    evaluate_source_tree_into, evaluate_source_tree_into_par,
+    parallel_source_tree_evaluation_scratch_len, update_source_summaries_into,
 };
 use cfsem::physics::point_source::{
     flux_density_dipole, flux_density_dipole_par, vector_potential_dipole,
@@ -17,9 +17,8 @@ use std::time::Duration;
 
 use std::hint::black_box;
 
-const HIERARCHICAL_LEAF_SIZE: usize = 16;
-const HIERARCHICAL_THETA: f64 = 0.7;
-const HIERARCHICAL_NUM_CHUNKS: usize = 8;
+const HIERARCHICAL_LEAF_SIZE: usize = 1;
+const HIERARCHICAL_THETA: f64 = 0.01;
 
 struct HierarchicalDipoleSolve<
     K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
@@ -32,9 +31,7 @@ struct HierarchicalDipoleSolve<
     targets: Vec<K::TargetGeometry>,
     moments: Vec<[f64; 3]>,
     source_tree: ClusterTree<f64>,
-    plan: DualInteractionPlan<f64>,
     source_summaries: SourceNodeSummaries<K>,
-    target_summaries: TargetNodeSummaries<K>,
     vector_out: Vec<[f64; 3]>,
     scratch_value: [[f64; 3]; 1],
     parallel_scratch_value: Vec<[f64; 3]>,
@@ -80,30 +77,10 @@ where
         }
 
         let source_tree = ClusterTree::build_morton_lbvh(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
-        let plan = DualInteractionPlan::build(
-            source_tree.as_view(),
-            &targets,
-            HIERARCHICAL_LEAF_SIZE,
-            HIERARCHICAL_THETA,
-            HIERARCHICAL_NUM_CHUNKS,
-            false,
-        )
-        .unwrap();
-
-        let mut target_summaries = TargetNodeSummaries::<K>::new_for_plan(plan.as_view());
-        assert_eq!(
-            update_plan_target_summaries_into(
-                &kernel,
-                plan.as_view(),
-                &targets,
-                &mut target_summaries,
-            ),
-            DualTreeError::Ok
-        );
-
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let vector_out = vec![[0.0; 3]; targets.len()];
-        let parallel_scratch_value = vec![[0.0; 3]; plan.chunks.len()];
+        let parallel_scratch_value =
+            vec![[0.0; 3]; parallel_source_tree_evaluation_scratch_len(targets.len())];
 
         Self {
             kernel,
@@ -111,9 +88,7 @@ where
             targets,
             moments,
             source_tree,
-            plan,
             source_summaries,
-            target_summaries,
             vector_out,
             scratch_value: [[0.0; 3]; 1],
             parallel_scratch_value,
@@ -136,15 +111,14 @@ where
             contribution: &mut self.scratch_value,
         };
         assert_eq!(
-            evaluate_into(
+            evaluate_source_tree_into(
                 &self.kernel,
-                self.plan.as_view(),
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.target_summaries,
                 &self.sources,
                 &self.targets,
                 &self.moments,
+                HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,
             ),
@@ -174,15 +148,14 @@ where
             contribution: &mut self.parallel_scratch_value,
         };
         assert_eq!(
-            evaluate_into_par(
+            evaluate_source_tree_into_par(
                 &self.kernel,
-                self.plan.as_view(),
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.target_summaries,
                 &self.sources,
                 &self.targets,
                 &self.moments,
+                HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,
             ),

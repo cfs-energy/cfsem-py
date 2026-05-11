@@ -5,9 +5,9 @@ use cfsem::physics::hierarchical::kernels::{
     LinearFilamentVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
-    ClusterTree, DualInteractionPlan, DualTreeError, DualTreeKernel, EvaluationScratch,
-    SourceNodeSummaries, TargetNodeSummaries, evaluate_into, evaluate_into_par,
-    update_plan_target_summaries_into, update_source_summaries_into,
+    ClusterTree, DualTreeError, DualTreeKernel, EvaluationScratch, SourceNodeSummaries,
+    evaluate_source_tree_into, evaluate_source_tree_into_par,
+    parallel_source_tree_evaluation_scratch_len, update_source_summaries_into,
 };
 use cfsem::physics::linear_filament::{
     flux_density_linear_filament, flux_density_linear_filament_par,
@@ -18,9 +18,8 @@ use std::time::Duration;
 
 use std::hint::black_box;
 
-const HIERARCHICAL_LEAF_SIZE: usize = 16;
-const HIERARCHICAL_THETA: f64 = 0.7;
-const HIERARCHICAL_NUM_CHUNKS: usize = 8;
+const HIERARCHICAL_LEAF_SIZE: usize = 1;
+const HIERARCHICAL_THETA: f64 = 0.05;
 const LOOP_RADIUS: f64 = 1.0;
 const LOOP_OBS_FRACTION_OFFSET: f64 = 0.027;
 const LOOP_CURRENT: f64 = 0.5;
@@ -41,9 +40,7 @@ where
     targets: Vec<DipoleTarget<f64>>,
     currents: Vec<f64>,
     source_tree: ClusterTree<f64>,
-    plan: DualInteractionPlan<f64>,
     source_summaries: SourceNodeSummaries<K>,
-    target_summaries: TargetNodeSummaries<K>,
     vector_out: Vec<[f64; 3]>,
     scratch_value: [[f64; 3]; 1],
     parallel_scratch_value: Vec<[f64; 3]>,
@@ -90,30 +87,10 @@ where
         }
 
         let source_tree = ClusterTree::build_morton_lbvh(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
-        let plan = DualInteractionPlan::build(
-            source_tree.as_view(),
-            &targets,
-            HIERARCHICAL_LEAF_SIZE,
-            HIERARCHICAL_THETA,
-            HIERARCHICAL_NUM_CHUNKS,
-            false,
-        )
-        .unwrap();
-
-        let mut target_summaries = TargetNodeSummaries::<K>::new_for_plan(plan.as_view());
-        assert_eq!(
-            update_plan_target_summaries_into(
-                &kernel,
-                plan.as_view(),
-                &targets,
-                &mut target_summaries,
-            ),
-            DualTreeError::Ok
-        );
-
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let vector_out = vec![[0.0; 3]; targets.len()];
-        let parallel_scratch_value = vec![[0.0; 3]; plan.chunks.len()];
+        let parallel_scratch_value =
+            vec![[0.0; 3]; parallel_source_tree_evaluation_scratch_len(targets.len())];
 
         Self {
             kernel,
@@ -121,9 +98,7 @@ where
             targets,
             currents: currents.to_vec(),
             source_tree,
-            plan,
             source_summaries,
-            target_summaries,
             vector_out,
             scratch_value: [[0.0; 3]; 1],
             parallel_scratch_value,
@@ -145,15 +120,14 @@ where
             contribution: &mut self.scratch_value,
         };
         assert_eq!(
-            evaluate_into(
+            evaluate_source_tree_into(
                 &self.kernel,
-                self.plan.as_view(),
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.target_summaries,
                 &self.sources,
                 &self.targets,
                 &self.currents,
+                HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,
             ),
@@ -182,15 +156,14 @@ where
             contribution: &mut self.parallel_scratch_value,
         };
         assert_eq!(
-            evaluate_into_par(
+            evaluate_source_tree_into_par(
                 &self.kernel,
-                self.plan.as_view(),
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.target_summaries,
                 &self.sources,
                 &self.targets,
                 &self.currents,
+                HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,
             ),

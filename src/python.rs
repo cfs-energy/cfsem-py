@@ -245,6 +245,7 @@ fn source_tree_aabbs_to_py_tuple(
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
 ) {
     let mut min_x = Vec::with_capacity(tree.node_aabb.len());
     let mut min_y = Vec::with_capacity(tree.node_aabb.len());
@@ -252,6 +253,7 @@ fn source_tree_aabbs_to_py_tuple(
     let mut max_x = Vec::with_capacity(tree.node_aabb.len());
     let mut max_y = Vec::with_capacity(tree.node_aabb.len());
     let mut max_z = Vec::with_capacity(tree.node_aabb.len());
+    let levels = source_tree_node_levels(tree);
     for i in 0..tree.node_aabb.len() {
         let aabb = tree.node_aabb[i];
         min_x.push(aabb.min[0]);
@@ -268,7 +270,28 @@ fn source_tree_aabbs_to_py_tuple(
         PyArray1::from_vec(py, max_x).unbind(),
         PyArray1::from_vec(py, max_y).unbind(),
         PyArray1::from_vec(py, max_z).unbind(),
+        PyArray1::from_vec(py, levels).unbind(),
     )
+}
+
+fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Vec<f64> {
+    let mut levels = vec![0.0; tree.node_aabb.len()];
+    let mut active = Vec::new();
+    if !tree.node_aabb.is_empty() {
+        active.push((0_usize, 0_u32));
+    }
+    while let Some((node, level)) = active.pop() {
+        levels[node] = f64::from(level);
+        let left = tree.node_left_child[node];
+        if left != physics::hierarchical::ClusterTreeView::<f64>::invalid_index() {
+            active.push((left as usize, level + 1));
+        }
+        let right = tree.node_right_child[node];
+        if right != physics::hierarchical::ClusterTreeView::<f64>::invalid_index() {
+            active.push((right as usize, level + 1));
+        }
+    }
+    levels
 }
 
 fn build_dipole_targets(
@@ -709,6 +732,7 @@ impl HierarchicalDipoles {
         Py<PyArray1<f64>>,
         Py<PyArray1<f64>>,
         Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
     )> {
         Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
     }
@@ -936,6 +960,7 @@ impl HierarchicalLinearFilaments {
         Py<PyArray1<f64>>,
         Py<PyArray1<f64>>,
         Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
     )> {
         Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
     }
@@ -1152,6 +1177,7 @@ impl HierarchicalBoundaryElements {
         &self,
         py: Python<'_>,
     ) -> PyResult<(
+        Py<PyArray1<f64>>,
         Py<PyArray1<f64>>,
         Py<PyArray1<f64>>,
         Py<PyArray1<f64>>,

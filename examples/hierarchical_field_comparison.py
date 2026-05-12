@@ -486,14 +486,18 @@ def aabb_overlay_path(
     aabbs: tuple[np.ndarray, ...],
     max_boxes: int = MAX_PLOTTED_AABBS,
 ) -> tuple[list[float | None], list[float | None]]:
-    min_x, _min_y, min_z, max_x, _max_y, max_z = aabbs
+    min_x, _min_y, min_z, max_x, _max_y, max_z, levels = aabbs
     if min_x.size == 0:
         return [], []
-    if min_x.size <= max_boxes:
-        indices = np.arange(min_x.size)
-    else:
-        step = max(1, int(np.ceil((min_x.size - 1) / max(1, max_boxes - 1))))
-        indices = np.concatenate((np.array([0]), np.arange(1, min_x.size, step)))[:max_boxes]
+    indices_by_level: list[np.ndarray] = []
+    count = 0
+    for level in np.unique(levels.astype(np.int64)):
+        level_indices = np.flatnonzero(levels == float(level))
+        if count + level_indices.size > max_boxes:
+            break
+        indices_by_level.append(level_indices)
+        count += level_indices.size
+    indices = np.concatenate(indices_by_level) if indices_by_level else np.array([0])
 
     xs: list[float | None] = []
     zs: list[float | None] = []

@@ -563,9 +563,9 @@ def make_figure(
         )
 
     for axis in fig.select_xaxes():
-        axis.update(title="x [m]", scaleanchor=None)
+        axis.update(title="x [m]")
     for axis in fig.select_yaxes():
-        axis.update(title="z [m]", scaleanchor="x")
+        axis.update(title="z [m]")
     fig.update_layout(
         template="plotly_white",
         height=360,
@@ -663,6 +663,14 @@ def make_self_field_figure(results: dict[str, object], field: str):
     )
     fig.update_yaxes(title="log10 relative error", row=1, col=2)
     return fig
+
+
+def speedup_text(direct_time: object, hierarchical_time: object) -> str:
+    direct = float(direct_time)
+    hierarchical = float(hierarchical_time)
+    if hierarchical <= 0.0:
+        return "n/a"
+    return f"{direct / hierarchical:.2f}x"
 
 
 def make_app():
@@ -879,11 +887,17 @@ def make_app():
                 if self_field["direct_skipped"]
                 else f"{float(self_field['direct_time']):.3f}s"
             )
+            self_speedup = (
+                "n/a"
+                if self_field["direct_skipped"]
+                else speedup_text(self_field["direct_time"], self_field["hierarchical_eval_time"])
+            )
             self_text = (
                 f"\nself-field source-source interactions={self_field['interactions']:.1E}\n"
                 f"self direct:       evaluation={direct_self}\n"
                 f"self hierarchical: construction={self_field['hierarchical_build_time']:.3f}s, "
-                f"evaluation={self_field['hierarchical_eval_time']:.3f}s"
+                f"evaluation={self_field['hierarchical_eval_time']:.3f}s, "
+                f"speedup={self_speedup}"
             )
         timing = (
             f"nsrc={results['source_count']}, nobs={geometry.obs[0].size}, "
@@ -895,7 +909,8 @@ def make_app():
             f"direct:       construction={results['direct_build_time']:.3f}s, "
             f"evaluation={results['direct_time']:.3f}s\n"
             f"hierarchical: construction={results['build_time']:.3f}s, "
-            f"evaluation={results['eval_time']:.3f}s"
+            f"evaluation={results['eval_time']:.3f}s, "
+            f"speedup={speedup_text(results['direct_time'], results['eval_time'])}"
             f"{self_text}"
         )
         return fig, self_fig, timing

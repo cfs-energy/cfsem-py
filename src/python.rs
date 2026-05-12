@@ -736,6 +736,21 @@ impl HierarchicalDipoles {
     )> {
         Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
     }
+
+    #[pyo3(signature = (moment, field="b"))]
+    fn accepted_source_levels(
+        &self,
+        py: Python<'_>,
+        moment: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
+        field: &str,
+    ) -> PyResult<Py<PyArray1<f64>>> {
+        let out = self.eval_dipole_source_levels(moment, field)?;
+        Ok(PyArray1::from_vec(py, out).unbind())
+    }
 }
 
 impl HierarchicalDipoles {
@@ -790,6 +805,41 @@ impl HierarchicalDipoles {
             self.theta,
             par,
         )
+    }
+
+    fn eval_dipole_source_levels(
+        &self,
+        moment: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
+        field: &str,
+    ) -> PyResult<Vec<f64>> {
+        let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
+        let source_tree = self.source_tree()?;
+        match field {
+            "b" => hierarchical_source_level_diagnostic(
+                physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
+                source_tree,
+                &self.sources,
+                &self.targets,
+                &moments,
+                self.theta,
+            ),
+            "a" => hierarchical_source_level_diagnostic(
+                physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
+                source_tree,
+                &self.sources,
+                &self.targets,
+                &moments,
+                self.theta,
+            ),
+            _ => Err(PyInteropError::ValueError {
+                msg: format!("Unsupported dipole diagnostic field: {field}"),
+            }
+            .into()),
+        }
     }
 }
 
@@ -1173,6 +1223,21 @@ impl HierarchicalBoundaryElements {
         Ok(vec3_to_py_tuple(py, &out))
     }
 
+    #[pyo3(signature = (current_density, field="b"))]
+    fn accepted_source_levels(
+        &self,
+        py: Python<'_>,
+        current_density: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
+        field: &str,
+    ) -> PyResult<Py<PyArray1<f64>>> {
+        let out = self.eval_boundary_element_source_levels(current_density, field)?;
+        Ok(PyArray1::from_vec(py, out).unbind())
+    }
+
     fn source_tree_aabbs(
         &self,
         py: Python<'_>,
@@ -1245,6 +1310,45 @@ impl HierarchicalBoundaryElements {
             self.theta,
             par,
         )
+    }
+
+    fn eval_boundary_element_source_levels(
+        &self,
+        current_density: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
+        field: &str,
+    ) -> PyResult<Vec<f64>> {
+        let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
+        let source_tree = self.source_tree()?;
+        match field {
+            "b" => hierarchical_source_level_diagnostic(
+                physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
+                    self.quad_kind,
+                ),
+                source_tree,
+                &self.sources,
+                &self.targets,
+                &moments,
+                self.theta,
+            ),
+            "a" => hierarchical_source_level_diagnostic(
+                physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
+                    self.quad_kind,
+                ),
+                source_tree,
+                &self.sources,
+                &self.targets,
+                &moments,
+                self.theta,
+            ),
+            _ => Err(PyInteropError::ValueError {
+                msg: format!("Unsupported boundary-element diagnostic field: {field}"),
+            }
+            .into()),
+        }
     }
 }
 

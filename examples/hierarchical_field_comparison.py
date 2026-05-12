@@ -18,6 +18,8 @@ WIRE_RADIUS = 0.015
 HELICAL_WIRE_RADIUS = 0.055
 TRIANGLE_STRIP_WIDTH = 0.08
 SOURCE_SPAN = 1.4
+DISTRIBUTED_SOURCE_RADIUS = 0.5 * SOURCE_SPAN
+DISTRIBUTED_SOURCE_CENTER_OFFSET = 2.5 * SOURCE_SPAN
 DEFAULT_TWIST_PITCH = 0.36
 DEFAULT_HELIX_WIDTH = HELICAL_WIRE_RADIUS
 DEFAULT_BEND_CURVATURE = 2.0 / SOURCE_SPAN
@@ -28,6 +30,7 @@ LOG10_DEFAULT_SOURCE_COUNT = float(np.log10(DEFAULT_SOURCE_COUNT))
 LOG10_MAX_SOURCE_COUNT = float(np.log10(MAX_SOURCE_COUNT))
 MAX_PLOTTED_PATH_POINTS = 400
 MAX_PLOTTED_AABBS = 500
+DISTRIBUTED_SOURCE_SEED = 1729
 
 
 @dataclass(frozen=True)
@@ -38,12 +41,22 @@ class Geometry:
     dlxyzfil: tuple[np.ndarray, np.ndarray, np.ndarray]
     current: np.ndarray
     wire_radius: np.ndarray
+    volume_xyzfil: tuple[np.ndarray, np.ndarray, np.ndarray]
+    volume_dlxyzfil: tuple[np.ndarray, np.ndarray, np.ndarray]
+    volume_current: np.ndarray
+    volume_wire_radius: np.ndarray
     dipole_loc: tuple[np.ndarray, np.ndarray, np.ndarray]
     dipole_moment: tuple[np.ndarray, np.ndarray, np.ndarray]
     dipole_outer_radius: np.ndarray
+    volume_dipole_loc: tuple[np.ndarray, np.ndarray, np.ndarray]
+    volume_dipole_moment: tuple[np.ndarray, np.ndarray, np.ndarray]
+    volume_dipole_outer_radius: np.ndarray
     strip_nodes: np.ndarray
     strip_triangles: np.ndarray
     strip_stream_function: np.ndarray
+    volume_strip_nodes: np.ndarray
+    volume_strip_triangles: np.ndarray
+    volume_strip_stream_function: np.ndarray
     obs: tuple[np.ndarray, np.ndarray, np.ndarray]
     obs_grid: tuple[np.ndarray, np.ndarray]
     extent: float
@@ -81,6 +94,7 @@ def section_observation_plane(
 
 
 def build_geometry(
+    geometry_layout: str,
     n_centerline: int,
     grid_n: int,
     twist_pitch: float,
@@ -109,6 +123,21 @@ def build_geometry(
     current = np.full(starts.shape[0], CURRENT)
     wire_radius = np.full(starts.shape[0], WIRE_RADIUS)
     dipole_loc, dipole_moment, dipole_outer_radius = build_segment_dipoles(starts, dl, current)
+    (
+        volume_dipole_loc,
+        volume_dipole_moment,
+        volume_dipole_outer_radius,
+        volume_xyzfil,
+        volume_dlxyzfil,
+        volume_current,
+        volume_wire_radius,
+        volume_strip_nodes,
+        volume_strip_triangles,
+        volume_strip_stream_function,
+    ) = build_volume_sources(
+        max(1, starts.shape[0]),
+        DISTRIBUTED_SOURCE_RADIUS,
+    )
     strip_nodes, strip_triangles, strip_stream_function = build_triangle_strip(
         helix,
         TRIANGLE_STRIP_WIDTH,
@@ -123,16 +152,126 @@ def build_geometry(
         dlxyzfil,
         current,
         wire_radius,
+        volume_xyzfil,
+        volume_dlxyzfil,
+        volume_current,
+        volume_wire_radius,
         dipole_loc,
         dipole_moment,
         dipole_outer_radius,
+        volume_dipole_loc,
+        volume_dipole_moment,
+        volume_dipole_outer_radius,
         strip_nodes,
         strip_triangles,
         strip_stream_function,
+        volume_strip_nodes,
+        volume_strip_triangles,
+        volume_strip_stream_function,
         obs,
         obs_grid,
         extent,
     )
+
+
+def build_volume_sources(
+    n: int,
+    radius: float,
+) -> tuple[
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+    np.ndarray,
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    rng = np.random.default_rng(DISTRIBUTED_SOURCE_SEED)
+    angles = 2.0 * np.pi * rng.random(n)
+    radii = radius * np.sqrt(rng.random(n))
+    disk_offsets = np.array(
+        [
+            [-DISTRIBUTED_SOURCE_CENTER_OFFSET, 0.0, -DISTRIBUTED_SOURCE_CENTER_OFFSET],
+            [DISTRIBUTED_SOURCE_CENTER_OFFSET, 0.0, -DISTRIBUTED_SOURCE_CENTER_OFFSET],
+            [-DISTRIBUTED_SOURCE_CENTER_OFFSET, 0.0, DISTRIBUTED_SOURCE_CENTER_OFFSET],
+            [DISTRIBUTED_SOURCE_CENTER_OFFSET, 0.0, DISTRIBUTED_SOURCE_CENTER_OFFSET],
+        ]
+    )
+    disk_ids = np.arange(n) % disk_offsets.shape[0]
+    loc = np.column_stack((radii * np.cos(angles), np.zeros(n), radii * np.sin(angles)))
+    loc = loc + disk_offsets[disk_ids]
+
+    central_moment = np.array([0.0, 0.0, 1.0])
+    r_norm = np.linalg.norm(loc, axis=1)
+    r_hat = loc / np.maximum(r_norm[:, None], 1.0e-30)
+    m_dot_r = r_hat @ central_moment
+    direction = 3.0 * r_hat * m_dot_r[:, None] - central_moment[None, :]
+    direction_norm = np.linalg.norm(direction, axis=1)
+    direction = direction / np.maximum(direction_norm[:, None], 1.0e-30)
+    moment_scale = CURRENT * radius**3 / max(1, n)
+    moments = moment_scale * direction
+    segment_length = 2.0 * radius / max(4.0, n ** (1.0 / 3.0))
+    starts = loc - 0.5 * segment_length * direction
+    dl = segment_length * direction
+    strip_nodes, strip_triangles, strip_stream_function = build_distributed_triangle_strips(
+        loc,
+        direction,
+        segment_length,
+        TRIANGLE_STRIP_WIDTH,
+        CURRENT,
+    )
+    return (
+        (loc[:, 0], loc[:, 1], loc[:, 2]),
+        (moments[:, 0], moments[:, 1], moments[:, 2]),
+        np.zeros(n),
+        (starts[:, 0], starts[:, 1], starts[:, 2]),
+        (dl[:, 0], dl[:, 1], dl[:, 2]),
+        np.full(n, CURRENT),
+        np.full(n, WIRE_RADIUS),
+        strip_nodes,
+        strip_triangles,
+        strip_stream_function,
+    )
+
+
+def build_distributed_triangle_strips(
+    centers: np.ndarray,
+    directions: np.ndarray,
+    length: float,
+    strip_width: float,
+    stream_function_jump: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n = centers.shape[0]
+    reference = np.tile(np.array([0.0, 0.0, 1.0]), (n, 1))
+    parallel = np.abs(np.sum(reference * directions, axis=1)) > 0.9
+    reference[parallel] = np.array([0.0, 1.0, 0.0])
+    width_dir = np.cross(directions, reference)
+    width_norm = np.linalg.norm(width_dir, axis=1)
+    width_dir = width_dir / np.maximum(width_norm[:, None], 1.0e-30)
+
+    half_length = 0.5 * length * directions
+    half_width = 0.5 * strip_width * width_dir
+    nodes = np.empty((4 * n, 3))
+    nodes[0::4] = centers - half_length - half_width
+    nodes[1::4] = centers - half_length + half_width
+    nodes[2::4] = centers + half_length - half_width
+    nodes[3::4] = centers + half_length + half_width
+
+    triangles = np.empty((2 * n, 3), dtype=np.int64)
+    for i in range(n):
+        base = 4 * i
+        triangles[2 * i] = [base, base + 2, base + 1]
+        triangles[2 * i + 1] = [base + 1, base + 2, base + 3]
+
+    stream_function = np.empty(4 * n)
+    stream_function[0::4] = 0.0
+    stream_function[2::4] = 0.0
+    stream_function[1::4] = stream_function_jump
+    stream_function[3::4] = stream_function_jump
+    return nodes, triangles, stream_function
 
 
 def build_segment_dipoles(
@@ -202,36 +341,88 @@ def relative_error(
     return err / ref
 
 
-def linear_filament_centers(geometry: Geometry) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def linear_filament_centers(
+    geometry: Geometry,
+    geometry_layout: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    xyzfil, dlxyzfil, _current, _wire_radius = filament_source_arrays(geometry, geometry_layout)
     return (
-        geometry.xyzfil[0] + 0.5 * geometry.dlxyzfil[0],
-        geometry.xyzfil[1] + 0.5 * geometry.dlxyzfil[1],
-        geometry.xyzfil[2] + 0.5 * geometry.dlxyzfil[2],
+        xyzfil[0] + 0.5 * dlxyzfil[0],
+        xyzfil[1] + 0.5 * dlxyzfil[1],
+        xyzfil[2] + 0.5 * dlxyzfil[2],
     )
 
 
-def triangle_centroids(geometry: Geometry) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    tri_nodes = geometry.strip_nodes[geometry.strip_triangles]
+def triangle_centroids(
+    geometry: Geometry,
+    geometry_layout: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    nodes, triangles, _stream_function = boundary_source_arrays(geometry, geometry_layout)
+    tri_nodes = nodes[triangles]
     centroids = np.mean(tri_nodes, axis=1)
     return (centroids[:, 0], centroids[:, 1], centroids[:, 2])
 
 
+def dipole_source_arrays(
+    geometry: Geometry,
+    geometry_layout: str,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]:
+    if geometry_layout == "distributed":
+        return (
+            geometry.volume_dipole_loc,
+            geometry.volume_dipole_moment,
+            geometry.volume_dipole_outer_radius,
+        )
+    return geometry.dipole_loc, geometry.dipole_moment, geometry.dipole_outer_radius
+
+
+def filament_source_arrays(
+    geometry: Geometry,
+    geometry_layout: str,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray, np.ndarray]:
+    if geometry_layout == "distributed":
+        return (
+            geometry.volume_xyzfil,
+            geometry.volume_dlxyzfil,
+            geometry.volume_current,
+            geometry.volume_wire_radius,
+        )
+    return geometry.xyzfil, geometry.dlxyzfil, geometry.current, geometry.wire_radius
+
+
+def boundary_source_arrays(
+    geometry: Geometry,
+    geometry_layout: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if geometry_layout == "distributed":
+        return (
+            geometry.volume_strip_nodes,
+            geometry.volume_strip_triangles,
+            geometry.volume_strip_stream_function,
+        )
+    return geometry.strip_nodes, geometry.strip_triangles, geometry.strip_stream_function
+
+
 def solve_self_fields(
     geometry: Geometry,
+    geometry_layout: str,
     source_geometry: str,
     construction_method: str,
     theta: float,
     par: bool,
 ) -> dict[str, object]:
     if source_geometry == "dipole":
-        self_obs = geometry.dipole_loc
-        source_count = geometry.dipole_outer_radius.size
+        dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
+        self_obs = dipole_loc
+        source_count = dipole_outer_radius.size
     elif source_geometry == "boundary":
-        self_obs = triangle_centroids(geometry)
-        source_count = geometry.strip_triangles.shape[0]
+        strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(geometry, geometry_layout)
+        self_obs = triangle_centroids(geometry, geometry_layout)
+        source_count = strip_triangles.shape[0]
     else:
-        self_obs = linear_filament_centers(geometry)
-        source_count = geometry.current.size
+        xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
+        self_obs = linear_filament_centers(geometry, geometry_layout)
+        source_count = current.size
 
     interactions = source_count * source_count
     direct_time: float | None = None
@@ -241,85 +432,87 @@ def solve_self_fields(
         t0 = time.perf_counter()
         if source_geometry == "dipole":
             direct_b = cfsem.flux_density_dipole(
-                geometry.dipole_loc,
-                geometry.dipole_moment,
+                dipole_loc,
+                dipole_moment,
                 self_obs,
                 par=par,
-                outer_radius=geometry.dipole_outer_radius,
+                outer_radius=dipole_outer_radius,
             )
             direct_a = cfsem.vector_potential_dipole(
-                geometry.dipole_loc,
-                geometry.dipole_moment,
+                dipole_loc,
+                dipole_moment,
                 self_obs,
                 par=par,
-                outer_radius=geometry.dipole_outer_radius,
+                outer_radius=dipole_outer_radius,
             )
         elif source_geometry == "boundary":
             self_obs_array = np.column_stack(self_obs)
             direct_b = cfsem.flux_density_triangle_mesh(
                 self_obs_array,
-                geometry.strip_nodes,
-                geometry.strip_triangles,
-                geometry.strip_stream_function,
+                strip_nodes,
+                strip_triangles,
+                strip_stream_function,
                 par=par,
             )
             direct_a = cfsem.vector_potential_triangle_mesh(
                 self_obs_array,
-                geometry.strip_nodes,
-                geometry.strip_triangles,
-                geometry.strip_stream_function,
+                strip_nodes,
+                strip_triangles,
+                strip_stream_function,
                 par=par,
             )
         else:
             direct_b = cfsem.flux_density_linear_filament(
                 self_obs,
-                geometry.xyzfil,
-                geometry.dlxyzfil,
-                geometry.current,
-                geometry.wire_radius,
+                xyzfil,
+                dlxyzfil,
+                current,
+                wire_radius,
                 par=par,
             )
             direct_a = cfsem.vector_potential_linear_filament(
                 self_obs,
-                geometry.xyzfil,
-                geometry.dlxyzfil,
-                geometry.current,
-                geometry.wire_radius,
+                xyzfil,
+                dlxyzfil,
+                current,
+                wire_radius,
                 par=par,
             )
         direct_time = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     if source_geometry == "dipole":
+        dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
         solver = cfsem.HierarchicalDipoles(theta=theta, construction_method=construction_method)
-        solver.build(geometry.dipole_loc, self_obs, geometry.dipole_outer_radius)
+        solver.build(dipole_loc, self_obs, dipole_outer_radius)
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.dipole_moment, par=par)
-        hierarchical_a = solver.vector_potential(geometry.dipole_moment, par=par)
+        hierarchical_b = solver.flux_density(dipole_moment, par=par)
+        hierarchical_a = solver.vector_potential(dipole_moment, par=par)
     elif source_geometry == "boundary":
+        strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(geometry, geometry_layout)
         solver = cfsem.HierarchicalBoundaryElements(
             theta=theta,
             construction_method=construction_method,
         )
-        solver.build(geometry.strip_nodes, geometry.strip_triangles, self_obs)
+        solver.build(strip_nodes, strip_triangles, self_obs)
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.strip_stream_function, par=par)
-        hierarchical_a = solver.vector_potential(geometry.strip_stream_function, par=par)
+        hierarchical_b = solver.flux_density(strip_stream_function, par=par)
+        hierarchical_a = solver.vector_potential(strip_stream_function, par=par)
     else:
         solver = cfsem.HierarchicalLinearFilaments(
             theta=theta,
             construction_method=construction_method,
         )
-        solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, self_obs)
+        solver.build(xyzfil, dlxyzfil, wire_radius, self_obs)
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.current, par=par)
-        hierarchical_a = solver.vector_potential(geometry.current, par=par)
+        hierarchical_b = solver.flux_density(current, par=par)
+        hierarchical_a = solver.vector_potential(current, par=par)
     eval_time = time.perf_counter() - t0
 
     return {
@@ -337,6 +530,7 @@ def solve_self_fields(
 
 def solve_fields(
     geometry: Geometry,
+    geometry_layout: str,
     source_geometry: str,
     construction_method: str,
     theta: float,
@@ -348,97 +542,106 @@ def solve_fields(
 
     t0 = time.perf_counter()
     if source_geometry == "dipole":
+        dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
         direct_b = cfsem.flux_density_dipole(
-            geometry.dipole_loc,
-            geometry.dipole_moment,
+            dipole_loc,
+            dipole_moment,
             geometry.obs,
             par=par,
-            outer_radius=geometry.dipole_outer_radius,
+            outer_radius=dipole_outer_radius,
         )
         direct_a = cfsem.vector_potential_dipole(
-            geometry.dipole_loc,
-            geometry.dipole_moment,
+            dipole_loc,
+            dipole_moment,
             geometry.obs,
             par=par,
-            outer_radius=geometry.dipole_outer_radius,
+            outer_radius=dipole_outer_radius,
         )
     elif source_geometry == "boundary":
+        strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(geometry, geometry_layout)
         obs_array = np.column_stack(geometry.obs)
         direct_b = cfsem.flux_density_triangle_mesh(
             obs_array,
-            geometry.strip_nodes,
-            geometry.strip_triangles,
-            geometry.strip_stream_function,
+            strip_nodes,
+            strip_triangles,
+            strip_stream_function,
             par=par,
         )
         direct_a = cfsem.vector_potential_triangle_mesh(
             obs_array,
-            geometry.strip_nodes,
-            geometry.strip_triangles,
-            geometry.strip_stream_function,
+            strip_nodes,
+            strip_triangles,
+            strip_stream_function,
             par=par,
         )
     else:
+        xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
         direct_b = cfsem.flux_density_linear_filament(
             geometry.obs,
-            geometry.xyzfil,
-            geometry.dlxyzfil,
-            geometry.current,
-            geometry.wire_radius,
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
             par=par,
         )
         direct_a = cfsem.vector_potential_linear_filament(
             geometry.obs,
-            geometry.xyzfil,
-            geometry.dlxyzfil,
-            geometry.current,
-            geometry.wire_radius,
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
             par=par,
         )
     direct_time = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     if source_geometry == "dipole":
+        dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
         solver = cfsem.HierarchicalDipoles(
             theta=theta,
             construction_method=construction_method,
         )
-        solver.build(geometry.dipole_loc, geometry.obs, geometry.dipole_outer_radius)
-        source_count = geometry.dipole_outer_radius.size
+        solver.build(dipole_loc, geometry.obs, dipole_outer_radius)
+        source_count = dipole_outer_radius.size
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.dipole_moment, par=par)
-        hierarchical_a = solver.vector_potential(geometry.dipole_moment, par=par)
+        hierarchical_b = solver.flux_density(dipole_moment, par=par)
+        hierarchical_a = solver.vector_potential(dipole_moment, par=par)
+        accepted_source_levels_b = solver.accepted_source_levels(dipole_moment, field="b")
+        accepted_source_levels_a = solver.accepted_source_levels(dipole_moment, field="a")
     elif source_geometry == "boundary":
+        strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(geometry, geometry_layout)
         solver = cfsem.HierarchicalBoundaryElements(
             theta=theta,
             construction_method=construction_method,
         )
-        solver.build(geometry.strip_nodes, geometry.strip_triangles, geometry.obs)
-        source_count = geometry.strip_triangles.shape[0]
+        solver.build(strip_nodes, strip_triangles, geometry.obs)
+        source_count = strip_triangles.shape[0]
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.strip_stream_function, par=par)
-        hierarchical_a = solver.vector_potential(geometry.strip_stream_function, par=par)
+        hierarchical_b = solver.flux_density(strip_stream_function, par=par)
+        hierarchical_a = solver.vector_potential(strip_stream_function, par=par)
+        accepted_source_levels_b = solver.accepted_source_levels(strip_stream_function, field="b")
+        accepted_source_levels_a = solver.accepted_source_levels(strip_stream_function, field="a")
     else:
+        xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
         solver = cfsem.HierarchicalLinearFilaments(
             theta=theta,
             construction_method=construction_method,
         )
-        solver.build(geometry.xyzfil, geometry.dlxyzfil, geometry.wire_radius, geometry.obs)
-        source_count = geometry.current.size
+        solver.build(xyzfil, dlxyzfil, wire_radius, geometry.obs)
+        source_count = current.size
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.current, par=par)
-        hierarchical_a = solver.vector_potential(geometry.current, par=par)
+        hierarchical_b = solver.flux_density(current, par=par)
+        hierarchical_a = solver.vector_potential(current, par=par)
+        accepted_source_levels_b = solver.accepted_source_levels(current, field="b")
+        accepted_source_levels_a = solver.accepted_source_levels(current, field="a")
     eval_time = time.perf_counter() - t0
     source_tree_aabbs = solver.source_tree_aabbs() if overlay_aabbs else None
-    if source_geometry == "linear":
-        accepted_source_levels_b = solver.accepted_source_levels(geometry.current, field="b")
-        accepted_source_levels_a = solver.accepted_source_levels(geometry.current, field="a")
 
     results: dict[str, object] = {
         "direct_b": direct_b,
@@ -451,15 +654,16 @@ def solve_fields(
         "eval_time": eval_time,
         "source_count": source_count,
         "source_target_interactions": source_count * geometry.obs[0].size,
+        "geometry_layout": geometry_layout,
     }
-    if source_geometry == "linear":
-        results["accepted_source_levels_b"] = accepted_source_levels_b
-        results["accepted_source_levels_a"] = accepted_source_levels_a
+    results["accepted_source_levels_b"] = accepted_source_levels_b
+    results["accepted_source_levels_a"] = accepted_source_levels_a
     if source_tree_aabbs is not None:
         results["source_tree_aabbs"] = source_tree_aabbs
     if calc_self_field:
         results["self_field"] = solve_self_fields(
             geometry,
+            geometry_layout=geometry_layout,
             source_geometry=source_geometry,
             construction_method=construction_method,
             theta=theta,
@@ -508,6 +712,45 @@ def aabb_overlay_path(
     return xs, zs
 
 
+def source_geometry_overlay_path(
+    geometry: Geometry,
+    geometry_layout: str,
+) -> tuple[list[float | None], list[float | None], list[float | None], list[float | None]]:
+    if geometry_layout == "distributed":
+        xyzfil, dlxyzfil, _current, _wire_radius = filament_source_arrays(geometry, geometry_layout)
+        count = xyzfil[0].size
+        if count <= MAX_PLOTTED_PATH_POINTS:
+            indices = np.arange(count)
+        else:
+            rng = np.random.default_rng(DISTRIBUTED_SOURCE_SEED)
+            indices = np.sort(rng.choice(count, size=MAX_PLOTTED_PATH_POINTS, replace=False))
+
+        segment_x: list[float | None] = []
+        segment_z: list[float | None] = []
+        marker_x: list[float | None] = []
+        marker_z: list[float | None] = []
+        for idx in indices:
+            i = int(idx)
+            x0 = float(xyzfil[0][i])
+            z0 = float(xyzfil[2][i])
+            x1 = float(xyzfil[0][i] + dlxyzfil[0][i])
+            z1 = float(xyzfil[2][i] + dlxyzfil[2][i])
+            segment_x.extend([x0, x1, None])
+            segment_z.extend([z0, z1, None])
+            marker_x.append(0.5 * (x0 + x1))
+            marker_z.append(0.5 * (z0 + z1))
+        return segment_x, segment_z, marker_x, marker_z
+
+    centerline_plot = decimate_path_for_plot(geometry.centerline)
+    helix_plot = decimate_path_for_plot(geometry.helix)
+    return (
+        list(centerline_plot[0]),
+        list(centerline_plot[2]),
+        list(helix_plot[0]),
+        list(helix_plot[2]),
+    )
+
+
 def make_figure(
     geometry: Geometry,
     results: dict[str, object],
@@ -542,8 +785,8 @@ def make_figure(
         horizontal_spacing=0.055,
     )
     xg, zg = geometry.obs_grid
-    centerline_plot = decimate_path_for_plot(geometry.centerline)
-    helix_plot = decimate_path_for_plot(geometry.helix)
+    geometry_layout = str(results.get("geometry_layout", "helical"))
+    geom_x0, geom_z0, geom_x1, geom_z1 = source_geometry_overlay_path(geometry, geometry_layout)
     aabb_overlay = results.get("source_tree_aabbs") if overlay_aabbs else None
     aabb_x: list[float | None] = []
     aabb_z: list[float | None] = []
@@ -576,8 +819,8 @@ def make_figure(
         )
         fig.add_trace(
             go.Scatter(
-                x=centerline_plot[0],
-                y=centerline_plot[2],
+                x=geom_x0,
+                y=geom_z0,
                 mode="lines",
                 line={"color": "white", "width": 2, "dash": "dash"},
                 showlegend=False,
@@ -588,10 +831,11 @@ def make_figure(
         )
         fig.add_trace(
             go.Scatter(
-                x=helix_plot[0],
-                y=helix_plot[2],
-                mode="lines",
+                x=geom_x1,
+                y=geom_z1,
+                mode="markers" if geometry_layout == "distributed" else "lines",
                 line={"color": "black", "width": 1},
+                marker={"color": "black", "size": 3} if geometry_layout == "distributed" else None,
                 showlegend=False,
                 hoverinfo="skip",
             ),
@@ -745,7 +989,7 @@ def make_app():
         [
             html.Div(
                 [
-                    html.Label("Field geometry"),
+                    html.Label("Source kernel"),
                     dcc.Dropdown(
                         id="source-geometry",
                         value="linear",
@@ -754,6 +998,16 @@ def make_app():
                             {"label": "Linear filament", "value": "linear"},
                             {"label": "Dipole", "value": "dipole"},
                             {"label": "Boundary-element triangle strip", "value": "boundary"},
+                        ],
+                    ),
+                    html.Label("Geometry"),
+                    dcc.Dropdown(
+                        id="geometry-layout",
+                        value="helical",
+                        clearable=False,
+                        options=[
+                            {"label": "Helical loop", "value": "helical"},
+                            {"label": "Distributed disk", "value": "distributed"},
                         ],
                     ),
                     html.Label("Twist pitch"),
@@ -888,6 +1142,7 @@ def make_app():
         Output("self-field-figure", "figure"),
         Output("timing", "children"),
         Input("source-geometry", "value"),
+        Input("geometry-layout", "value"),
         Input("twist-pitch", "value"),
         Input("helix-width", "value"),
         Input("bend-curvature", "value"),
@@ -900,6 +1155,7 @@ def make_app():
     )
     def update(
         source_geometry,
+        geometry_layout,
         twist_pitch,
         helix_width,
         bend_curvature,
@@ -912,6 +1168,7 @@ def make_app():
     ):
         source_count = source_count_from_log10(float(log10_source_count))
         geometry = build_geometry(
+            geometry_layout,
             int(source_count) + 1,
             GRID_N,
             float(twist_pitch),
@@ -922,6 +1179,7 @@ def make_app():
         opts = set(options or [])
         results = solve_fields(
             geometry,
+            geometry_layout=geometry_layout,
             source_geometry=source_geometry,
             construction_method=construction,
             theta=float(theta),
@@ -955,6 +1213,7 @@ def make_app():
             f"nsrc={results['source_count']}, nobs={geometry.obs[0].size}, "
             f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
             f"theta={float(theta):.2f}\n"
+            f"geometry={geometry_layout}, kernel={source_geometry}\n"
             f"twist_pitch={float(twist_pitch):.3f}, helix_width={float(helix_width):.3f}, "
             f"bend_curvature={float(bend_curvature):.3f}, loop_fraction={float(loop_fraction):.2f}\n"
             f"original source-target interactions={results['source_target_interactions']:.1E}\n"

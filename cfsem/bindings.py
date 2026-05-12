@@ -1309,6 +1309,13 @@ class HierarchicalDipoles:
     def vector_potential_into(self, moment: Array3xN, out: Array3xN, par: bool = False) -> None:
         self._solver.vector_potential_into(_3tup_contig(moment), out, par)
 
+    def accepted_source_levels(
+        self,
+        moment: Array3xN,
+        field: Literal["b", "a"] = "b",
+    ) -> NDArray[float64]:
+        return self._solver.accepted_source_levels(_3tup_contig(moment), field)  # type: ignore
+
     def source_tree_aabbs(self) -> tuple[NDArray[float64], ...]:
         return self._solver.source_tree_aabbs()  # type: ignore
 
@@ -1449,6 +1456,13 @@ class HierarchicalBoundaryElements:
 
     def vector_potential(self, s: NDArray[float64] | Array3xN, par: bool = False) -> Array3xN:
         return self._solver.vector_potential(self._source_values(s), par)  # type: ignore
+
+    def accepted_source_levels(
+        self,
+        s: NDArray[float64] | Array3xN,
+        field: Literal["b", "a"] = "b",
+    ) -> NDArray[float64]:
+        return self._solver.accepted_source_levels(self._source_values(s), field)  # type: ignore
 
     def source_tree_aabbs(self) -> tuple[NDArray[float64], ...]:
         return self._solver.source_tree_aabbs()  # type: ignore

@@ -27,6 +27,7 @@ LOG10_MIN_SOURCE_COUNT = float(np.log10(MIN_SOURCE_COUNT))
 LOG10_DEFAULT_SOURCE_COUNT = float(np.log10(DEFAULT_SOURCE_COUNT))
 LOG10_MAX_SOURCE_COUNT = float(np.log10(MAX_SOURCE_COUNT))
 MAX_PLOTTED_PATH_POINTS = 400
+MAX_PLOTTED_AABBS = 500
 
 
 @dataclass(frozen=True)
@@ -341,6 +342,7 @@ def solve_fields(
     theta: float,
     par: bool,
     calc_self_field: bool,
+    overlay_aabbs: bool,
 ) -> dict[str, object]:
     direct_build_time = 0.0
 
@@ -433,6 +435,7 @@ def solve_fields(
         hierarchical_b = solver.flux_density(geometry.current, par=par)
         hierarchical_a = solver.vector_potential(geometry.current, par=par)
     eval_time = time.perf_counter() - t0
+    source_tree_aabbs = solver.source_tree_aabbs() if overlay_aabbs else None
     if source_geometry == "linear":
         accepted_source_levels_b = solver.accepted_source_levels(geometry.current, field="b")
         accepted_source_levels_a = solver.accepted_source_levels(geometry.current, field="a")
@@ -452,6 +455,8 @@ def solve_fields(
     if source_geometry == "linear":
         results["accepted_source_levels_b"] = accepted_source_levels_b
         results["accepted_source_levels_a"] = accepted_source_levels_a
+    if source_tree_aabbs is not None:
+        results["source_tree_aabbs"] = source_tree_aabbs
     if calc_self_field:
         results["self_field"] = solve_self_fields(
             geometry,
@@ -477,11 +482,34 @@ def decimate_path_for_plot(path: np.ndarray, max_points: int = MAX_PLOTTED_PATH_
     return decimated
 
 
+def aabb_overlay_path(
+    aabbs: tuple[np.ndarray, ...],
+    max_boxes: int = MAX_PLOTTED_AABBS,
+) -> tuple[list[float | None], list[float | None]]:
+    min_x, _min_y, min_z, max_x, _max_y, max_z = aabbs
+    if min_x.size == 0:
+        return [], []
+    if min_x.size <= max_boxes:
+        indices = np.arange(min_x.size)
+    else:
+        step = max(1, int(np.ceil((min_x.size - 1) / max(1, max_boxes - 1))))
+        indices = np.concatenate((np.array([0]), np.arange(1, min_x.size, step)))[:max_boxes]
+
+    xs: list[float | None] = []
+    zs: list[float | None] = []
+    for idx in indices:
+        i = int(idx)
+        xs.extend([min_x[i], max_x[i], max_x[i], min_x[i], min_x[i], None])
+        zs.extend([min_z[i], min_z[i], max_z[i], max_z[i], min_z[i], None])
+    return xs, zs
+
+
 def make_figure(
     geometry: Geometry,
     results: dict[str, object],
     field: str,
     show_error: bool,
+    overlay_aabbs: bool,
 ):
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -512,6 +540,11 @@ def make_figure(
     xg, zg = geometry.obs_grid
     centerline_plot = decimate_path_for_plot(geometry.centerline)
     helix_plot = decimate_path_for_plot(geometry.helix)
+    aabb_overlay = results.get("source_tree_aabbs") if overlay_aabbs else None
+    aabb_x: list[float | None] = []
+    aabb_z: list[float | None] = []
+    if isinstance(aabb_overlay, tuple):
+        aabb_x, aabb_z = aabb_overlay_path(aabb_overlay)
     traces = [
         (left, "log10 |direct|"),
         (middle, "log10 |hierarchical|"),
@@ -561,6 +594,19 @@ def make_figure(
             row=1,
             col=col,
         )
+        if aabb_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=aabb_x,
+                    y=aabb_z,
+                    mode="lines",
+                    line={"color": "rgba(20, 20, 20, 0.32)", "width": 1},
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=1,
+                col=col,
+            )
 
     for axis in fig.select_xaxes():
         axis.update(title="x [m]")
@@ -796,6 +842,7 @@ def make_app():
                             {"label": "Parallel evaluation", "value": "parallel"},
                             {"label": "Show relative error", "value": "relative-error"},
                             {"label": "Calculate self-field", "value": "self-field"},
+                            {"label": "Overlay source AABBs", "value": "aabbs"},
                         ],
                     ),
                 ],
@@ -876,8 +923,9 @@ def make_app():
             theta=float(theta),
             par="parallel" in opts,
             calc_self_field="self-field" in opts,
+            overlay_aabbs="aabbs" in opts,
         )
-        fig = make_figure(geometry, results, field, "relative-error" in opts)
+        fig = make_figure(geometry, results, field, "relative-error" in opts, "aabbs" in opts)
         self_fig = make_self_field_figure(results, field)
         self_field = results.get("self_field")
         self_text = ""

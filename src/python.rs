@@ -235,6 +235,42 @@ fn vec3_to_py_tuple(
     )
 }
 
+fn source_tree_aabbs_to_py_tuple(
+    py: Python<'_>,
+    tree: &physics::hierarchical::ClusterTree<f64>,
+) -> (
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+) {
+    let mut min_x = Vec::with_capacity(tree.node_aabb.len());
+    let mut min_y = Vec::with_capacity(tree.node_aabb.len());
+    let mut min_z = Vec::with_capacity(tree.node_aabb.len());
+    let mut max_x = Vec::with_capacity(tree.node_aabb.len());
+    let mut max_y = Vec::with_capacity(tree.node_aabb.len());
+    let mut max_z = Vec::with_capacity(tree.node_aabb.len());
+    for i in 0..tree.node_aabb.len() {
+        let aabb = tree.node_aabb[i];
+        min_x.push(aabb.min[0]);
+        min_y.push(aabb.min[1]);
+        min_z.push(aabb.min[2]);
+        max_x.push(aabb.max[0]);
+        max_y.push(aabb.max[1]);
+        max_z.push(aabb.max[2]);
+    }
+    (
+        PyArray1::from_vec(py, min_x).unbind(),
+        PyArray1::from_vec(py, min_y).unbind(),
+        PyArray1::from_vec(py, min_z).unbind(),
+        PyArray1::from_vec(py, max_x).unbind(),
+        PyArray1::from_vec(py, max_y).unbind(),
+        PyArray1::from_vec(py, max_z).unbind(),
+    )
+}
+
 fn build_dipole_targets(
     obs: (
         PyReadonlyArray1<f64>,
@@ -662,6 +698,20 @@ impl HierarchicalDipoles {
         let values = self.eval_dipole_vector_potential(moment, par)?;
         copy_vec3_to_py_arrays(&values, out)
     }
+
+    fn source_tree_aabbs(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<(
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+    )> {
+        Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
+    }
 }
 
 impl HierarchicalDipoles {
@@ -875,6 +925,20 @@ impl HierarchicalLinearFilaments {
         let out = self.eval_linear_filament_source_levels(current, field)?;
         Ok(PyArray1::from_vec(py, out).unbind())
     }
+
+    fn source_tree_aabbs(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<(
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+    )> {
+        Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
+    }
 }
 
 impl HierarchicalLinearFilaments {
@@ -1082,6 +1146,20 @@ impl HierarchicalBoundaryElements {
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
         let out = self.eval_boundary_element_vector_potential(current_density, par)?;
         Ok(vec3_to_py_tuple(py, &out))
+    }
+
+    fn source_tree_aabbs(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<(
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+        Py<PyArray1<f64>>,
+    )> {
+        Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
     }
 }
 

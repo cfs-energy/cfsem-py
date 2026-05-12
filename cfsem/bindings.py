@@ -1309,6 +1309,9 @@ class HierarchicalDipoles:
     def vector_potential_into(self, moment: Array3xN, out: Array3xN, par: bool = False) -> None:
         self._solver.vector_potential_into(_3tup_contig(moment), out, par)
 
+    def source_tree_aabbs(self) -> tuple[NDArray[float64], ...]:
+        return self._solver.source_tree_aabbs()  # type: ignore
+
 
 class HierarchicalLinearFilaments:
     """Reusable single-source-tree hierarchical linear-filament field solver."""
@@ -1381,6 +1384,9 @@ class HierarchicalLinearFilaments:
         current = ascontiguousarray(current, dtype=float64).ravel()
         return self._solver.accepted_source_levels(current, field)  # type: ignore
 
+    def source_tree_aabbs(self) -> tuple[NDArray[float64], ...]:
+        return self._solver.source_tree_aabbs()  # type: ignore
+
 
 class HierarchicalBoundaryElements:
     """Reusable single-source-tree hierarchical triangular boundary-element field solver."""
@@ -1443,6 +1449,9 @@ class HierarchicalBoundaryElements:
 
     def vector_potential(self, s: NDArray[float64] | Array3xN, par: bool = False) -> Array3xN:
         return self._solver.vector_potential(self._source_values(s), par)  # type: ignore
+
+    def source_tree_aabbs(self) -> tuple[NDArray[float64], ...]:
+        return self._solver.source_tree_aabbs()  # type: ignore
 
     def _source_values(self, s: NDArray[float64] | Array3xN) -> Array3xN:
         values = asarray(s)

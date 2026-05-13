@@ -107,6 +107,97 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     _assert_vec_close(solver.vector_potential(stream_function, par=False), direct_a)
 
 
+def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
+    loc = (
+        np.array([0.0, 0.5]),
+        np.array([0.0, 0.2]),
+        np.array([0.0, 0.1]),
+    )
+    moment = (
+        np.array([0.0, 0.2]),
+        np.array([0.0, 0.1]),
+        np.array([1.0, -0.3]),
+    )
+    outer_radius = np.zeros(2)
+    obs = (
+        np.array([1.0, 1.3, -0.7]),
+        np.array([0.0, -0.4, 0.9]),
+        np.array([0.5, 0.2, -0.2]),
+    )
+    dipole_solver = cfsem.HierarchicalDipoles(theta=0.0)
+    dipole_solver.build(loc, obs, outer_radius=outer_radius)
+    _assert_vec_close(
+        cfsem.flux_density_dipole_hierarchical(
+            loc,
+            moment,
+            obs,
+            theta=0.0,
+            par=False,
+            outer_radius=outer_radius,
+        ),
+        dipole_solver.flux_density(moment, par=False),
+    )
+    _assert_vec_close(
+        cfsem.vector_potential_dipole_hierarchical(
+            loc, moment, obs, theta=0.0, par=False, outer_radius=outer_radius
+        ),
+        dipole_solver.vector_potential(moment, par=False),
+    )
+
+    xyzfil = (
+        np.array([0.0, 0.5]),
+        np.array([0.0, 0.2]),
+        np.array([0.0, 0.1]),
+    )
+    dlxyzfil = (
+        np.array([0.0, 0.1]),
+        np.array([0.4, -0.2]),
+        np.array([0.2, 0.5]),
+    )
+    current = np.array([2.0, -1.5])
+    wire_radius = np.zeros(2)
+    filament_solver = cfsem.HierarchicalLinearFilaments(theta=0.0)
+    filament_solver.build(xyzfil, dlxyzfil, wire_radius, obs)
+    _assert_vec_close(
+        cfsem.flux_density_linear_filament_hierarchical(
+            obs, xyzfil, dlxyzfil, current, wire_radius, theta=0.0, par=False
+        ),
+        filament_solver.flux_density(current, par=False),
+    )
+    _assert_vec_close(
+        cfsem.vector_potential_linear_filament_hierarchical(
+            obs, xyzfil, dlxyzfil, current, wire_radius, theta=0.0, par=False
+        ),
+        filament_solver.vector_potential(current, par=False),
+    )
+
+    nodes = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+        ]
+    )
+    triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
+    stream_function = np.array([0.0, 1.0, 0.25, -0.5])
+    obs_array = np.column_stack(obs)
+    boundary_solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
+    boundary_solver.build(nodes, triangles, obs)
+    _assert_vec_close(
+        cfsem.flux_density_triangle_mesh_hierarchical(
+            obs_array, nodes, triangles, stream_function, theta=0.0, par=False, quad="dunavant3"
+        ),
+        boundary_solver.flux_density(stream_function, par=False),
+    )
+    _assert_vec_close(
+        cfsem.vector_potential_triangle_mesh_hierarchical(
+            obs_array, nodes, triangles, stream_function, theta=0.0, par=False, quad="dunavant3"
+        ),
+        boundary_solver.vector_potential(stream_function, par=False),
+    )
+
+
 def test_hierarchical_dipole_wrapper_update_and_into_methods():
     loc = np.array([[0.0, 0.0, 0.0], [0.25, 0.1, -0.1]])
     obs = np.array([[1.0, 0.0, 0.5], [0.4, -0.3, 0.2], [-0.2, 0.7, -0.1]])

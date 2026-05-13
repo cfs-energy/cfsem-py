@@ -543,6 +543,240 @@ where
     Ok(out)
 }
 
+#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, par=true))]
+fn flux_density_dipole_hierarchical(
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    moment: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    outer_radius: PyReadonlyArray1<f64>,
+    obs: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    theta: f64,
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(moment);
+    _3tup_slice_ro!(obs);
+    let outer_radius = outer_radius.as_slice()?;
+    let mut bx = vec![0.0; obs.0.len()];
+    let mut by = vec![0.0; obs.0.len()];
+    let mut bz = vec![0.0; obs.0.len()];
+    physics::hierarchical::flux_density_dipole_hierarchical(
+        loc,
+        moment,
+        outer_radius,
+        obs,
+        theta,
+        par,
+        (&mut bx, &mut by, &mut bz),
+    )
+    .map_err(|err| py_dual_tree_error("hierarchical dipole flux density", err))?;
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, par=true))]
+fn vector_potential_dipole_hierarchical(
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    moment: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    outer_radius: PyReadonlyArray1<f64>,
+    obs: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    theta: f64,
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(moment);
+    _3tup_slice_ro!(obs);
+    let outer_radius = outer_radius.as_slice()?;
+    let mut ax = vec![0.0; obs.0.len()];
+    let mut ay = vec![0.0; obs.0.len()];
+    let mut az = vec![0.0; obs.0.len()];
+    physics::hierarchical::vector_potential_dipole_hierarchical(
+        loc,
+        moment,
+        outer_radius,
+        obs,
+        theta,
+        par,
+        (&mut ax, &mut ay, &mut az),
+    )
+    .map_err(|err| py_dual_tree_error("hierarchical dipole vector potential", err))?;
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
+}
+
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, par=true))]
+fn flux_density_linear_filament_hierarchical(
+    xyzp: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    ifil: PyReadonlyArray1<f64>,
+    wire_radius: PyReadonlyArray1<f64>,
+    theta: f64,
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(xyzp);
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let ifil = ifil.as_slice()?;
+    let wire_radius = wire_radius.as_slice()?;
+    let mut bx = vec![0.0; xyzp.0.len()];
+    let mut by = vec![0.0; xyzp.0.len()];
+    let mut bz = vec![0.0; xyzp.0.len()];
+    physics::hierarchical::flux_density_linear_filament_hierarchical(
+        xyzp,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        wire_radius,
+        theta,
+        par,
+        (&mut bx, &mut by, &mut bz),
+    )
+    .map_err(|err| py_dual_tree_error("hierarchical linear-filament flux density", err))?;
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, par=true))]
+fn vector_potential_linear_filament_hierarchical(
+    xyzp: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    xyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    ifil: PyReadonlyArray1<f64>,
+    wire_radius: PyReadonlyArray1<f64>,
+    theta: f64,
+    par: bool,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    _3tup_slice_ro!(xyzp);
+    _3tup_slice_ro!(xyzfil);
+    _3tup_slice_ro!(dlxyzfil);
+    let ifil = ifil.as_slice()?;
+    let wire_radius = wire_radius.as_slice()?;
+    let mut ax = vec![0.0; xyzp.0.len()];
+    let mut ay = vec![0.0; xyzp.0.len()];
+    let mut az = vec![0.0; xyzp.0.len()];
+    physics::hierarchical::vector_potential_linear_filament_hierarchical(
+        xyzp,
+        xyzfil,
+        dlxyzfil,
+        ifil,
+        wire_radius,
+        theta,
+        par,
+        (&mut ax, &mut ay, &mut az),
+    )
+    .map_err(|err| py_dual_tree_error("hierarchical linear-filament vector potential", err))?;
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
+}
+
+#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, par=true, quad="dunavant3"))]
+fn flux_density_triangle_mesh_hierarchical(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+    theta: f64,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let s = s.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+    let mut bx = vec![0.0; obs.0.len()];
+    let mut by = vec![0.0; obs.0.len()];
+    let mut bz = vec![0.0; obs.0.len()];
+    physics::hierarchical::flux_density_triangle_mesh_hierarchical(
+        (&obs.0, &obs.1, &obs.2),
+        &mesh,
+        s,
+        quad,
+        theta,
+        par,
+        (&mut bx, &mut by, &mut bz),
+    )
+    .map_err(|err| py_dual_tree_error("hierarchical triangle-mesh flux density", err))?;
+    _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, par=true, quad="dunavant3"))]
+fn vector_potential_triangle_mesh_hierarchical(
+    obs: PyReadonlyArray2<f64>,
+    nodes: PyReadonlyArray2<f64>,
+    triangles: PyReadonlyArray2<i64>,
+    s: PyReadonlyArray1<f64>,
+    theta: f64,
+    par: bool,
+    quad: &str,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let obs = split_xyz_array2("obs", obs)?;
+    let nodes = split_xyz_array2("nodes", nodes)?;
+    let triangles = split_triangle_index_array2("triangles", triangles)?;
+    let mesh = triangle_mesh_view(&nodes, &triangles)?;
+    let s = s.as_slice()?;
+    let quad = parse_triangle_quadrature(quad)?;
+    let mut ax = vec![0.0; obs.0.len()];
+    let mut ay = vec![0.0; obs.0.len()];
+    let mut az = vec![0.0; obs.0.len()];
+    physics::hierarchical::vector_potential_triangle_mesh_hierarchical(
+        (&obs.0, &obs.1, &obs.2),
+        &mesh,
+        s,
+        quad,
+        theta,
+        par,
+        (&mut ax, &mut ay, &mut az),
+    )
+    .map_err(|err| py_dual_tree_error("hierarchical triangle-mesh vector potential", err))?;
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
+}
+
 #[pyclass(module = "cfsem", unsendable)]
 struct HierarchicalDipoles {
     theta: f64,
@@ -4897,6 +5131,30 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(vector_potential_dipole, m.clone())?)?;
 
     // Hierarchical solvers
+    m.add_function(wrap_pyfunction!(
+        flux_density_dipole_hierarchical,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_dipole_hierarchical,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        flux_density_linear_filament_hierarchical,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_linear_filament_hierarchical,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        flux_density_triangle_mesh_hierarchical,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_triangle_mesh_hierarchical,
+        m.clone()
+    )?)?;
     m.add_class::<HierarchicalDipoles>()?;
     m.add_class::<HierarchicalLinearFilaments>()?;
     m.add_class::<HierarchicalBoundaryElements>()?;

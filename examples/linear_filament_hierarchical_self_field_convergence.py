@@ -51,6 +51,7 @@ TESTING_SCALING_INTERACTION_TARGETS = np.logspace(5.0, 6.0, 2, dtype=np.float64)
 DIRECT_SCALING_MAX_INTERACTIONS = 1.0e9
 DIRECT_TRACE_COLOR = "tab:green"
 CONSTRUCTION_METHOD = "recursive"
+MAX_AABB_PLOT_LEVELS = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,18 +324,31 @@ def direct_time_fit(scaling_results: list[ScalingResult]) -> tuple[float, float]
     return float(slope), float(intercept)
 
 
+def source_tree_aabbs(discretization: LoopDiscretization) -> tuple[NDArray[np.float64], ...]:
+    """Build the coarse source tree and return its AABB arrays for plotting."""
+
+    solver = cfsem.HierarchicalLinearFilaments(theta=THETA_SWEEP[0], construction_method=CONSTRUCTION_METHOD)
+    solver.build_sources(
+        discretization.starts,
+        discretization.deltas,
+        discretization.wire_radius,
+    )
+    return solver.source_tree_aabbs()
+
+
 def build_figure(
     results: list[StudyResult],
     scaling_results_by_theta: dict[float, list[ScalingResult]],
 ) -> plt.Figure:
     """Plot self-field convergence and interaction-count timing."""
 
-    fig = plt.figure(figsize=(17.0, 9.0), constrained_layout=True)
-    grid = fig.add_gridspec(2, 3)
+    fig = plt.figure(figsize=(18.5, 9.0), constrained_layout=True)
+    grid = fig.add_gridspec(2, 4, width_ratios=[1.0, 1.0, 1.0, 0.34])
     error_ax = fig.add_subplot(grid[0, 0])
     theta_time_ax = fig.add_subplot(grid[0, 1])
-    legend_ax = fig.add_subplot(grid[0, 2])
+    domain_ax = fig.add_subplot(grid[0, 2])
     scaling_axes = [fig.add_subplot(grid[1, i]) for i in range(3)]
+    scaling_legend_ax = fig.add_subplot(grid[1, 3])
 
     for result in results:
         theta = np.array([item.theta for item in result.theta_results], dtype=np.float64)
@@ -342,10 +356,7 @@ def build_figure(
         max_error = np.array([item.max_relative_error for item in result.theta_results], dtype=np.float64)
         eval_seconds = np.array([item.eval_seconds for item in result.theta_results], dtype=np.float64)
         build_seconds = np.array([item.build_seconds for item in result.theta_results], dtype=np.float64)
-        label = (
-            f"target ds={1.0e3 * result.discretization.target_ds:.0f} mm "
-            f"(n={result.discretization.segment_count})"
-        )
+        label = f"target ds={1.0e3 * result.discretization.target_ds:.0f} mm"
 
         error_ax.loglog(theta, rms_error, marker="o", label=f"RMS, {label}")
         error_ax.loglog(theta, max_error, marker="s", linestyle="--", label=f"Max, {label}")
@@ -364,6 +375,8 @@ def build_figure(
         ax.invert_xaxis()
         ax.grid(True, which="both", linewidth=0.5, alpha=0.35)
 
+    plot_domain_axis(domain_ax, results[0].discretization)
+
     for ax, theta in zip(scaling_axes, SCALING_THETAS, strict=True):
         scaling_results = scaling_results_by_theta[float(theta)]
         plot_scaling_axis(ax, scaling_results)
@@ -379,15 +392,46 @@ def build_figure(
     theta_time_ax.set_ylabel("Time [s]")
     theta_time_ax.set_title("Hierarchical timing; dotted lines are direct references")
     theta_time_ax.legend(fontsize="small")
-    legend_ax.axis("off")
+    scaling_legend_ax.axis("off")
     handles, labels = scaling_axes[0].get_legend_handles_labels()
-    legend_ax.legend(handles, labels, loc="center", frameon=True, title="Scaling traces")
+    scaling_legend_ax.legend(handles, labels, loc="center left", frameon=True, title="Scaling traces")
     fig.suptitle(
         "Linear-filament circular-loop self-field convergence\n"
         f"radius={LOOP_RADIUS:g} m, current={CURRENT:g} A, wire_radius={WIRE_RADIUS:g} m, "
         f"construction={CONSTRUCTION_METHOD}"
     )
     return fig
+
+
+def plot_domain_axis(ax: plt.Axes, discretization: LoopDiscretization) -> None:
+    """Plot the coarse filament loop and source-tree AABBs in the loop plane."""
+
+    start_x, start_y, _start_z = discretization.starts
+    delta_x, delta_y, _delta_z = discretization.deltas
+    end_x = start_x + delta_x
+    end_y = start_y + delta_y
+    for i in range(discretization.segment_count):
+        ax.plot([start_x[i], end_x[i]], [start_y[i], end_y[i]], color="black", linewidth=3.0)
+
+    min_x, min_y, _min_z, max_x, max_y, _max_z, levels = source_tree_aabbs(discretization)
+    for i in range(len(min_x)):
+        if levels[i] > MAX_AABB_PLOT_LEVELS:
+            continue
+        xs = [min_x[i], max_x[i], max_x[i], min_x[i], min_x[i]]
+        ys = [min_y[i], min_y[i], max_y[i], max_y[i], min_y[i]]
+        ax.plot(xs, ys, color="black", linewidth=1.0)
+
+    pad = 0.12 * LOOP_RADIUS
+    ax.set_xlim(-LOOP_RADIUS - pad, LOOP_RADIUS + pad)
+    ax.set_ylim(-LOOP_RADIUS - pad, LOOP_RADIUS + pad)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title(
+        f"Coarse loop source tree\n"
+        f"ds={1.0e3 * discretization.target_ds:.0f} mm, AABBs through level {MAX_AABB_PLOT_LEVELS}"
+    )
+    ax.grid(True, linewidth=0.5, alpha=0.35)
 
 
 def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> None:

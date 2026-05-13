@@ -3,6 +3,21 @@ use core::cmp::Ordering;
 use super::{Aabb, BoundedGeometry, DualTreeError, DualTreeScalar};
 
 const INVALID_INDEX: u32 = u32::MAX;
+/// Adjacent spatial gap must exceed this multiple of the mean sorted gap before
+/// the recursive builder treats it as a cluster boundary.
+const SPATIAL_GAP_DOMINANCE_FACTOR: f64 = 4.0;
+/// Adjacent spatial gap must cover at least this fraction of the node span
+/// before the recursive builder treats it as a cluster boundary.
+const SPATIAL_GAP_MIN_SPAN_FRACTION: f64 = 0.05;
+/// Adjacent Morton-code gap must exceed this multiple of the mean sorted code
+/// gap before the LBVH builder treats it as a cluster boundary.
+const MORTON_GAP_DOMINANCE_FACTOR: f64 = 4.0;
+/// Adjacent Morton-code gap must cover at least this fraction of the node's code
+/// span before the LBVH builder treats it as a cluster boundary.
+const MORTON_GAP_MIN_SPAN_FRACTION: f64 = 0.05;
+/// Candidate gap splits must leave at least this fraction of the range on each
+/// side. This keeps ordinary curve sampling gaps from creating skinny trees.
+const GAP_SPLIT_MIN_SIDE_FRACTION: usize = 8;
 /// Number of quantization bits per coordinate used by the 3D Morton code.
 ///
 /// Three axes at 21 bits each fill 63 bits, keeping the code within a signed
@@ -14,9 +29,11 @@ const MORTON_MAX_COORD: u64 = (1_u64 << MORTON_BITS_PER_AXIS) - 1;
 /// CPU tree construction strategy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClusterTreeBuildMethod {
-    /// Recursively sort each node range by the longest AABB axis.
+    /// Recursively sort each node range by the longest AABB axis, then split
+    /// at a dominant adjacent spatial gap on that axis or the median otherwise.
     LongestAxisMedian,
-    /// Sort once by Morton code, then split contiguous ranges at their midpoint.
+    /// Sort once by Morton code, then split contiguous ranges at a dominant
+    /// adjacent Morton-code gap or the median otherwise.
     MortonLbvh,
 }
 
@@ -52,6 +69,8 @@ pub struct ClusterTree<T: DualTreeScalar> {
     pub leaf_count: Vec<u32>,
     /// Input geometry IDs in tree order. Every node covers a contiguous range.
     pub sorted_indices: Vec<u32>,
+    /// Morton code for each sorted input, populated only by Morton/LBVH construction.
+    pub sorted_morton_codes: Vec<u64>,
     /// Node IDs for leaves, used to update leaf summaries without scanning all nodes.
     pub leaf_node_ids: Vec<u32>,
     /// Internal node IDs grouped by tree depth from root to leaves.
@@ -81,6 +100,8 @@ pub struct ClusterTreeView<'a, T: DualTreeScalar> {
     pub leaf_count: &'a [u32],
     /// Input geometry IDs in tree order. Every node covers a contiguous range.
     pub sorted_indices: &'a [u32],
+    /// Morton code for each sorted input, populated only by Morton/LBVH construction.
+    pub sorted_morton_codes: &'a [u64],
     /// Node IDs for leaves, used to update leaf summaries without scanning all nodes.
     pub leaf_node_ids: &'a [u32],
     /// Internal node IDs grouped by tree depth from root to leaves.
@@ -92,7 +113,7 @@ pub struct ClusterTreeView<'a, T: DualTreeScalar> {
 }
 
 impl<T: DualTreeScalar> ClusterTree<T> {
-    /// Build a CPU-owned finalized tree using longest-axis median splitting.
+    /// Build a CPU-owned finalized tree using longest-axis hybrid splitting.
     pub fn build<G>(geometry: &[G], leaf_size: usize) -> Result<Self, DualTreeError>
     where
         G: BoundedGeometry<Scalar = T>,
@@ -107,9 +128,10 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     /// Build a CPU-owned finalized tree using Morton-code LBVH ordering.
     ///
     /// This path computes one Morton code per representative point, sorts the
-    /// whole input once, and then builds a balanced binary tree by midpoint
-    /// splitting contiguous Morton-sorted ranges. Node AABBs are still computed
-    /// from the full bounded geometry, so finite-size sources remain covered.
+    /// whole input once, and then builds a binary tree by splitting contiguous
+    /// Morton-sorted ranges at dominant adjacent code gaps or the median when
+    /// no dominant cluster gap is present. Node AABBs are still computed from
+    /// the full bounded geometry, so finite-size sources remain covered.
     pub fn build_morton_lbvh<G>(geometry: &[G], leaf_size: usize) -> Result<Self, DualTreeError>
     where
         G: BoundedGeometry<Scalar = T>,
@@ -148,6 +170,7 @@ impl<T: DualTreeScalar> ClusterTree<T> {
             leaf_start: Vec::new(),
             leaf_count: Vec::new(),
             sorted_indices: Vec::with_capacity(geometry.len()),
+            sorted_morton_codes: Vec::new(),
             leaf_node_ids: Vec::new(),
             internal_level_ids: Vec::new(),
             internal_level_offsets: vec![0],
@@ -159,9 +182,9 @@ impl<T: DualTreeScalar> ClusterTree<T> {
         }
 
         // LBVH pays one global sort up front. The recursive builder can then
-        // split ranges by midpoint without reordering within subtrees.
+        // split ranges at code gaps or medians without reordering within subtrees.
         if method == ClusterTreeBuildMethod::MortonLbvh {
-            sort_indices_by_morton(&mut tree.sorted_indices, geometry);
+            tree.sorted_morton_codes = sort_indices_by_morton(&mut tree.sorted_indices, geometry);
         }
 
         let mut internal_by_depth: Vec<Vec<u32>> = Vec::new();
@@ -213,6 +236,7 @@ impl<T: DualTreeScalar> ClusterTree<T> {
             leaf_start: &self.leaf_start,
             leaf_count: &self.leaf_count,
             sorted_indices: &self.sorted_indices,
+            sorted_morton_codes: &self.sorted_morton_codes,
             leaf_node_ids: &self.leaf_node_ids,
             internal_level_ids: &self.internal_level_ids,
             internal_level_offsets: &self.internal_level_offsets,
@@ -299,7 +323,7 @@ where
         scalar_cmp(pa, pb)
     });
 
-    let mid = start + count / 2;
+    let mid = hybrid_axis_gap_split(&tree.sorted_indices, geometry, start, end, axis);
     if internal_by_depth.len() <= depth {
         internal_by_depth.resize_with(depth + 1, Vec::new);
     }
@@ -334,9 +358,11 @@ where
 /// Recursively build a tree over an already Morton-sorted item range.
 ///
 /// The Morton sort supplies spatial locality. Each internal node splits its
-/// range at the midpoint, which keeps the tree balanced and avoids additional
-/// per-node sorting. Internal AABBs are propagated from children after both
-/// child subtrees are built.
+/// range at a dominant adjacent Morton-code gap or the median when no dominant
+/// gap exists. This avoids additional per-node sorting while separating obvious
+/// code-space clusters without letting ordinary sampling gaps create skinny
+/// trees. Internal AABBs are propagated from children after both child subtrees
+/// are built.
 fn build_range_morton<T, G>(
     tree: &mut ClusterTree<T>,
     geometry: &[G],
@@ -376,9 +402,9 @@ where
         return Ok(node_id);
     }
 
-    // Midpoint splitting is the "linear" part of LBVH here: the expensive
-    // spatial ordering has already been encoded by the Morton sort.
-    let mid = start + count / 2;
+    // Split at a dominant adjacent Morton-code gap when one exists; otherwise
+    // use the median to keep continuous or uniformly sampled geometry balanced.
+    let mid = hybrid_morton_gap_split(tree.sorted_morton_codes.as_slice(), start, end);
     if internal_by_depth.len() <= depth {
         internal_by_depth.resize_with(depth + 1, Vec::new);
     }
@@ -416,7 +442,7 @@ where
 /// Ties are resolved by the original input ID so duplicate Morton codes produce
 /// deterministic trees. The actual node bounds are still based on `aabb()`, not
 /// on representative points.
-fn sort_indices_by_morton<T, G>(indices: &mut [u32], geometry: &[G])
+fn sort_indices_by_morton<T, G>(indices: &mut [u32], geometry: &[G]) -> Vec<u64>
 where
     T: DualTreeScalar,
     G: BoundedGeometry<Scalar = T>,
@@ -440,6 +466,11 @@ where
     for i in 0..items.len() {
         indices[i] = items[i].input_id;
     }
+    let mut codes = Vec::with_capacity(items.len());
+    for item in items {
+        codes.push(item.code);
+    }
+    codes
 }
 
 /// Compute global representative-point bounds for Morton quantization.
@@ -514,6 +545,131 @@ where
         out = out.union(geometry[indices[i] as usize].aabb());
     }
     out
+}
+
+/// Split a sorted range at a dominant representative-point gap on `axis`.
+///
+/// The caller has already sorted `indices[start..end]` along the chosen axis.
+/// A dominant gap is used only when it is large compared with the range span
+/// and the mean adjacent spacing, and when it does not create an extreme
+/// imbalance. Otherwise the median split gives smoother behavior for loops,
+/// helices, and other continuous source distributions.
+fn hybrid_axis_gap_split<T, G>(
+    indices: &[u32],
+    geometry: &[G],
+    start: usize,
+    end: usize,
+    axis: usize,
+) -> usize
+where
+    T: DualTreeScalar,
+    G: BoundedGeometry<Scalar = T>,
+{
+    let count = end - start;
+    let median = start + count / 2;
+    let mut split = median;
+    let mut best_gap = T::ZERO;
+    for i in start + 1..end {
+        let left = geometry[indices[i - 1] as usize].representative_point()[axis];
+        let right = geometry[indices[i] as usize].representative_point()[axis];
+        let gap = right - left;
+        if gap > best_gap {
+            best_gap = gap;
+            split = i;
+        }
+    }
+    if accepts_hybrid_gap_split(
+        split,
+        start,
+        end,
+        best_gap.to_f64(),
+        spatial_axis_span(indices, geometry, start, end, axis).to_f64(),
+        SPATIAL_GAP_DOMINANCE_FACTOR,
+        SPATIAL_GAP_MIN_SPAN_FRACTION,
+    ) {
+        split
+    } else {
+        median
+    }
+}
+
+/// Split a Morton-sorted range at a dominant adjacent code gap.
+///
+/// Equal-code ranges and smoothly sampled ranges fall back to a median split,
+/// which keeps degenerate representative points and continuous curves from
+/// creating empty, repeatedly identical, or badly imbalanced partitions.
+fn hybrid_morton_gap_split(codes: &[u64], start: usize, end: usize) -> usize {
+    let count = end - start;
+    let median = start + count / 2;
+    let mut split = median;
+    let mut best_gap = 0_u64;
+    for i in start + 1..end {
+        let gap = codes[i].saturating_sub(codes[i - 1]);
+        if gap > best_gap {
+            best_gap = gap;
+            split = i;
+        }
+    }
+    if accepts_hybrid_gap_split(
+        split,
+        start,
+        end,
+        best_gap as f64,
+        codes[end - 1].saturating_sub(codes[start]) as f64,
+        MORTON_GAP_DOMINANCE_FACTOR,
+        MORTON_GAP_MIN_SPAN_FRACTION,
+    ) {
+        split
+    } else {
+        median
+    }
+}
+
+/// Return the representative-point span along one already-sorted axis.
+fn spatial_axis_span<T, G>(
+    indices: &[u32],
+    geometry: &[G],
+    start: usize,
+    end: usize,
+    axis: usize,
+) -> T
+where
+    T: DualTreeScalar,
+    G: BoundedGeometry<Scalar = T>,
+{
+    let lo = geometry[indices[start] as usize].representative_point()[axis];
+    let hi = geometry[indices[end - 1] as usize].representative_point()[axis];
+    hi - lo
+}
+
+/// Decide whether the largest adjacent gap is meaningful enough to use.
+///
+/// The dominance check separates true clusters from normal sampling variation,
+/// while the balance check keeps one outlier from forcing a long chain of
+/// nearly empty siblings.
+fn accepts_hybrid_gap_split(
+    split: usize,
+    start: usize,
+    end: usize,
+    gap: f64,
+    span: f64,
+    dominance_factor: f64,
+    min_span_fraction: f64,
+) -> bool {
+    let count = end - start;
+    if count <= 2 || span <= 0.0 || gap <= 0.0 {
+        return false;
+    }
+
+    let left_count = split - start;
+    let right_count = end - split;
+    let min_side = count / GAP_SPLIT_MIN_SIDE_FRACTION;
+    if min_side > 0 && (left_count < min_side || right_count < min_side) {
+        return false;
+    }
+
+    let mean_gap = span / (count - 1) as f64;
+    gap >= dominance_factor * mean_gap && gap >= min_span_fraction * span
 }
 
 /// Return the axis with largest AABB extent.

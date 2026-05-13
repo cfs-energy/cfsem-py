@@ -1470,6 +1470,46 @@ fn tree_covers_each_input_once() {
 }
 
 #[test]
+fn recursive_tree_splits_separated_clusters_at_spatial_gap() {
+    let points = points_f64(&[
+        [-10.0, -10.0, 0.0],
+        [-10.1, -10.0, 0.0],
+        [10.0, -10.0, 0.0],
+        [10.1, -10.0, 0.0],
+        [-10.0, 10.0, 0.0],
+        [-10.1, 10.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [10.1, 10.0, 0.0],
+    ]);
+    let tree = ClusterTree::build(&points, 1).unwrap();
+    let left = tree.node_left_child[0] as usize;
+    let right = tree.node_right_child[0] as usize;
+
+    assert!(tree.node_aabb[left].max[0] < 0.0 || tree.node_aabb[right].max[0] < 0.0);
+    assert!(tree.node_aabb[left].min[0] > 0.0 || tree.node_aabb[right].min[0] > 0.0);
+}
+
+#[test]
+fn recursive_tree_uses_median_for_uniform_spatial_gaps() {
+    let points = points_f64(&[
+        [-3.0, 0.0, 0.0],
+        [-2.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.0, 0.0, 0.0],
+    ]);
+    let tree = ClusterTree::build(&points, 1).unwrap();
+    let left = tree.node_left_child[0] as usize;
+    let right = tree.node_right_child[0] as usize;
+
+    assert_eq!(tree.node_range_count[left], 4);
+    assert_eq!(tree.node_range_count[right], 4);
+}
+
+#[test]
 fn morton_tree_covers_each_input_once() {
     let points = points_f64(&[
         [0.0, 0.0, 0.0],
@@ -1509,6 +1549,51 @@ fn morton_tree_covers_each_input_once() {
             assert!(point[axis] <= tree.node_aabb[0].max[axis]);
         }
     }
+}
+
+#[test]
+fn morton_tree_uses_median_for_uniform_code_gaps() {
+    let points = points_f64(&[
+        [-3.0, 0.0, 0.0],
+        [-2.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.0, 0.0, 0.0],
+    ]);
+    let tree = ClusterTree::build_morton_lbvh(&points, 1).unwrap();
+    let left = tree.node_left_child[0] as usize;
+    let right = tree.node_right_child[0] as usize;
+
+    assert_eq!(tree.node_range_count[left], 4);
+    assert_eq!(tree.node_range_count[right], 4);
+}
+
+#[test]
+fn morton_tree_splits_separated_clusters_at_code_gap() {
+    let points = points_f64(&[
+        [-10.0, -10.0, 0.0],
+        [-10.1, -10.0, 0.0],
+        [10.0, -10.0, 0.0],
+        [10.1, -10.0, 0.0],
+        [-10.0, 10.0, 0.0],
+        [-10.1, 10.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [10.1, 10.0, 0.0],
+    ]);
+    let tree = ClusterTree::build_morton_lbvh(&points, 1).unwrap();
+    let left = tree.node_left_child[0] as usize;
+    let right = tree.node_right_child[0] as usize;
+
+    assert!(tree.node_range_count[left] > 0);
+    assert!(tree.node_range_count[right] > 0);
+    assert!(
+        tree.sorted_morton_codes[tree.node_range_start[right] as usize]
+            > tree.sorted_morton_codes
+                [(tree.node_range_start[left] + tree.node_range_count[left] - 1) as usize]
+    );
 }
 
 #[test]

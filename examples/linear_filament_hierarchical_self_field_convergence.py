@@ -8,12 +8,12 @@ self-field error in coil discretizations.
 
 Two segment-length targets are shown:
 
-- 5 cm, representing a coarse filamentization,
-- 5 mm, representing a finer filamentization.
+- 10 mm, representing a coarse filamentization,
+- 1 mm, representing a finer filamentization.
 
 For each discretization, the direct solution is computed once and used as the
-reference while the hierarchical opening angle `theta` is swept from 0.8 down
-to 0.05. A second plot row changes the loop discretization to sweep dense
+reference while the hierarchical opening angle `theta` is swept from 1.0 down
+to 0.01. A second plot row changes the loop discretization to sweep dense
 interaction counts from about 1e5 to 1e10 and records hierarchical build and
 evaluation time at several fixed theta values.
 """
@@ -43,8 +43,8 @@ TESTING = bool(os.getenv("CFSEM_TESTING"))
 LOOP_RADIUS = 1.0  # [m]
 CURRENT = 1.0  # [A]
 WIRE_RADIUS = 1.0e-3  # [m]
-TARGET_SEGMENT_LENGTHS = (0.05, 0.005)  # [m]
-THETA_SWEEP = np.array([0.8, 0.6, 0.4, 0.3, 0.2, 0.15, 0.1, 0.075, 0.05], dtype=np.float64)
+TARGET_SEGMENT_LENGTHS = (0.01, 0.001)  # [m]
+THETA_SWEEP = np.logspace(0.0, -2.0, 10, dtype=np.float64)
 SCALING_THETAS = (0.05, 0.3, 0.6)
 SCALING_INTERACTION_TARGETS = np.logspace(5.0, 10.0, 6, dtype=np.float64)
 TESTING_SCALING_INTERACTION_TARGETS = np.logspace(5.0, 6.0, 2, dtype=np.float64)

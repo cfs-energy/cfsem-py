@@ -437,6 +437,26 @@ def plot_runtime_scaling_fit(
     return exponent
 
 
+def plot_runtime_scaling_fit_on_axis(
+    ax: plt.Axes,
+    fit_x_values: NDArray[np.float64],
+    plot_x_values: NDArray[np.float64],
+    y_values: NDArray[np.float64],
+    color: str,
+) -> float | None:
+    """Fit against one size variable and draw the fit against another x-axis variable."""
+
+    fit = loglog_power_fit(fit_x_values, y_values)
+    if fit is None:
+        return None
+    exponent, coefficient = fit
+    fit_x = np.array([float(np.min(fit_x_values)), float(np.max(fit_x_values))], dtype=np.float64)
+    plot_x = np.array([float(np.min(plot_x_values)), float(np.max(plot_x_values))], dtype=np.float64)
+    fit_y = coefficient * fit_x**exponent
+    ax.loglog(plot_x, fit_y, color=color, linestyle="-.", linewidth=1.0, alpha=0.8, label="_nolegend_")
+    return exponent
+
+
 def source_tree_aabbs(discretization: LoopDiscretization) -> tuple[NDArray[np.float64], ...]:
     """Build the coarse source tree and return its AABB arrays for plotting."""
 
@@ -803,6 +823,10 @@ def plot_domain_axis(ax: plt.Axes, discretization: LoopDiscretization) -> None:
 def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> None:
     """Plot hierarchical and direct timing for one fixed theta value."""
 
+    scaling_interactions = np.array(
+        [item.discretization.interaction_count for item in scaling_results],
+        dtype=np.float64,
+    )
     scaling_sources = np.array(
         [item.discretization.segment_count for item in scaling_results],
         dtype=np.float64,
@@ -810,31 +834,33 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
     scaling_build_seconds = np.array([item.build_seconds for item in scaling_results], dtype=np.float64)
     scaling_eval_seconds = np.array([item.eval_seconds for item in scaling_results], dtype=np.float64)
     eval_line = ax.loglog(
-        scaling_sources,
+        scaling_interactions,
         scaling_eval_seconds,
         marker="o",
         label="Hierarchical eval",
     )[0]
     build_eval_seconds = scaling_build_seconds + scaling_eval_seconds
     build_eval_line = ax.loglog(
-        scaling_sources,
+        scaling_interactions,
         build_eval_seconds,
         marker="s",
         linestyle="--",
         label="Hierarchical build+eval",
     )[0]
     scaling_annotations: list[str] = []
-    eval_exponent = plot_runtime_scaling_fit(
+    eval_exponent = plot_runtime_scaling_fit_on_axis(
         ax,
         scaling_sources,
+        scaling_interactions,
         scaling_eval_seconds,
         eval_line.get_color(),
     )
     if eval_exponent is not None:
         scaling_annotations.append(rf"eval $\sim N^{{{eval_exponent:.2f}}}$")
-    build_eval_exponent = plot_runtime_scaling_fit(
+    build_eval_exponent = plot_runtime_scaling_fit_on_axis(
         ax,
         scaling_sources,
+        scaling_interactions,
         build_eval_seconds,
         build_eval_line.get_color(),
     )
@@ -843,15 +869,20 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
 
     direct_measured = [item for item in scaling_results if item.direct_seconds is not None]
     if direct_measured:
+        direct_interactions = np.array(
+            [item.discretization.interaction_count for item in direct_measured],
+            dtype=np.float64,
+        )
         direct_sources = np.array(
             [item.discretization.segment_count for item in direct_measured],
             dtype=np.float64,
         )
         direct_seconds = np.array([float(item.direct_seconds) for item in direct_measured], dtype=np.float64)
-        ax.loglog(direct_sources, direct_seconds, marker="^", color=DIRECT_TRACE_COLOR, label="Direct")
-        direct_exponent = plot_runtime_scaling_fit(
+        ax.loglog(direct_interactions, direct_seconds, marker="^", color=DIRECT_TRACE_COLOR, label="Direct")
+        direct_exponent = plot_runtime_scaling_fit_on_axis(
             ax,
             direct_sources,
+            direct_interactions,
             direct_seconds,
             DIRECT_TRACE_COLOR,
         )
@@ -861,19 +892,14 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
     direct_fit = direct_time_fit(scaling_results)
     if direct_fit is not None:
         slope, intercept = direct_fit
-        scaling_interactions = np.array(
-            [item.discretization.interaction_count for item in scaling_results],
-            dtype=np.float64,
-        )
         fit_mask = scaling_interactions > DIRECT_SCALING_MAX_INTERACTIONS
         if np.any(fit_mask) and direct_measured:
             last_measured = max(direct_measured, key=lambda item: item.discretization.interaction_count)
-            last_source_count = float(last_measured.discretization.segment_count)
-            fit_sources = np.concatenate(([last_source_count], scaling_sources[fit_mask]))
-            fit_interactions = fit_sources * fit_sources
+            last_interaction_count = float(last_measured.discretization.interaction_count)
+            fit_interactions = np.concatenate(([last_interaction_count], scaling_interactions[fit_mask]))
             fit_seconds = np.maximum(slope * fit_interactions + intercept, np.finfo(np.float64).tiny)
             ax.loglog(
-                fit_sources,
+                fit_interactions,
                 fit_seconds,
                 color=DIRECT_TRACE_COLOR,
                 linestyle=":",

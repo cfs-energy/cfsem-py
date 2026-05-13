@@ -58,6 +58,8 @@ CONSTRUCTION_METHOD = "recursive"
 MAX_AABB_PLOT_LEVELS = 6
 NEAR_FIELD_INBOARD_FROM_FIRST_ORIGIN = 0.05  # [m]
 NEAR_FIELD_INBOARD_RADIUS = 0.001  # [m]
+NEAR_FIELD_OUTBOARD_FROM_FIRST_ORIGIN = 0.05  # [m]
+NEAR_FIELD_OUTBOARD_RADIUS = 1.5  # [m]
 NEAR_FIELD_TARGET_COUNT = 100
 TESTING_NEAR_FIELD_TARGET_COUNT = 30
 NEAR_FIELD_DS_SWEEP = np.logspace(np.log10(0.001), np.log10(0.05), 32, dtype=np.float64)
@@ -195,15 +197,22 @@ def circular_loop_discretization_for_interactions(target_interactions: float) ->
 
 
 def near_field_observation_points() -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Observation points on a radial line from near loop center to near the first source."""
+    """Observation points on radial lines inside and outside the loop."""
 
     target_count = TESTING_NEAR_FIELD_TARGET_COUNT if TESTING else NEAR_FIELD_TARGET_COUNT
-    radius = np.linspace(
+    inboard_radius = np.linspace(
         NEAR_FIELD_INBOARD_RADIUS,
         LOOP_RADIUS - NEAR_FIELD_INBOARD_FROM_FIRST_ORIGIN,
         target_count,
         dtype=np.float64,
     )
+    outboard_radius = np.linspace(
+        LOOP_RADIUS + NEAR_FIELD_OUTBOARD_FROM_FIRST_ORIGIN,
+        NEAR_FIELD_OUTBOARD_RADIUS,
+        target_count,
+        dtype=np.float64,
+    )
+    radius = np.concatenate((inboard_radius, outboard_radius))
     return (
         radius,
         np.zeros_like(radius),
@@ -745,8 +754,9 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
     fig.suptitle(
         "Near-field convergence against analytic circular-filament field\n"
         f"targets on x-axis from r={NEAR_FIELD_INBOARD_RADIUS:.3f} m "
-        f"to r={LOOP_RADIUS - NEAR_FIELD_INBOARD_FROM_FIRST_ORIGIN:.3f} m "
-        f"({NEAR_FIELD_INBOARD_FROM_FIRST_ORIGIN:g} m inboard of first filament origin)"
+        f"to r={LOOP_RADIUS - NEAR_FIELD_INBOARD_FROM_FIRST_ORIGIN:.3f} m and "
+        f"r={LOOP_RADIUS + NEAR_FIELD_OUTBOARD_FROM_FIRST_ORIGIN:.3f} m "
+        f"to r={NEAR_FIELD_OUTBOARD_RADIUS:.3f} m"
     )
     return fig
 
@@ -776,7 +786,7 @@ def plot_near_field_domain_axis(ax: plt.Axes) -> None:
     ax.scatter(target_x, target_y, s=12, color="tab:red", label="targets", zorder=3)
 
     pad = 0.12 * LOOP_RADIUS
-    ax.set_xlim(-LOOP_RADIUS - pad, LOOP_RADIUS + pad)
+    ax.set_xlim(-LOOP_RADIUS - pad, NEAR_FIELD_OUTBOARD_RADIUS + pad)
     ax.set_ylim(-LOOP_RADIUS - pad, LOOP_RADIUS + pad)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("x [m]")

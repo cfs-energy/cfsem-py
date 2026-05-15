@@ -109,6 +109,10 @@ pub fn update_source_summaries_into<K: DualTreeKernel>(
     moments: &[K::SourceMoment],
     summaries: &mut [K::SourceSummary],
 ) -> DualTreeError {
+    let err = validate_source_tree_layout(tree);
+    if err != DualTreeError::Ok {
+        return err;
+    }
     if sources.len() != tree.n_items() || moments.len() != tree.n_items() {
         return DualTreeError::LengthMismatch;
     }
@@ -120,7 +124,8 @@ pub fn update_source_summaries_into<K: DualTreeKernel>(
         let node_id = tree.leaf_node_ids[i];
         let start = tree.leaf_start[node_id as usize] as usize;
         let count = tree.leaf_count[node_id as usize] as usize;
-        let source_ids = &tree.sorted_indices[start..start + count];
+        let end = start + count;
+        let source_ids = &tree.sorted_indices[start..end];
         let err = kernel.summarize_leaf_sources(
             source_ids,
             sources,
@@ -348,6 +353,35 @@ pub fn evaluate_source_tree_into<K: DualTreeKernel>(
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
 ) -> DualTreeError {
+    let err = validate_source_tree_layout(source_tree);
+    if err != DualTreeError::Ok {
+        return err;
+    }
+    evaluate_source_tree_into_validated(
+        kernel,
+        source_tree,
+        source_summaries,
+        sources,
+        targets,
+        moments,
+        theta,
+        out,
+        scratch,
+    )
+}
+
+#[inline]
+fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_summaries: &[K::SourceSummary],
+    sources: &[K::SourceGeometry],
+    targets: &[K::TargetGeometry],
+    moments: &[K::SourceMoment],
+    theta: K::Scalar,
+    out: &mut [K::Output],
+    scratch: &mut EvaluationScratch<'_, K::Output>,
+) -> DualTreeError {
     if sources.len() != source_tree.n_items()
         || moments.len() != source_tree.n_items()
         || targets.len() != out.len()
@@ -363,10 +397,15 @@ pub fn evaluate_source_tree_into<K: DualTreeKernel>(
     let target_ids = [0_u32];
 
     for target_id in 0..targets.len() {
-        kernel.zero_output(&mut out[target_id]);
+        // SAFETY: `targets.len() == out.len()` is checked above, and this loop
+        // only visits indices in `0..targets.len()`.
+        let target = unsafe { targets.get_unchecked(target_id) };
+        // SAFETY: same bound as `target`; each target index is visited once.
+        let target_out = unsafe { out.get_unchecked_mut(target_id) };
+        kernel.zero_output(target_out);
         let err = kernel.summarize_leaf_targets(
             &target_ids,
-            &targets[target_id..target_id + 1],
+            core::slice::from_ref(target),
             &mut target_summary,
         );
         if err != DualTreeError::Ok {
@@ -376,45 +415,63 @@ pub fn evaluate_source_tree_into<K: DualTreeKernel>(
         active.clear();
         active.push(0_u32);
         while let Some(source_node) = active.pop() {
-            if source_node_is_far::<K>(
-                kernel,
-                source_tree,
-                &targets[target_id],
-                source_node,
-                &source_summaries[source_node as usize],
-                theta,
-            ) {
+            let source_node_index = source_node as usize;
+            // SAFETY: `validate_source_tree_layout` checks the root, children,
+            // and leaf node ids pushed into `active`; `source_summaries` length
+            // is checked against `source_tree.n_nodes()` above.
+            let source_summary = unsafe { source_summaries.get_unchecked(source_node_index) };
+            // SAFETY: same validated node bound as `source_summary`.
+            let source_aabb = unsafe { *source_tree.node_aabb.get_unchecked(source_node_index) };
+            if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
                 let err = kernel.eval_far(
                     &target_summary,
-                    &source_summaries[source_node as usize],
+                    source_summary,
                     &mut scratch.contribution[0],
                 );
                 if err != DualTreeError::Ok {
                     return err;
                 }
-                kernel.accumulate(&mut out[target_id], &scratch.contribution[0]);
+                kernel.accumulate(target_out, &scratch.contribution[0]);
                 continue;
             }
 
-            if source_tree.is_leaf(source_node) {
-                let start = source_tree.leaf_start[source_node as usize] as usize;
-                let count = source_tree.leaf_count[source_node as usize] as usize;
-                for i in 0..count {
-                    let source_id = source_tree.sorted_indices[start + i] as usize;
-                    let err = kernel.eval_exact(
-                        &targets[target_id],
-                        &sources[source_id],
-                        &moments[source_id],
-                        &mut scratch.contribution[0],
-                    );
+            // SAFETY: same validated node bound as `source_summary`.
+            let leaf_count = unsafe { *source_tree.leaf_count.get_unchecked(source_node_index) };
+            if leaf_count > 0 {
+                // SAFETY: same validated node bound as `source_summary`.
+                let start =
+                    unsafe { *source_tree.leaf_start.get_unchecked(source_node_index) } as usize;
+                let count = leaf_count as usize;
+                let end = start + count;
+                // SAFETY: `validate_source_tree_layout` checks every leaf
+                // range against `sorted_indices.len()`.
+                let source_ids = unsafe { source_tree.sorted_indices.get_unchecked(start..end) };
+                for i in 0..source_ids.len() {
+                    // SAFETY: this loop is bounded by `source_ids.len()`.
+                    let source_id = unsafe { *source_ids.get_unchecked(i) } as usize;
+                    // SAFETY: sorted source ids are checked to be less than
+                    // `source_tree.n_items()`, and `sources`/`moments` lengths
+                    // are checked against `source_tree.n_items()` above.
+                    let source = unsafe { sources.get_unchecked(source_id) };
+                    // SAFETY: same source-id bound as `source`.
+                    let moment = unsafe { moments.get_unchecked(source_id) };
+                    let err =
+                        kernel.eval_exact(target, source, moment, &mut scratch.contribution[0]);
                     if err != DualTreeError::Ok {
                         return err;
                     }
-                    kernel.accumulate(&mut out[target_id], &scratch.contribution[0]);
+                    kernel.accumulate(target_out, &scratch.contribution[0]);
                 }
             } else {
-                active.push(source_tree.node_left_child[source_node as usize]);
-                active.push(source_tree.node_right_child[source_node as usize]);
+                // SAFETY: same validated node bound as `source_summary`.
+                active
+                    .push(unsafe { *source_tree.node_left_child.get_unchecked(source_node_index) });
+                // SAFETY: same validated node bound as `source_summary`.
+                active.push(unsafe {
+                    *source_tree
+                        .node_right_child
+                        .get_unchecked(source_node_index)
+                });
             }
         }
     }
@@ -440,6 +497,10 @@ pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
 ) -> DualTreeError {
+    let err = validate_source_tree_layout(source_tree);
+    if err != DualTreeError::Ok {
+        return err;
+    }
     if sources.len() != source_tree.n_items()
         || moments.len() != source_tree.n_items()
         || targets.len() != out.len()
@@ -474,7 +535,7 @@ pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
             let mut chunk_scratch = EvaluationScratch {
                 contribution: core::slice::from_mut(contribution),
             };
-            let err = evaluate_source_tree_into(
+            let err = evaluate_source_tree_into_validated(
                 kernel,
                 source_tree,
                 source_summaries,
@@ -515,6 +576,10 @@ pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
     theta: K::Scalar,
     out: &mut [f64],
 ) -> DualTreeError {
+    let err = validate_source_tree_layout(source_tree);
+    if err != DualTreeError::Ok {
+        return err;
+    }
     if targets.len() != out.len() {
         return DualTreeError::LengthMismatch;
     }
@@ -524,6 +589,8 @@ pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
 
     let mut active = Vec::new();
     for target_id in 0..targets.len() {
+        // SAFETY: this loop only visits indices in `0..targets.len()`.
+        let target = unsafe { targets.get_unchecked(target_id) };
         let mut weighted_level = 0.0_f64;
         let mut represented_sources = 0.0_f64;
 
@@ -531,27 +598,44 @@ pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
         active.push((0_u32, 0_u32));
         while let Some((source_node, source_level)) = active.pop() {
             let source_node_index = source_node as usize;
-            let source_count = source_tree.node_range_count[source_node_index] as f64;
-            if source_node_is_far::<K>(
-                kernel,
-                source_tree,
-                &targets[target_id],
-                source_node,
-                &source_summaries[source_node_index],
-                theta,
-            ) {
+            // SAFETY: `validate_source_tree_layout` checks every node pushed
+            // into the traversal and every node-range array.
+            let source_count = unsafe {
+                *source_tree
+                    .node_range_count
+                    .get_unchecked(source_node_index)
+            } as f64;
+            // SAFETY: `source_summaries` length is checked against the tree node count above.
+            let source_summary = unsafe { source_summaries.get_unchecked(source_node_index) };
+            // SAFETY: same validated node bound as `source_count`.
+            let source_aabb = unsafe { *source_tree.node_aabb.get_unchecked(source_node_index) };
+            if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
                 weighted_level += f64::from(source_level) * source_count;
                 represented_sources += source_count;
                 continue;
             }
 
-            if source_tree.is_leaf(source_node) {
+            // SAFETY: same validated node bound as `source_count`.
+            let leaf_count = unsafe { *source_tree.leaf_count.get_unchecked(source_node_index) };
+            if leaf_count > 0 {
                 weighted_level += f64::from(source_level) * source_count;
                 represented_sources += source_count;
             } else {
                 let next_level = source_level + 1;
-                active.push((source_tree.node_left_child[source_node_index], next_level));
-                active.push((source_tree.node_right_child[source_node_index], next_level));
+                // SAFETY: same validated node bound as `source_count`.
+                active.push((
+                    unsafe { *source_tree.node_left_child.get_unchecked(source_node_index) },
+                    next_level,
+                ));
+                // SAFETY: same validated node bound as `source_count`.
+                active.push((
+                    unsafe {
+                        *source_tree
+                            .node_right_child
+                            .get_unchecked(source_node_index)
+                    },
+                    next_level,
+                ));
             }
         }
 
@@ -563,20 +647,6 @@ pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
     }
 
     DualTreeError::Ok
-}
-
-#[inline]
-fn source_node_is_far<K: DualTreeKernel>(
-    kernel: &K,
-    source_tree: ClusterTreeView<'_, K::Scalar>,
-    target: &K::TargetGeometry,
-    source_node: u32,
-    source_summary: &K::SourceSummary,
-    theta: K::Scalar,
-) -> bool {
-    let target_aabb = target.aabb();
-    let source_aabb = source_tree.node_aabb[source_node as usize];
-    kernel.accept_far(target_aabb, source_aabb, source_summary, theta)
 }
 
 #[cfg(test)]
@@ -687,9 +757,11 @@ pub fn dense_direct_evaluate_into<K: DualTreeKernel>(
     }
 
     for target_id in 0..targets.len() {
+        let target = &targets[target_id];
+        let target_out = &mut out[target_id];
         for source_id in 0..sources.len() {
             let err = kernel.eval_exact(
-                &targets[target_id],
+                target,
                 &sources[source_id],
                 &moments[source_id],
                 &mut scratch.contribution[0],
@@ -697,7 +769,89 @@ pub fn dense_direct_evaluate_into<K: DualTreeKernel>(
             if err != DualTreeError::Ok {
                 return err;
             }
-            kernel.accumulate(&mut out[target_id], &scratch.contribution[0]);
+            kernel.accumulate(target_out, &scratch.contribution[0]);
+        }
+    }
+
+    DualTreeError::Ok
+}
+
+/// Validate the flat source-tree layout before entering hot traversal loops.
+///
+/// This converts malformed tree views into error codes up front instead of
+/// relying on slice indexing panics in the evaluator. `ClusterTree::as_view`
+/// already satisfies these invariants; this guard mainly protects borrowed
+/// views passed across API boundaries or future GPU-compatible wrappers.
+#[inline]
+fn validate_source_tree_layout<T: super::DualTreeScalar>(
+    tree: ClusterTreeView<'_, T>,
+) -> DualTreeError {
+    let n_nodes = tree.n_nodes();
+    if n_nodes == 0 {
+        return DualTreeError::EmptyInput;
+    }
+    if tree.node_left_child.len() != n_nodes
+        || tree.node_right_child.len() != n_nodes
+        || tree.node_range_start.len() != n_nodes
+        || tree.node_range_count.len() != n_nodes
+        || tree.leaf_start.len() != n_nodes
+        || tree.leaf_count.len() != n_nodes
+    {
+        return DualTreeError::LengthMismatch;
+    }
+
+    for i in 0..tree.sorted_indices.len() {
+        if tree.sorted_indices[i] as usize >= tree.sorted_indices.len() {
+            return DualTreeError::LengthMismatch;
+        }
+    }
+
+    for node_id in 0..n_nodes {
+        let start = tree.node_range_start[node_id] as usize;
+        let count = tree.node_range_count[node_id] as usize;
+        if count == 0
+            || start > tree.sorted_indices.len()
+            || count > tree.sorted_indices.len() - start
+        {
+            return DualTreeError::LengthMismatch;
+        }
+    }
+
+    for i in 0..tree.leaf_node_ids.len() {
+        let node_id = tree.leaf_node_ids[i] as usize;
+        if node_id >= n_nodes {
+            return DualTreeError::LengthMismatch;
+        }
+        let start = tree.leaf_start[node_id] as usize;
+        let count = tree.leaf_count[node_id] as usize;
+        if count == 0
+            || start > tree.sorted_indices.len()
+            || count > tree.sorted_indices.len() - start
+        {
+            return DualTreeError::LengthMismatch;
+        }
+    }
+
+    if !tree.internal_level_offsets.is_empty() {
+        let mut previous = 0_usize;
+        for i in 0..tree.internal_level_offsets.len() {
+            let offset = tree.internal_level_offsets[i] as usize;
+            if offset < previous || offset > tree.internal_level_ids.len() {
+                return DualTreeError::LengthMismatch;
+            }
+            previous = offset;
+        }
+    }
+
+    for i in 0..tree.internal_level_ids.len() {
+        let node_id = tree.internal_level_ids[i] as usize;
+        if node_id >= n_nodes {
+            return DualTreeError::LengthMismatch;
+        }
+        let left = tree.node_left_child[node_id] as usize;
+        let right = tree.node_right_child[node_id] as usize;
+        if left >= n_nodes || right >= n_nodes {
+            return DualTreeError::LengthMismatch;
         }
     }
 

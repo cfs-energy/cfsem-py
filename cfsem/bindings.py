@@ -1475,10 +1475,20 @@ class HierarchicalDipoles:
     def vector_potential(self, moment: Array3xN, par: bool = False) -> Array3xN:
         return self._solver.vector_potential(_3tup_contig(moment), par)  # type: ignore
 
-    def flux_density_into(self, moment: Array3xN, out: Array3xN, par: bool = False) -> None:
+    def flux_density_into(
+        self,
+        moment: Array3xN,
+        out: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
+        par: bool = False,
+    ) -> None:
         self._solver.flux_density_into(_3tup_contig(moment), out, par)
 
-    def vector_potential_into(self, moment: Array3xN, out: Array3xN, par: bool = False) -> None:
+    def vector_potential_into(
+        self,
+        moment: Array3xN,
+        out: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
+        par: bool = False,
+    ) -> None:
         self._solver.vector_potential_into(_3tup_contig(moment), out, par)
 
     def accepted_source_levels(

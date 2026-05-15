@@ -227,6 +227,22 @@ def test_hierarchical_dipole_wrapper_update_and_into_methods():
     solver.vector_potential_into(moment, out, par=False)
     _assert_vec_close(out, expected_a)
 
+    expected_b = cfsem.flux_density_dipole(loc, moment, obs, par=False)
+    out_b = (
+        np.empty(obs.shape[0]),
+        np.empty(obs.shape[0]),
+        np.empty(obs.shape[0]),
+    )
+    out_a = (
+        np.empty(obs.shape[0]),
+        np.empty(obs.shape[0]),
+        np.empty(obs.shape[0]),
+    )
+    solver.flux_density_into(moment, out_b, par=False)
+    solver.vector_potential_into(moment, out_a, par=False)
+    _assert_vec_close(out_b, expected_b)
+    _assert_vec_close(out_a, expected_a)
+
 
 def test_hierarchical_linear_filament_wrapper_update_methods():
     xyzfil = np.array([[0.0, 0.0, 0.0], [0.5, 0.2, 0.1]])

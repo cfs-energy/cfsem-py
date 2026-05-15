@@ -397,11 +397,8 @@ fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
     let target_ids = [0_u32];
 
     for target_id in 0..targets.len() {
-        // SAFETY: `targets.len() == out.len()` is checked above, and this loop
-        // only visits indices in `0..targets.len()`.
-        let target = unsafe { targets.get_unchecked(target_id) };
-        // SAFETY: same bound as `target`; each target index is visited once.
-        let target_out = unsafe { out.get_unchecked_mut(target_id) };
+        let target = &targets[target_id];
+        let target_out = &mut out[target_id];
         kernel.zero_output(target_out);
         let err = kernel.summarize_leaf_targets(
             &target_ids,
@@ -416,12 +413,8 @@ fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
         active.push(0_u32);
         while let Some(source_node) = active.pop() {
             let source_node_index = source_node as usize;
-            // SAFETY: `validate_source_tree_layout` checks the root, children,
-            // and leaf node ids pushed into `active`; `source_summaries` length
-            // is checked against `source_tree.n_nodes()` above.
-            let source_summary = unsafe { source_summaries.get_unchecked(source_node_index) };
-            // SAFETY: same validated node bound as `source_summary`.
-            let source_aabb = unsafe { *source_tree.node_aabb.get_unchecked(source_node_index) };
+            let source_summary = &source_summaries[source_node_index];
+            let source_aabb = source_tree.node_aabb[source_node_index];
             if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
                 let err = kernel.eval_far(
                     &target_summary,
@@ -435,26 +428,16 @@ fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
                 continue;
             }
 
-            // SAFETY: same validated node bound as `source_summary`.
-            let leaf_count = unsafe { *source_tree.leaf_count.get_unchecked(source_node_index) };
+            let leaf_count = source_tree.leaf_count[source_node_index];
             if leaf_count > 0 {
-                // SAFETY: same validated node bound as `source_summary`.
-                let start =
-                    unsafe { *source_tree.leaf_start.get_unchecked(source_node_index) } as usize;
+                let start = source_tree.leaf_start[source_node_index] as usize;
                 let count = leaf_count as usize;
                 let end = start + count;
-                // SAFETY: `validate_source_tree_layout` checks every leaf
-                // range against `sorted_indices.len()`.
-                let source_ids = unsafe { source_tree.sorted_indices.get_unchecked(start..end) };
+                let source_ids = &source_tree.sorted_indices[start..end];
                 for i in 0..source_ids.len() {
-                    // SAFETY: this loop is bounded by `source_ids.len()`.
-                    let source_id = unsafe { *source_ids.get_unchecked(i) } as usize;
-                    // SAFETY: sorted source ids are checked to be less than
-                    // `source_tree.n_items()`, and `sources`/`moments` lengths
-                    // are checked against `source_tree.n_items()` above.
-                    let source = unsafe { sources.get_unchecked(source_id) };
-                    // SAFETY: same source-id bound as `source`.
-                    let moment = unsafe { moments.get_unchecked(source_id) };
+                    let source_id = source_ids[i] as usize;
+                    let source = &sources[source_id];
+                    let moment = &moments[source_id];
                     let err =
                         kernel.eval_exact(target, source, moment, &mut scratch.contribution[0]);
                     if err != DualTreeError::Ok {
@@ -463,15 +446,8 @@ fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
                     kernel.accumulate(target_out, &scratch.contribution[0]);
                 }
             } else {
-                // SAFETY: same validated node bound as `source_summary`.
-                active
-                    .push(unsafe { *source_tree.node_left_child.get_unchecked(source_node_index) });
-                // SAFETY: same validated node bound as `source_summary`.
-                active.push(unsafe {
-                    *source_tree
-                        .node_right_child
-                        .get_unchecked(source_node_index)
-                });
+                active.push(source_tree.node_left_child[source_node_index]);
+                active.push(source_tree.node_right_child[source_node_index]);
             }
         }
     }
@@ -589,8 +565,7 @@ pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
 
     let mut active = Vec::new();
     for target_id in 0..targets.len() {
-        // SAFETY: this loop only visits indices in `0..targets.len()`.
-        let target = unsafe { targets.get_unchecked(target_id) };
+        let target = &targets[target_id];
         let mut weighted_level = 0.0_f64;
         let mut represented_sources = 0.0_f64;
 
@@ -598,44 +573,23 @@ pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
         active.push((0_u32, 0_u32));
         while let Some((source_node, source_level)) = active.pop() {
             let source_node_index = source_node as usize;
-            // SAFETY: `validate_source_tree_layout` checks every node pushed
-            // into the traversal and every node-range array.
-            let source_count = unsafe {
-                *source_tree
-                    .node_range_count
-                    .get_unchecked(source_node_index)
-            } as f64;
-            // SAFETY: `source_summaries` length is checked against the tree node count above.
-            let source_summary = unsafe { source_summaries.get_unchecked(source_node_index) };
-            // SAFETY: same validated node bound as `source_count`.
-            let source_aabb = unsafe { *source_tree.node_aabb.get_unchecked(source_node_index) };
+            let source_count = source_tree.node_range_count[source_node_index] as f64;
+            let source_summary = &source_summaries[source_node_index];
+            let source_aabb = source_tree.node_aabb[source_node_index];
             if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
                 weighted_level += f64::from(source_level) * source_count;
                 represented_sources += source_count;
                 continue;
             }
 
-            // SAFETY: same validated node bound as `source_count`.
-            let leaf_count = unsafe { *source_tree.leaf_count.get_unchecked(source_node_index) };
+            let leaf_count = source_tree.leaf_count[source_node_index];
             if leaf_count > 0 {
                 weighted_level += f64::from(source_level) * source_count;
                 represented_sources += source_count;
             } else {
                 let next_level = source_level + 1;
-                // SAFETY: same validated node bound as `source_count`.
-                active.push((
-                    unsafe { *source_tree.node_left_child.get_unchecked(source_node_index) },
-                    next_level,
-                ));
-                // SAFETY: same validated node bound as `source_count`.
-                active.push((
-                    unsafe {
-                        *source_tree
-                            .node_right_child
-                            .get_unchecked(source_node_index)
-                    },
-                    next_level,
-                ));
+                active.push((source_tree.node_left_child[source_node_index], next_level));
+                active.push((source_tree.node_right_child[source_node_index], next_level));
             }
         }
 

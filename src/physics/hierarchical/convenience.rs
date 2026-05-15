@@ -28,6 +28,22 @@ const SOURCE_LEAF_SIZE: usize = 1;
 /// This one-shot helper mirrors the direct dipole API while rebuilding the
 /// source tree internally. Use the reusable solver pieces directly when many
 /// source-magnitude updates share fixed geometry.
+///
+/// Args:
+///     loc: Dipole source coordinates.
+///     moment: Dipole magnetic moment components.
+///     outer_radius: Radius for the magnetized-sphere near-field treatment.
+///     obs: Observation point coordinates.
+///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+///     par: Whether to evaluate target batches in parallel.
+///     out: Output component slices to fill.
+///
+/// Returns:
+///     Nothing on success.
+///
+/// Errors:
+///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     scratch storage is too small, or a kernel reports an error.
 pub fn flux_density_dipole_hierarchical(
     loc: (&[f64], &[f64], &[f64]),
     moment: (&[f64], &[f64], &[f64]),
@@ -56,6 +72,22 @@ pub fn flux_density_dipole_hierarchical(
 /// This one-shot helper mirrors the direct dipole API while rebuilding the
 /// source tree internally. Use the reusable solver pieces directly when many
 /// source-magnitude updates share fixed geometry.
+///
+/// Args:
+///     loc: Dipole source coordinates.
+///     moment: Dipole magnetic moment components.
+///     outer_radius: Radius for the magnetized-sphere near-field treatment.
+///     obs: Observation point coordinates.
+///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+///     par: Whether to evaluate target batches in parallel.
+///     out: Output component slices to fill.
+///
+/// Returns:
+///     Nothing on success.
+///
+/// Errors:
+///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     scratch storage is too small, or a kernel reports an error.
 pub fn vector_potential_dipole_hierarchical(
     loc: (&[f64], &[f64], &[f64]),
     moment: (&[f64], &[f64], &[f64]),
@@ -84,6 +116,23 @@ pub fn vector_potential_dipole_hierarchical(
 /// This one-shot helper mirrors [`crate::physics::linear_filament::flux_density_linear_filament`]
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many current updates share fixed geometry.
+///
+/// Args:
+///     xyzp: Observation point coordinates.
+///     xyzfil: Filament segment start coordinates.
+///     dlxyzfil: Filament segment start-to-end displacement components.
+///     ifil: Current in each filament segment.
+///     wire_radius: Wire radius for each filament segment.
+///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+///     par: Whether to evaluate target batches in parallel.
+///     out: Output component slices to fill.
+///
+/// Returns:
+///     Nothing on success.
+///
+/// Errors:
+///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     scratch storage is too small, or a kernel reports an error.
 pub fn flux_density_linear_filament_hierarchical(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
@@ -115,6 +164,23 @@ pub fn flux_density_linear_filament_hierarchical(
 /// This one-shot helper mirrors [`crate::physics::linear_filament::vector_potential_linear_filament`]
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many current updates share fixed geometry.
+///
+/// Args:
+///     xyzp: Observation point coordinates.
+///     xyzfil: Filament segment start coordinates.
+///     dlxyzfil: Filament segment start-to-end displacement components.
+///     ifil: Current in each filament segment.
+///     wire_radius: Wire radius for each filament segment.
+///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+///     par: Whether to evaluate target batches in parallel.
+///     out: Output component slices to fill.
+///
+/// Returns:
+///     Nothing on success.
+///
+/// Errors:
+///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     scratch storage is too small, or a kernel reports an error.
 pub fn vector_potential_linear_filament_hierarchical(
     xyzp: (&[f64], &[f64], &[f64]),
     xyzfil: (&[f64], &[f64], &[f64]),
@@ -146,6 +212,22 @@ pub fn vector_potential_linear_filament_hierarchical(
 /// This one-shot helper mirrors [`crate::physics::boundary_element::flux_density_triangle_mesh`]
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many source-value updates share fixed geometry.
+///
+/// Args:
+///     obs: Observation point coordinates.
+///     mesh: Triangle mesh source geometry.
+///     s: Nodal stream-function values.
+///     quad_kind: Triangle quadrature rule.
+///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+///     par: Whether to evaluate target batches in parallel.
+///     out: Output component slices to fill.
+///
+/// Returns:
+///     Nothing on success.
+///
+/// Errors:
+///     Returns [`DualTreeError`] when input lengths are inconsistent, mesh conversion fails,
+///     tree construction fails, scratch storage is too small, or a kernel reports an error.
 pub fn flux_density_triangle_mesh_hierarchical(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
@@ -173,6 +255,22 @@ pub fn flux_density_triangle_mesh_hierarchical(
 /// This one-shot helper mirrors [`crate::physics::boundary_element::vector_potential_triangle_mesh`]
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many source-value updates share fixed geometry.
+///
+/// Args:
+///     obs: Observation point coordinates.
+///     mesh: Triangle mesh source geometry.
+///     s: Nodal stream-function values.
+///     quad_kind: Triangle quadrature rule.
+///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+///     par: Whether to evaluate target batches in parallel.
+///     out: Output component slices to fill.
+///
+/// Returns:
+///     Nothing on success.
+///
+/// Errors:
+///     Returns [`DualTreeError`] when input lengths are inconsistent, mesh conversion fails,
+///     tree construction fails, scratch storage is too small, or a kernel reports an error.
 pub fn vector_potential_triangle_mesh_hierarchical(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,

@@ -396,12 +396,24 @@ def flux_density_linear_filament_hierarchical(
     theta: float = 0.05,
     par: bool = True,
 ) -> Array3xN:
-    """
-    Hierarchical B-field calculation for many linear filament segments.
+    """Hierarchical B-field calculation for many linear filament segments.
 
     This one-shot wrapper builds the source tree internally and mirrors
     [`flux_density_linear_filament`][cfsem.flux_density_linear_filament] for cases where
     geometry reuse is not needed.
+
+    Args:
+        xyzp: Observation point coordinates.
+        xyzfil: Filament segment start coordinates.
+        dlxyzfil: Filament segment start-to-end displacement vectors.
+        ifil: Current in each filament segment.
+        wire_radius: Wire radius for each filament segment, or one scalar radius for all
+            segments.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic flux-density components at the observation points.
     """
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
@@ -430,12 +442,24 @@ def vector_potential_linear_filament_hierarchical(
     theta: float = 0.05,
     par: bool = True,
 ) -> Array3xN:
-    """
-    Hierarchical A-field calculation for many linear filament segments.
+    """Hierarchical A-field calculation for many linear filament segments.
 
     This one-shot wrapper builds the source tree internally and mirrors
     [`vector_potential_linear_filament`][cfsem.vector_potential_linear_filament] for cases
     where geometry reuse is not needed.
+
+    Args:
+        xyzp: Observation point coordinates.
+        xyzfil: Filament segment start coordinates.
+        dlxyzfil: Filament segment start-to-end displacement vectors.
+        ifil: Current in each filament segment.
+        wire_radius: Wire radius for each filament segment, or one scalar radius for all
+            segments.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic vector-potential components at the observation points.
     """
     xyzp = _3tup_contig(xyzp)
     xyzfil = _3tup_contig(xyzfil)
@@ -526,12 +550,23 @@ def flux_density_triangle_mesh_hierarchical(
     par: bool = True,
     quad: str = "dunavant3",
 ) -> Array3xN:
-    """
-    Hierarchical B-field calculation for a triangle mesh with nodal stream-function values.
+    """Hierarchical B-field calculation for a triangle mesh with nodal stream-function values.
 
     This one-shot wrapper builds the source tree internally and mirrors
     [`flux_density_triangle_mesh`][cfsem.flux_density_triangle_mesh] for cases where
     geometry reuse is not needed.
+
+    Args:
+        obs: Observation point coordinates with one point per row.
+        nodes: Mesh node coordinates with one node per row.
+        triangles: Triangle node indices with one triangle per row.
+        s: Nodal stream-function values.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+        quad: Triangle quadrature rule.
+
+    Returns:
+        Magnetic flux-density components at the observation points.
     """
     obs = ascontiguousarray(obs, dtype=float64)
     nodes = ascontiguousarray(nodes, dtype=float64)
@@ -549,12 +584,23 @@ def vector_potential_triangle_mesh_hierarchical(
     par: bool = True,
     quad: str = "dunavant3",
 ) -> Array3xN:
-    """
-    Hierarchical A-field calculation for a triangle mesh with nodal stream-function values.
+    """Hierarchical A-field calculation for a triangle mesh with nodal stream-function values.
 
     This one-shot wrapper builds the source tree internally and mirrors
     [`vector_potential_triangle_mesh`][cfsem.vector_potential_triangle_mesh] for cases
     where geometry reuse is not needed.
+
+    Args:
+        obs: Observation point coordinates with one point per row.
+        nodes: Mesh node coordinates with one node per row.
+        triangles: Triangle node indices with one triangle per row.
+        s: Nodal stream-function values.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+        quad: Triangle quadrature rule.
+
+    Returns:
+        Magnetic vector-potential components at the observation points.
     """
     obs = ascontiguousarray(obs, dtype=float64)
     nodes = ascontiguousarray(nodes, dtype=float64)
@@ -1352,12 +1398,23 @@ def flux_density_dipole_hierarchical(
     par: bool = True,
     outer_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
-    """
-    Hierarchical magnetic flux density of dipoles in cartesian coordinates.
+    """Hierarchical magnetic flux density of dipoles in cartesian coordinates.
 
     This one-shot wrapper builds the source tree internally and mirrors
     [`flux_density_dipole`][cfsem.flux_density_dipole] for cases where geometry reuse is
     not needed.
+
+    Args:
+        loc: Dipole source coordinates.
+        moment: Dipole magnetic moment vectors.
+        xyzp: Observation point coordinates.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+        outer_radius: Radius for the magnetized-sphere near-field treatment. Defaults to
+            zero for every source.
+
+    Returns:
+        Magnetic flux-density components at the observation points.
     """
     loc = _3tup_contig(loc)
     moment = _3tup_contig(moment)
@@ -1406,12 +1463,23 @@ def vector_potential_dipole_hierarchical(
     par: bool = True,
     outer_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
-    """
-    Hierarchical magnetic vector potential of dipoles in cartesian coordinates.
+    """Hierarchical magnetic vector potential of dipoles in cartesian coordinates.
 
     This one-shot wrapper builds the source tree internally and mirrors
     [`vector_potential_dipole`][cfsem.vector_potential_dipole] for cases where geometry
     reuse is not needed.
+
+    Args:
+        loc: Dipole source coordinates.
+        moment: Dipole magnetic moment vectors.
+        xyzp: Observation point coordinates.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+        outer_radius: Radius for the magnetized-sphere near-field treatment. Defaults to
+            zero for every source.
+
+    Returns:
+        Magnetic vector-potential components at the observation points.
     """
     loc = _3tup_contig(loc)
     moment = _3tup_contig(moment)

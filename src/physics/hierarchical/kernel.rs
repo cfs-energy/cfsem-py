@@ -16,6 +16,13 @@ pub enum DualTreeError {
 }
 
 impl DualTreeError {
+    /// Convert a raw GPU-compatible error code into a named error.
+    ///
+    /// Args:
+    ///     value: Integer error code produced by hierarchical tree operations.
+    ///
+    /// Returns:
+    ///     Matching error value, or [`DualTreeError::KernelError1`] for unknown codes.
     #[inline]
     pub fn from_u32(value: u32) -> Self {
         match value {
@@ -37,7 +44,16 @@ impl DualTreeError {
 pub trait BoundedGeometry {
     type Scalar: DualTreeScalar;
 
+    /// Return the axis-aligned bounds of this geometry.
+    ///
+    /// Returns:
+    ///     Bounds that fully contain the geometry.
     fn aabb(&self) -> Aabb<Self::Scalar>;
+
+    /// Return a representative point used for source-tree ordering.
+    ///
+    /// Returns:
+    ///     Point used by spatial sorting and Morton-code construction.
     fn representative_point(&self) -> [Self::Scalar; 3];
 }
 
@@ -52,6 +68,16 @@ pub trait DualTreeKernel {
     type TargetSummary: Copy + Default + Send + Sync;
     type Output: Copy + Default + Send + Sync;
 
+    /// Summarize a leaf node from the original source values.
+    ///
+    /// Args:
+    ///     source_ids: Source indices owned by the leaf.
+    ///     sources: Source geometry values.
+    ///     moments: Source amplitudes or moments.
+    ///     out: Summary value to fill.
+    ///
+    /// Returns:
+    ///     Error code for the summary operation.
     fn summarize_leaf_sources(
         &self,
         source_ids: &[u32],
@@ -60,6 +86,15 @@ pub trait DualTreeKernel {
         out: &mut Self::SourceSummary,
     ) -> DualTreeError;
 
+    /// Combine child source summaries into one parent summary.
+    ///
+    /// Args:
+    ///     children: Source summary storage for the whole tree.
+    ///     child_ids: Child node indices to combine.
+    ///     out: Parent summary value to fill.
+    ///
+    /// Returns:
+    ///     Error code for the summary operation.
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
@@ -67,6 +102,15 @@ pub trait DualTreeKernel {
         out: &mut Self::SourceSummary,
     ) -> DualTreeError;
 
+    /// Summarize a leaf node from target geometry.
+    ///
+    /// Args:
+    ///     target_ids: Target indices owned by the leaf.
+    ///     targets: Target geometry values.
+    ///     out: Summary value to fill.
+    ///
+    /// Returns:
+    ///     Error code for the summary operation.
     fn summarize_leaf_targets(
         &self,
         target_ids: &[u32],
@@ -74,6 +118,15 @@ pub trait DualTreeKernel {
         out: &mut Self::TargetSummary,
     ) -> DualTreeError;
 
+    /// Combine child target summaries into one parent summary.
+    ///
+    /// Args:
+    ///     children: Target summary storage for the whole tree.
+    ///     child_ids: Child node indices to combine.
+    ///     out: Parent summary value to fill.
+    ///
+    /// Returns:
+    ///     Error code for the summary operation.
     fn combine_target_summaries(
         &self,
         children: &[Self::TargetSummary],
@@ -81,6 +134,16 @@ pub trait DualTreeKernel {
         out: &mut Self::TargetSummary,
     ) -> DualTreeError;
 
+    /// Evaluate the exact source-target interaction.
+    ///
+    /// Args:
+    ///     target: Target geometry value.
+    ///     source: Source geometry value.
+    ///     moment: Source amplitude or moment.
+    ///     out: Contribution value to fill.
+    ///
+    /// Returns:
+    ///     Error code for the interaction.
     fn eval_exact(
         &self,
         target: &Self::TargetGeometry,
@@ -89,6 +152,15 @@ pub trait DualTreeKernel {
         out: &mut Self::Output,
     ) -> DualTreeError;
 
+    /// Evaluate a far-field source summary against a target summary.
+    ///
+    /// Args:
+    ///     target: Target summary value.
+    ///     source: Source summary value.
+    ///     out: Contribution value to fill.
+    ///
+    /// Returns:
+    ///     Error code for the interaction.
     fn eval_far(
         &self,
         target: &Self::TargetSummary,
@@ -101,6 +173,15 @@ pub trait DualTreeKernel {
     /// The default implementation uses the standard AABB Barnes-Hut criterion.
     /// Kernels can override this to apply source-summary-specific constraints,
     /// such as stricter acceptance for open filament arcs.
+    ///
+    /// Args:
+    ///     target_aabb: Bounds of the target or target group.
+    ///     source_aabb: Bounds of the source node.
+    ///     source: Source summary for kernel-specific acceptance checks.
+    ///     theta: Barnes-Hut acceptance angle.
+    ///
+    /// Returns:
+    ///     Whether the evaluator may use the source summary.
     #[inline]
     fn accept_far(
         &self,
@@ -112,9 +193,26 @@ pub trait DualTreeKernel {
         geometric_accept_far(target_aabb, source_aabb, theta)
     }
 
+    /// Reset an output accumulator to the kernel's zero value.
+    ///
+    /// Args:
+    ///     out: Output accumulator to reset.
     fn zero_output(&self, out: &mut Self::Output);
+
+    /// Add one contribution into an output accumulator.
+    ///
+    /// Args:
+    ///     out: Output accumulator to update.
+    ///     contribution: Contribution to add.
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output);
 
+    /// Describe a kernel-specific error code.
+    ///
+    /// Args:
+    ///     error: Error code returned by a kernel method.
+    ///
+    /// Returns:
+    ///     Static description of the error code.
     #[inline]
     fn describe_error(&self, error: DualTreeError) -> &'static str {
         match error {

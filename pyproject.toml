@@ -44,6 +44,7 @@ dev = [
 features = ["python"]
 module-name = "cfsem.cfsem"
 version = "cargo"
+profile = "release"
 
 [tool.ruff]
 line-length = 110

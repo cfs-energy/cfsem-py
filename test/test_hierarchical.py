@@ -341,3 +341,14 @@ def test_coordinate_tuple_conversion_rejects_invalid_shape():
 
     with pytest.raises(ValueError, match="component arrays must have matching lengths"):
         solver.flux_density(bad_moment)
+
+
+def test_direct_wrapper_rejects_array_without_coordinate_dimension():
+    obs = np.zeros((2, 2))
+    xyzfil = (np.zeros(1), np.zeros(1), np.zeros(1))
+    dlxyzfil = (np.ones(1), np.zeros(1), np.zeros(1))
+    current = np.ones(1)
+    wire_radius = np.zeros(1)
+
+    with pytest.raises(ValueError, match="one dimension of length 3"):
+        cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)

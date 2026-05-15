@@ -29,6 +29,12 @@ const SOURCE_LEAF_SIZE: usize = 1;
 /// source tree internally. Use the reusable solver pieces directly when many
 /// source-magnitude updates share fixed geometry.
 ///
+/// This is an approximate method, and no particular accuracy level is guaranteed.
+/// Truncated methods like this one may average entire local loop structures out of
+/// existence; as a result, maximum relative error is unbounded. This method must be
+/// tuned to a given use-case in order to be useful, and should not be used to calculate
+/// safety-related field limits.
+///
 /// Args:
 ///     loc: Dipole source coordinates.
 ///     moment: Dipole magnetic moment components.
@@ -73,6 +79,12 @@ pub fn flux_density_dipole_hierarchical(
 /// source tree internally. Use the reusable solver pieces directly when many
 /// source-magnitude updates share fixed geometry.
 ///
+/// This is an approximate method, and no particular accuracy level is guaranteed.
+/// Truncated methods like this one may average entire local loop structures out of
+/// existence; as a result, maximum relative error is unbounded. This method must be
+/// tuned to a given use-case in order to be useful, and should not be used to calculate
+/// safety-related field limits.
+///
 /// Args:
 ///     loc: Dipole source coordinates.
 ///     moment: Dipole magnetic moment components.
@@ -116,6 +128,12 @@ pub fn vector_potential_dipole_hierarchical(
 /// This one-shot helper mirrors [`crate::physics::linear_filament::flux_density_linear_filament`]
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many current updates share fixed geometry.
+///
+/// This is an approximate method, and no particular accuracy level is guaranteed.
+/// Truncated methods like this one may average entire local loop structures out of
+/// existence; as a result, maximum relative error is unbounded. This method must be
+/// tuned to a given use-case in order to be useful, and should not be used to calculate
+/// safety-related field limits.
 ///
 /// Args:
 ///     xyzp: Observation point coordinates.
@@ -165,6 +183,12 @@ pub fn flux_density_linear_filament_hierarchical(
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many current updates share fixed geometry.
 ///
+/// This is an approximate method, and no particular accuracy level is guaranteed.
+/// Truncated methods like this one may average entire local loop structures out of
+/// existence; as a result, maximum relative error is unbounded. This method must be
+/// tuned to a given use-case in order to be useful, and should not be used to calculate
+/// safety-related field limits.
+///
 /// Args:
 ///     xyzp: Observation point coordinates.
 ///     xyzfil: Filament segment start coordinates.
@@ -213,6 +237,12 @@ pub fn vector_potential_linear_filament_hierarchical(
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many source-value updates share fixed geometry.
 ///
+/// This is an approximate method, and no particular accuracy level is guaranteed.
+/// Truncated methods like this one may average entire local loop structures out of
+/// existence; as a result, maximum relative error is unbounded. This method must be
+/// tuned to a given use-case in order to be useful, and should not be used to calculate
+/// safety-related field limits.
+///
 /// Args:
 ///     obs: Observation point coordinates.
 ///     mesh: Triangle mesh source geometry.
@@ -255,6 +285,12 @@ pub fn flux_density_triangle_mesh_hierarchical(
 /// This one-shot helper mirrors [`crate::physics::boundary_element::vector_potential_triangle_mesh`]
 /// while rebuilding the source tree internally. Use the reusable solver pieces
 /// directly when many source-value updates share fixed geometry.
+///
+/// This is an approximate method, and no particular accuracy level is guaranteed.
+/// Truncated methods like this one may average entire local loop structures out of
+/// existence; as a result, maximum relative error is unbounded. This method must be
+/// tuned to a given use-case in order to be useful, and should not be used to calculate
+/// safety-related field limits.
 ///
 /// Args:
 ///     obs: Observation point coordinates.

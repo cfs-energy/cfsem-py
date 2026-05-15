@@ -90,6 +90,12 @@ class HierarchicalDipoles:
     ) -> ArrayTriple:
         """Evaluate magnetic flux density for the current source and target geometry.
 
+        This is an approximate method, and no particular accuracy level is guaranteed.
+        Truncated methods like this one may average entire local loop structures out of
+        existence; as a result, maximum relative error is unbounded. This method must be
+        tuned to a given use-case in order to be useful, and should not be used to
+        calculate safety-related field limits.
+
         Args:
             moment: Dipole magnetic moment components.
             par: Whether to evaluate target batches in parallel.
@@ -107,6 +113,12 @@ class HierarchicalDipoles:
         out: ArrayTriple | None = None,
     ) -> ArrayTriple:
         """Evaluate magnetic vector potential for the current source and target geometry.
+
+        This is an approximate method, and no particular accuracy level is guaranteed.
+        Truncated methods like this one may average entire local loop structures out of
+        existence; as a result, maximum relative error is unbounded. This method must be
+        tuned to a given use-case in order to be useful, and should not be used to
+        calculate safety-related field limits.
 
         Args:
             moment: Dipole magnetic moment components.
@@ -233,6 +245,12 @@ class HierarchicalLinearFilaments:
     ) -> ArrayTriple:
         """Evaluate magnetic flux density for the current source and target geometry.
 
+        This is an approximate method, and no particular accuracy level is guaranteed.
+        Truncated methods like this one may average entire local loop structures out of
+        existence; as a result, maximum relative error is unbounded. This method must be
+        tuned to a given use-case in order to be useful, and should not be used to
+        calculate safety-related field limits.
+
         Args:
             current: Current in each filament segment.
             par: Whether to evaluate target batches in parallel.
@@ -250,6 +268,12 @@ class HierarchicalLinearFilaments:
         out: ArrayTriple | None = None,
     ) -> ArrayTriple:
         """Evaluate magnetic vector potential for the current source and target geometry.
+
+        This is an approximate method, and no particular accuracy level is guaranteed.
+        Truncated methods like this one may average entire local loop structures out of
+        existence; as a result, maximum relative error is unbounded. This method must be
+        tuned to a given use-case in order to be useful, and should not be used to
+        calculate safety-related field limits.
 
         Args:
             current: Current in each filament segment.
@@ -376,6 +400,12 @@ class HierarchicalBoundaryElements:
     ) -> ArrayTriple:
         """Evaluate magnetic flux density for the current source and target geometry.
 
+        This is an approximate method, and no particular accuracy level is guaranteed.
+        Truncated methods like this one may average entire local loop structures out of
+        existence; as a result, maximum relative error is unbounded. This method must be
+        tuned to a given use-case in order to be useful, and should not be used to
+        calculate safety-related field limits.
+
         Args:
             current_density: Triangle-local current-density components.
             par: Whether to evaluate target batches in parallel.
@@ -393,6 +423,12 @@ class HierarchicalBoundaryElements:
         out: ArrayTriple | None = None,
     ) -> ArrayTriple:
         """Evaluate magnetic vector potential for the current source and target geometry.
+
+        This is an approximate method, and no particular accuracy level is guaranteed.
+        Truncated methods like this one may average entire local loop structures out of
+        existence; as a result, maximum relative error is unbounded. This method must be
+        tuned to a given use-case in order to be useful, and should not be used to
+        calculate safety-related field limits.
 
         Args:
             current_density: Triangle-local current-density components.

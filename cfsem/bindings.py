@@ -402,6 +402,12 @@ def flux_density_linear_filament_hierarchical(
     [`flux_density_linear_filament`][cfsem.flux_density_linear_filament] for cases where
     geometry reuse is not needed.
 
+    This is an approximate method, and no particular accuracy level is guaranteed.
+    Truncated methods like this one may average entire local loop structures out of
+    existence; as a result, maximum relative error is unbounded. This method must be
+    tuned to a given use-case in order to be useful, and should not be used to calculate
+    safety-related field limits.
+
     Args:
         xyzp: Observation point coordinates.
         xyzfil: Filament segment start coordinates.
@@ -447,6 +453,12 @@ def vector_potential_linear_filament_hierarchical(
     This one-shot wrapper builds the source tree internally and mirrors
     [`vector_potential_linear_filament`][cfsem.vector_potential_linear_filament] for cases
     where geometry reuse is not needed.
+
+    This is an approximate method, and no particular accuracy level is guaranteed.
+    Truncated methods like this one may average entire local loop structures out of
+    existence; as a result, maximum relative error is unbounded. This method must be
+    tuned to a given use-case in order to be useful, and should not be used to calculate
+    safety-related field limits.
 
     Args:
         xyzp: Observation point coordinates.
@@ -556,6 +568,12 @@ def flux_density_triangle_mesh_hierarchical(
     [`flux_density_triangle_mesh`][cfsem.flux_density_triangle_mesh] for cases where
     geometry reuse is not needed.
 
+    This is an approximate method, and no particular accuracy level is guaranteed.
+    Truncated methods like this one may average entire local loop structures out of
+    existence; as a result, maximum relative error is unbounded. This method must be
+    tuned to a given use-case in order to be useful, and should not be used to calculate
+    safety-related field limits.
+
     Args:
         obs: Observation point coordinates with one point per row.
         nodes: Mesh node coordinates with one node per row.
@@ -589,6 +607,12 @@ def vector_potential_triangle_mesh_hierarchical(
     This one-shot wrapper builds the source tree internally and mirrors
     [`vector_potential_triangle_mesh`][cfsem.vector_potential_triangle_mesh] for cases
     where geometry reuse is not needed.
+
+    This is an approximate method, and no particular accuracy level is guaranteed.
+    Truncated methods like this one may average entire local loop structures out of
+    existence; as a result, maximum relative error is unbounded. This method must be
+    tuned to a given use-case in order to be useful, and should not be used to calculate
+    safety-related field limits.
 
     Args:
         obs: Observation point coordinates with one point per row.
@@ -1404,6 +1428,12 @@ def flux_density_dipole_hierarchical(
     [`flux_density_dipole`][cfsem.flux_density_dipole] for cases where geometry reuse is
     not needed.
 
+    This is an approximate method, and no particular accuracy level is guaranteed.
+    Truncated methods like this one may average entire local loop structures out of
+    existence; as a result, maximum relative error is unbounded. This method must be
+    tuned to a given use-case in order to be useful, and should not be used to calculate
+    safety-related field limits.
+
     Args:
         loc: Dipole source coordinates.
         moment: Dipole magnetic moment vectors.
@@ -1468,6 +1498,12 @@ def vector_potential_dipole_hierarchical(
     This one-shot wrapper builds the source tree internally and mirrors
     [`vector_potential_dipole`][cfsem.vector_potential_dipole] for cases where geometry
     reuse is not needed.
+
+    This is an approximate method, and no particular accuracy level is guaranteed.
+    Truncated methods like this one may average entire local loop structures out of
+    existence; as a result, maximum relative error is unbounded. This method must be
+    tuned to a given use-case in order to be useful, and should not be used to calculate
+    safety-related field limits.
 
     Args:
         loc: Dipole source coordinates.

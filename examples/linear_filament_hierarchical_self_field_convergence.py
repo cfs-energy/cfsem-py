@@ -65,6 +65,10 @@ TESTING_NEAR_FIELD_TARGET_COUNT = 30
 NEAR_FIELD_DS_SWEEP = np.logspace(np.log10(0.001), np.log10(0.05), 32, dtype=np.float64)
 TESTING_NEAR_FIELD_DS_SWEEP = np.array([0.02, 0.005, 0.001], dtype=np.float64)
 NEAR_FIELD_ERROR_TARGET = 1.0e-3
+MIN_THETA_CONVERGENCE_EXPONENT = 1.9
+MIN_DIRECT_TIMING_EXPONENT = 1.9
+MAX_DIRECT_TIMING_EXPONENT = 2.1
+MAX_HIERARCHICAL_TIMING_EXPONENT = 1.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -701,6 +705,10 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
     fit_theta = theta[:fit_count]
     fit_error = one_mm_error[:fit_count]
     convergence_exponent, fit_intercept = np.polyfit(np.log(fit_theta), np.log(fit_error), 1)
+    assert convergence_exponent >= MIN_THETA_CONVERGENCE_EXPONENT, (
+        "Expected near-field theta convergence exponent "
+        f">= {MIN_THETA_CONVERGENCE_EXPONENT:g}, got {convergence_exponent:.3g}"
+    )
     one_mm_theta_ax.loglog(
         fit_theta,
         np.exp(fit_intercept) * fit_theta**convergence_exponent,
@@ -858,6 +866,7 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
         label="Hierarchical build+eval",
     )[0]
     scaling_annotations: list[str] = []
+    assert_timing_exponents = scaling_sources.size >= 3
     eval_exponent = plot_runtime_scaling_fit_on_axis(
         ax,
         scaling_sources,
@@ -866,6 +875,10 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
         eval_line.get_color(),
     )
     if eval_exponent is not None:
+        assert not assert_timing_exponents or eval_exponent < MAX_HIERARCHICAL_TIMING_EXPONENT, (
+            "Expected hierarchical eval timing exponent "
+            f"< {MAX_HIERARCHICAL_TIMING_EXPONENT:g}, got {eval_exponent:.3g}"
+        )
         scaling_annotations.append(rf"eval $\sim N^{{{eval_exponent:.2f}}}$")
     build_eval_exponent = plot_runtime_scaling_fit_on_axis(
         ax,
@@ -875,6 +888,10 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
         build_eval_line.get_color(),
     )
     if build_eval_exponent is not None:
+        assert not assert_timing_exponents or build_eval_exponent < MAX_HIERARCHICAL_TIMING_EXPONENT, (
+            "Expected hierarchical build+eval timing exponent "
+            f"< {MAX_HIERARCHICAL_TIMING_EXPONENT:g}, got {build_eval_exponent:.3g}"
+        )
         scaling_annotations.append(rf"build+eval $\sim N^{{{build_eval_exponent:.2f}}}$")
 
     direct_measured = [item for item in scaling_results if item.direct_seconds is not None]
@@ -897,6 +914,13 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
             DIRECT_TRACE_COLOR,
         )
         if direct_exponent is not None:
+            assert not assert_timing_exponents or (
+                MIN_DIRECT_TIMING_EXPONENT < direct_exponent < MAX_DIRECT_TIMING_EXPONENT
+            ), (
+                "Expected direct timing exponent "
+                f"{MIN_DIRECT_TIMING_EXPONENT:g} < x < {MAX_DIRECT_TIMING_EXPONENT:g}, "
+                f"got {direct_exponent:.3g}"
+            )
             scaling_annotations.append(rf"direct $\sim N^{{{direct_exponent:.2f}}}$")
 
     direct_fit = direct_time_fit(scaling_results)

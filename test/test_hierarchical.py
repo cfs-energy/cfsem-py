@@ -39,6 +39,8 @@ def test_hierarchical_dipoles_match_direct_and_reuse_tree():
     _assert_vec_close(solver.flux_density(moment0, par=False), direct_b0)
     _assert_vec_close(solver.flux_density(moment0, par=True), direct_b0)
     _assert_vec_close(solver.vector_potential(moment0, par=False), direct_a0)
+    assert solver.accepted_source_levels(moment0, field="b").shape == obs[0].shape
+    assert solver.source_tree_aabbs()[0].size > 0
 
     direct_b1 = cfsem.flux_density_dipole(loc, moment1, obs, par=False, outer_radius=outer_radius)
     out = (np.empty_like(obs[0]), np.empty_like(obs[0]), np.empty_like(obs[0]))
@@ -73,6 +75,8 @@ def test_hierarchical_linear_filaments_match_direct():
     _assert_vec_close(solver.flux_density(current, par=False), direct_b)
     _assert_vec_close(solver.flux_density(current, par=True), direct_b)
     _assert_vec_close(solver.vector_potential(current, par=False), direct_a)
+    assert solver.accepted_source_levels(current, field="a").shape == obs[0].shape
+    assert solver.source_tree_aabbs()[0].size > 0
 
 
 def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
@@ -105,6 +109,8 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     _assert_vec_close(solver.flux_density(stream_function, par=False), direct_b)
     _assert_vec_close(solver.flux_density(stream_function, par=True), direct_b)
     _assert_vec_close(solver.vector_potential(stream_function, par=False), direct_a)
+    assert solver.accepted_source_levels(stream_function, field="b").shape == obs[0].shape
+    assert solver.source_tree_aabbs()[0].size > 0
 
 
 def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
@@ -160,13 +166,13 @@ def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
     filament_solver.build(xyzfil, dlxyzfil, wire_radius, obs)
     _assert_vec_close(
         cfsem.flux_density_linear_filament_hierarchical(
-            obs, xyzfil, dlxyzfil, current, wire_radius, theta=0.0, par=False
+            obs, xyzfil, dlxyzfil, current, 0.0, theta=0.0, par=False
         ),
         filament_solver.flux_density(current, par=False),
     )
     _assert_vec_close(
         cfsem.vector_potential_linear_filament_hierarchical(
-            obs, xyzfil, dlxyzfil, current, wire_radius, theta=0.0, par=False
+            obs, xyzfil, dlxyzfil, current, 0.0, theta=0.0, par=False
         ),
         filament_solver.vector_potential(current, par=False),
     )
@@ -279,6 +285,8 @@ def test_hierarchical_boundary_element_wrapper_update_and_source_value_methods()
     _assert_vec_close(solver.flux_density(stream_function, par=False), direct_b)
     _assert_vec_close(solver.flux_density(triangle_values, par=False), direct_b)
     _assert_vec_close(solver.vector_potential(stream_function, par=False), direct_a)
+    assert solver.accepted_source_levels(stream_function, field="a").shape == obs_tuple[0].shape
+    assert solver.source_tree_aabbs()[0].size > 0
 
 
 def test_coordinate_tuple_conversion_rejects_invalid_shape():

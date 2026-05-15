@@ -1469,27 +1469,29 @@ class HierarchicalDipoles:
     def update_targets(self, obs: Array3xN, par: bool = False) -> None:
         self.build_targets(obs, par)
 
-    def flux_density(self, moment: Array3xN, par: bool = False) -> Array3xN:
-        return self._solver.flux_density(_3tup_contig(moment), par)  # type: ignore
-
-    def vector_potential(self, moment: Array3xN, par: bool = False) -> Array3xN:
-        return self._solver.vector_potential(_3tup_contig(moment), par)  # type: ignore
-
-    def flux_density_into(
+    def flux_density(
         self,
         moment: Array3xN,
-        out: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
         par: bool = False,
-    ) -> None:
-        self._solver.flux_density_into(_3tup_contig(moment), out, par)
+        out: tuple[NDArray[float64], NDArray[float64], NDArray[float64]] | None = None,
+    ) -> Array3xN:
+        moment = _3tup_contig(moment)
+        if out is None:
+            return self._solver.flux_density(moment, par)  # type: ignore
+        self._solver.flux_density_into(moment, out, par)
+        return out
 
-    def vector_potential_into(
+    def vector_potential(
         self,
         moment: Array3xN,
-        out: tuple[NDArray[float64], NDArray[float64], NDArray[float64]],
         par: bool = False,
-    ) -> None:
-        self._solver.vector_potential_into(_3tup_contig(moment), out, par)
+        out: tuple[NDArray[float64], NDArray[float64], NDArray[float64]] | None = None,
+    ) -> Array3xN:
+        moment = _3tup_contig(moment)
+        if out is None:
+            return self._solver.vector_potential(moment, par)  # type: ignore
+        self._solver.vector_potential_into(moment, out, par)
+        return out
 
     def accepted_source_levels(
         self,

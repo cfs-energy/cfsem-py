@@ -44,7 +44,7 @@ def test_hierarchical_dipoles_match_direct_and_reuse_tree():
 
     direct_b1 = cfsem.flux_density_dipole(loc, moment1, obs, par=False, outer_radius=outer_radius)
     out = (np.empty_like(obs[0]), np.empty_like(obs[0]), np.empty_like(obs[0]))
-    solver.flux_density_into(moment1, out, par=False)
+    assert solver.flux_density(moment1, par=False, out=out) is out
     _assert_vec_close(out, direct_b1)
 
 
@@ -224,7 +224,7 @@ def test_hierarchical_dipole_wrapper_update_and_into_methods():
         np.empty(obs.shape[0]),
         np.empty(obs.shape[0]),
     )
-    solver.vector_potential_into(moment, out, par=False)
+    assert solver.vector_potential(moment, par=False, out=out) is out
     _assert_vec_close(out, expected_a)
 
     expected_b = cfsem.flux_density_dipole(loc, moment, obs, par=False)
@@ -238,8 +238,8 @@ def test_hierarchical_dipole_wrapper_update_and_into_methods():
         np.empty(obs.shape[0]),
         np.empty(obs.shape[0]),
     )
-    solver.flux_density_into(moment, out_b, par=False)
-    solver.vector_potential_into(moment, out_a, par=False)
+    assert solver.flux_density(moment, par=False, out=out_b) is out_b
+    assert solver.vector_potential(moment, par=False, out=out_a) is out_a
     _assert_vec_close(out_b, expected_b)
     _assert_vec_close(out_a, expected_a)
 

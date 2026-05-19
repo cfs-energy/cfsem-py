@@ -44,7 +44,7 @@ def test_hierarchical_dipoles_match_direct_and_reuse_tree():
     )
 
     solver = cfsem.HierarchicalDipoles(theta=0.0)
-    solver.build_targets(obs)
+    solver.set_observation_points(obs)
     solver.build_sources(loc, outer_radius)
 
     direct_b0 = cfsem.flux_density_dipole(loc, moment0, obs, par=False, outer_radius=outer_radius)
@@ -241,7 +241,7 @@ def test_hierarchical_dipole_wrapper_update_and_into_methods():
     obs_tuple = _tuple_columns(obs)
     solver.build(loc_tuple, obs_tuple)
     solver.update_sources(loc_tuple)
-    solver.update_targets(obs_tuple)
+    solver.set_observation_points(obs_tuple)
 
     expected_a = cfsem.vector_potential_dipole(loc, moment, obs, par=False)
     out = (
@@ -282,8 +282,7 @@ def test_hierarchical_linear_filament_wrapper_update_methods():
     obs_tuple = _tuple_columns(obs)
     solver.build_sources(xyzfil_tuple, dlxyzfil_tuple, wire_radius)
     solver.update_sources(xyzfil_tuple, dlxyzfil_tuple, wire_radius)
-    solver.build_targets(obs_tuple)
-    solver.update_targets(obs_tuple)
+    solver.set_observation_points(obs_tuple)
 
     direct_b = cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
     direct_a = cfsem.vector_potential_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
@@ -317,8 +316,7 @@ def test_hierarchical_boundary_element_wrapper_update_and_source_value_methods()
     solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
     solver.build_sources(nodes, triangles)
     solver.update_sources(nodes, triangles)
-    solver.build_targets(obs_tuple)
-    solver.update_targets(obs_tuple)
+    solver.set_observation_points(obs_tuple)
 
     direct_b = cfsem.flux_density_triangle_mesh(
         obs, nodes, triangles, stream_function, par=False, quad="dunavant3"

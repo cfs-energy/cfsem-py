@@ -3,6 +3,8 @@ use core::cmp::Ordering;
 use super::{Aabb, BoundedGeometry, DualTreeError, DualTreeScalar};
 
 const INVALID_INDEX: u32 = u32::MAX;
+/// Fixed runtime leaf size for public single-source-tree solvers.
+const DEFAULT_LEAF_SIZE: usize = 1;
 /// Adjacent spatial gap must exceed this multiple of the mean sorted gap before
 /// the recursive builder treats it as a cluster boundary.
 const SPATIAL_GAP_DOMINANCE_FACTOR: f64 = 4.0;
@@ -114,15 +116,11 @@ pub struct ClusterTreeView<'a, T: DualTreeScalar> {
 
 impl<T: DualTreeScalar> ClusterTree<T> {
     /// Build a CPU-owned finalized tree using longest-axis hybrid splitting.
-    pub fn build<G>(geometry: &[G], leaf_size: usize) -> Result<Self, DualTreeError>
+    pub fn build<G>(geometry: &[G]) -> Result<Self, DualTreeError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
-        Self::build_with_method(
-            geometry,
-            leaf_size,
-            ClusterTreeBuildMethod::LongestAxisMedian,
-        )
+        Self::build_with_method(geometry, ClusterTreeBuildMethod::LongestAxisMedian)
     }
 
     /// Build a CPU-owned finalized tree using Morton-code LBVH ordering.
@@ -132,11 +130,11 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     /// Morton-sorted ranges at dominant adjacent code gaps or the median when
     /// no dominant cluster gap is present. Node AABBs are still computed from
     /// the full bounded geometry, so finite-size sources remain covered.
-    pub fn build_morton_lbvh<G>(geometry: &[G], leaf_size: usize) -> Result<Self, DualTreeError>
+    pub fn build_morton_lbvh<G>(geometry: &[G]) -> Result<Self, DualTreeError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
-        Self::build_with_method(geometry, leaf_size, ClusterTreeBuildMethod::MortonLbvh)
+        Self::build_with_method(geometry, ClusterTreeBuildMethod::MortonLbvh)
     }
 
     /// Build a CPU-owned finalized tree with the selected construction strategy.
@@ -144,6 +142,46 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     /// Both strategies produce the same flat runtime layout and maintain the
     /// invariant that every node owns a contiguous range in `sorted_indices`.
     pub fn build_with_method<G>(
+        geometry: &[G],
+        method: ClusterTreeBuildMethod,
+    ) -> Result<Self, DualTreeError>
+    where
+        G: BoundedGeometry<Scalar = T>,
+    {
+        Self::build_with_leaf_size_and_method(geometry, DEFAULT_LEAF_SIZE, method)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn build_with_leaf_size<G>(
+        geometry: &[G],
+        leaf_size: usize,
+    ) -> Result<Self, DualTreeError>
+    where
+        G: BoundedGeometry<Scalar = T>,
+    {
+        Self::build_with_leaf_size_and_method(
+            geometry,
+            leaf_size,
+            ClusterTreeBuildMethod::LongestAxisMedian,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn build_morton_lbvh_with_leaf_size<G>(
+        geometry: &[G],
+        leaf_size: usize,
+    ) -> Result<Self, DualTreeError>
+    where
+        G: BoundedGeometry<Scalar = T>,
+    {
+        Self::build_with_leaf_size_and_method(
+            geometry,
+            leaf_size,
+            ClusterTreeBuildMethod::MortonLbvh,
+        )
+    }
+
+    fn build_with_leaf_size_and_method<G>(
         geometry: &[G],
         leaf_size: usize,
         method: ClusterTreeBuildMethod,

@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use std::hint::black_box;
 
-const HIERARCHICAL_LEAF_SIZE: usize = 1;
 const HIERARCHICAL_THETA: f64 = 0.05;
 const LOOP_RADIUS: f64 = 1.0;
 const LOOP_OBS_FRACTION_OFFSET: f64 = 0.027;
@@ -86,7 +85,7 @@ where
             });
         }
 
-        let source_tree = ClusterTree::build_morton_lbvh(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
+        let source_tree = ClusterTree::build_morton_lbvh(&sources).unwrap();
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let vector_out = vec![[0.0; 3]; targets.len()];
         let parallel_scratch_value =

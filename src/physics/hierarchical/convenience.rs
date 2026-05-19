@@ -21,8 +21,6 @@ use super::{
     update_source_summaries_into,
 };
 
-const SOURCE_LEAF_SIZE: usize = 1;
-
 /// Hierarchical magnetic flux density of dipole sources at Cartesian targets.
 ///
 /// This one-shot helper mirrors the direct dipole API while rebuilding the
@@ -346,7 +344,7 @@ where
         return Err(DualTreeError::LengthMismatch);
     }
 
-    let source_tree = ClusterTree::build(sources, SOURCE_LEAF_SIZE)?;
+    let source_tree = ClusterTree::build(sources)?;
     let mut source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
     let mut err = update_source_summaries_into(
         &kernel,

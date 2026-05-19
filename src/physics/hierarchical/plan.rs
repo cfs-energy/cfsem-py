@@ -138,7 +138,8 @@ where
 {
     let target_start = chunk_id * target_chunk_size;
     let target_end = (target_start + target_chunk_size).min(targets.len());
-    let target_tree = ClusterTree::build(&targets[target_start..target_end], target_leaf_size)?;
+    let target_tree =
+        ClusterTree::build_with_leaf_size(&targets[target_start..target_end], target_leaf_size)?;
     let mut chunk = DualInteractionPlanChunk {
         target_start,
         target_count: target_end - target_start,

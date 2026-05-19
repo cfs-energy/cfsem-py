@@ -64,21 +64,11 @@ class HierarchicalDipoles:
         """
         ...
 
-    def build_targets(self, obs: ArrayTriple, par: bool = False) -> None:
-        """Build or replace observation point geometry.
+    def set_observation_points(self, obs: ArrayTriple) -> None:
+        """Set or replace observation point geometry.
 
         Args:
             obs: Observation point coordinates as component arrays.
-            par: Reserved for API consistency.
-        """
-        ...
-
-    def update_targets(self, obs: ArrayTriple, par: bool = False) -> None:
-        """Replace observation point geometry.
-
-        Args:
-            obs: Observation point coordinates as component arrays.
-            par: Reserved for API consistency.
         """
         ...
 
@@ -219,21 +209,11 @@ class HierarchicalLinearFilaments:
         """
         ...
 
-    def build_targets(self, obs: ArrayTriple, par: bool = False) -> None:
-        """Build or replace observation point geometry.
+    def set_observation_points(self, obs: ArrayTriple) -> None:
+        """Set or replace observation point geometry.
 
         Args:
             obs: Observation point coordinates as component arrays.
-            par: Reserved for API consistency.
-        """
-        ...
-
-    def update_targets(self, obs: ArrayTriple, par: bool = False) -> None:
-        """Replace observation point geometry.
-
-        Args:
-            obs: Observation point coordinates as component arrays.
-            par: Reserved for API consistency.
         """
         ...
 
@@ -374,21 +354,11 @@ class HierarchicalBoundaryElements:
         """
         ...
 
-    def build_targets(self, obs: ArrayTriple, par: bool = False) -> None:
-        """Build or replace observation point geometry.
+    def set_observation_points(self, obs: ArrayTriple) -> None:
+        """Set or replace observation point geometry.
 
         Args:
             obs: Observation point coordinates as component arrays.
-            par: Reserved for API consistency.
-        """
-        ...
-
-    def update_targets(self, obs: ArrayTriple, par: bool = False) -> None:
-        """Replace observation point geometry.
-
-        Args:
-            obs: Observation point coordinates as component arrays.
-            par: Reserved for API consistency.
         """
         ...
 

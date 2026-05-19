@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use std::hint::black_box;
 
-const HIERARCHICAL_LEAF_SIZE: usize = 1;
 const HIERARCHICAL_THETA: f64 = 0.01;
 
 struct HierarchicalDipoleSolve<
@@ -76,7 +75,7 @@ where
             moments.push([moment.0[i], moment.1[i], moment.2[i]]);
         }
 
-        let source_tree = ClusterTree::build_morton_lbvh(&sources, HIERARCHICAL_LEAF_SIZE).unwrap();
+        let source_tree = ClusterTree::build_morton_lbvh(&sources).unwrap();
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let vector_out = vec![[0.0; 3]; targets.len()];
         let parallel_scratch_value =

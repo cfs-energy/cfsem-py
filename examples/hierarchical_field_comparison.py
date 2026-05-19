@@ -33,6 +33,20 @@ MAX_PLOTTED_AABBS = 500
 DISTRIBUTED_SOURCE_SEED = 1729
 
 
+def contiguous_triple(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return x/y/z component arrays that satisfy the Rust bindings' slice requirements."""
+
+    return (
+        np.ascontiguousarray(x),
+        np.ascontiguousarray(y),
+        np.ascontiguousarray(z),
+    )
+
+
 @dataclass(frozen=True)
 class Geometry:
     centerline: np.ndarray
@@ -90,7 +104,7 @@ def section_observation_plane(
     z = np.linspace(-extent, extent, n)
     xg, zg = np.meshgrid(x, z, indexing="xy")
     yg = np.zeros_like(xg)
-    return (xg.ravel(), yg.ravel(), zg.ravel()), (xg, zg)
+    return contiguous_triple(xg.ravel(), yg.ravel(), zg.ravel()), (xg, zg)
 
 
 def build_geometry(
@@ -118,8 +132,8 @@ def build_geometry(
     starts = helix[:, :-1].T
     ends = helix[:, 1:].T
     dl = ends - starts
-    xyzfil = (starts[:, 0], starts[:, 1], starts[:, 2])
-    dlxyzfil = (dl[:, 0], dl[:, 1], dl[:, 2])
+    xyzfil = contiguous_triple(starts[:, 0], starts[:, 1], starts[:, 2])
+    dlxyzfil = contiguous_triple(dl[:, 0], dl[:, 1], dl[:, 2])
     current = np.full(starts.shape[0], CURRENT)
     wire_radius = np.full(starts.shape[0], WIRE_RADIUS)
     dipole_loc, dipole_moment, dipole_outer_radius = build_segment_dipoles(starts, dl, current)
@@ -224,11 +238,11 @@ def build_volume_sources(
         CURRENT,
     )
     return (
-        (loc[:, 0], loc[:, 1], loc[:, 2]),
-        (moments[:, 0], moments[:, 1], moments[:, 2]),
+        contiguous_triple(loc[:, 0], loc[:, 1], loc[:, 2]),
+        contiguous_triple(moments[:, 0], moments[:, 1], moments[:, 2]),
         np.zeros(n),
-        (starts[:, 0], starts[:, 1], starts[:, 2]),
-        (dl[:, 0], dl[:, 1], dl[:, 2]),
+        contiguous_triple(starts[:, 0], starts[:, 1], starts[:, 2]),
+        contiguous_triple(dl[:, 0], dl[:, 1], dl[:, 2]),
         np.full(n, CURRENT),
         np.full(n, WIRE_RADIUS),
         strip_nodes,
@@ -283,8 +297,8 @@ def build_segment_dipoles(
     # This is a compact source distribution for comparing direct and hierarchical dipole kernels.
     moments = current[:, None] * dl
     return (
-        (centers[:, 0], centers[:, 1], centers[:, 2]),
-        (moments[:, 0], moments[:, 1], moments[:, 2]),
+        contiguous_triple(centers[:, 0], centers[:, 1], centers[:, 2]),
+        contiguous_triple(moments[:, 0], moments[:, 1], moments[:, 2]),
         np.zeros(starts.shape[0]),
     )
 
@@ -347,9 +361,9 @@ def linear_filament_centers(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     xyzfil, dlxyzfil, _current, _wire_radius = filament_source_arrays(geometry, geometry_layout)
     return (
-        xyzfil[0] + 0.5 * dlxyzfil[0],
-        xyzfil[1] + 0.5 * dlxyzfil[1],
-        xyzfil[2] + 0.5 * dlxyzfil[2],
+        np.ascontiguousarray(xyzfil[0] + 0.5 * dlxyzfil[0]),
+        np.ascontiguousarray(xyzfil[1] + 0.5 * dlxyzfil[1]),
+        np.ascontiguousarray(xyzfil[2] + 0.5 * dlxyzfil[2]),
     )
 
 
@@ -360,7 +374,7 @@ def triangle_centroids(
     nodes, triangles, _stream_function = boundary_source_arrays(geometry, geometry_layout)
     tri_nodes = nodes[triangles]
     centroids = np.mean(tri_nodes, axis=1)
-    return (centroids[:, 0], centroids[:, 1], centroids[:, 2])
+    return contiguous_triple(centroids[:, 0], centroids[:, 1], centroids[:, 2])
 
 
 def dipole_source_arrays(
@@ -401,11 +415,15 @@ def boundary_source_arrays(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if geometry_layout == "distributed":
         return (
-            geometry.volume_strip_nodes,
-            geometry.volume_strip_triangles,
-            geometry.volume_strip_stream_function,
+            np.ascontiguousarray(geometry.volume_strip_nodes),
+            np.ascontiguousarray(geometry.volume_strip_triangles),
+            np.ascontiguousarray(geometry.volume_strip_stream_function),
         )
-    return geometry.strip_nodes, geometry.strip_triangles, geometry.strip_stream_function
+    return (
+        np.ascontiguousarray(geometry.strip_nodes),
+        np.ascontiguousarray(geometry.strip_triangles),
+        np.ascontiguousarray(geometry.strip_stream_function),
+    )
 
 
 def boundary_triangle_values(

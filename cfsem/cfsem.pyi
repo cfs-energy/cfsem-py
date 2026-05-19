@@ -17,24 +17,7 @@ class HierarchicalDipoles:
         """
         ...
 
-    def build(
-        self,
-        loc: ArrayTriple,
-        obs: ArrayTriple,
-        outer_radius: NDArray[float64] | None = None,
-        par: bool = False,
-    ) -> None:
-        """Build source and target geometry for repeated dipole evaluations.
-
-        Args:
-            loc: Dipole source coordinates as component arrays.
-            obs: Observation point coordinates as component arrays.
-            outer_radius: Radius for the magnetized-sphere near-field treatment.
-            par: Whether to parallelize CPU construction.
-        """
-        ...
-
-    def build_sources(
+    def set_sources(
         self,
         loc: ArrayTriple,
         outer_radius: NDArray[float64] | None = None,
@@ -49,31 +32,9 @@ class HierarchicalDipoles:
         """
         ...
 
-    def update_sources(
-        self,
-        loc: ArrayTriple,
-        outer_radius: NDArray[float64] | None = None,
-        par: bool = False,
-    ) -> None:
-        """Replace dipole source geometry and rebuild the source tree.
-
-        Args:
-            loc: Dipole source coordinates as component arrays.
-            outer_radius: Radius for the magnetized-sphere near-field treatment.
-            par: Whether to parallelize CPU construction.
-        """
-        ...
-
-    def set_observation_points(self, obs: ArrayTriple) -> None:
-        """Set or replace observation point geometry.
-
-        Args:
-            obs: Observation point coordinates as component arrays.
-        """
-        ...
-
     def flux_density(
         self,
+        target: ArrayTriple,
         moment: ArrayTriple,
         par: bool = False,
         out: ArrayTriple | None = None,
@@ -87,6 +48,7 @@ class HierarchicalDipoles:
         calculate safety-related field limits.
 
         Args:
+            target: Target point coordinates as component arrays.
             moment: Dipole magnetic moment components.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
@@ -98,6 +60,7 @@ class HierarchicalDipoles:
 
     def vector_potential(
         self,
+        target: ArrayTriple,
         moment: ArrayTriple,
         par: bool = False,
         out: ArrayTriple | None = None,
@@ -111,6 +74,7 @@ class HierarchicalDipoles:
         calculate safety-related field limits.
 
         Args:
+            target: Target point coordinates as component arrays.
             moment: Dipole magnetic moment components.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
@@ -122,12 +86,14 @@ class HierarchicalDipoles:
 
     def accepted_source_levels(
         self,
+        target: ArrayTriple,
         moment: ArrayTriple,
         field: Literal["b", "a"] = "b",
     ) -> NDArray[float64]:
         """Return the accepted source-tree level diagnostic for each target.
 
         Args:
+            target: Target point coordinates as component arrays.
             moment: Dipole magnetic moment components.
             field: Field kernel to use for the acceptance diagnostic.
 
@@ -156,26 +122,7 @@ class HierarchicalLinearFilaments:
         """
         ...
 
-    def build(
-        self,
-        xyzfil: ArrayTriple,
-        dlxyzfil: ArrayTriple,
-        wire_radius: NDArray[float64],
-        obs: ArrayTriple,
-        par: bool = False,
-    ) -> None:
-        """Build source and target geometry for repeated filament evaluations.
-
-        Args:
-            xyzfil: Filament segment start coordinates as component arrays.
-            dlxyzfil: Filament segment displacement vectors as component arrays.
-            wire_radius: Wire radius for each segment.
-            obs: Observation point coordinates as component arrays.
-            par: Whether to parallelize CPU construction.
-        """
-        ...
-
-    def build_sources(
+    def set_sources(
         self,
         xyzfil: ArrayTriple,
         dlxyzfil: ArrayTriple,
@@ -192,33 +139,9 @@ class HierarchicalLinearFilaments:
         """
         ...
 
-    def update_sources(
-        self,
-        xyzfil: ArrayTriple,
-        dlxyzfil: ArrayTriple,
-        wire_radius: NDArray[float64],
-        par: bool = False,
-    ) -> None:
-        """Replace filament source geometry and rebuild the source tree.
-
-        Args:
-            xyzfil: Filament segment start coordinates as component arrays.
-            dlxyzfil: Filament segment displacement vectors as component arrays.
-            wire_radius: Wire radius for each segment.
-            par: Whether to parallelize CPU construction.
-        """
-        ...
-
-    def set_observation_points(self, obs: ArrayTriple) -> None:
-        """Set or replace observation point geometry.
-
-        Args:
-            obs: Observation point coordinates as component arrays.
-        """
-        ...
-
     def flux_density(
         self,
+        target: ArrayTriple,
         current: NDArray[float64],
         par: bool = False,
         out: ArrayTriple | None = None,
@@ -232,6 +155,7 @@ class HierarchicalLinearFilaments:
         calculate safety-related field limits.
 
         Args:
+            target: Target point coordinates as component arrays.
             current: Current in each filament segment.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
@@ -243,6 +167,7 @@ class HierarchicalLinearFilaments:
 
     def vector_potential(
         self,
+        target: ArrayTriple,
         current: NDArray[float64],
         par: bool = False,
         out: ArrayTriple | None = None,
@@ -256,6 +181,7 @@ class HierarchicalLinearFilaments:
         calculate safety-related field limits.
 
         Args:
+            target: Target point coordinates as component arrays.
             current: Current in each filament segment.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
@@ -267,12 +193,14 @@ class HierarchicalLinearFilaments:
 
     def accepted_source_levels(
         self,
+        target: ArrayTriple,
         current: NDArray[float64],
         field: Literal["b", "a"] = "b",
     ) -> NDArray[float64]:
         """Return the accepted source-tree level diagnostic for each target.
 
         Args:
+            target: Target point coordinates as component arrays.
             current: Current in each filament segment.
             field: Field kernel to use for the acceptance diagnostic.
 
@@ -307,24 +235,7 @@ class HierarchicalBoundaryElements:
         """
         ...
 
-    def build(
-        self,
-        nodes: NDArray[float64],
-        triangles: NDArray[int64],
-        obs: ArrayTriple,
-        par: bool = False,
-    ) -> None:
-        """Build source and target geometry for repeated triangle-mesh evaluations.
-
-        Args:
-            nodes: Mesh node coordinates with one node per row.
-            triangles: Triangle node indices with one triangle per row.
-            obs: Observation point coordinates as component arrays.
-            par: Whether to parallelize CPU construction.
-        """
-        ...
-
-    def build_sources(
+    def set_sources(
         self,
         nodes: NDArray[float64],
         triangles: NDArray[int64],
@@ -339,31 +250,9 @@ class HierarchicalBoundaryElements:
         """
         ...
 
-    def update_sources(
-        self,
-        nodes: NDArray[float64],
-        triangles: NDArray[int64],
-        par: bool = False,
-    ) -> None:
-        """Replace triangle source geometry and rebuild the source tree.
-
-        Args:
-            nodes: Mesh node coordinates with one node per row.
-            triangles: Triangle node indices with one triangle per row.
-            par: Whether to parallelize CPU construction.
-        """
-        ...
-
-    def set_observation_points(self, obs: ArrayTriple) -> None:
-        """Set or replace observation point geometry.
-
-        Args:
-            obs: Observation point coordinates as component arrays.
-        """
-        ...
-
     def flux_density(
         self,
+        target: ArrayTriple,
         current_density: ArrayTriple,
         par: bool = False,
         out: ArrayTriple | None = None,
@@ -377,6 +266,7 @@ class HierarchicalBoundaryElements:
         calculate safety-related field limits.
 
         Args:
+            target: Target point coordinates as component arrays.
             current_density: Triangle-local current-density components.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
@@ -388,6 +278,7 @@ class HierarchicalBoundaryElements:
 
     def vector_potential(
         self,
+        target: ArrayTriple,
         current_density: ArrayTriple,
         par: bool = False,
         out: ArrayTriple | None = None,
@@ -401,6 +292,7 @@ class HierarchicalBoundaryElements:
         calculate safety-related field limits.
 
         Args:
+            target: Target point coordinates as component arrays.
             current_density: Triangle-local current-density components.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
@@ -412,12 +304,14 @@ class HierarchicalBoundaryElements:
 
     def accepted_source_levels(
         self,
+        target: ArrayTriple,
         current_density: ArrayTriple,
         field: Literal["b", "a"] = "b",
     ) -> NDArray[float64]:
         """Return the accepted source-tree level diagnostic for each target.
 
         Args:
+            target: Target point coordinates as component arrays.
             current_density: Triangle-local current-density components.
             field: Field kernel to use for the acceptance diagnostic.
 

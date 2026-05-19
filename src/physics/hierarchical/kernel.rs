@@ -57,6 +57,49 @@ pub trait BoundedGeometry {
     fn representative_point(&self) -> [Self::Scalar; 3];
 }
 
+/// Borrowed target storage that can produce scalar target geometry values.
+///
+/// This keeps the evaluator generic over physical target point layouts. Plain
+/// slices work for Rust callers, while Python bindings can pass borrowed
+/// component columns without first allocating interleaved target structs.
+pub trait TargetCollection<K: DualTreeKernel>: Copy + Sync {
+    /// Number of target points in the collection.
+    fn len(self) -> usize;
+
+    /// Return one scalar target geometry value.
+    fn target(self, index: usize) -> K::TargetGeometry;
+
+    /// Return a borrowed sub-collection over `start..end`.
+    fn slice(self, start: usize, end: usize) -> Self;
+
+    /// Return whether the collection contains no targets.
+    #[inline]
+    fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<K> TargetCollection<K> for &[K::TargetGeometry]
+where
+    K: DualTreeKernel,
+    K::TargetGeometry: Copy,
+{
+    #[inline]
+    fn len(self) -> usize {
+        <[K::TargetGeometry]>::len(self)
+    }
+
+    #[inline]
+    fn target(self, index: usize) -> K::TargetGeometry {
+        self[index]
+    }
+
+    #[inline]
+    fn slice(self, start: usize, end: usize) -> Self {
+        &self[start..end]
+    }
+}
+
 /// Trait implemented by physics kernels that can use the generic hierarchical evaluator.
 pub trait DualTreeKernel {
     type Scalar: DualTreeScalar;

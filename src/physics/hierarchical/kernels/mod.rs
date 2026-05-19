@@ -12,7 +12,7 @@ mod linear_filament_vector_potential;
 pub use boundary_element::{BoundaryElementSummary, BoundaryElementTriangle};
 pub use boundary_element_flux_density::BoundaryElementFluxDensityKernel;
 pub use boundary_element_vector_potential::BoundaryElementVectorPotentialKernel;
-pub use dipole::{DipoleSource, DipoleTarget, DipoleTargetSummary};
+pub use dipole::{DipoleSource, DipoleTarget, DipoleTargetSummary, DipoleTargets};
 pub use dipole_flux_density::{DipoleFluxDensityKernel, DipoleFluxDensitySummary};
 pub use dipole_vector_potential::{DipoleVectorPotentialKernel, DipoleVectorPotentialSummary};
 pub use linear_filament_flux_density::{

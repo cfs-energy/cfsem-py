@@ -1,6 +1,6 @@
 #[cfg(test)]
 use super::plan::{DualInteractionPlanChunk, DualInteractionPlanView};
-use super::{BoundedGeometry, ClusterTreeView, DualTreeError, DualTreeKernel};
+use super::{BoundedGeometry, ClusterTreeView, DualTreeError, DualTreeKernel, TargetCollection};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -342,17 +342,22 @@ pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
 /// source-side acceptance criterion as the lower-level interaction-plan
 /// evaluator.
 #[inline]
-pub fn evaluate_source_tree_into<K: DualTreeKernel>(
+pub fn evaluate_source_tree_into<K, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
     sources: &[K::SourceGeometry],
-    targets: &[K::TargetGeometry],
+    targets: C,
     moments: &[K::SourceMoment],
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError {
+) -> DualTreeError
+where
+    K: DualTreeKernel,
+    K::TargetGeometry: Copy,
+    C: TargetCollection<K>,
+{
     let err = validate_source_tree_layout(source_tree);
     if err != DualTreeError::Ok {
         return err;
@@ -371,17 +376,22 @@ pub fn evaluate_source_tree_into<K: DualTreeKernel>(
 }
 
 #[inline]
-fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
+fn evaluate_source_tree_into_validated<K, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
     sources: &[K::SourceGeometry],
-    targets: &[K::TargetGeometry],
+    targets: C,
     moments: &[K::SourceMoment],
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError {
+) -> DualTreeError
+where
+    K: DualTreeKernel,
+    K::TargetGeometry: Copy,
+    C: TargetCollection<K>,
+{
     if sources.len() != source_tree.n_items()
         || moments.len() != source_tree.n_items()
         || targets.len() != out.len()
@@ -397,58 +407,96 @@ fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
     let target_ids = [0_u32];
 
     for target_id in 0..targets.len() {
-        let target = &targets[target_id];
-        let target_out = &mut out[target_id];
-        kernel.zero_output(target_out);
-        let err = kernel.summarize_leaf_targets(
-            &target_ids,
-            core::slice::from_ref(target),
+        let target = targets.target(target_id);
+        let err = evaluate_source_tree_scalar(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            target,
+            moments,
+            theta,
+            &mut out[target_id],
+            &mut scratch.contribution[0],
             &mut target_summary,
+            &mut active,
+            &target_ids,
         );
         if err != DualTreeError::Ok {
             return err;
         }
+    }
 
-        active.clear();
-        active.push(0_u32);
-        while let Some(source_node) = active.pop() {
-            let source_node_index = source_node as usize;
-            let source_summary = &source_summaries[source_node_index];
-            let source_aabb = source_tree.node_aabb[source_node_index];
-            if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
-                let err = kernel.eval_far(
-                    &target_summary,
-                    source_summary,
-                    &mut scratch.contribution[0],
+    DualTreeError::Ok
+}
+
+/// Evaluate one scalar target against the source tree.
+///
+/// Serial and parallel vector evaluators both call this helper so the source
+/// traversal and acceptance behavior cannot diverge between evaluation modes.
+#[inline]
+fn evaluate_source_tree_scalar<K>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_summaries: &[K::SourceSummary],
+    sources: &[K::SourceGeometry],
+    target: K::TargetGeometry,
+    moments: &[K::SourceMoment],
+    theta: K::Scalar,
+    out: &mut K::Output,
+    contribution: &mut K::Output,
+    target_summary: &mut K::TargetSummary,
+    active: &mut Vec<u32>,
+    target_ids: &[u32],
+) -> DualTreeError
+where
+    K: DualTreeKernel,
+    K::TargetGeometry: Copy,
+{
+    kernel.zero_output(out);
+    let err =
+        kernel.summarize_leaf_targets(target_ids, core::slice::from_ref(&target), target_summary);
+    if err != DualTreeError::Ok {
+        return err;
+    }
+
+    active.clear();
+    active.push(0_u32);
+    while let Some(source_node) = active.pop() {
+        let source_node_index = source_node as usize;
+        let source_summary = &source_summaries[source_node_index];
+        let source_aabb = source_tree.node_aabb[source_node_index];
+        if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
+            let err = kernel.eval_far(target_summary, source_summary, contribution);
+            if err != DualTreeError::Ok {
+                return err;
+            }
+            kernel.accumulate(out, contribution);
+            continue;
+        }
+
+        let leaf_count = source_tree.leaf_count[source_node_index];
+        if leaf_count > 0 {
+            let start = source_tree.leaf_start[source_node_index] as usize;
+            let count = leaf_count as usize;
+            let end = start + count;
+            let source_ids = &source_tree.sorted_indices[start..end];
+            for i in 0..source_ids.len() {
+                let source_id = source_ids[i] as usize;
+                let err = kernel.eval_exact(
+                    &target,
+                    &sources[source_id],
+                    &moments[source_id],
+                    contribution,
                 );
                 if err != DualTreeError::Ok {
                     return err;
                 }
-                kernel.accumulate(target_out, &scratch.contribution[0]);
-                continue;
+                kernel.accumulate(out, contribution);
             }
-
-            let leaf_count = source_tree.leaf_count[source_node_index];
-            if leaf_count > 0 {
-                let start = source_tree.leaf_start[source_node_index] as usize;
-                let count = leaf_count as usize;
-                let end = start + count;
-                let source_ids = &source_tree.sorted_indices[start..end];
-                for i in 0..source_ids.len() {
-                    let source_id = source_ids[i] as usize;
-                    let source = &sources[source_id];
-                    let moment = &moments[source_id];
-                    let err =
-                        kernel.eval_exact(target, source, moment, &mut scratch.contribution[0]);
-                    if err != DualTreeError::Ok {
-                        return err;
-                    }
-                    kernel.accumulate(target_out, &scratch.contribution[0]);
-                }
-            } else {
-                active.push(source_tree.node_left_child[source_node_index]);
-                active.push(source_tree.node_right_child[source_node_index]);
-            }
+        } else {
+            active.push(source_tree.node_left_child[source_node_index]);
+            active.push(source_tree.node_right_child[source_node_index]);
         }
     }
 
@@ -462,17 +510,22 @@ fn evaluate_source_tree_into_validated<K: DualTreeKernel>(
 /// source-tree evaluator on that slice. It shares the source tree and source
 /// summaries between workers, and avoids any cross-thread output accumulation.
 #[inline]
-pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
+pub fn evaluate_source_tree_into_par<K, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
     sources: &[K::SourceGeometry],
-    targets: &[K::TargetGeometry],
+    targets: C,
     moments: &[K::SourceMoment],
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError {
+) -> DualTreeError
+where
+    K: DualTreeKernel + Sync,
+    K::TargetGeometry: Copy,
+    C: TargetCollection<K>,
+{
     let err = validate_source_tree_layout(source_tree);
     if err != DualTreeError::Ok {
         return err;
@@ -499,15 +552,18 @@ pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
     let error_code = AtomicU32::new(DualTreeError::Ok as u32);
 
     (
-        targets.par_chunks(chunk_size),
+        (0..chunk_count).into_par_iter(),
         out.par_chunks_mut(chunk_size),
         scratch.contribution[..chunk_count].par_iter_mut(),
     )
         .into_par_iter()
-        .for_each(|(target_chunk, out_chunk, contribution)| {
+        .for_each(|(chunk_id, out_chunk, contribution)| {
             if error_code.load(Ordering::Relaxed) != DualTreeError::Ok as u32 {
                 return;
             }
+            let start = chunk_id * chunk_size;
+            let end = start + out_chunk.len();
+            let target_chunk = targets.slice(start, end);
             let mut chunk_scratch = EvaluationScratch {
                 contribution: core::slice::from_mut(contribution),
             };
@@ -544,14 +600,19 @@ pub fn evaluate_source_tree_into_par<K: DualTreeKernel + Sync>(
 /// original source items represented by that terminal node, giving a per-target
 /// mean accepted source level.
 #[inline]
-pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
+pub fn accepted_source_level_diagnostic_into<K, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
-    targets: &[K::TargetGeometry],
+    targets: C,
     theta: K::Scalar,
     out: &mut [f64],
-) -> DualTreeError {
+) -> DualTreeError
+where
+    K: DualTreeKernel,
+    K::TargetGeometry: Copy,
+    C: TargetCollection<K>,
+{
     let err = validate_source_tree_layout(source_tree);
     if err != DualTreeError::Ok {
         return err;
@@ -565,7 +626,7 @@ pub fn accepted_source_level_diagnostic_into<K: DualTreeKernel>(
 
     let mut active = Vec::new();
     for target_id in 0..targets.len() {
-        let target = &targets[target_id];
+        let target = targets.target(target_id);
         let mut weighted_level = 0.0_f64;
         let mut represented_sources = 0.0_f64;
 

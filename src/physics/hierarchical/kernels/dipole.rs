@@ -1,5 +1,7 @@
 use crate::math::{add3_in_place, norm3};
-use crate::physics::hierarchical::{Aabb, BoundedGeometry, DualTreeError, DualTreeScalar};
+use crate::physics::hierarchical::{
+    Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar, TargetCollection,
+};
 use crate::physics::point_source::dipole::{
     flux_density_dipole_scalar_generic, vector_potential_dipole_scalar_generic,
 };
@@ -15,6 +17,49 @@ pub struct DipoleSource<T: DualTreeScalar> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DipoleTarget<T: DualTreeScalar> {
     pub position: [T; 3],
+}
+
+/// Borrowed component-column target points for dipole-like 3D target kernels.
+#[derive(Clone, Copy, Debug)]
+pub struct DipoleTargets<'a, T: DualTreeScalar> {
+    pub x: &'a [T],
+    pub y: &'a [T],
+    pub z: &'a [T],
+}
+
+impl<'a, T: DualTreeScalar> DipoleTargets<'a, T> {
+    /// Create borrowed target columns.
+    #[inline]
+    pub fn new(x: &'a [T], y: &'a [T], z: &'a [T]) -> Self {
+        Self { x, y, z }
+    }
+}
+
+impl<'a, K, T> TargetCollection<K> for DipoleTargets<'a, T>
+where
+    K: DualTreeKernel<Scalar = T, TargetGeometry = DipoleTarget<T>>,
+    T: DualTreeScalar,
+{
+    #[inline]
+    fn len(self) -> usize {
+        self.x.len()
+    }
+
+    #[inline]
+    fn target(self, index: usize) -> DipoleTarget<T> {
+        DipoleTarget {
+            position: [self.x[index], self.y[index], self.z[index]],
+        }
+    }
+
+    #[inline]
+    fn slice(self, start: usize, end: usize) -> Self {
+        Self {
+            x: &self.x[start..end],
+            y: &self.y[start..end],
+            z: &self.z[start..end],
+        }
+    }
 }
 
 impl<T: DualTreeScalar> BoundedGeometry for DipoleSource<T> {

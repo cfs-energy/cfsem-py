@@ -38,7 +38,7 @@ pub use evaluator::{
     update_source_summaries_into,
 };
 pub(crate) use kernel::geometric_accept_far;
-pub use kernel::{BoundedGeometry, DualTreeError, DualTreeKernel};
+pub use kernel::{BoundedGeometry, DualTreeError, DualTreeKernel, TargetCollection};
 pub use scalar::DualTreeScalar;
 pub use tree::{ClusterTree, ClusterTreeBuildMethod, ClusterTreeView};
 

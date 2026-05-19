@@ -338,6 +338,7 @@ fn one_shot_vec3<K>(
 ) -> Result<(), DualTreeError>
 where
     K: DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    K::TargetGeometry: Copy,
 {
     if out.0.len() != targets.len() || out.1.len() != targets.len() || out.2.len() != targets.len()
     {

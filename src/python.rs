@@ -324,21 +324,27 @@ fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Ve
     levels
 }
 
-fn build_dipole_targets(
-    obs: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
+fn read_target_columns<'py>(
+    target: &'py (
+        PyReadonlyArray1<'py, f64>,
+        PyReadonlyArray1<'py, f64>,
+        PyReadonlyArray1<'py, f64>,
     ),
-) -> PyResult<Vec<physics::hierarchical::kernels::DipoleTarget<f64>>> {
-    let points = read_xyz_tuple(obs, "obs")?;
-    let mut targets = Vec::with_capacity(points.len());
-    for i in 0..points.len() {
-        targets.push(physics::hierarchical::kernels::DipoleTarget {
-            position: points[i],
-        });
+) -> PyResult<physics::hierarchical::kernels::DipoleTargets<'py, f64>> {
+    let target = (
+        target.0.as_slice()?,
+        target.1.as_slice()?,
+        target.2.as_slice()?,
+    );
+    if target.0.len() != target.1.len() || target.0.len() != target.2.len() {
+        return Err(PyInteropError::DimensionalityError {
+            msg: "target component arrays must have matching lengths".to_string(),
+        }
+        .into());
     }
-    Ok(targets)
+    Ok(physics::hierarchical::kernels::DipoleTargets::new(
+        target.0, target.1, target.2,
+    ))
 }
 
 fn build_dipole_sources(
@@ -489,17 +495,19 @@ fn read_scalar_moments(moment: PyReadonlyArray1<f64>, n: usize, name: &str) -> P
     Ok(moment.to_vec())
 }
 
-fn hierarchical_eval_source_tree_vec3<K>(
+fn hierarchical_eval_source_tree_vec3<K, C>(
     kernel: K,
     source_tree: &physics::hierarchical::ClusterTree<f64>,
     sources: &[K::SourceGeometry],
-    targets: &[K::TargetGeometry],
+    targets: C,
     moments: &[K::SourceMoment],
     theta: f64,
     par: bool,
 ) -> PyResult<Vec<[f64; 3]>>
 where
     K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    K::TargetGeometry: Copy,
+    C: physics::hierarchical::TargetCollection<K>,
 {
     let mut source_summaries =
         physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
@@ -514,9 +522,10 @@ where
         return Err(py_dual_tree_error("source summary update", err));
     }
 
-    let mut out = vec![[0.0; 3]; targets.len()];
+    let target_count = targets.len();
+    let mut out = vec![[0.0; 3]; target_count];
     let scratch_len = match par {
-        true => physics::hierarchical::parallel_source_tree_evaluation_scratch_len(targets.len()),
+        true => physics::hierarchical::parallel_source_tree_evaluation_scratch_len(target_count),
         false => physics::hierarchical::source_tree_evaluation_scratch_len(),
     };
     let mut scratch_value = vec![[0.0; 3]; scratch_len];
@@ -556,16 +565,18 @@ where
     Ok(out)
 }
 
-fn hierarchical_source_level_diagnostic<K>(
+fn hierarchical_source_level_diagnostic<K, C>(
     kernel: K,
     source_tree: &physics::hierarchical::ClusterTree<f64>,
     sources: &[K::SourceGeometry],
-    targets: &[K::TargetGeometry],
+    targets: C,
     moments: &[K::SourceMoment],
     theta: f64,
 ) -> PyResult<Vec<f64>>
 where
     K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    K::TargetGeometry: Copy,
+    C: physics::hierarchical::TargetCollection<K>,
 {
     let mut source_summaries =
         physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
@@ -834,7 +845,6 @@ struct HierarchicalDipoles {
     theta: f64,
     construction_method: HierarchicalConstructionMethod,
     sources: Vec<physics::hierarchical::kernels::DipoleSource<f64>>,
-    targets: Option<Vec<physics::hierarchical::kernels::DipoleTarget<f64>>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
 }
 
@@ -847,46 +857,12 @@ impl HierarchicalDipoles {
             theta,
             construction_method: parse_hierarchical_construction_method(construction_method)?,
             sources: Vec::new(),
-            targets: None,
             source_tree: None,
         })
     }
 
-    #[pyo3(signature = (loc, obs, outer_radius=None, par=false))]
-    fn build(
-        &mut self,
-        loc: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        obs: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        outer_radius: Option<PyReadonlyArray1<f64>>,
-        par: bool,
-    ) -> PyResult<()> {
-        self.set_observation_points(obs)?;
-        self.build_sources(loc, outer_radius, par)
-    }
-
-    #[pyo3(signature = (obs))]
-    fn set_observation_points(
-        &mut self,
-        obs: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-    ) -> PyResult<()> {
-        self.targets = Some(build_dipole_targets(obs)?);
-        Ok(())
-    }
-
     #[pyo3(signature = (loc, outer_radius=None, par=false))]
-    fn build_sources(
+    fn set_sources(
         &mut self,
         loc: (
             PyReadonlyArray1<f64>,
@@ -905,24 +881,15 @@ impl HierarchicalDipoles {
         Ok(())
     }
 
-    #[pyo3(signature = (loc, outer_radius=None, par=false))]
-    fn update_sources(
-        &mut self,
-        loc: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        outer_radius: Option<PyReadonlyArray1<f64>>,
-        par: bool,
-    ) -> PyResult<()> {
-        self.build_sources(loc, outer_radius, par)
-    }
-
-    #[pyo3(signature = (moment, par=false, out=None))]
+    #[pyo3(signature = (target, moment, par=false, out=None))]
     fn flux_density(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         moment: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -935,14 +902,19 @@ impl HierarchicalDipoles {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_dipole_flux_density(moment, par)?;
+        let values = self.eval_dipole_flux_density(target, moment, par)?;
         vec3_to_output_tuple(py, &values, out, "flux_density")
     }
 
-    #[pyo3(signature = (moment, par=false, out=None))]
+    #[pyo3(signature = (target, moment, par=false, out=None))]
     fn vector_potential(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         moment: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -955,7 +927,7 @@ impl HierarchicalDipoles {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_dipole_vector_potential(moment, par)?;
+        let values = self.eval_dipole_vector_potential(target, moment, par)?;
         vec3_to_output_tuple(py, &values, out, "vector_potential")
     }
 
@@ -974,10 +946,15 @@ impl HierarchicalDipoles {
         Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
     }
 
-    #[pyo3(signature = (moment, field="b"))]
+    #[pyo3(signature = (target, moment, field="b"))]
     fn accepted_source_levels(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         moment: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -985,7 +962,7 @@ impl HierarchicalDipoles {
         ),
         field: &str,
     ) -> PyResult<Py<PyArray1<f64>>> {
-        let out = self.eval_dipole_source_levels(moment, field)?;
+        let out = self.eval_dipole_source_levels(target, moment, field)?;
         Ok(PyArray1::from_vec(py, out).unbind())
     }
 }
@@ -1000,17 +977,13 @@ impl HierarchicalDipoles {
             .map_err(Into::into)
     }
 
-    fn targets(&self) -> PyResult<&[physics::hierarchical::kernels::DipoleTarget<f64>]> {
-        self.targets
-            .as_deref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "observation points have not been set".to_string(),
-            })
-            .map_err(Into::into)
-    }
-
     fn eval_dipole_flux_density(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         moment: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1019,7 +992,7 @@ impl HierarchicalDipoles {
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
@@ -1034,6 +1007,11 @@ impl HierarchicalDipoles {
 
     fn eval_dipole_vector_potential(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         moment: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1042,7 +1020,7 @@ impl HierarchicalDipoles {
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
@@ -1057,6 +1035,11 @@ impl HierarchicalDipoles {
 
     fn eval_dipole_source_levels(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         moment: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1065,7 +1048,7 @@ impl HierarchicalDipoles {
         field: &str,
     ) -> PyResult<Vec<f64>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let moments = read_vec3_moments(moment, self.sources.len(), "moment")?;
         match field {
             "b" => hierarchical_source_level_diagnostic(
@@ -1097,7 +1080,6 @@ struct HierarchicalLinearFilaments {
     theta: f64,
     construction_method: HierarchicalConstructionMethod,
     sources: Vec<physics::hierarchical::kernels::LinearFilamentSource<f64>>,
-    targets: Option<Vec<physics::hierarchical::kernels::DipoleTarget<f64>>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
 }
 
@@ -1110,51 +1092,12 @@ impl HierarchicalLinearFilaments {
             theta,
             construction_method: parse_hierarchical_construction_method(construction_method)?,
             sources: Vec::new(),
-            targets: None,
             source_tree: None,
         })
     }
 
-    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, obs, par=false))]
-    fn build(
-        &mut self,
-        xyzfil: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        dlxyzfil: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        wire_radius: PyReadonlyArray1<f64>,
-        obs: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        par: bool,
-    ) -> PyResult<()> {
-        self.set_observation_points(obs)?;
-        self.build_sources(xyzfil, dlxyzfil, wire_radius, par)
-    }
-
-    #[pyo3(signature = (obs))]
-    fn set_observation_points(
-        &mut self,
-        obs: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-    ) -> PyResult<()> {
-        self.targets = Some(build_dipole_targets(obs)?);
-        Ok(())
-    }
-
     #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, par=false))]
-    fn build_sources(
+    fn set_sources(
         &mut self,
         xyzfil: (
             PyReadonlyArray1<f64>,
@@ -1178,29 +1121,15 @@ impl HierarchicalLinearFilaments {
         Ok(())
     }
 
-    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, par=false))]
-    fn update_sources(
-        &mut self,
-        xyzfil: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        dlxyzfil: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        wire_radius: PyReadonlyArray1<f64>,
-        par: bool,
-    ) -> PyResult<()> {
-        self.build_sources(xyzfil, dlxyzfil, wire_radius, par)
-    }
-
-    #[pyo3(signature = (current, par=false, out=None))]
+    #[pyo3(signature = (target, current, par=false, out=None))]
     fn flux_density(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current: PyReadonlyArray1<f64>,
         par: bool,
         out: Option<(
@@ -1209,14 +1138,19 @@ impl HierarchicalLinearFilaments {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_linear_filament_flux_density(current, par)?;
+        let values = self.eval_linear_filament_flux_density(target, current, par)?;
         vec3_to_output_tuple(py, &values, out, "flux_density")
     }
 
-    #[pyo3(signature = (current, par=false, out=None))]
+    #[pyo3(signature = (target, current, par=false, out=None))]
     fn vector_potential(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current: PyReadonlyArray1<f64>,
         par: bool,
         out: Option<(
@@ -1225,18 +1159,23 @@ impl HierarchicalLinearFilaments {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_linear_filament_vector_potential(current, par)?;
+        let values = self.eval_linear_filament_vector_potential(target, current, par)?;
         vec3_to_output_tuple(py, &values, out, "vector_potential")
     }
 
-    #[pyo3(signature = (current, field="b"))]
+    #[pyo3(signature = (target, current, field="b"))]
     fn accepted_source_levels(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current: PyReadonlyArray1<f64>,
         field: &str,
     ) -> PyResult<Py<PyArray1<f64>>> {
-        let out = self.eval_linear_filament_source_levels(current, field)?;
+        let out = self.eval_linear_filament_source_levels(target, current, field)?;
         Ok(PyArray1::from_vec(py, out).unbind())
     }
 
@@ -1266,22 +1205,18 @@ impl HierarchicalLinearFilaments {
             .map_err(Into::into)
     }
 
-    fn targets(&self) -> PyResult<&[physics::hierarchical::kernels::DipoleTarget<f64>]> {
-        self.targets
-            .as_deref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "observation points have not been set".to_string(),
-            })
-            .map_err(Into::into)
-    }
-
     fn eval_linear_filament_flux_density(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current: PyReadonlyArray1<f64>,
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let currents = read_scalar_moments(current, self.sources.len(), "current")?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(),
@@ -1296,11 +1231,16 @@ impl HierarchicalLinearFilaments {
 
     fn eval_linear_filament_vector_potential(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current: PyReadonlyArray1<f64>,
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let currents = read_scalar_moments(current, self.sources.len(), "current")?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(),
@@ -1315,11 +1255,16 @@ impl HierarchicalLinearFilaments {
 
     fn eval_linear_filament_source_levels(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current: PyReadonlyArray1<f64>,
         field: &str,
     ) -> PyResult<Vec<f64>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let currents = read_scalar_moments(current, self.sources.len(), "current")?;
         match field {
             "b" => hierarchical_source_level_diagnostic(
@@ -1352,7 +1297,6 @@ struct HierarchicalBoundaryElements {
     construction_method: HierarchicalConstructionMethod,
     quad_kind: physics::boundary_element::QuadratureKind,
     sources: Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>,
-    targets: Option<Vec<physics::hierarchical::kernels::DipoleTarget<f64>>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
 }
 
@@ -1366,42 +1310,12 @@ impl HierarchicalBoundaryElements {
             construction_method: parse_hierarchical_construction_method(construction_method)?,
             quad_kind: parse_triangle_quadrature(quad)?,
             sources: Vec::new(),
-            targets: None,
             source_tree: None,
         })
     }
 
-    #[pyo3(signature = (nodes, triangles, obs, par=false))]
-    fn build(
-        &mut self,
-        nodes: PyReadonlyArray2<f64>,
-        triangles: PyReadonlyArray2<i64>,
-        obs: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        par: bool,
-    ) -> PyResult<()> {
-        self.set_observation_points(obs)?;
-        self.build_sources(nodes, triangles, par)
-    }
-
-    #[pyo3(signature = (obs))]
-    fn set_observation_points(
-        &mut self,
-        obs: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-    ) -> PyResult<()> {
-        self.targets = Some(build_dipole_targets(obs)?);
-        Ok(())
-    }
-
     #[pyo3(signature = (nodes, triangles, par=false))]
-    fn build_sources(
+    fn set_sources(
         &mut self,
         nodes: PyReadonlyArray2<f64>,
         triangles: PyReadonlyArray2<i64>,
@@ -1416,20 +1330,15 @@ impl HierarchicalBoundaryElements {
         Ok(())
     }
 
-    #[pyo3(signature = (nodes, triangles, par=false))]
-    fn update_sources(
-        &mut self,
-        nodes: PyReadonlyArray2<f64>,
-        triangles: PyReadonlyArray2<i64>,
-        par: bool,
-    ) -> PyResult<()> {
-        self.build_sources(nodes, triangles, par)
-    }
-
-    #[pyo3(signature = (current_density, par=false, out=None))]
+    #[pyo3(signature = (target, current_density, par=false, out=None))]
     fn flux_density(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current_density: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1442,14 +1351,19 @@ impl HierarchicalBoundaryElements {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_boundary_element_flux_density(current_density, par)?;
+        let values = self.eval_boundary_element_flux_density(target, current_density, par)?;
         vec3_to_output_tuple(py, &values, out, "flux_density")
     }
 
-    #[pyo3(signature = (current_density, par=false, out=None))]
+    #[pyo3(signature = (target, current_density, par=false, out=None))]
     fn vector_potential(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current_density: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1462,14 +1376,19 @@ impl HierarchicalBoundaryElements {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_boundary_element_vector_potential(current_density, par)?;
+        let values = self.eval_boundary_element_vector_potential(target, current_density, par)?;
         vec3_to_output_tuple(py, &values, out, "vector_potential")
     }
 
-    #[pyo3(signature = (current_density, field="b"))]
+    #[pyo3(signature = (target, current_density, field="b"))]
     fn accepted_source_levels(
         &self,
         py: Python<'_>,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current_density: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1477,7 +1396,7 @@ impl HierarchicalBoundaryElements {
         ),
         field: &str,
     ) -> PyResult<Py<PyArray1<f64>>> {
-        let out = self.eval_boundary_element_source_levels(current_density, field)?;
+        let out = self.eval_boundary_element_source_levels(target, current_density, field)?;
         Ok(PyArray1::from_vec(py, out).unbind())
     }
 
@@ -1507,17 +1426,13 @@ impl HierarchicalBoundaryElements {
             .map_err(Into::into)
     }
 
-    fn targets(&self) -> PyResult<&[physics::hierarchical::kernels::DipoleTarget<f64>]> {
-        self.targets
-            .as_deref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "observation points have not been set".to_string(),
-            })
-            .map_err(Into::into)
-    }
-
     fn eval_boundary_element_flux_density(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current_density: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1526,7 +1441,7 @@ impl HierarchicalBoundaryElements {
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
@@ -1543,6 +1458,11 @@ impl HierarchicalBoundaryElements {
 
     fn eval_boundary_element_vector_potential(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current_density: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1551,7 +1471,7 @@ impl HierarchicalBoundaryElements {
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
@@ -1568,6 +1488,11 @@ impl HierarchicalBoundaryElements {
 
     fn eval_boundary_element_source_levels(
         &self,
+        target: (
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+            PyReadonlyArray1<f64>,
+        ),
         current_density: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1576,7 +1501,7 @@ impl HierarchicalBoundaryElements {
         field: &str,
     ) -> PyResult<Vec<f64>> {
         let source_tree = self.source_tree()?;
-        let targets = self.targets()?;
+        let targets = read_target_columns(&target)?;
         let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
         match field {
             "b" => hierarchical_source_level_diagnostic(

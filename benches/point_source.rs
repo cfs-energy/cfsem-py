@@ -23,7 +23,7 @@ struct HierarchicalDipoleSolve<
     K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
 > where
     K::SourceGeometry: From<DipoleSource<f64>>,
-    K::TargetGeometry: From<DipoleTarget<f64>>,
+    K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
 {
     kernel: K,
     sources: Vec<K::SourceGeometry>,
@@ -40,7 +40,7 @@ impl<K> HierarchicalDipoleSolve<K>
 where
     K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
     K::SourceGeometry: From<DipoleSource<f64>>,
-    K::TargetGeometry: From<DipoleTarget<f64>>,
+    K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
 {
     fn new(
         kernel: K,
@@ -115,7 +115,7 @@ where
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
                 &self.sources,
-                &self.targets,
+                self.targets.as_slice(),
                 &self.moments,
                 HIERARCHICAL_THETA,
                 &mut self.vector_out,
@@ -152,7 +152,7 @@ where
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
                 &self.sources,
-                &self.targets,
+                self.targets.as_slice(),
                 &self.moments,
                 HIERARCHICAL_THETA,
                 &mut self.vector_out,
@@ -179,7 +179,7 @@ fn hierarchical_dipole_build_and_solve<K>(
 ) where
     K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
     K::SourceGeometry: From<DipoleSource<f64>>,
-    K::TargetGeometry: From<DipoleTarget<f64>>,
+    K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
 {
     let mut solve = HierarchicalDipoleSolve::new(kernel, loc, moment, outer_radius, obs);
     solve.solve_into(out);

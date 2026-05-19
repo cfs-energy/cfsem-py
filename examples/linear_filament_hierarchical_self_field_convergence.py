@@ -275,17 +275,16 @@ def hierarchical_self_field(
 
     solver = cfsem.HierarchicalLinearFilaments(theta=theta, construction_method=CONSTRUCTION_METHOD)
     start = perf_counter()
-    solver.build(
+    solver.set_sources(
         discretization.starts,
         discretization.deltas,
         discretization.wire_radius,
-        discretization.centers,
         par=par,
     )
     build_seconds = perf_counter() - start
 
     start = perf_counter()
-    field = stack_field(solver.flux_density(discretization.current, par=par))
+    field = stack_field(solver.flux_density(discretization.centers, discretization.current, par=par))
     eval_seconds = perf_counter() - start
     return field, build_seconds, eval_seconds
 
@@ -474,7 +473,7 @@ def source_tree_aabbs(discretization: LoopDiscretization) -> tuple[NDArray[np.fl
     """Build the coarse source tree and return its AABB arrays for plotting."""
 
     solver = cfsem.HierarchicalLinearFilaments(theta=THETA_SWEEP[0], construction_method=CONSTRUCTION_METHOD)
-    solver.build_sources(
+    solver.set_sources(
         discretization.starts,
         discretization.deltas,
         discretization.wire_radius,

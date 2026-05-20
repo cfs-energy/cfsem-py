@@ -259,11 +259,11 @@ def flux_density_linear_filament(
     par: bool = True,
 ) -> ArrayTriple: ...
 def flux_density_linear_filament_hierarchical(
-    xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
     dlxyzfil: ArrayTriple,
     ifil: FloatArray,
     wire_radius: FloatArray,
+    xyzp: ArrayTriple,
     theta: float = 0.05,
     par: bool = True,
 ) -> ArrayTriple: ...
@@ -291,11 +291,11 @@ def vector_potential_linear_filament(
     par: bool = True,
 ) -> ArrayTriple: ...
 def vector_potential_linear_filament_hierarchical(
-    xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
     dlxyzfil: ArrayTriple,
     ifil: FloatArray,
     wire_radius: FloatArray,
+    xyzp: ArrayTriple,
     theta: float = 0.05,
     par: bool = True,
 ) -> ArrayTriple: ...
@@ -355,22 +355,22 @@ def vector_potential_triangle_mesh(
     quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def flux_density_triangle_mesh_hierarchical(
-    obs: FloatMatrix,
     nodes: FloatMatrix,
     triangles: IntMatrix,
     s: FloatArray,
+    obs: FloatMatrix,
     theta: float = 0.05,
-    par: bool = True,
     quad: str = "dunavant3",
+    par: bool = True,
 ) -> ArrayTriple: ...
 def vector_potential_triangle_mesh_hierarchical(
-    obs: FloatMatrix,
     nodes: FloatMatrix,
     triangles: IntMatrix,
     s: FloatArray,
+    obs: FloatMatrix,
     theta: float = 0.05,
-    par: bool = True,
     quad: str = "dunavant3",
+    par: bool = True,
 ) -> ArrayTriple: ...
 def flux_density_triangle_mesh_mapping(
     obs: FloatMatrix,

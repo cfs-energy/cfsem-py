@@ -385,11 +385,11 @@ def run_near_field_study(par: bool) -> NearFieldStudy:
             start = perf_counter()
             field = stack_field(
                 cfsem.flux_density_linear_filament_hierarchical(
-                    obs,
                     discretization.starts,
                     discretization.deltas,
                     discretization.current,
                     discretization.wire_radius,
+                    obs,
                     theta=float(theta),
                     par=par,
                 )

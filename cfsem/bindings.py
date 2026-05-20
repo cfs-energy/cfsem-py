@@ -25,16 +25,16 @@ from .cfsem import (
     flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
 )
 from .cfsem import flux_density_dipole as em_flux_density_dipole
-from .cfsem import flux_density_dipole_hierarchical as em_flux_density_dipole_hierarchical
+from .cfsem import flux_density_dipole_hierarchical as flux_density_dipole_hierarchical
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
-from .cfsem import vector_potential_dipole_hierarchical as em_vector_potential_dipole_hierarchical
+from .cfsem import vector_potential_dipole_hierarchical as vector_potential_dipole_hierarchical
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
 from .cfsem import (
-    flux_density_linear_filament_hierarchical as em_flux_density_linear_filament_hierarchical,
+    flux_density_linear_filament_hierarchical as flux_density_linear_filament_hierarchical,
 )
 from .cfsem import flux_density_triangle_mesh_mapping as em_flux_density_triangle_mesh_mapping
 from .cfsem import flux_density_triangle_mesh as em_flux_density_triangle_mesh
-from .cfsem import flux_density_triangle_mesh_hierarchical as em_flux_density_triangle_mesh_hierarchical
+from .cfsem import flux_density_triangle_mesh_hierarchical as flux_density_triangle_mesh_hierarchical
 from .cfsem import (
     flux_density_linear_filament_matrix as em_flux_density_linear_filament_matrix,
 )
@@ -84,7 +84,7 @@ from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
 from .cfsem import (
-    vector_potential_linear_filament_hierarchical as em_vector_potential_linear_filament_hierarchical,
+    vector_potential_linear_filament_hierarchical as vector_potential_linear_filament_hierarchical,
 )
 from .cfsem import (
     vector_potential_triangle_mesh_mapping as em_vector_potential_triangle_mesh_mapping,
@@ -94,7 +94,7 @@ from .cfsem import (
     vector_potential_linear_filament_matrix as em_vector_potential_linear_filament_matrix,
 )
 from .cfsem import (
-    vector_potential_triangle_mesh_hierarchical as em_vector_potential_triangle_mesh_hierarchical,
+    vector_potential_triangle_mesh_hierarchical as vector_potential_triangle_mesh_hierarchical,
 )
 from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
@@ -389,110 +389,6 @@ def vector_potential_point_segment(
     return em_vector_potential_point_segment(xyzp, xyzfil, dlxyzfil, ifil, par)
 
 
-def flux_density_linear_filament_hierarchical(
-    xyzp: Array3xN,
-    xyzfil: Array3xN,
-    dlxyzfil: Array3xN,
-    ifil: NDArray[float64],
-    wire_radius: float | NDArray[float64] = 0.0,
-    theta: float = 0.05,
-    par: bool = True,
-) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
-    """Hierarchical B-field calculation for many linear filament segments.
-
-    This one-shot wrapper builds the source tree internally and mirrors
-    [`flux_density_linear_filament`][cfsem.flux_density_linear_filament] for cases where
-    geometry reuse is not needed.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-
-    Args:
-        xyzp: Observation point coordinates.
-        xyzfil: Filament segment start coordinates.
-        dlxyzfil: Filament segment start-to-end displacement vectors.
-        ifil: Current in each filament segment.
-        wire_radius: Wire radius for each filament segment, or one scalar radius for all
-            segments.
-        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        par: Whether to evaluate target batches in parallel.
-
-    Returns:
-        Magnetic flux-density components at the observation points.
-    """
-    xyzp = _3tup_contig(xyzp)
-    xyzfil = _3tup_contig(xyzfil)
-    dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil, dtype=float64).ravel()
-    if asarray(wire_radius).ndim == 0:
-        wire_radius = full(ifil.size, float(wire_radius))
-    wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
-    return em_flux_density_linear_filament_hierarchical(
-        xyzp,
-        xyzfil,
-        dlxyzfil,
-        ifil,
-        wire_radius,
-        theta,
-        par,
-    )
-
-
-def vector_potential_linear_filament_hierarchical(
-    xyzp: Array3xN,
-    xyzfil: Array3xN,
-    dlxyzfil: Array3xN,
-    ifil: NDArray[float64],
-    wire_radius: float | NDArray[float64] = 0.0,
-    theta: float = 0.05,
-    par: bool = True,
-) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
-    """Hierarchical A-field calculation for many linear filament segments.
-
-    This one-shot wrapper builds the source tree internally and mirrors
-    [`vector_potential_linear_filament`][cfsem.vector_potential_linear_filament] for cases
-    where geometry reuse is not needed.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-
-    Args:
-        xyzp: Observation point coordinates.
-        xyzfil: Filament segment start coordinates.
-        dlxyzfil: Filament segment start-to-end displacement vectors.
-        ifil: Current in each filament segment.
-        wire_radius: Wire radius for each filament segment, or one scalar radius for all
-            segments.
-        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        par: Whether to evaluate target batches in parallel.
-
-    Returns:
-        Magnetic vector-potential components at the observation points.
-    """
-    xyzp = _3tup_contig(xyzp)
-    xyzfil = _3tup_contig(xyzfil)
-    dlxyzfil = _3tup_contig(dlxyzfil)
-    ifil = ascontiguousarray(ifil, dtype=float64).ravel()
-    if asarray(wire_radius).ndim == 0:
-        wire_radius = full(ifil.size, float(wire_radius))
-    wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
-    return em_vector_potential_linear_filament_hierarchical(
-        xyzp,
-        xyzfil,
-        dlxyzfil,
-        ifil,
-        wire_radius,
-        theta,
-        par,
-    )
-
-
 def flux_density_triangle_mesh(
     obs: NDArray[float64],
     nodes: NDArray[float64],
@@ -553,86 +449,6 @@ def vector_potential_triangle_mesh(
     triangles = ascontiguousarray(triangles, dtype=int64)
     s = ascontiguousarray(s, dtype=float64).ravel()
     return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par, quad)
-
-
-def flux_density_triangle_mesh_hierarchical(
-    obs: NDArray[float64],
-    nodes: NDArray[float64],
-    triangles: NDArray[int64],
-    s: NDArray[float64],
-    theta: float = 0.05,
-    par: bool = True,
-    quad: str = "dunavant3",
-) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
-    """Hierarchical B-field calculation for a triangle mesh with nodal stream-function values.
-
-    This one-shot wrapper builds the source tree internally and mirrors
-    [`flux_density_triangle_mesh`][cfsem.flux_density_triangle_mesh] for cases where
-    geometry reuse is not needed.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-
-    Args:
-        obs: Observation point coordinates with one point per row.
-        nodes: Mesh node coordinates with one node per row.
-        triangles: Triangle node indices with one triangle per row.
-        s: Nodal stream-function values.
-        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        par: Whether to evaluate target batches in parallel.
-        quad: Triangle quadrature rule.
-
-    Returns:
-        Magnetic flux-density components at the observation points.
-    """
-    obs = ascontiguousarray(obs, dtype=float64)
-    nodes = ascontiguousarray(nodes, dtype=float64)
-    triangles = ascontiguousarray(triangles, dtype=int64)
-    s = ascontiguousarray(s, dtype=float64).ravel()
-    return em_flux_density_triangle_mesh_hierarchical(obs, nodes, triangles, s, theta, par, quad)
-
-
-def vector_potential_triangle_mesh_hierarchical(
-    obs: NDArray[float64],
-    nodes: NDArray[float64],
-    triangles: NDArray[int64],
-    s: NDArray[float64],
-    theta: float = 0.05,
-    par: bool = True,
-    quad: str = "dunavant3",
-) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
-    """Hierarchical A-field calculation for a triangle mesh with nodal stream-function values.
-
-    This one-shot wrapper builds the source tree internally and mirrors
-    [`vector_potential_triangle_mesh`][cfsem.vector_potential_triangle_mesh] for cases
-    where geometry reuse is not needed.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-
-    Args:
-        obs: Observation point coordinates with one point per row.
-        nodes: Mesh node coordinates with one node per row.
-        triangles: Triangle node indices with one triangle per row.
-        s: Nodal stream-function values.
-        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        par: Whether to evaluate target batches in parallel.
-        quad: Triangle quadrature rule.
-
-    Returns:
-        Magnetic vector-potential components at the observation points.
-    """
-    obs = ascontiguousarray(obs, dtype=float64)
-    nodes = ascontiguousarray(nodes, dtype=float64)
-    triangles = ascontiguousarray(triangles, dtype=int64)
-    s = ascontiguousarray(s, dtype=float64).ravel()
-    return em_vector_potential_triangle_mesh_hierarchical(obs, nodes, triangles, s, theta, par, quad)
 
 
 def flux_density_triangle_mesh_mapping(
@@ -1416,46 +1232,6 @@ def flux_density_dipole(
     return bx, by, bz  # type: ignore
 
 
-def flux_density_dipole_hierarchical(
-    loc: Array3xN,
-    moment: Array3xN,
-    xyzp: Array3xN,
-    theta: float = 0.01,
-    par: bool = True,
-    outer_radius: NDArray[float64] | None = None,
-) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
-    """Hierarchical magnetic flux density of dipoles in cartesian coordinates.
-
-    This one-shot wrapper builds the source tree internally and mirrors
-    [`flux_density_dipole`][cfsem.flux_density_dipole] for cases where geometry reuse is
-    not needed.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-
-    Args:
-        loc: Dipole source coordinates.
-        moment: Dipole magnetic moment vectors.
-        xyzp: Observation point coordinates.
-        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        par: Whether to evaluate target batches in parallel.
-        outer_radius: Radius for the magnetized-sphere near-field treatment. Defaults to
-            zero for every source.
-
-    Returns:
-        Magnetic flux-density components at the observation points.
-    """
-    loc = _3tup_contig(loc)
-    moment = _3tup_contig(moment)
-    xyzp = _3tup_contig(xyzp)
-    outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
-    outer_radius = ascontiguousarray(outer_radius, dtype=float64).ravel()
-    return em_flux_density_dipole_hierarchical(loc, moment, outer_radius, xyzp, theta, par)
-
-
 def vector_potential_dipole(
     loc: Array3xN,
     moment: Array3xN,
@@ -1485,46 +1261,6 @@ def vector_potential_dipole(
     ax, ay, az = em_vector_potential_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
     return ax, ay, az  # type: ignore
-
-
-def vector_potential_dipole_hierarchical(
-    loc: Array3xN,
-    moment: Array3xN,
-    xyzp: Array3xN,
-    theta: float = 0.01,
-    par: bool = True,
-    outer_radius: NDArray[float64] | None = None,
-) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
-    """Hierarchical magnetic vector potential of dipoles in cartesian coordinates.
-
-    This one-shot wrapper builds the source tree internally and mirrors
-    [`vector_potential_dipole`][cfsem.vector_potential_dipole] for cases where geometry
-    reuse is not needed.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-
-    Args:
-        loc: Dipole source coordinates.
-        moment: Dipole magnetic moment vectors.
-        xyzp: Observation point coordinates.
-        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        par: Whether to evaluate target batches in parallel.
-        outer_radius: Radius for the magnetized-sphere near-field treatment. Defaults to
-            zero for every source.
-
-    Returns:
-        Magnetic vector-potential components at the observation points.
-    """
-    loc = _3tup_contig(loc)
-    moment = _3tup_contig(moment)
-    xyzp = _3tup_contig(xyzp)
-    outer_radius = outer_radius if outer_radius is not None else zeros_like(loc[0])
-    outer_radius = ascontiguousarray(outer_radius, dtype=float64).ravel()
-    return em_vector_potential_dipole_hierarchical(loc, moment, outer_radius, xyzp, theta, par)
 
 
 def body_force_density_circular_filament_cartesian(

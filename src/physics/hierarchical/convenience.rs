@@ -10,13 +10,13 @@ use crate::physics::boundary_element::QuadratureKind;
 
 use super::kernels::{
     BoundaryElementFluxDensityKernel, BoundaryElementTriangle,
-    BoundaryElementVectorPotentialKernel, DipoleFluxDensityKernel, DipoleSource, DipoleTarget,
+    BoundaryElementVectorPotentialKernel, DipoleFluxDensityKernel, DipoleSource, DipoleTargets,
     DipoleVectorPotentialKernel, LinearFilamentFluxDensityKernel, LinearFilamentSource,
     LinearFilamentVectorPotentialKernel,
 };
 use super::{
     ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
-    evaluate_source_tree_into, evaluate_source_tree_into_par,
+    TargetCollection, evaluate_source_tree_into, evaluate_source_tree_into_par,
     parallel_source_tree_evaluation_scratch_len, source_tree_evaluation_scratch_len,
     update_source_summaries_into,
 };
@@ -64,7 +64,7 @@ pub fn flux_density_dipole_hierarchical(
         DipoleFluxDensityKernel::<f64>::new(),
         &sources,
         &moments,
-        &targets,
+        targets,
         theta,
         par,
         out,
@@ -114,7 +114,7 @@ pub fn vector_potential_dipole_hierarchical(
         DipoleVectorPotentialKernel::<f64>::new(),
         &sources,
         &moments,
-        &targets,
+        targets,
         theta,
         par,
         out,
@@ -168,7 +168,7 @@ pub fn flux_density_linear_filament_hierarchical(
         LinearFilamentFluxDensityKernel::<f64>::new(),
         &sources,
         ifil,
-        &targets,
+        targets,
         theta,
         par,
         out,
@@ -222,7 +222,7 @@ pub fn vector_potential_linear_filament_hierarchical(
         LinearFilamentVectorPotentialKernel::<f64>::new(),
         &sources,
         ifil,
-        &targets,
+        targets,
         theta,
         par,
         out,
@@ -271,7 +271,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
         BoundaryElementFluxDensityKernel::<f64>::new(quad_kind),
         &sources,
         &moments,
-        &targets,
+        targets,
         theta,
         par,
         out,
@@ -320,18 +320,18 @@ pub fn vector_potential_triangle_mesh_hierarchical(
         BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind),
         &sources,
         &moments,
-        &targets,
+        targets,
         theta,
         par,
         out,
     )
 }
 
-fn one_shot_vec3<K>(
+fn one_shot_vec3<K, C>(
     kernel: K,
     sources: &[K::SourceGeometry],
     moments: &[K::SourceMoment],
-    targets: &[K::TargetGeometry],
+    targets: C,
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -339,6 +339,7 @@ fn one_shot_vec3<K>(
 where
     K: HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
     K::TargetGeometry: Copy,
+    C: TargetCollection<K>,
 {
     if out.0.len() != targets.len() || out.1.len() != targets.len() || out.2.len() != targets.len()
     {
@@ -403,19 +404,13 @@ where
     Ok(())
 }
 
-fn dipole_targets_from_slices(
-    points: (&[f64], &[f64], &[f64]),
-) -> Result<Vec<DipoleTarget<f64>>, HierarchicalError> {
+fn dipole_targets_from_slices<'a>(
+    points: (&'a [f64], &'a [f64], &'a [f64]),
+) -> Result<DipoleTargets<'a, f64>, HierarchicalError> {
     if points.0.len() != points.1.len() || points.0.len() != points.2.len() {
         return Err(HierarchicalError::LengthMismatch);
     }
-    let mut targets = Vec::with_capacity(points.0.len());
-    for i in 0..points.0.len() {
-        targets.push(DipoleTarget {
-            position: [points.0[i], points.1[i], points.2[i]],
-        });
-    }
-    Ok(targets)
+    Ok(DipoleTargets::new(points.0, points.1, points.2))
 }
 
 fn dipole_sources_from_slices(

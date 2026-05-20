@@ -153,16 +153,16 @@ def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
         cfsem.flux_density_dipole_hierarchical(
             loc,
             moment,
+            outer_radius,
             obs,
             theta=0.0,
             par=False,
-            outer_radius=outer_radius,
         ),
         dipole_solver.flux_density(obs, moment, par=False),
     )
     _assert_vec_close(
         cfsem.vector_potential_dipole_hierarchical(
-            loc, moment, obs, theta=0.0, par=False, outer_radius=outer_radius
+            loc, moment, outer_radius, obs, theta=0.0, par=False
         ),
         dipole_solver.vector_potential(obs, moment, par=False),
     )
@@ -183,13 +183,13 @@ def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
     filament_solver.set_sources(xyzfil, dlxyzfil, wire_radius)
     _assert_vec_close(
         cfsem.flux_density_linear_filament_hierarchical(
-            obs, xyzfil, dlxyzfil, current, 0.0, theta=0.0, par=False
+            xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=False
         ),
         filament_solver.flux_density(obs, current, par=False),
     )
     _assert_vec_close(
         cfsem.vector_potential_linear_filament_hierarchical(
-            obs, xyzfil, dlxyzfil, current, 0.0, theta=0.0, par=False
+            xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=False
         ),
         filament_solver.vector_potential(obs, current, par=False),
     )
@@ -214,13 +214,13 @@ def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
     boundary_solver.set_sources(nodes, triangles)
     _assert_vec_close(
         cfsem.flux_density_triangle_mesh_hierarchical(
-            obs_array, nodes, triangles, stream_function, theta=0.0, par=False, quad="dunavant3"
+            nodes, triangles, stream_function, obs_array, theta=0.0, quad="dunavant3", par=False
         ),
         boundary_solver.flux_density(obs, triangle_values, par=False),
     )
     _assert_vec_close(
         cfsem.vector_potential_triangle_mesh_hierarchical(
-            obs_array, nodes, triangles, stream_function, theta=0.0, par=False, quad="dunavant3"
+            nodes, triangles, stream_function, obs_array, theta=0.0, quad="dunavant3", par=False
         ),
         boundary_solver.vector_potential(obs, triangle_values, par=False),
     )

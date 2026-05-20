@@ -1010,7 +1010,7 @@ class HierarchicalBoundaryElements:
     def flux_density(
         self,
         target: ArrayTriple,
-        stream_function_values: ArrayTriple,
+        s: FloatArray,
         par: bool = False,
         out: ArrayTriple | None = None,
     ) -> ArrayTriple:
@@ -1024,7 +1024,7 @@ class HierarchicalBoundaryElements:
 
         Args:
             target: Target point coordinates as component arrays.
-            stream_function_values: Triangle-local nodal stream-function values.
+            s: Nodal stream-function values.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
 
@@ -1036,7 +1036,7 @@ class HierarchicalBoundaryElements:
     def vector_potential(
         self,
         target: ArrayTriple,
-        stream_function_values: ArrayTriple,
+        s: FloatArray,
         par: bool = False,
         out: ArrayTriple | None = None,
     ) -> ArrayTriple:
@@ -1050,7 +1050,7 @@ class HierarchicalBoundaryElements:
 
         Args:
             target: Target point coordinates as component arrays.
-            stream_function_values: Triangle-local nodal stream-function values.
+            s: Nodal stream-function values.
             par: Whether to evaluate target batches in parallel.
             out: Optional output component arrays to fill.
 
@@ -1062,14 +1062,14 @@ class HierarchicalBoundaryElements:
     def accepted_source_levels(
         self,
         target: ArrayTriple,
-        stream_function_values: ArrayTriple,
+        s: FloatArray,
         field: Literal["b", "a"] = "b",
     ) -> NDArray[float64]:
         """Return the accepted source-tree level diagnostic for each target.
 
         Args:
             target: Target point coordinates as component arrays.
-            stream_function_values: Triangle-local nodal stream-function values.
+            s: Nodal stream-function values.
             field: Field kernel to use for the acceptance diagnostic.
 
         Returns:

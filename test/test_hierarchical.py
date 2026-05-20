@@ -102,11 +102,6 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     )
     triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
     stream_function = np.array([0.0, 1.0, 0.25, -0.5])
-    triangle_values = (
-        stream_function[triangles[:, 0]],
-        stream_function[triangles[:, 1]],
-        stream_function[triangles[:, 2]],
-    )
     obs = (
         np.array([0.25, 1.5, -0.4]),
         np.array([0.25, -0.2, 1.2]),
@@ -123,10 +118,10 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     direct_a = cfsem.vector_potential_triangle_mesh(
         obs_array, nodes, triangles, stream_function, par=False, quad="dunavant3"
     )
-    _assert_vec_close(solver.flux_density(obs, triangle_values, par=False), direct_b)
-    _assert_vec_close(solver.flux_density(obs, triangle_values, par=True), direct_b)
-    _assert_vec_close(solver.vector_potential(obs, triangle_values, par=False), direct_a)
-    assert solver.accepted_source_levels(obs, triangle_values, field="b").shape == obs[0].shape
+    _assert_vec_close(solver.flux_density(obs, stream_function, par=False), direct_b)
+    _assert_vec_close(solver.flux_density(obs, stream_function, par=True), direct_b)
+    _assert_vec_close(solver.vector_potential(obs, stream_function, par=False), direct_a)
+    assert solver.accepted_source_levels(obs, stream_function, field="b").shape == obs[0].shape
     assert solver.source_tree_aabbs()[0].size > 0
 
 
@@ -204,11 +199,6 @@ def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
     )
     triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
     stream_function = np.array([0.0, 1.0, 0.25, -0.5])
-    triangle_values = (
-        stream_function[triangles[:, 0]],
-        stream_function[triangles[:, 1]],
-        stream_function[triangles[:, 2]],
-    )
     obs_array = np.column_stack(obs)
     boundary_solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
     boundary_solver.set_sources(nodes, triangles)
@@ -216,13 +206,13 @@ def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
         cfsem.flux_density_triangle_mesh_hierarchical(
             nodes, triangles, stream_function, obs_array, theta=0.0, quad="dunavant3", par=False
         ),
-        boundary_solver.flux_density(obs, triangle_values, par=False),
+        boundary_solver.flux_density(obs, stream_function, par=False),
     )
     _assert_vec_close(
         cfsem.vector_potential_triangle_mesh_hierarchical(
             nodes, triangles, stream_function, obs_array, theta=0.0, quad="dunavant3", par=False
         ),
-        boundary_solver.vector_potential(obs, triangle_values, par=False),
+        boundary_solver.vector_potential(obs, stream_function, par=False),
     )
 
 
@@ -298,17 +288,12 @@ def test_hierarchical_boundary_element_wrapper_update_and_source_value_methods()
     )
     triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
     stream_function = np.array([0.0, 1.0, 0.25, -0.5])
-    triangle_values = (
-        stream_function[triangles[:, 0]],
-        stream_function[triangles[:, 1]],
-        stream_function[triangles[:, 2]],
-    )
     obs = np.array([[0.25, 0.25, 0.5], [1.5, -0.2, 0.8], [-0.4, 1.2, -0.7]])
     obs_tuple = _tuple_columns(obs)
 
     unbuilt = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
     with pytest.raises(ValueError, match="sources have not been built"):
-        unbuilt.flux_density(obs_tuple, triangle_values)
+        unbuilt.flux_density(obs_tuple, stream_function)
 
     solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
     solver.set_sources(nodes, triangles)
@@ -320,9 +305,9 @@ def test_hierarchical_boundary_element_wrapper_update_and_source_value_methods()
     direct_a = cfsem.vector_potential_triangle_mesh(
         obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
     )
-    _assert_vec_close(solver.flux_density(obs_tuple, triangle_values, par=False), direct_b)
-    _assert_vec_close(solver.vector_potential(obs_tuple, triangle_values, par=False), direct_a)
-    assert solver.accepted_source_levels(obs_tuple, triangle_values, field="a").shape == obs_tuple[0].shape
+    _assert_vec_close(solver.flux_density(obs_tuple, stream_function, par=False), direct_b)
+    _assert_vec_close(solver.vector_potential(obs_tuple, stream_function, par=False), direct_a)
+    assert solver.accepted_source_levels(obs_tuple, stream_function, field="a").shape == obs_tuple[0].shape
     assert solver.source_tree_aabbs()[0].size > 0
 
 

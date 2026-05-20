@@ -549,38 +549,69 @@ fn build_linear_filament_sources(
     Ok(sources)
 }
 
-fn build_boundary_element_sources(
+struct BoundaryElementGeometry {
+    nodes: (Vec<f64>, Vec<f64>, Vec<f64>),
+    triangles: (Vec<usize>, Vec<usize>, Vec<usize>),
+}
+
+impl BoundaryElementGeometry {
+    fn mesh_view(&self) -> PyResult<mesh::TriangleMeshView<'_>> {
+        mesh::TriangleMeshView::new(
+            (&self.nodes.0, &self.nodes.1, &self.nodes.2),
+            (&self.triangles.0, &self.triangles.1, &self.triangles.2),
+        )
+        .map_err(|err| PyInteropError::ValueError {
+            msg: err.to_string(),
+        })
+        .map_err(Into::into)
+    }
+}
+
+fn build_boundary_element_geometry(
     py: Python<'_>,
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
-) -> PyResult<Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>> {
+) -> PyResult<(
+    BoundaryElementGeometry,
+    Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>,
+)> {
     warn_if_readonly_array2_noncontiguous(py, &nodes, "nodes")?;
     warn_if_readonly_array2_noncontiguous(py, &triangles, "triangles")?;
-    let nodes = nodes.as_array();
-    let node_shape = nodes.shape();
-    if node_shape.len() != 2 || node_shape[1] != 3 {
-        return Err(PyInteropError::DimensionalityError {
-            msg: "nodes must have shape (nnode, 3)".to_string(),
-        }
-        .into());
-    }
-
+    let nodes = split_xyz_array2("nodes", nodes)?;
     let (i0, i1, i2) = split_triangle_index_array2("triangles", triangles)?;
-    let mut sources = Vec::with_capacity(i0.len());
-    for i in 0..i0.len() {
-        if i0[i] >= node_shape[0] || i1[i] >= node_shape[0] || i2[i] >= node_shape[0] {
-            return Err(PyInteropError::ValueError {
-                msg: "triangles contain node index outside nodes".to_string(),
-            }
-            .into());
-        }
+    let geometry = BoundaryElementGeometry {
+        nodes,
+        triangles: (i0, i1, i2),
+    };
+    let mesh = geometry.mesh_view()?;
+    let mut sources = Vec::with_capacity(mesh.len());
+    for i in 0..mesh.len() {
+        let nodes = mesh.triangle_nodes(i);
         sources.push(physics::hierarchical::kernels::BoundaryElementTriangle {
-            n0: [nodes[[i0[i], 0]], nodes[[i0[i], 1]], nodes[[i0[i], 2]]],
-            n1: [nodes[[i1[i], 0]], nodes[[i1[i], 1]], nodes[[i1[i], 2]]],
-            n2: [nodes[[i2[i], 0]], nodes[[i2[i], 1]], nodes[[i2[i], 2]]],
+            n0: nodes[0],
+            n1: nodes[1],
+            n2: nodes[2],
         });
     }
-    Ok(sources)
+    Ok((geometry, sources))
+}
+
+fn read_boundary_element_moments(
+    py: Python<'_>,
+    mesh: &mesh::TriangleMeshView<'_>,
+    s: &PyReadonlyArray1<'_, f64>,
+) -> PyResult<Vec<[f64; 3]>> {
+    let s = read_f64_input_array1(py, s, "s")?;
+    mesh.validate_nodal_values(s.as_slice()).map_err(|err| {
+        PyInteropError::DimensionalityError {
+            msg: err.to_string(),
+        }
+    })?;
+    let mut moments = Vec::with_capacity(mesh.len());
+    for i in 0..mesh.len() {
+        moments.push(mesh.triangle_scalars(i, s.as_slice()));
+    }
+    Ok(moments)
 }
 
 fn read_vec3_moments(
@@ -1440,6 +1471,7 @@ struct HierarchicalBoundaryElements {
     theta: f64,
     construction_method: HierarchicalConstructionMethod,
     quad_kind: physics::boundary_element::QuadratureKind,
+    geometry: Option<BoundaryElementGeometry>,
     sources: Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>,
     source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
 }
@@ -1453,6 +1485,7 @@ impl HierarchicalBoundaryElements {
             theta,
             construction_method: parse_hierarchical_construction_method(construction_method)?,
             quad_kind: parse_triangle_quadrature(quad)?,
+            geometry: None,
             sources: Vec::new(),
             source_tree: None,
         })
@@ -1465,15 +1498,17 @@ impl HierarchicalBoundaryElements {
         nodes: PyReadonlyArray2<f64>,
         triangles: PyReadonlyArray2<i64>,
     ) -> PyResult<()> {
-        self.sources = build_boundary_element_sources(py, nodes, triangles)?;
+        let (geometry, sources) = build_boundary_element_geometry(py, nodes, triangles)?;
+        self.sources = sources;
         self.source_tree = Some(
             build_hierarchical_source_tree(&self.sources, self.construction_method)
                 .map_err(|err| py_hierarchical_error("source tree build", err))?,
         );
+        self.geometry = Some(geometry);
         Ok(())
     }
 
-    #[pyo3(signature = (target, stream_function_values, par=false, out=None))]
+    #[pyo3(signature = (target, s, par=false, out=None))]
     fn flux_density(
         &self,
         py: Python<'_>,
@@ -1482,11 +1517,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        stream_function_values: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
+        s: PyReadonlyArray1<f64>,
         par: bool,
         out: Option<(
             PyReadwriteArray1<f64>,
@@ -1494,12 +1525,11 @@ impl HierarchicalBoundaryElements {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values =
-            self.eval_boundary_element_flux_density(py, target, stream_function_values, par)?;
+        let values = self.eval_boundary_element_flux_density(py, target, s, par)?;
         vec3_to_output_tuple(py, &values, out, "flux_density")
     }
 
-    #[pyo3(signature = (target, stream_function_values, par=false, out=None))]
+    #[pyo3(signature = (target, s, par=false, out=None))]
     fn vector_potential(
         &self,
         py: Python<'_>,
@@ -1508,11 +1538,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        stream_function_values: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
+        s: PyReadonlyArray1<f64>,
         par: bool,
         out: Option<(
             PyReadwriteArray1<f64>,
@@ -1520,12 +1546,11 @@ impl HierarchicalBoundaryElements {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values =
-            self.eval_boundary_element_vector_potential(py, target, stream_function_values, par)?;
+        let values = self.eval_boundary_element_vector_potential(py, target, s, par)?;
         vec3_to_output_tuple(py, &values, out, "vector_potential")
     }
 
-    #[pyo3(signature = (target, stream_function_values, field="b"))]
+    #[pyo3(signature = (target, s, field="b"))]
     fn accepted_source_levels(
         &self,
         py: Python<'_>,
@@ -1534,15 +1559,10 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        stream_function_values: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
+        s: PyReadonlyArray1<f64>,
         field: &str,
     ) -> PyResult<Py<PyArray1<f64>>> {
-        let out =
-            self.eval_boundary_element_source_levels(py, target, stream_function_values, field)?;
+        let out = self.eval_boundary_element_source_levels(py, target, s, field)?;
         Ok(PyArray1::from_vec(py, out).unbind())
     }
 
@@ -1572,6 +1592,15 @@ impl HierarchicalBoundaryElements {
             .map_err(Into::into)
     }
 
+    fn mesh_view(&self) -> PyResult<mesh::TriangleMeshView<'_>> {
+        self.geometry
+            .as_ref()
+            .ok_or_else(|| PyInteropError::ValueError {
+                msg: "sources have not been built".to_string(),
+            })?
+            .mesh_view()
+    }
+
     fn eval_boundary_element_flux_density(
         &self,
         py: Python<'_>,
@@ -1580,21 +1609,13 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        stream_function_values: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
+        s: PyReadonlyArray1<f64>,
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
+        let mesh = self.mesh_view()?;
         let targets = read_target_points(py, &target)?;
-        let moments = read_vec3_moments(
-            py,
-            stream_function_values,
-            self.sources.len(),
-            "stream_function_values",
-        )?;
+        let moments = read_boundary_element_moments(py, &mesh, &s)?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
                 self.quad_kind,
@@ -1616,21 +1637,13 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        stream_function_values: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
+        s: PyReadonlyArray1<f64>,
         par: bool,
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
+        let mesh = self.mesh_view()?;
         let targets = read_target_points(py, &target)?;
-        let moments = read_vec3_moments(
-            py,
-            stream_function_values,
-            self.sources.len(),
-            "stream_function_values",
-        )?;
+        let moments = read_boundary_element_moments(py, &mesh, &s)?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
                 self.quad_kind,
@@ -1652,21 +1665,13 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        stream_function_values: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
+        s: PyReadonlyArray1<f64>,
         field: &str,
     ) -> PyResult<Vec<f64>> {
         let source_tree = self.source_tree()?;
+        let mesh = self.mesh_view()?;
         let targets = read_target_points(py, &target)?;
-        let moments = read_vec3_moments(
-            py,
-            stream_function_values,
-            self.sources.len(),
-            "stream_function_values",
-        )?;
+        let moments = read_boundary_element_moments(py, &mesh, &s)?;
         match field {
             "b" => hierarchical_source_level_diagnostic(
                 physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(

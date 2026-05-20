@@ -426,17 +426,6 @@ def boundary_source_arrays(
     )
 
 
-def boundary_triangle_values(
-    stream_function: np.ndarray,
-    triangles: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    return (
-        np.ascontiguousarray(stream_function[triangles[:, 0]]),
-        np.ascontiguousarray(stream_function[triangles[:, 1]]),
-        np.ascontiguousarray(stream_function[triangles[:, 2]]),
-    )
-
-
 def solve_self_fields(
     geometry: Geometry,
     geometry_layout: str,
@@ -530,7 +519,6 @@ def solve_self_fields(
         strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(
             geometry, geometry_layout
         )
-        strip_triangle_values = boundary_triangle_values(strip_stream_function, strip_triangles)
         solver = cfsem.HierarchicalBoundaryElements(
             theta=theta,
             construction_method=construction_method,
@@ -539,8 +527,8 @@ def solve_self_fields(
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(self_obs, strip_triangle_values, par=par)
-        hierarchical_a = solver.vector_potential(self_obs, strip_triangle_values, par=par)
+        hierarchical_b = solver.flux_density(self_obs, strip_stream_function, par=par)
+        hierarchical_a = solver.vector_potential(self_obs, strip_stream_function, par=par)
     else:
         solver = cfsem.HierarchicalLinearFilaments(
             theta=theta,
@@ -655,7 +643,6 @@ def solve_fields(
         strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(
             geometry, geometry_layout
         )
-        strip_triangle_values = boundary_triangle_values(strip_stream_function, strip_triangles)
         solver = cfsem.HierarchicalBoundaryElements(
             theta=theta,
             construction_method=construction_method,
@@ -665,13 +652,13 @@ def solve_fields(
         build_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.obs, strip_triangle_values, par=par)
-        hierarchical_a = solver.vector_potential(geometry.obs, strip_triangle_values, par=par)
+        hierarchical_b = solver.flux_density(geometry.obs, strip_stream_function, par=par)
+        hierarchical_a = solver.vector_potential(geometry.obs, strip_stream_function, par=par)
         accepted_source_levels_b = solver.accepted_source_levels(
-            geometry.obs, strip_triangle_values, field="b"
+            geometry.obs, strip_stream_function, field="b"
         )
         accepted_source_levels_a = solver.accepted_source_levels(
-            geometry.obs, strip_triangle_values, field="a"
+            geometry.obs, strip_stream_function, field="a"
         )
     else:
         xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)

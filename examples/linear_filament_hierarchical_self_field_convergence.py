@@ -279,7 +279,6 @@ def hierarchical_self_field(
         discretization.starts,
         discretization.deltas,
         discretization.wire_radius,
-        par=par,
     )
     build_seconds = perf_counter() - start
 

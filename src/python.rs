@@ -861,7 +861,7 @@ impl HierarchicalDipoles {
         })
     }
 
-    #[pyo3(signature = (loc, outer_radius=None, par=false))]
+    #[pyo3(signature = (loc, outer_radius=None))]
     fn set_sources(
         &mut self,
         loc: (
@@ -870,9 +870,7 @@ impl HierarchicalDipoles {
             PyReadonlyArray1<f64>,
         ),
         outer_radius: Option<PyReadonlyArray1<f64>>,
-        par: bool,
     ) -> PyResult<()> {
-        let _ = par;
         self.sources = build_dipole_sources_optional_radius(loc, outer_radius)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(&self.sources, self.construction_method)
@@ -1096,7 +1094,7 @@ impl HierarchicalLinearFilaments {
         })
     }
 
-    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius, par=false))]
+    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius))]
     fn set_sources(
         &mut self,
         xyzfil: (
@@ -1110,9 +1108,7 @@ impl HierarchicalLinearFilaments {
             PyReadonlyArray1<f64>,
         ),
         wire_radius: PyReadonlyArray1<f64>,
-        par: bool,
     ) -> PyResult<()> {
-        let _ = par;
         self.sources = build_linear_filament_sources(xyzfil, dlxyzfil, wire_radius)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(&self.sources, self.construction_method)
@@ -1314,14 +1310,12 @@ impl HierarchicalBoundaryElements {
         })
     }
 
-    #[pyo3(signature = (nodes, triangles, par=false))]
+    #[pyo3(signature = (nodes, triangles))]
     fn set_sources(
         &mut self,
         nodes: PyReadonlyArray2<f64>,
         triangles: PyReadonlyArray2<i64>,
-        par: bool,
     ) -> PyResult<()> {
-        let _ = par;
         self.sources = build_boundary_element_sources(nodes, triangles)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(&self.sources, self.construction_method)

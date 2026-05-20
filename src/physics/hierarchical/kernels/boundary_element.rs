@@ -141,10 +141,9 @@ fn add_source_to_summary<T: DualTreeScalar>(
     }
 
     // The far-field surrogate represents the physical current distribution,
-    // not just the mesh geometry. Weighting by area lets a zero-current
-    // triangle move the collapsed source position, which produces coherent
-    // artifacts when inactive or weak-current elements are grouped with active
-    // elements.
+    // not just the mesh geometry. Current-element weighting prevents inactive
+    // or weak-current triangles from moving the collapsed source position as
+    // much as active elements.
     out.weight = out.weight + current_weight;
     add3_in_place(&mut out.origin, scale3(centroid, current_weight));
     add3_in_place(&mut out.dipole_origin, scale3(centroid, current_weight));

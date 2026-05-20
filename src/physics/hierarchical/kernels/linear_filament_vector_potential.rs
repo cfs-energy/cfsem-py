@@ -41,7 +41,7 @@ pub struct LinearFilamentVectorPotentialSummary<T: DualTreeScalar> {
 /// Tree construction still uses each finite source segment's full AABB, so the
 /// near/far plan is based on the full span of the included filaments. Once a
 /// source cluster is accepted as far, the source term is represented as a point
-/// current element with a length-weighted origin, unit direction, and
+/// current element with a current-element-weighted origin, unit direction, and
 /// `I*dL` magnitude. A magnetic dipole term with its own weighted origin is
 /// also included so closed or locally cancelling current paths can still
 /// contribute to the far vector potential.

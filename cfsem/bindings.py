@@ -395,7 +395,7 @@ def flux_density_linear_filament_hierarchical(
     wire_radius: float | NDArray[float64] = 0.0,
     theta: float = 0.05,
     par: bool = True,
-) -> Array3xN:
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Hierarchical B-field calculation for many linear filament segments.
 
     This one-shot wrapper builds the source tree internally and mirrors
@@ -447,7 +447,7 @@ def vector_potential_linear_filament_hierarchical(
     wire_radius: float | NDArray[float64] = 0.0,
     theta: float = 0.05,
     par: bool = True,
-) -> Array3xN:
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Hierarchical A-field calculation for many linear filament segments.
 
     This one-shot wrapper builds the source tree internally and mirrors
@@ -561,7 +561,7 @@ def flux_density_triangle_mesh_hierarchical(
     theta: float = 0.05,
     par: bool = True,
     quad: str = "dunavant3",
-) -> Array3xN:
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Hierarchical B-field calculation for a triangle mesh with nodal stream-function values.
 
     This one-shot wrapper builds the source tree internally and mirrors
@@ -601,7 +601,7 @@ def vector_potential_triangle_mesh_hierarchical(
     theta: float = 0.05,
     par: bool = True,
     quad: str = "dunavant3",
-) -> Array3xN:
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Hierarchical A-field calculation for a triangle mesh with nodal stream-function values.
 
     This one-shot wrapper builds the source tree internally and mirrors
@@ -1421,7 +1421,7 @@ def flux_density_dipole_hierarchical(
     theta: float = 0.01,
     par: bool = True,
     outer_radius: NDArray[float64] | None = None,
-) -> Array3xN:
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Hierarchical magnetic flux density of dipoles in cartesian coordinates.
 
     This one-shot wrapper builds the source tree internally and mirrors
@@ -1492,7 +1492,7 @@ def vector_potential_dipole_hierarchical(
     theta: float = 0.01,
     par: bool = True,
     outer_radius: NDArray[float64] | None = None,
-) -> Array3xN:
+) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Hierarchical magnetic vector potential of dipoles in cartesian coordinates.
 
     This one-shot wrapper builds the source tree internally and mirrors

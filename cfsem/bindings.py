@@ -7,7 +7,7 @@ passed as contiguous and reallocating into contiguous inputs if necessary.
 
 from typing import Literal
 
-from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, zeros_like
+from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, uint64, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -102,6 +102,8 @@ from .cfsem import (
 from .cfsem import HierarchicalBoundaryElements as HierarchicalBoundaryElements
 from .cfsem import HierarchicalDipoles as HierarchicalDipoles
 from .cfsem import HierarchicalLinearFilaments as HierarchicalLinearFilaments
+
+SparseTriplet = tuple[NDArray[float64], NDArray[uint64], NDArray[uint64]]
 
 
 def flux_circular_filament(
@@ -1206,7 +1208,7 @@ def inductance_linear_filaments(
     raise ValueError("output must be 'vector' or 'matrix'")
 
 
-def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
+def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> SparseTriplet:
     """Build second-order Grad-Shafranov operator in triplet format.
     Assumes regular grid spacing.
 
@@ -1221,7 +1223,7 @@ def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
     return em_gs_operator_order2(rs, zs)
 
 
-def gs_operator_order4(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
+def gs_operator_order4(rs: NDArray[float64], zs: NDArray[float64]) -> SparseTriplet:
     """
     Build fourth-order Grad-Shafranov operator in triplet format.
     Assumes regular grid spacing.
@@ -1357,7 +1359,7 @@ def mutual_inductance_circular_to_linear(
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     par: bool = True,
-) -> NDArray[float64]:
+) -> float:
     """
     Mutual inductance between a collection of circular filaments and a piecewise-linear filament.
     This method is much faster (~100x typically) than discretizing the circular loop

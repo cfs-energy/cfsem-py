@@ -56,62 +56,62 @@ struct MortonItem {
 #[derive(Clone, Debug)]
 pub struct ClusterTree<T: Scalar> {
     /// Axis-aligned bounds for each node.
-    pub node_aabb: Vec<Aabb<T>>,
+    pub(crate) node_aabb: Vec<Aabb<T>>,
     /// Left child node ID, or `INVALID_INDEX` for leaves.
-    pub node_left_child: Vec<u32>,
+    pub(crate) node_left_child: Vec<u32>,
     /// Right child node ID, or `INVALID_INDEX` for leaves.
-    pub node_right_child: Vec<u32>,
+    pub(crate) node_right_child: Vec<u32>,
     /// Start of this node's contiguous item range in `sorted_indices`.
-    pub node_range_start: Vec<u32>,
+    pub(crate) node_range_start: Vec<u32>,
     /// Number of items covered by this node's subtree.
-    pub node_range_count: Vec<u32>,
+    pub(crate) node_range_count: Vec<u32>,
     /// Start of this leaf's item range, or `INVALID_INDEX` for internal nodes.
-    pub leaf_start: Vec<u32>,
+    pub(crate) leaf_start: Vec<u32>,
     /// Leaf item count, or zero for internal nodes.
-    pub leaf_count: Vec<u32>,
+    pub(crate) leaf_count: Vec<u32>,
     /// Input geometry IDs in tree order. Every node covers a contiguous range.
-    pub sorted_indices: Vec<u32>,
+    pub(crate) sorted_indices: Vec<u32>,
     /// Morton code for each sorted input, populated only by Morton/LBVH construction.
-    pub sorted_morton_codes: Vec<u64>,
+    pub(crate) sorted_morton_codes: Vec<u64>,
     /// Node IDs for leaves, used to update leaf summaries without scanning all nodes.
-    pub leaf_node_ids: Vec<u32>,
+    pub(crate) leaf_node_ids: Vec<u32>,
     /// Internal node IDs grouped by tree depth from root to leaves.
-    pub internal_level_ids: Vec<u32>,
+    pub(crate) internal_level_ids: Vec<u32>,
     /// CSR-style offsets into `internal_level_ids` for each internal depth.
-    pub internal_level_offsets: Vec<u32>,
+    pub(crate) internal_level_offsets: Vec<u32>,
     /// Maximum root-to-leaf depth.
-    pub max_depth: u32,
+    pub(crate) max_depth: u32,
 }
 
 /// Borrowed view over a finalized cluster tree.
 #[derive(Clone, Copy)]
 pub struct ClusterTreeView<'a, T: Scalar> {
     /// Axis-aligned bounds for each node.
-    pub node_aabb: &'a [Aabb<T>],
+    pub(crate) node_aabb: &'a [Aabb<T>],
     /// Left child node ID, or `INVALID_INDEX` for leaves.
-    pub node_left_child: &'a [u32],
+    pub(crate) node_left_child: &'a [u32],
     /// Right child node ID, or `INVALID_INDEX` for leaves.
-    pub node_right_child: &'a [u32],
+    pub(crate) node_right_child: &'a [u32],
     /// Start of this node's contiguous item range in `sorted_indices`.
-    pub node_range_start: &'a [u32],
+    pub(crate) node_range_start: &'a [u32],
     /// Number of items covered by this node's subtree.
-    pub node_range_count: &'a [u32],
+    pub(crate) node_range_count: &'a [u32],
     /// Start of this leaf's item range, or `INVALID_INDEX` for internal nodes.
-    pub leaf_start: &'a [u32],
+    pub(crate) leaf_start: &'a [u32],
     /// Leaf item count, or zero for internal nodes.
-    pub leaf_count: &'a [u32],
+    pub(crate) leaf_count: &'a [u32],
     /// Input geometry IDs in tree order. Every node covers a contiguous range.
-    pub sorted_indices: &'a [u32],
+    pub(crate) sorted_indices: &'a [u32],
     /// Morton code for each sorted input, populated only by Morton/LBVH construction.
-    pub sorted_morton_codes: &'a [u64],
+    pub(crate) sorted_morton_codes: &'a [u64],
     /// Node IDs for leaves, used to update leaf summaries without scanning all nodes.
-    pub leaf_node_ids: &'a [u32],
+    pub(crate) leaf_node_ids: &'a [u32],
     /// Internal node IDs grouped by tree depth from root to leaves.
-    pub internal_level_ids: &'a [u32],
+    pub(crate) internal_level_ids: &'a [u32],
     /// CSR-style offsets into `internal_level_ids` for each internal depth.
-    pub internal_level_offsets: &'a [u32],
+    pub(crate) internal_level_offsets: &'a [u32],
     /// Maximum root-to-leaf depth.
-    pub max_depth: u32,
+    pub(crate) max_depth: u32,
 }
 
 impl<T: Scalar> ClusterTree<T> {
@@ -281,6 +281,84 @@ impl<T: Scalar> ClusterTree<T> {
             max_depth: self.max_depth,
         }
     }
+
+    /// Axis-aligned bounds for every tree node.
+    #[inline]
+    pub fn node_aabbs(&self) -> &[Aabb<T>] {
+        &self.node_aabb
+    }
+
+    /// Left child node ID for every node, or [`ClusterTreeView::invalid_index`] for leaves.
+    #[inline]
+    pub fn node_left_children(&self) -> &[u32] {
+        &self.node_left_child
+    }
+
+    /// Right child node ID for every node, or [`ClusterTreeView::invalid_index`] for leaves.
+    #[inline]
+    pub fn node_right_children(&self) -> &[u32] {
+        &self.node_right_child
+    }
+
+    /// Start offsets for the sorted item range owned by each node.
+    #[inline]
+    pub fn node_range_starts(&self) -> &[u32] {
+        &self.node_range_start
+    }
+
+    /// Item counts for the sorted range owned by each node.
+    #[inline]
+    pub fn node_range_counts(&self) -> &[u32] {
+        &self.node_range_count
+    }
+
+    /// Leaf start offsets into [`ClusterTree::sorted_indices`].
+    #[inline]
+    pub fn leaf_starts(&self) -> &[u32] {
+        &self.leaf_start
+    }
+
+    /// Leaf item counts. Internal nodes have count zero.
+    #[inline]
+    pub fn leaf_counts(&self) -> &[u32] {
+        &self.leaf_count
+    }
+
+    /// Input geometry IDs in tree order.
+    #[inline]
+    pub fn sorted_indices(&self) -> &[u32] {
+        &self.sorted_indices
+    }
+
+    /// Morton codes in tree order when this tree was built by the Morton/LBVH method.
+    #[inline]
+    pub fn sorted_morton_codes(&self) -> &[u64] {
+        &self.sorted_morton_codes
+    }
+
+    /// Node IDs for leaves.
+    #[inline]
+    pub fn leaf_node_ids(&self) -> &[u32] {
+        &self.leaf_node_ids
+    }
+
+    /// Internal node IDs grouped by depth from root to leaves.
+    #[inline]
+    pub fn internal_level_ids(&self) -> &[u32] {
+        &self.internal_level_ids
+    }
+
+    /// CSR-style offsets into [`ClusterTree::internal_level_ids`].
+    #[inline]
+    pub fn internal_level_offsets(&self) -> &[u32] {
+        &self.internal_level_offsets
+    }
+
+    /// Maximum root-to-leaf depth.
+    #[inline]
+    pub fn max_depth(&self) -> u32 {
+        self.max_depth
+    }
 }
 
 impl<T: Scalar> ClusterTreeView<'_, T> {
@@ -294,6 +372,84 @@ impl<T: Scalar> ClusterTreeView<'_, T> {
     #[inline]
     pub fn n_items(&self) -> usize {
         self.sorted_indices.len()
+    }
+
+    /// Axis-aligned bounds for every tree node.
+    #[inline]
+    pub fn node_aabbs(&self) -> &[Aabb<T>] {
+        self.node_aabb
+    }
+
+    /// Left child node ID for every node, or [`ClusterTreeView::invalid_index`] for leaves.
+    #[inline]
+    pub fn node_left_children(&self) -> &[u32] {
+        self.node_left_child
+    }
+
+    /// Right child node ID for every node, or [`ClusterTreeView::invalid_index`] for leaves.
+    #[inline]
+    pub fn node_right_children(&self) -> &[u32] {
+        self.node_right_child
+    }
+
+    /// Start offsets for the sorted item range owned by each node.
+    #[inline]
+    pub fn node_range_starts(&self) -> &[u32] {
+        self.node_range_start
+    }
+
+    /// Item counts for the sorted range owned by each node.
+    #[inline]
+    pub fn node_range_counts(&self) -> &[u32] {
+        self.node_range_count
+    }
+
+    /// Leaf start offsets into [`ClusterTreeView::sorted_indices`].
+    #[inline]
+    pub fn leaf_starts(&self) -> &[u32] {
+        self.leaf_start
+    }
+
+    /// Leaf item counts. Internal nodes have count zero.
+    #[inline]
+    pub fn leaf_counts(&self) -> &[u32] {
+        self.leaf_count
+    }
+
+    /// Input geometry IDs in tree order.
+    #[inline]
+    pub fn sorted_indices(&self) -> &[u32] {
+        self.sorted_indices
+    }
+
+    /// Morton codes in tree order when this tree was built by the Morton/LBVH method.
+    #[inline]
+    pub fn sorted_morton_codes(&self) -> &[u64] {
+        self.sorted_morton_codes
+    }
+
+    /// Node IDs for leaves.
+    #[inline]
+    pub fn leaf_node_ids(&self) -> &[u32] {
+        self.leaf_node_ids
+    }
+
+    /// Internal node IDs grouped by depth from root to leaves.
+    #[inline]
+    pub fn internal_level_ids(&self) -> &[u32] {
+        self.internal_level_ids
+    }
+
+    /// CSR-style offsets into [`ClusterTreeView::internal_level_ids`].
+    #[inline]
+    pub fn internal_level_offsets(&self) -> &[u32] {
+        self.internal_level_offsets
+    }
+
+    /// Maximum root-to-leaf depth.
+    #[inline]
+    pub fn max_depth(&self) -> u32 {
+        self.max_depth
     }
 
     /// Whether `node_id` refers to a leaf node.

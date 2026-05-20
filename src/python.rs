@@ -1324,7 +1324,7 @@ impl HierarchicalBoundaryElements {
         Ok(())
     }
 
-    #[pyo3(signature = (target, current_density, par=false, out=None))]
+    #[pyo3(signature = (target, stream_function_values, par=false, out=None))]
     fn flux_density(
         &self,
         py: Python<'_>,
@@ -1333,7 +1333,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        current_density: (
+        stream_function_values: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1345,11 +1345,12 @@ impl HierarchicalBoundaryElements {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_boundary_element_flux_density(target, current_density, par)?;
+        let values =
+            self.eval_boundary_element_flux_density(target, stream_function_values, par)?;
         vec3_to_output_tuple(py, &values, out, "flux_density")
     }
 
-    #[pyo3(signature = (target, current_density, par=false, out=None))]
+    #[pyo3(signature = (target, stream_function_values, par=false, out=None))]
     fn vector_potential(
         &self,
         py: Python<'_>,
@@ -1358,7 +1359,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        current_density: (
+        stream_function_values: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1370,11 +1371,12 @@ impl HierarchicalBoundaryElements {
             PyReadwriteArray1<f64>,
         )>,
     ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_boundary_element_vector_potential(target, current_density, par)?;
+        let values =
+            self.eval_boundary_element_vector_potential(target, stream_function_values, par)?;
         vec3_to_output_tuple(py, &values, out, "vector_potential")
     }
 
-    #[pyo3(signature = (target, current_density, field="b"))]
+    #[pyo3(signature = (target, stream_function_values, field="b"))]
     fn accepted_source_levels(
         &self,
         py: Python<'_>,
@@ -1383,14 +1385,15 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        current_density: (
+        stream_function_values: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
         field: &str,
     ) -> PyResult<Py<PyArray1<f64>>> {
-        let out = self.eval_boundary_element_source_levels(target, current_density, field)?;
+        let out =
+            self.eval_boundary_element_source_levels(target, stream_function_values, field)?;
         Ok(PyArray1::from_vec(py, out).unbind())
     }
 
@@ -1427,7 +1430,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        current_density: (
+        stream_function_values: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1436,7 +1439,11 @@ impl HierarchicalBoundaryElements {
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
         let targets = read_target_columns(&target)?;
-        let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
+        let moments = read_vec3_moments(
+            stream_function_values,
+            self.sources.len(),
+            "stream_function_values",
+        )?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
                 self.quad_kind,
@@ -1457,7 +1464,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        current_density: (
+        stream_function_values: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1466,7 +1473,11 @@ impl HierarchicalBoundaryElements {
     ) -> PyResult<Vec<[f64; 3]>> {
         let source_tree = self.source_tree()?;
         let targets = read_target_columns(&target)?;
-        let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
+        let moments = read_vec3_moments(
+            stream_function_values,
+            self.sources.len(),
+            "stream_function_values",
+        )?;
         hierarchical_eval_source_tree_vec3(
             physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
                 self.quad_kind,
@@ -1487,7 +1498,7 @@ impl HierarchicalBoundaryElements {
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
         ),
-        current_density: (
+        stream_function_values: (
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
             PyReadonlyArray1<f64>,
@@ -1496,7 +1507,11 @@ impl HierarchicalBoundaryElements {
     ) -> PyResult<Vec<f64>> {
         let source_tree = self.source_tree()?;
         let targets = read_target_columns(&target)?;
-        let moments = read_vec3_moments(current_density, self.sources.len(), "current_density")?;
+        let moments = read_vec3_moments(
+            stream_function_values,
+            self.sources.len(),
+            "stream_function_values",
+        )?;
         match field {
             "b" => hierarchical_source_level_diagnostic(
                 physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(

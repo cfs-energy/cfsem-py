@@ -24,6 +24,7 @@ nav:
   - "Python API":
       - "python/filament.md"
       - "python/boundary_element.md"
+      - "python/hierarchical.md"
       - "python/flux_density.md"
       - "python/vector_potential.md"
       - "python/inductance.md"

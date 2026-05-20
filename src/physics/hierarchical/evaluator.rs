@@ -832,6 +832,13 @@ fn validate_source_tree_layout<T: super::Scalar>(
         {
             return HierarchicalError::LengthMismatch;
         }
+        if tree.leaf_count[node_id] == 0 {
+            let left = tree.node_left_child[node_id] as usize;
+            let right = tree.node_right_child[node_id] as usize;
+            if left >= n_nodes || right >= n_nodes {
+                return HierarchicalError::LengthMismatch;
+            }
+        }
     }
 
     for i in 0..tree.leaf_node_ids.len() {

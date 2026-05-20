@@ -4,7 +4,13 @@
 
 ::: cfsem.flux_density_triangle_mesh
 
+::: cfsem.flux_density_triangle_mesh_hierarchical
+
 ::: cfsem.vector_potential_triangle_mesh
+
+::: cfsem.vector_potential_triangle_mesh_hierarchical
+
+::: cfsem.HierarchicalBoundaryElements
 
 ## Field Mappings
 

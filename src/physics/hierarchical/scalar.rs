@@ -17,8 +17,10 @@ pub trait DualTreeScalar:
     const ZERO: Self;
     const ONE: Self;
 
+    fn min_positive() -> Self;
     fn from_f64(value: f64) -> Self;
     fn to_f64(self) -> f64;
+    fn is_nan(self) -> bool;
     fn sqrt(self) -> Self;
     fn powf(self, n: f64) -> Self;
     fn ln(self) -> Self;
@@ -31,6 +33,11 @@ impl DualTreeScalar for f32 {
     const ONE: Self = 1.0;
 
     #[inline]
+    fn min_positive() -> Self {
+        f32::MIN_POSITIVE
+    }
+
+    #[inline]
     fn from_f64(value: f64) -> Self {
         value as f32
     }
@@ -38,6 +45,11 @@ impl DualTreeScalar for f32 {
     #[inline]
     fn to_f64(self) -> f64 {
         self as f64
+    }
+
+    #[inline]
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 
     #[inline]
@@ -71,6 +83,11 @@ impl DualTreeScalar for f64 {
     const ONE: Self = 1.0;
 
     #[inline]
+    fn min_positive() -> Self {
+        f64::MIN_POSITIVE
+    }
+
+    #[inline]
     fn from_f64(value: f64) -> Self {
         value
     }
@@ -78,6 +95,11 @@ impl DualTreeScalar for f64 {
     #[inline]
     fn to_f64(self) -> f64 {
         self
+    }
+
+    #[inline]
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 
     #[inline]

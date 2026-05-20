@@ -236,7 +236,7 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
     // Handle zero-length special case before any division by segment length.
     if ab2 == T::ZERO {
         let r_min = max_scalar(r_min, T::ZERO);
-        let r_min_frac = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
+        let r_min_frac = max_scalar(r_min, T::min_positive());
         let dist_a = norm3(ap);
         let dist_b = norm3(bp);
         let frac = min_scalar(dist_a / r_min_frac, T::ONE);
@@ -273,7 +273,7 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
     };
 
     // Clamp r_min to prevent div/0
-    let r_min = max_scalar(r_min, T::from_f64(f64::MIN_POSITIVE));
+    let r_min = max_scalar(r_min, T::min_positive());
 
     // Parallel distances from each endpoint to the target
     let para_a = dot3(ap, ab_norm);

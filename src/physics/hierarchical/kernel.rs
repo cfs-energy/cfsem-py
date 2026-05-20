@@ -66,6 +66,13 @@ pub trait TargetCollection<K: DualTreeKernel>: Copy + Sync {
     /// Number of target points in the collection.
     fn len(self) -> usize;
 
+    /// Return whether all column-like target storage has the same length.
+    ///
+    /// Evaluators call this immediately before looping over target data so
+    /// mismatched columns return [`DualTreeError::LengthMismatch`] instead of
+    /// panicking from inside the hot target loop.
+    fn has_consistent_lengths(self) -> bool;
+
     /// Return one scalar target geometry value.
     fn target(self, index: usize) -> K::TargetGeometry;
 
@@ -87,6 +94,11 @@ where
     #[inline]
     fn len(self) -> usize {
         <[K::TargetGeometry]>::len(self)
+    }
+
+    #[inline]
+    fn has_consistent_lengths(self) -> bool {
+        true
     }
 
     #[inline]

@@ -395,6 +395,7 @@ where
     if sources.len() != source_tree.n_items()
         || moments.len() != source_tree.n_items()
         || targets.len() != out.len()
+        || !targets.has_consistent_lengths()
     {
         return DualTreeError::LengthMismatch;
     }
@@ -533,6 +534,7 @@ where
     if sources.len() != source_tree.n_items()
         || moments.len() != source_tree.n_items()
         || targets.len() != out.len()
+        || !targets.has_consistent_lengths()
     {
         return DualTreeError::LengthMismatch;
     }
@@ -617,7 +619,7 @@ where
     if err != DualTreeError::Ok {
         return err;
     }
-    if targets.len() != out.len() {
+    if targets.len() != out.len() || !targets.has_consistent_lengths() {
         return DualTreeError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() {

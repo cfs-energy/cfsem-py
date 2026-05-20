@@ -136,9 +136,9 @@ pub fn flux_density_point_segment_scalar<T: DualTreeScalar>(
 
     // Get filament midpoint and length vector
     let half = T::from_f64(0.5);
-    let xmid = half.mul_add(xyz0.0 + xyz1.0, T::ZERO);
-    let ymid = half.mul_add(xyz0.1 + xyz1.1, T::ZERO);
-    let zmid = half.mul_add(xyz0.2 + xyz1.2, T::ZERO);
+    let xmid = half.mul_add(xyz1.0 - xyz0.0, xyz0.0);
+    let ymid = half.mul_add(xyz1.1 - xyz0.1, xyz0.1);
+    let zmid = half.mul_add(xyz1.2 - xyz0.2, xyz0.2);
     let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
     let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
     let b = flux_density_current_element_scalar([xmid, ymid, zmid], moment, [xp, yp, zp]);
@@ -267,9 +267,9 @@ pub fn vector_potential_point_segment_scalar<T: DualTreeScalar>(
 
     // Get filament midpoint and length vector
     let half = T::from_f64(0.5);
-    let xmid = half.mul_add(xyz0.0 + xyz1.0, T::ZERO);
-    let ymid = half.mul_add(xyz0.1 + xyz1.1, T::ZERO);
-    let zmid = half.mul_add(xyz0.2 + xyz1.2, T::ZERO);
+    let xmid = half.mul_add(xyz1.0 - xyz0.0, xyz0.0);
+    let ymid = half.mul_add(xyz1.1 - xyz0.1, xyz0.1);
+    let zmid = half.mul_add(xyz1.2 - xyz0.2, xyz0.2);
     let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
     let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
     let a = vector_potential_current_element_scalar(

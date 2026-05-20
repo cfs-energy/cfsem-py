@@ -46,6 +46,11 @@ where
     }
 
     #[inline]
+    fn has_consistent_lengths(self) -> bool {
+        self.x.len() == self.y.len() && self.x.len() == self.z.len()
+    }
+
+    #[inline]
     fn target(self, index: usize) -> DipoleTarget<T> {
         DipoleTarget {
             position: [self.x[index], self.y[index], self.z[index]],

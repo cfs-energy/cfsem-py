@@ -99,7 +99,7 @@ pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
 
 #[inline]
 fn clip_nan_generic<T: DualTreeScalar>(value: T, fallback: T) -> T {
-    if value != value { fallback } else { value }
+    if value.is_nan() { fallback } else { value }
 }
 
 /// Magnetic flux density of a dipole in cartesian coordinates.

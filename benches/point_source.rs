@@ -4,7 +4,7 @@ use cfsem::physics::hierarchical::kernels::{
     DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
-    ClusterTree, DualTreeError, DualTreeKernel, EvaluationScratch, SourceNodeSummaries,
+    ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
     evaluate_source_tree_into, evaluate_source_tree_into_par,
     parallel_source_tree_evaluation_scratch_len, update_source_summaries_into,
 };
@@ -20,7 +20,7 @@ use std::hint::black_box;
 const HIERARCHICAL_THETA: f64 = 0.01;
 
 struct HierarchicalDipoleSolve<
-    K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
+    K: HierarchicalKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
 > where
     K::SourceGeometry: From<DipoleSource<f64>>,
     K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
@@ -38,7 +38,7 @@ struct HierarchicalDipoleSolve<
 
 impl<K> HierarchicalDipoleSolve<K>
 where
-    K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
+    K: HierarchicalKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
     K::SourceGeometry: From<DipoleSource<f64>>,
     K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
 {
@@ -103,7 +103,7 @@ where
                 &self.moments,
                 &mut self.source_summaries.node_summaries,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
 
         let mut scratch = EvaluationScratch {
@@ -121,7 +121,7 @@ where
                 &mut self.vector_out,
                 &mut scratch,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
 
         for i in 0..self.vector_out.len() {
@@ -140,7 +140,7 @@ where
                 &self.moments,
                 &mut self.source_summaries.node_summaries,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
 
         let mut scratch = EvaluationScratch {
@@ -158,7 +158,7 @@ where
                 &mut self.vector_out,
                 &mut scratch,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
 
         for i in 0..self.vector_out.len() {
@@ -177,7 +177,7 @@ fn hierarchical_dipole_build_and_solve<K>(
     obs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) where
-    K: DualTreeKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
+    K: HierarchicalKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
     K::SourceGeometry: From<DipoleSource<f64>>,
     K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
 {

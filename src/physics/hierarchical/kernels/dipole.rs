@@ -1,6 +1,6 @@
 use crate::math::{add3_in_place, norm3};
 use crate::physics::hierarchical::{
-    Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar, TargetCollection,
+    Aabb, BoundedGeometry, HierarchicalError, HierarchicalKernel, Scalar, TargetCollection,
 };
 use crate::physics::point_source::dipole::{
     flux_density_dipole_scalar_generic, vector_potential_dipole_scalar_generic,
@@ -8,26 +8,26 @@ use crate::physics::point_source::dipole::{
 
 /// Point source location for generic dipole kernels.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleSource<T: DualTreeScalar> {
+pub struct DipoleSource<T: Scalar> {
     pub position: [T; 3],
     pub outer_radius: T,
 }
 
 /// Point target location for generic dipole kernels.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleTarget<T: DualTreeScalar> {
+pub struct DipoleTarget<T: Scalar> {
     pub position: [T; 3],
 }
 
 /// Borrowed component-column target points for dipole-like 3D target kernels.
 #[derive(Clone, Copy, Debug)]
-pub struct DipoleTargets<'a, T: DualTreeScalar> {
+pub struct DipoleTargets<'a, T: Scalar> {
     pub x: &'a [T],
     pub y: &'a [T],
     pub z: &'a [T],
 }
 
-impl<'a, T: DualTreeScalar> DipoleTargets<'a, T> {
+impl<'a, T: Scalar> DipoleTargets<'a, T> {
     /// Create borrowed target columns.
     #[inline]
     pub fn new(x: &'a [T], y: &'a [T], z: &'a [T]) -> Self {
@@ -37,8 +37,8 @@ impl<'a, T: DualTreeScalar> DipoleTargets<'a, T> {
 
 impl<'a, K, T> TargetCollection<K> for DipoleTargets<'a, T>
 where
-    K: DualTreeKernel<Scalar = T, TargetGeometry = DipoleTarget<T>>,
-    T: DualTreeScalar,
+    K: HierarchicalKernel<Scalar = T, TargetGeometry = DipoleTarget<T>>,
+    T: Scalar,
 {
     #[inline]
     fn len(self) -> usize {
@@ -67,7 +67,7 @@ where
     }
 }
 
-impl<T: DualTreeScalar> BoundedGeometry for DipoleSource<T> {
+impl<T: Scalar> BoundedGeometry for DipoleSource<T> {
     type Scalar = T;
 
     #[inline]
@@ -96,7 +96,7 @@ impl<T: DualTreeScalar> BoundedGeometry for DipoleSource<T> {
     }
 }
 
-impl<T: DualTreeScalar> BoundedGeometry for DipoleTarget<T> {
+impl<T: Scalar> BoundedGeometry for DipoleTarget<T> {
     type Scalar = T;
 
     #[inline]
@@ -112,13 +112,13 @@ impl<T: DualTreeScalar> BoundedGeometry for DipoleTarget<T> {
 
 /// Target summary for point targets.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleTargetSummary<T: DualTreeScalar> {
+pub struct DipoleTargetSummary<T: Scalar> {
     pub centroid: [T; 3],
     pub count: T,
 }
 
 #[inline]
-pub(super) fn summarize_weighted_source_centroid<T: DualTreeScalar>(
+pub(super) fn summarize_weighted_source_centroid<T: Scalar>(
     source_ids: &[u32],
     sources: &[DipoleSource<T>],
     moments: &[[T; 3]],
@@ -147,11 +147,11 @@ pub(super) fn summarize_weighted_source_centroid<T: DualTreeScalar>(
 }
 
 #[inline]
-pub(super) fn summarize_target_leaf<T: DualTreeScalar>(
+pub(super) fn summarize_target_leaf<T: Scalar>(
     target_ids: &[u32],
     targets: &[DipoleTarget<T>],
     out: &mut DipoleTargetSummary<T>,
-) -> DualTreeError {
+) -> HierarchicalError {
     *out = DipoleTargetSummary::default();
     for i in 0..target_ids.len() {
         let target_id = target_ids[i] as usize;
@@ -163,14 +163,14 @@ pub(super) fn summarize_target_leaf<T: DualTreeScalar>(
             out.centroid[axis] = out.centroid[axis] / out.count;
         }
     }
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[inline]
-pub(super) fn combine_target<T: DualTreeScalar>(
+pub(super) fn combine_target<T: Scalar>(
     children: &[DipoleTargetSummary<T>],
     out: &mut DipoleTargetSummary<T>,
-) -> DualTreeError {
+) -> HierarchicalError {
     *out = DipoleTargetSummary::default();
     for i in 0..children.len() {
         out.count = out.count + children[i].count;
@@ -184,29 +184,29 @@ pub(super) fn combine_target<T: DualTreeScalar>(
             out.centroid[axis] = out.centroid[axis] / out.count;
         }
     }
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[inline]
-pub(super) fn dipole_field<T: DualTreeScalar>(
+pub(super) fn dipole_field<T: Scalar>(
     target: [T; 3],
     source: [T; 3],
     moment: [T; 3],
     outer_radius: T,
     out: &mut [T; 3],
-) -> DualTreeError {
+) -> HierarchicalError {
     *out = flux_density_dipole_scalar_generic(source, moment, outer_radius, target);
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[inline]
-pub(super) fn dipole_vector_potential<T: DualTreeScalar>(
+pub(super) fn dipole_vector_potential<T: Scalar>(
     target: [T; 3],
     source: [T; 3],
     moment: [T; 3],
     outer_radius: T,
     out: &mut [T; 3],
-) -> DualTreeError {
+) -> HierarchicalError {
     *out = vector_potential_dipole_scalar_generic(source, moment, outer_radius, target);
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }

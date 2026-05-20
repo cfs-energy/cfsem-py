@@ -7,7 +7,7 @@ use super::dipole::{
 use super::linear_filament_flux_density::LinearFilamentSource;
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::hierarchical::{
-    Aabb, BoundedGeometry, DualTreeError, DualTreeKernel, DualTreeScalar, geometric_accept_far,
+    Aabb, BoundedGeometry, HierarchicalError, HierarchicalKernel, Scalar, geometric_accept_far,
 };
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::segment::vector_potential_point_segment_scalar;
@@ -21,7 +21,7 @@ const LINEAR_FILAMENT_THETA_SCALE: f64 = 0.5;
 
 /// Source summary for finite linear filament vector-potential clusters.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct LinearFilamentVectorPotentialSummary<T: DualTreeScalar> {
+pub struct LinearFilamentVectorPotentialSummary<T: Scalar> {
     /// `|I*dL|`-weighted origin for the net current-element source term.
     pub origin: [T; 3],
     /// Unit direction of the net current element after finalization.
@@ -46,11 +46,11 @@ pub struct LinearFilamentVectorPotentialSummary<T: DualTreeScalar> {
 /// also included so closed or locally cancelling current paths can still
 /// contribute to the far vector potential.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct LinearFilamentVectorPotentialKernel<T: DualTreeScalar> {
+pub struct LinearFilamentVectorPotentialKernel<T: Scalar> {
     marker: PhantomData<T>,
 }
 
-impl<T: DualTreeScalar> LinearFilamentVectorPotentialKernel<T> {
+impl<T: Scalar> LinearFilamentVectorPotentialKernel<T> {
     #[inline]
     pub fn new() -> Self {
         Self {
@@ -59,7 +59,7 @@ impl<T: DualTreeScalar> LinearFilamentVectorPotentialKernel<T> {
     }
 }
 
-impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T> {
+impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     type Scalar = T;
     type SourceGeometry = LinearFilamentSource<T>;
     type TargetGeometry = DipoleTarget<T>;
@@ -75,14 +75,14 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         sources: &[Self::SourceGeometry],
         currents: &[Self::SourceMoment],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = LinearFilamentVectorPotentialSummary::default();
         for i in 0..source_ids.len() {
             let source_id = source_ids[i] as usize;
             add_source_to_summary(&sources[source_id], currents[source_id], out);
         }
         finalize_leaf_source_summary(out);
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]
@@ -91,7 +91,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         children: &[Self::SourceSummary],
         _child_ids: &[u32],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = LinearFilamentVectorPotentialSummary::default();
         for i in 0..children.len() {
             out.weight = out.weight + children[i].weight;
@@ -128,7 +128,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
             );
         }
         finalize_current_element(out);
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]
@@ -137,7 +137,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         target_ids: &[u32],
         targets: &[Self::TargetGeometry],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         summarize_target_leaf(target_ids, targets, out)
     }
 
@@ -147,7 +147,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         children: &[Self::TargetSummary],
         _child_ids: &[u32],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         combine_target(children, out)
     }
 
@@ -158,7 +158,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         source: &Self::SourceGeometry,
         current: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = tuple_to_array(vector_potential_linear_filament_scalar(
             (
                 array_to_tuple(source.start),
@@ -168,7 +168,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
             source.wire_radius,
             array_to_tuple(target.position),
         ));
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]
@@ -177,10 +177,10 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = [T::ZERO; 3];
         if source.weight <= T::ZERO {
-            return DualTreeError::Ok;
+            return HierarchicalError::Ok;
         }
 
         if source.magnitude > T::ZERO {
@@ -200,12 +200,12 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
             T::ZERO,
             &mut dipole_out,
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
         add3_in_place(out, dipole_out);
 
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]
@@ -243,7 +243,7 @@ impl<T: DualTreeScalar> DualTreeKernel for LinearFilamentVectorPotentialKernel<T
 }
 
 #[inline]
-fn add_source_to_summary<T: DualTreeScalar>(
+fn add_source_to_summary<T: Scalar>(
     source: &LinearFilamentSource<T>,
     current: T,
     out: &mut LinearFilamentVectorPotentialSummary<T>,
@@ -280,9 +280,7 @@ fn add_source_to_summary<T: DualTreeScalar>(
 }
 
 #[inline]
-fn finalize_leaf_source_summary<T: DualTreeScalar>(
-    summary: &mut LinearFilamentVectorPotentialSummary<T>,
-) {
+fn finalize_leaf_source_summary<T: Scalar>(summary: &mut LinearFilamentVectorPotentialSummary<T>) {
     if summary.weight > T::ZERO {
         summary.origin = scale3(summary.origin, T::ONE / summary.weight);
         summary.dipole_origin = scale3(summary.dipole_origin, T::ONE / summary.weight);
@@ -299,9 +297,7 @@ fn finalize_leaf_source_summary<T: DualTreeScalar>(
 }
 
 #[inline]
-fn finalize_current_element<T: DualTreeScalar>(
-    summary: &mut LinearFilamentVectorPotentialSummary<T>,
-) {
+fn finalize_current_element<T: Scalar>(summary: &mut LinearFilamentVectorPotentialSummary<T>) {
     summary.magnitude = norm3(summary.direction);
     if summary.magnitude > T::ZERO {
         summary.direction = scale3(summary.direction, T::ONE / summary.magnitude);
@@ -309,7 +305,7 @@ fn finalize_current_element<T: DualTreeScalar>(
 }
 
 #[inline]
-fn point_segment_source_term<T: DualTreeScalar>(
+fn point_segment_source_term<T: Scalar>(
     origin: [T; 3],
     direction: [T; 3],
     magnitude: T,
@@ -329,16 +325,16 @@ fn point_segment_source_term<T: DualTreeScalar>(
 }
 
 #[inline]
-fn half<T: DualTreeScalar>() -> T {
+fn half<T: Scalar>() -> T {
     T::from_f64(0.5)
 }
 
 #[inline]
-fn array_to_tuple<T: DualTreeScalar>(value: [T; 3]) -> (T, T, T) {
+fn array_to_tuple<T: Scalar>(value: [T; 3]) -> (T, T, T) {
     (value[0], value[1], value[2])
 }
 
 #[inline]
-fn tuple_to_array<T: DualTreeScalar>(value: (T, T, T)) -> [T; 3] {
+fn tuple_to_array<T: Scalar>(value: (T, T, T)) -> [T; 3] {
     [value.0, value.1, value.2]
 }

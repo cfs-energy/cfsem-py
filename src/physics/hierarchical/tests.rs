@@ -3,7 +3,7 @@ use super::evaluator::{
     parallel_evaluation_scratch_len, serial_evaluation_scratch_len,
     update_plan_target_summaries_into,
 };
-use super::plan::DualInteractionPlan;
+use super::plan::InteractionPlan;
 use super::*;
 use crate::physics::boundary_element::{
     QuadratureKind, flux_density_triangle, vector_potential_triangle,
@@ -18,11 +18,11 @@ use crate::physics::hierarchical::kernels::{
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
 
 #[derive(Clone, Copy)]
-struct MockPoint<T: DualTreeScalar> {
+struct MockPoint<T: Scalar> {
     point: [T; 3],
 }
 
-impl<T: DualTreeScalar> BoundedGeometry for MockPoint<T> {
+impl<T: Scalar> BoundedGeometry for MockPoint<T> {
     type Scalar = T;
 
     fn aabb(&self) -> Aabb<Self::Scalar> {
@@ -35,23 +35,23 @@ impl<T: DualTreeScalar> BoundedGeometry for MockPoint<T> {
 }
 
 #[derive(Clone, Copy, Default)]
-struct SourceSummary<T: DualTreeScalar> {
+struct SourceSummary<T: Scalar> {
     centroid: [T; 3],
     moment: T,
     count: T,
 }
 
 #[derive(Clone, Copy, Default)]
-struct TargetSummary<T: DualTreeScalar> {
+struct TargetSummary<T: Scalar> {
     centroid: [T; 3],
     count: T,
 }
 
-struct MockKernel<T: DualTreeScalar> {
+struct MockKernel<T: Scalar> {
     _marker: core::marker::PhantomData<T>,
 }
 
-impl<T: DualTreeScalar> MockKernel<T> {
+impl<T: Scalar> MockKernel<T> {
     fn new() -> Self {
         Self {
             _marker: core::marker::PhantomData,
@@ -59,7 +59,7 @@ impl<T: DualTreeScalar> MockKernel<T> {
     }
 }
 
-impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
+impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
     type Scalar = T;
     type SourceGeometry = MockPoint<T>;
     type TargetGeometry = MockPoint<T>;
@@ -74,7 +74,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
         sources: &[Self::SourceGeometry],
         moments: &[Self::SourceMoment],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = SourceSummary::default();
         for i in 0..source_ids.len() {
             let id = source_ids[i] as usize;
@@ -89,7 +89,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
                 out.centroid[axis] = out.centroid[axis] / out.count;
             }
         }
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     fn combine_source_summaries(
@@ -97,7 +97,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
         children: &[Self::SourceSummary],
         _child_ids: &[u32],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = SourceSummary::default();
         for i in 0..children.len() {
             out.count = out.count + children[i].count;
@@ -112,7 +112,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
                 out.centroid[axis] = out.centroid[axis] / out.count;
             }
         }
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     fn summarize_leaf_targets(
@@ -120,7 +120,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
         target_ids: &[u32],
         targets: &[Self::TargetGeometry],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = TargetSummary::default();
         for i in 0..target_ids.len() {
             let id = target_ids[i] as usize;
@@ -134,7 +134,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
                 out.centroid[axis] = out.centroid[axis] / out.count;
             }
         }
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     fn combine_target_summaries(
@@ -142,7 +142,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
         children: &[Self::TargetSummary],
         _child_ids: &[u32],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = TargetSummary::default();
         for i in 0..children.len() {
             out.count = out.count + children[i].count;
@@ -156,7 +156,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
                 out.centroid[axis] = out.centroid[axis] / out.count;
             }
         }
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     fn eval_exact(
@@ -165,10 +165,10 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         let r2 = dist2(target.point, source.point);
         *out = *moment / (T::ONE + r2);
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     fn eval_far(
@@ -176,10 +176,10 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         let r2 = dist2(target.centroid, source.centroid);
         *out = source.moment / (T::ONE + r2);
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     fn zero_output(&self, out: &mut Self::Output) {
@@ -191,7 +191,7 @@ impl<T: DualTreeScalar> DualTreeKernel for MockKernel<T> {
     }
 }
 
-fn dist2<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
+fn dist2<T: Scalar>(a: [T; 3], b: [T; 3]) -> T {
     let mut out = T::ZERO;
     for axis in 0..3 {
         let d = a[axis] - b[axis];
@@ -268,7 +268,7 @@ fn dipole_exact_uses_magnetized_sphere_radius() {
 
     assert_eq!(
         kernel.eval_exact(&target, &source, &moment, &mut out),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let expected = crate::physics::point_source::dipole::flux_density_dipole_scalar(
@@ -305,9 +305,8 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
     let moments = [[0.0, 0.0, 2.0], [0.0, 1.0, 0.5]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
 
     let mut b_source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
@@ -326,7 +325,7 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             &moments,
             &mut b_source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -335,7 +334,7 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             targets.as_slice(),
             &mut b_target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_source_summaries_into(
@@ -345,7 +344,7 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             &moments,
             &mut a_source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -354,7 +353,7 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             targets.as_slice(),
             &mut a_target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -377,7 +376,7 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             &mut b_out,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         evaluate_into(
@@ -392,7 +391,7 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             &mut a_out,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     for target_id in 0..targets.len() {
@@ -457,7 +456,7 @@ fn linear_filament_exact_matches_scalar_and_supports_f32() {
 
     assert_eq!(
         kernel.eval_exact(&target, &source, &current, &mut out),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     let expected = crate::physics::linear_filament::flux_density_linear_filament_scalar(
         (
@@ -504,9 +503,8 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     let currents = [2.0, -1.5];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
@@ -520,7 +518,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
             &currents,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -529,7 +527,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
             targets.as_slice(),
             &mut target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -551,7 +549,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
             &mut bh,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -562,7 +560,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let xp = [targets[0].position[0], targets[1].position[0]];
@@ -633,9 +631,8 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     let currents = [2.0, -1.5];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
@@ -651,7 +648,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
             &currents,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -660,7 +657,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
             targets.as_slice(),
             &mut target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -682,7 +679,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
             &mut bh,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -693,7 +690,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let xp = [targets[0].position[0], targets[1].position[0]];
@@ -755,7 +752,7 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
     let mut b_out = [0.0; 3];
     assert_eq!(
         b_kernel.eval_exact(&target, &source, &moment, &mut b_out),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         b_out,
@@ -773,7 +770,7 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
     let mut a_out = [0.0; 3];
     assert_eq!(
         a_kernel.eval_exact(&target, &source, &moment, &mut a_out),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         a_out,
@@ -821,7 +818,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     let active_only_sources = [active_source];
     let active_only_moments = [active_moment];
     let source_tree = ClusterTree::build_with_leaf_size(&active_only_sources, 1).unwrap();
-    let plan = DualInteractionPlan::build(
+    let plan = InteractionPlan::build(
         source_tree.as_view(),
         targets.as_slice(),
         1,
@@ -844,7 +841,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
             &active_only_moments,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -853,7 +850,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
             targets.as_slice(),
             &mut target_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -873,13 +870,13 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
             &mut active_only,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let sources_with_inactive = [active_source, inactive_source];
     let moments_with_inactive = [active_moment, inactive_moment];
     let source_tree = ClusterTree::build_with_leaf_size(&sources_with_inactive, 2).unwrap();
-    let plan = DualInteractionPlan::build(
+    let plan = InteractionPlan::build(
         source_tree.as_view(),
         targets.as_slice(),
         1,
@@ -902,7 +899,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
             &moments_with_inactive,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -911,7 +908,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
             targets.as_slice(),
             &mut target_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     let mut with_inactive = [[0.0; 3]; 1];
     assert_eq!(
@@ -927,7 +924,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
             &mut with_inactive,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     for axis in 0..3 {
@@ -972,7 +969,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
     }];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, sources.len()).unwrap();
-    let plan = DualInteractionPlan::build(
+    let plan = InteractionPlan::build(
         source_tree.as_view(),
         targets.as_slice(),
         1,
@@ -995,7 +992,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
             &moments,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -1004,7 +1001,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
             targets.as_slice(),
             &mut target_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -1026,7 +1023,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
             &mut far,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -1037,7 +1034,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
             &mut direct,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let err = vec_norm3([
@@ -1081,9 +1078,8 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
@@ -1097,7 +1093,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
             &moments,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -1106,7 +1102,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
             targets.as_slice(),
             &mut target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -1128,7 +1124,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
             &mut bh,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -1139,7 +1135,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     for target_id in 0..targets.len() {
@@ -1191,9 +1187,8 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new(
             source_tree.as_view(),
@@ -1211,7 +1206,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
             &moments,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -1220,7 +1215,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
             targets.as_slice(),
             &mut target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -1242,7 +1237,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
             &mut bh,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -1253,7 +1248,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     for target_id in 0..targets.len() {
@@ -1299,9 +1294,8 @@ fn linear_filament_reuses_tree_for_current_updates() {
     let currents0 = [1.0, 1.0];
     let currents1 = [2.0, -1.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
@@ -1313,7 +1307,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
             targets.as_slice(),
             &mut target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -1331,7 +1325,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
             &currents0,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         evaluate_into(
@@ -1346,7 +1340,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
             &mut out0,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     assert_eq!(
@@ -1357,7 +1351,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
             &currents1,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         evaluate_into(
@@ -1372,7 +1366,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
             &mut out1,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_ne!(out0, out1);
 }
@@ -1445,9 +1439,8 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
     }];
     let currents = [1.0, 1.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 1.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 1.0, 1, false)
+        .unwrap();
     assert_eq!(plan.far_target_node_ids.len(), 1);
     assert!(plan.near_target_ids.is_empty());
 
@@ -1463,7 +1456,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
             &currents,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -1472,7 +1465,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
             targets.as_slice(),
             &mut target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -1493,7 +1486,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
             &mut out,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert!(out[0][0].is_finite());
     assert!(out[0][1].is_finite());
@@ -1683,9 +1676,8 @@ fn theta_zero_plan_is_all_exact() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f64(&[[10.0, 0.0, 0.0], [11.0, 0.0, 0.0]]);
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     assert_eq!(plan.near_target_ids.len(), sources.len() * targets.len());
     assert_eq!(plan.near_source_ids.len(), sources.len() * targets.len());
     assert!(plan.far_target_node_ids.is_empty());
@@ -1697,9 +1689,8 @@ fn separated_plan_has_far_pair() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
     let targets = points_f64(&[[100.0, 0.0, 0.0], [100.0, 1.0, 0.0]]);
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 1.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 1.0, 1, false)
+        .unwrap();
     assert_eq!(plan.far_target_node_ids.len(), 1);
     assert_eq!(plan.far_source_node_ids.len(), 1);
     assert!(plan.near_target_ids.is_empty());
@@ -1720,7 +1711,7 @@ fn source_summary_update_tracks_moments() {
         &moments_a,
         &mut summaries.node_summaries,
     );
-    assert_eq!(err, DualTreeError::Ok);
+    assert_eq!(err, HierarchicalError::Ok);
     assert_eq!(summaries.node_summaries[0].moment, 6.0);
 
     let moments_b = [2.0, 4.0, 6.0];
@@ -1731,7 +1722,7 @@ fn source_summary_update_tracks_moments() {
         &moments_b,
         &mut summaries.node_summaries,
     );
-    assert_eq!(err, DualTreeError::Ok);
+    assert_eq!(err, HierarchicalError::Ok);
     assert_eq!(summaries.node_summaries[0].moment, 12.0);
 }
 
@@ -1761,7 +1752,7 @@ fn dipole_source_summary_centroid_tracks_moment_weights() {
             &moments_a,
             &mut summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert!((summaries.node_summaries[0].centroid[0] - 7.5).abs() < 1.0e-14);
 
@@ -1774,7 +1765,7 @@ fn dipole_source_summary_centroid_tracks_moment_weights() {
             &moments_b,
             &mut summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert!((summaries.node_summaries[0].centroid[0] - 2.0).abs() < 1.0e-14);
 }
@@ -1805,12 +1796,10 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
     let moments = [1.0_f64, 2.0, -0.5, 3.0];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 2, 0.0, 3, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 2, 0.0, 3, false)
+        .unwrap();
     let plan_built_in_parallel =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 2, 0.0, 3, true)
-            .unwrap();
+        InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 2, 0.0, 3, true).unwrap();
     assert_eq!(plan.chunks.len(), 3);
     assert_eq!(plan_built_in_parallel.chunks.len(), plan.chunks.len());
     assert_eq!(
@@ -1838,7 +1827,7 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
             &moments,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -1847,7 +1836,7 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
             targets.as_slice(),
             &mut target_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut dense = vec![0.0_f64; output_len(plan.as_view())];
@@ -1870,7 +1859,7 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
                 contribution: &mut dense_scratch_value
             },
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         evaluate_into(
@@ -1887,7 +1876,7 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
                 contribution: &mut serial_scratch_value
             },
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         evaluate_into_par(
@@ -1904,7 +1893,7 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
                 contribution: &mut parallel_scratch_value
             },
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     let mut parallel_build_target_summaries =
         TargetNodeSummaries::<MockKernel<f64>>::new_for_plan(plan_built_in_parallel.as_view());
@@ -1915,7 +1904,7 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
             targets.as_slice(),
             &mut parallel_build_target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         evaluate_into(
@@ -1932,7 +1921,7 @@ fn chunked_plan_serial_and_parallel_match_dense_direct() {
                 contribution: &mut parallel_build_scratch_value
             },
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     assert_eq!(serial, dense);
@@ -1947,9 +1936,8 @@ fn theta_zero_matches_dense_direct_f32() {
     let targets = points_f32(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f32, 2.0, 3.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f32>>::new(source_tree.as_view());
     let mut target_summaries = TargetNodeSummaries::<MockKernel<f32>>::new_for_plan(plan.as_view());
     assert_eq!(
@@ -1960,7 +1948,7 @@ fn theta_zero_matches_dense_direct_f32() {
             &moments,
             &mut source_summaries.node_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -1969,7 +1957,7 @@ fn theta_zero_matches_dense_direct_f32() {
             targets.as_slice(),
             &mut target_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [0.0_f32];
@@ -1991,7 +1979,7 @@ fn theta_zero_matches_dense_direct_f32() {
             &mut bh,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -2002,7 +1990,7 @@ fn theta_zero_matches_dense_direct_f32() {
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     for i in 0..bh.len() {
         assert!((bh[i] - dense[i]).abs() < 1e-5);
@@ -2025,7 +2013,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
             &moments,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut source_tree_out = [0.0; 2];
@@ -2047,7 +2035,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
             &mut source_tree_out,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     let mut par_scratch_value =
         vec![0.0; parallel_source_tree_evaluation_scratch_len(targets.len())];
@@ -2066,7 +2054,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
             &mut source_tree_out_par,
             &mut par_scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -2077,7 +2065,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     for i in 0..targets.len() {
         assert!((source_tree_out[i] - dense[i]).abs() < 1.0e-14);
@@ -2104,7 +2092,7 @@ fn dense_direct_reports_empty_scratch() {
             &mut out,
             &mut scratch
         ),
-        DualTreeError::ScratchTooSmall
+        HierarchicalError::ScratchTooSmall
     );
 }
 
@@ -2114,9 +2102,8 @@ fn run_theta_zero_matches_dense_direct_f64() {
     let targets = points_f64(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f64, 2.0, 3.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries = TargetNodeSummaries::<MockKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
@@ -2127,7 +2114,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
             &moments,
             &mut source_summaries.node_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -2136,7 +2123,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
             targets.as_slice(),
             &mut target_summaries
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [0.0_f64];
@@ -2158,7 +2145,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
             &mut bh,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -2169,7 +2156,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     for i in 0..bh.len() {
         assert!((bh[i] - dense[i]).abs() < 1e-12);
@@ -2204,9 +2191,8 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
     let moments = [[0.0, 0.0, 1.0], [0.0, 1.0, 0.5], [1.0, 0.0, 0.0]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan =
-        DualInteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-            .unwrap();
+    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
+        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
     let mut target_summaries =
@@ -2220,7 +2206,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
             &moments,
             &mut source_summaries.node_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         update_plan_target_summaries_into(
@@ -2229,7 +2215,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
             targets.as_slice(),
             &mut target_summaries,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     let mut scratch_value = [[0.0; 3]];
@@ -2252,7 +2238,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
             &mut bh,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
     assert_eq!(
         dense_direct_evaluate_into(
@@ -2263,7 +2249,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
             &mut dense,
             &mut scratch,
         ),
-        DualTreeError::Ok
+        HierarchicalError::Ok
     );
 
     for i in 0..bh.len() {

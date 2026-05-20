@@ -1,11 +1,11 @@
 //! Physical-space mapping helpers for 3-node triangles in 3D.
 
 use crate::math::{cross3, norm3};
-use crate::physics::hierarchical::DualTreeScalar;
+use crate::physics::hierarchical::Scalar;
 
 /// Map one reference-triangle point `(u, v)` into a physical triangle in 3D.
 #[inline]
-pub fn map_point<T: DualTreeScalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3], uv: [T; 2]) -> [T; 3] {
+pub fn map_point<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3], uv: [T; 2]) -> [T; 3] {
     let w = T::ONE - uv[0] - uv[1];
     [
         n0[0] * w + n1[0] * uv[0] + n2[0] * uv[1],
@@ -16,7 +16,7 @@ pub fn map_point<T: DualTreeScalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3], uv: [T; 
 
 /// Physical area of a 3D triangle.
 #[inline]
-pub fn area<T: DualTreeScalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> T {
+pub fn area<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> T {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
     let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
     let cross = cross3(v01, v02);
@@ -25,7 +25,7 @@ pub fn area<T: DualTreeScalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> T {
 
 /// Unit normal of a 3D triangle.
 #[inline]
-pub fn normal<T: DualTreeScalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> [T; 3] {
+pub fn normal<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> [T; 3] {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
     let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
     let cross = cross3(v01, v02);

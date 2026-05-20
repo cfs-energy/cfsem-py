@@ -11,7 +11,7 @@ use crate::{
     math::{PointLineDistance, cross3, point_line_distance_with_endpoints},
 };
 
-use crate::physics::hierarchical::DualTreeScalar;
+use crate::physics::hierarchical::Scalar;
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.
@@ -616,7 +616,7 @@ pub fn flux_density_linear_filament_matrix(
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
 #[inline]
-pub fn flux_density_linear_filament_scalar<T: DualTreeScalar>(
+pub fn flux_density_linear_filament_scalar<T: Scalar>(
     xyzifil: ((T, T, T), (T, T, T), T),
     wire_radius: T,
     xyzobs: (T, T, T),
@@ -962,7 +962,7 @@ pub fn vector_potential_linear_filament_matrix(
 ///
 /// * `a`:        (V-s/m) Vector potential x, y, z components
 #[inline]
-pub fn vector_potential_linear_filament_scalar<T: DualTreeScalar>(
+pub fn vector_potential_linear_filament_scalar<T: Scalar>(
     xyzifil: ((T, T, T), (T, T, T), T),
     wire_radius: T,
     xyzobs: (T, T, T),
@@ -1091,7 +1091,7 @@ pub fn vector_potential_linear_filament_scalar<T: DualTreeScalar>(
 }
 
 #[inline]
-fn max_scalar<T: DualTreeScalar>(a: T, b: T) -> T {
+fn max_scalar<T: Scalar>(a: T, b: T) -> T {
     if a > b { a } else { b }
 }
 

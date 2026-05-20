@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use super::{Aabb, BoundedGeometry, DualTreeError, DualTreeScalar};
+use super::{Aabb, BoundedGeometry, HierarchicalError, Scalar};
 
 const INVALID_INDEX: u32 = u32::MAX;
 /// Fixed runtime leaf size for public single-source-tree solvers.
@@ -54,7 +54,7 @@ struct MortonItem {
 /// resulting slices are suitable for the allocation-free update/evaluation
 /// routines.
 #[derive(Clone, Debug)]
-pub struct ClusterTree<T: DualTreeScalar> {
+pub struct ClusterTree<T: Scalar> {
     /// Axis-aligned bounds for each node.
     pub node_aabb: Vec<Aabb<T>>,
     /// Left child node ID, or `INVALID_INDEX` for leaves.
@@ -85,7 +85,7 @@ pub struct ClusterTree<T: DualTreeScalar> {
 
 /// Borrowed view over a finalized cluster tree.
 #[derive(Clone, Copy)]
-pub struct ClusterTreeView<'a, T: DualTreeScalar> {
+pub struct ClusterTreeView<'a, T: Scalar> {
     /// Axis-aligned bounds for each node.
     pub node_aabb: &'a [Aabb<T>],
     /// Left child node ID, or `INVALID_INDEX` for leaves.
@@ -114,9 +114,9 @@ pub struct ClusterTreeView<'a, T: DualTreeScalar> {
     pub max_depth: u32,
 }
 
-impl<T: DualTreeScalar> ClusterTree<T> {
+impl<T: Scalar> ClusterTree<T> {
     /// Build a CPU-owned finalized tree using longest-axis hybrid splitting.
-    pub fn build<G>(geometry: &[G]) -> Result<Self, DualTreeError>
+    pub fn build<G>(geometry: &[G]) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
@@ -130,7 +130,7 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     /// Morton-sorted ranges at dominant adjacent code gaps or the median when
     /// no dominant cluster gap is present. Node AABBs are still computed from
     /// the full bounded geometry, so finite-size sources remain covered.
-    pub fn build_morton_lbvh<G>(geometry: &[G]) -> Result<Self, DualTreeError>
+    pub fn build_morton_lbvh<G>(geometry: &[G]) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
@@ -144,7 +144,7 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     pub fn build_with_method<G>(
         geometry: &[G],
         method: ClusterTreeBuildMethod,
-    ) -> Result<Self, DualTreeError>
+    ) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
@@ -155,7 +155,7 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     pub(crate) fn build_with_leaf_size<G>(
         geometry: &[G],
         leaf_size: usize,
-    ) -> Result<Self, DualTreeError>
+    ) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
@@ -170,7 +170,7 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     pub(crate) fn build_morton_lbvh_with_leaf_size<G>(
         geometry: &[G],
         leaf_size: usize,
-    ) -> Result<Self, DualTreeError>
+    ) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
@@ -185,18 +185,18 @@ impl<T: DualTreeScalar> ClusterTree<T> {
         geometry: &[G],
         leaf_size: usize,
         method: ClusterTreeBuildMethod,
-    ) -> Result<Self, DualTreeError>
+    ) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometry<Scalar = T>,
     {
         if geometry.is_empty() {
-            return Err(DualTreeError::EmptyInput);
+            return Err(HierarchicalError::EmptyInput);
         }
         if leaf_size == 0 {
-            return Err(DualTreeError::InvalidLeafSize);
+            return Err(HierarchicalError::InvalidLeafSize);
         }
         if geometry.len() > u32::MAX as usize {
-            return Err(DualTreeError::CapacityExceeded);
+            return Err(HierarchicalError::CapacityExceeded);
         }
 
         let mut tree = Self {
@@ -283,7 +283,7 @@ impl<T: DualTreeScalar> ClusterTree<T> {
     }
 }
 
-impl<T: DualTreeScalar> ClusterTreeView<'_, T> {
+impl<T: Scalar> ClusterTreeView<'_, T> {
     /// Number of nodes in the tree.
     #[inline]
     pub fn n_nodes(&self) -> usize {
@@ -321,9 +321,9 @@ fn build_range_longest_axis<T, G>(
     end: usize,
     depth: usize,
     internal_by_depth: &mut Vec<Vec<u32>>,
-) -> Result<u32, DualTreeError>
+) -> Result<u32, HierarchicalError>
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let node_id = usize_to_u32(tree.node_aabb.len())?;
@@ -409,9 +409,9 @@ fn build_range_morton<T, G>(
     end: usize,
     depth: usize,
     internal_by_depth: &mut Vec<Vec<u32>>,
-) -> Result<u32, DualTreeError>
+) -> Result<u32, HierarchicalError>
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let node_id = usize_to_u32(tree.node_aabb.len())?;
@@ -482,7 +482,7 @@ where
 /// on representative points.
 fn sort_indices_by_morton<T, G>(indices: &mut [u32], geometry: &[G]) -> Vec<u64>
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let bounds = representative_point_bounds(indices, geometry);
@@ -518,7 +518,7 @@ where
 /// separately by leaf and internal AABBs.
 fn representative_point_bounds<T, G>(indices: &[u32], geometry: &[G]) -> ([f64; 3], [f64; 3])
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let mut min = [f64::INFINITY; 3];
@@ -542,7 +542,7 @@ where
 ///
 /// Each coordinate is quantized to `MORTON_BITS_PER_AXIS` bits and then the
 /// coordinate bits are interleaved as x0, y0, z0, x1, y1, z1, ...
-fn morton_code<T: DualTreeScalar>(point: [T; 3], bounds: ([f64; 3], [f64; 3])) -> u64 {
+fn morton_code<T: Scalar>(point: [T; 3], bounds: ([f64; 3], [f64; 3])) -> u64 {
     let mut coords = [0_u64; 3];
     for axis in 0..3 {
         coords[axis] = quantize_morton_coord(point[axis].to_f64(), bounds.0[axis], bounds.1[axis]);
@@ -575,7 +575,7 @@ fn quantize_morton_coord(value: f64, min: f64, max: f64) -> u64 {
 /// Compute the AABB covering `sorted_indices[start..end]`.
 fn range_aabb<T, G>(indices: &[u32], geometry: &[G], start: usize, end: usize) -> Aabb<T>
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let mut out = Aabb::empty();
@@ -600,7 +600,7 @@ fn hybrid_axis_gap_split<T, G>(
     axis: usize,
 ) -> usize
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let count = end - start;
@@ -672,7 +672,7 @@ fn spatial_axis_span<T, G>(
     axis: usize,
 ) -> T
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let lo = geometry[indices[start] as usize].representative_point()[axis];
@@ -711,7 +711,7 @@ fn accepts_hybrid_gap_split(
 }
 
 /// Return the axis with largest AABB extent.
-fn longest_axis<T: DualTreeScalar>(aabb: Aabb<T>) -> usize {
+fn longest_axis<T: Scalar>(aabb: Aabb<T>) -> usize {
     let mut axis = 0;
     let mut extent = aabb.extent(0);
     for candidate in 1..3 {
@@ -729,7 +729,7 @@ fn longest_axis<T: DualTreeScalar>(aabb: Aabb<T>) -> usize {
 /// The tree builder rejects no finite values explicitly, so this avoids relying
 /// on `partial_cmp().unwrap()` for scalar types with NaN-like values. Equal and
 /// unordered values are treated as equal by falling through to `Ordering::Equal`.
-fn scalar_cmp<T: DualTreeScalar>(a: T, b: T) -> Ordering {
+fn scalar_cmp<T: Scalar>(a: T, b: T) -> Ordering {
     if a < b {
         Ordering::Less
     } else if a > b {
@@ -740,9 +740,9 @@ fn scalar_cmp<T: DualTreeScalar>(a: T, b: T) -> Ordering {
 }
 
 /// Convert `usize` into the u32 index type used by runtime tree arrays.
-pub(crate) fn usize_to_u32(value: usize) -> Result<u32, DualTreeError> {
+pub(crate) fn usize_to_u32(value: usize) -> Result<u32, HierarchicalError> {
     if value > u32::MAX as usize {
-        Err(DualTreeError::CapacityExceeded)
+        Err(HierarchicalError::CapacityExceeded)
     } else {
         Ok(value as u32)
     }

@@ -5,11 +5,11 @@ use super::dipole::{
     summarize_target_leaf, summarize_weighted_source_centroid,
 };
 use crate::math::add3_in_place;
-use crate::physics::hierarchical::{DualTreeError, DualTreeKernel, DualTreeScalar};
+use crate::physics::hierarchical::{HierarchicalError, HierarchicalKernel, Scalar};
 
 /// Source summary for dipole vector-potential clusters.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleVectorPotentialSummary<T: DualTreeScalar> {
+pub struct DipoleVectorPotentialSummary<T: Scalar> {
     pub centroid: [T; 3],
     pub moment: [T; 3],
     pub weight: T,
@@ -20,11 +20,11 @@ pub struct DipoleVectorPotentialSummary<T: DualTreeScalar> {
 /// This is not a full multipole treatment. Far evaluation uses one total dipole
 /// at the moment-weighted source centroid.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleVectorPotentialKernel<T: DualTreeScalar> {
+pub struct DipoleVectorPotentialKernel<T: Scalar> {
     marker: PhantomData<T>,
 }
 
-impl<T: DualTreeScalar> DipoleVectorPotentialKernel<T> {
+impl<T: Scalar> DipoleVectorPotentialKernel<T> {
     #[inline]
     pub fn new() -> Self {
         Self {
@@ -33,7 +33,7 @@ impl<T: DualTreeScalar> DipoleVectorPotentialKernel<T> {
     }
 }
 
-impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
+impl<T: Scalar> HierarchicalKernel for DipoleVectorPotentialKernel<T> {
     type Scalar = T;
     type SourceGeometry = DipoleSource<T>;
     type TargetGeometry = DipoleTarget<T>;
@@ -49,7 +49,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
         sources: &[Self::SourceGeometry],
         moments: &[Self::SourceMoment],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = DipoleVectorPotentialSummary::default();
         summarize_weighted_source_centroid(
             source_ids,
@@ -62,7 +62,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
             let source_id = source_ids[i] as usize;
             add3_in_place(&mut out.moment, moments[source_id]);
         }
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]
@@ -71,7 +71,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
         children: &[Self::SourceSummary],
         _child_ids: &[u32],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = DipoleVectorPotentialSummary::default();
         for i in 0..children.len() {
             out.weight = out.weight + children[i].weight;
@@ -90,7 +90,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
             add3_in_place(&mut out.moment, children[i].moment);
         }
 
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]
@@ -99,7 +99,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
         target_ids: &[u32],
         targets: &[Self::TargetGeometry],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         summarize_target_leaf(target_ids, targets, out)
     }
 
@@ -109,7 +109,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
         children: &[Self::TargetSummary],
         _child_ids: &[u32],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         combine_target(children, out)
     }
 
@@ -120,7 +120,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         dipole_vector_potential(
             target.position,
             source.position,
@@ -136,7 +136,7 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         let err = dipole_vector_potential(
             target.centroid,
             source.centroid,
@@ -144,10 +144,10 @@ impl<T: DualTreeScalar> DualTreeKernel for DipoleVectorPotentialKernel<T> {
             T::ZERO,
             out,
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]

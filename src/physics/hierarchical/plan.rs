@@ -1,9 +1,9 @@
-use super::{BoundedGeometry, ClusterTree, ClusterTreeView, DualTreeError, DualTreeScalar};
+use super::{BoundedGeometry, ClusterTree, ClusterTreeView, HierarchicalError, Scalar};
 use rayon::prelude::*;
 
-/// One target-owned chunk of a finalized dual interaction plan.
+/// One target-owned chunk of a finalized interaction plan.
 #[derive(Clone, Debug)]
-pub struct DualInteractionPlanChunk<T: DualTreeScalar> {
+pub struct InteractionPlanChunk<T: Scalar> {
     pub target_start: usize,
     pub target_count: usize,
     pub target_tree: ClusterTree<T>,
@@ -13,10 +13,10 @@ pub struct DualInteractionPlanChunk<T: DualTreeScalar> {
     pub far_source_node_ids: Vec<u32>,
 }
 
-/// CPU-owned finalized dual interaction plan.
+/// CPU-owned finalized interaction plan.
 #[derive(Clone, Debug, Default)]
-pub struct DualInteractionPlan<T: DualTreeScalar> {
-    pub chunks: Vec<DualInteractionPlanChunk<T>>,
+pub struct InteractionPlan<T: Scalar> {
+    pub chunks: Vec<InteractionPlanChunk<T>>,
     pub target_count: usize,
     pub target_chunk_size: usize,
     pub near_target_ids: Vec<u32>,
@@ -27,14 +27,14 @@ pub struct DualInteractionPlan<T: DualTreeScalar> {
 
 /// Borrowed view over a finalized interaction plan.
 #[derive(Clone, Copy)]
-pub struct DualInteractionPlanView<'a, T: DualTreeScalar> {
-    pub chunks: &'a [DualInteractionPlanChunk<T>],
+pub struct InteractionPlanView<'a, T: Scalar> {
+    pub chunks: &'a [InteractionPlanChunk<T>],
     pub target_count: usize,
     pub target_chunk_size: usize,
 }
 
-impl<T: DualTreeScalar> DualInteractionPlan<T> {
-    /// Build a chunked dual-tree interaction plan for fixed source/target geometry.
+impl<T: Scalar> InteractionPlan<T> {
+    /// Build a chunked source-tree interaction plan for fixed source/target geometry.
     pub fn build<G>(
         source_tree: ClusterTreeView<'_, T>,
         targets: &[G],
@@ -42,18 +42,18 @@ impl<T: DualTreeScalar> DualInteractionPlan<T> {
         theta: T,
         num_chunks: usize,
         par: bool,
-    ) -> Result<Self, DualTreeError>
+    ) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometry<Scalar = T> + Sync,
     {
         if theta < T::ZERO {
-            return Err(DualTreeError::InvalidTheta);
+            return Err(HierarchicalError::InvalidTheta);
         }
         if source_tree.n_nodes() == 0 || targets.is_empty() {
-            return Err(DualTreeError::EmptyInput);
+            return Err(HierarchicalError::EmptyInput);
         }
         if target_leaf_size == 0 || num_chunks == 0 {
-            return Err(DualTreeError::InvalidLeafSize);
+            return Err(HierarchicalError::InvalidLeafSize);
         }
 
         let chunk_count = num_chunks.min(targets.len());
@@ -115,8 +115,8 @@ impl<T: DualTreeScalar> DualInteractionPlan<T> {
     }
 
     #[inline]
-    pub fn as_view(&self) -> DualInteractionPlanView<'_, T> {
-        DualInteractionPlanView {
+    pub fn as_view(&self) -> InteractionPlanView<'_, T> {
+        InteractionPlanView {
             chunks: &self.chunks,
             target_count: self.target_count,
             target_chunk_size: self.target_chunk_size,
@@ -131,16 +131,16 @@ fn build_plan_chunk<T, G>(
     theta: T,
     target_chunk_size: usize,
     chunk_id: usize,
-) -> Result<DualInteractionPlanChunk<T>, DualTreeError>
+) -> Result<InteractionPlanChunk<T>, HierarchicalError>
 where
-    T: DualTreeScalar,
+    T: Scalar,
     G: BoundedGeometry<Scalar = T>,
 {
     let target_start = chunk_id * target_chunk_size;
     let target_end = (target_start + target_chunk_size).min(targets.len());
     let target_tree =
         ClusterTree::build_with_leaf_size(&targets[target_start..target_end], target_leaf_size)?;
-    let mut chunk = DualInteractionPlanChunk {
+    let mut chunk = InteractionPlanChunk {
         target_start,
         target_count: target_end - target_start,
         target_tree,
@@ -154,7 +154,7 @@ where
     Ok(chunk)
 }
 
-impl<T: DualTreeScalar> DualInteractionPlanChunk<T> {
+impl<T: Scalar> InteractionPlanChunk<T> {
     fn sort_pairs(&mut self) {
         let mut near_pairs = Vec::with_capacity(self.near_source_ids.len());
         for i in 0..self.near_source_ids.len() {
@@ -178,8 +178,8 @@ impl<T: DualTreeScalar> DualInteractionPlanChunk<T> {
     }
 }
 
-fn build_chunk_pairs<T: DualTreeScalar>(
-    chunk: &mut DualInteractionPlanChunk<T>,
+fn build_chunk_pairs<T: Scalar>(
+    chunk: &mut InteractionPlanChunk<T>,
     source_tree: ClusterTreeView<'_, T>,
     theta: T,
 ) {
@@ -240,7 +240,7 @@ fn build_chunk_pairs<T: DualTreeScalar>(
     chunk.far_source_node_ids = far_source_node_ids;
 }
 
-fn is_far<T: DualTreeScalar>(
+fn is_far<T: Scalar>(
     target_tree: ClusterTreeView<'_, T>,
     source_tree: ClusterTreeView<'_, T>,
     target_node: u32,
@@ -264,7 +264,7 @@ fn is_far<T: DualTreeScalar>(
     gap_sq * theta * theta > combined * combined
 }
 
-fn expand_leaf_pair<T: DualTreeScalar>(
+fn expand_leaf_pair<T: Scalar>(
     near_target_ids: &mut Vec<u32>,
     near_source_ids: &mut Vec<u32>,
     target_tree: ClusterTreeView<'_, T>,
@@ -287,7 +287,7 @@ fn expand_leaf_pair<T: DualTreeScalar>(
     }
 }
 
-fn push_split_target<T: DualTreeScalar>(
+fn push_split_target<T: Scalar>(
     active: &mut Vec<(u32, u32)>,
     target_tree: ClusterTreeView<'_, T>,
     target_node: u32,
@@ -303,7 +303,7 @@ fn push_split_target<T: DualTreeScalar>(
     }
 }
 
-fn push_split_source<T: DualTreeScalar>(
+fn push_split_source<T: Scalar>(
     active: &mut Vec<(u32, u32)>,
     source_tree: ClusterTreeView<'_, T>,
     target_node: u32,
@@ -319,7 +319,7 @@ fn push_split_source<T: DualTreeScalar>(
     }
 }
 
-fn push_split_both<T: DualTreeScalar>(
+fn push_split_both<T: Scalar>(
     active: &mut Vec<(u32, u32)>,
     target_tree: ClusterTreeView<'_, T>,
     source_tree: ClusterTreeView<'_, T>,

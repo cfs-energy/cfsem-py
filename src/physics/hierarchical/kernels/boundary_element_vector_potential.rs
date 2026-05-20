@@ -10,7 +10,7 @@ use super::dipole::{
 };
 use crate::math::add3_in_place;
 use crate::physics::boundary_element::{QuadratureKind, vector_potential_triangle};
-use crate::physics::hierarchical::{DualTreeError, DualTreeKernel, DualTreeScalar};
+use crate::physics::hierarchical::{HierarchicalError, HierarchicalKernel, Scalar};
 use crate::physics::point_source::current_element::vector_potential_current_element_scalar;
 
 /// Boundary-element vector-potential Barnes-Hut kernel.
@@ -20,12 +20,12 @@ use crate::physics::point_source::current_element::vector_potential_current_elem
 /// shifted magnetic-dipole term so locally closed current paths retain their
 /// leading loop behavior.
 #[derive(Clone, Copy, Debug)]
-pub struct BoundaryElementVectorPotentialKernel<T: DualTreeScalar> {
+pub struct BoundaryElementVectorPotentialKernel<T: Scalar> {
     quad_kind: QuadratureKind,
     marker: PhantomData<T>,
 }
 
-impl<T: DualTreeScalar> BoundaryElementVectorPotentialKernel<T> {
+impl<T: Scalar> BoundaryElementVectorPotentialKernel<T> {
     #[inline]
     pub fn new(quad_kind: QuadratureKind) -> Self {
         Self {
@@ -35,14 +35,14 @@ impl<T: DualTreeScalar> BoundaryElementVectorPotentialKernel<T> {
     }
 }
 
-impl<T: DualTreeScalar> Default for BoundaryElementVectorPotentialKernel<T> {
+impl<T: Scalar> Default for BoundaryElementVectorPotentialKernel<T> {
     #[inline]
     fn default() -> Self {
         Self::new(QuadratureKind::Dunavant3)
     }
 }
 
-impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<T> {
+impl<T: Scalar> HierarchicalKernel for BoundaryElementVectorPotentialKernel<T> {
     type Scalar = T;
     type SourceGeometry = BoundaryElementTriangle<T>;
     type TargetGeometry = DipoleTarget<T>;
@@ -58,7 +58,7 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
         sources: &[Self::SourceGeometry],
         moments: &[Self::SourceMoment],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         summarize_leaf_sources(source_ids, sources, moments, out)
     }
 
@@ -68,7 +68,7 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
         children: &[Self::SourceSummary],
         _child_ids: &[u32],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         combine_source_summaries(children, out)
     }
 
@@ -78,7 +78,7 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
         target_ids: &[u32],
         targets: &[Self::TargetGeometry],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         summarize_target_leaf(target_ids, targets, out)
     }
 
@@ -88,7 +88,7 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
         children: &[Self::TargetSummary],
         _child_ids: &[u32],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         combine_target(children, out)
     }
 
@@ -99,7 +99,7 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = vector_potential_triangle(
             source.n0,
             source.n1,
@@ -108,7 +108,7 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
             target.position,
             self.quad_kind,
         );
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]
@@ -117,10 +117,10 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> DualTreeError {
+    ) -> HierarchicalError {
         *out = [T::ZERO; 3];
         if source.weight <= T::ZERO {
-            return DualTreeError::Ok;
+            return HierarchicalError::Ok;
         }
 
         if has_current(source) {
@@ -139,12 +139,12 @@ impl<T: DualTreeScalar> DualTreeKernel for BoundaryElementVectorPotentialKernel<
             T::ZERO,
             &mut dipole_out,
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
         add3_in_place(out, dipole_out);
 
-        DualTreeError::Ok
+        HierarchicalError::Ok
     }
 
     #[inline]

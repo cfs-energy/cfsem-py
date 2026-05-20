@@ -10,7 +10,7 @@ use crate::{
     macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
     math::{cross3, dot3},
     physics::{
-        hierarchical::DualTreeScalar,
+        hierarchical::Scalar,
         volumetric::{
             flux_density_inside_magnetized_sphere,
             vector_potential_inside_magnetized_sphere_generic,
@@ -52,7 +52,7 @@ pub fn flux_density_dipole_scalar(
 ///
 /// * (bx, by, bz) \[T\] magnetic field components at observation point
 #[inline]
-pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
+pub fn flux_density_dipole_scalar_generic<T: Scalar>(
     loc: [T; 3],
     moment: [T; 3],
     outer_radius: T,
@@ -98,7 +98,7 @@ pub fn flux_density_dipole_scalar_generic<T: DualTreeScalar>(
 }
 
 #[inline]
-fn clip_nan_generic<T: DualTreeScalar>(value: T, fallback: T) -> T {
+fn clip_nan_generic<T: Scalar>(value: T, fallback: T) -> T {
     if value.is_nan() { fallback } else { value }
 }
 
@@ -214,7 +214,7 @@ pub fn vector_potential_dipole_scalar(
 ///
 /// * (ax, ay, az) [V-s/m] vector potential components at observation point
 #[inline]
-pub fn vector_potential_dipole_scalar_generic<T: DualTreeScalar>(
+pub fn vector_potential_dipole_scalar_generic<T: Scalar>(
     loc: [T; 3],
     moment: [T; 3],
     outer_radius: T,

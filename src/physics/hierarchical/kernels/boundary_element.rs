@@ -1,16 +1,16 @@
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::boundary_element::{calc_tri_area, triangle_current_density};
-use crate::physics::hierarchical::{Aabb, BoundedGeometry, DualTreeError, DualTreeScalar};
+use crate::physics::hierarchical::{Aabb, BoundedGeometry, HierarchicalError, Scalar};
 
 /// Triangular boundary-element source geometry.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct BoundaryElementTriangle<T: DualTreeScalar> {
+pub struct BoundaryElementTriangle<T: Scalar> {
     pub n0: [T; 3],
     pub n1: [T; 3],
     pub n2: [T; 3],
 }
 
-impl<T: DualTreeScalar> BoundedGeometry for BoundaryElementTriangle<T> {
+impl<T: Scalar> BoundedGeometry for BoundaryElementTriangle<T> {
     type Scalar = T;
 
     #[inline]
@@ -49,7 +49,7 @@ impl<T: DualTreeScalar> BoundedGeometry for BoundaryElementTriangle<T> {
 
 /// Source summary for boundary-element clusters.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct BoundaryElementSummary<T: DualTreeScalar> {
+pub struct BoundaryElementSummary<T: Scalar> {
     /// Position used by the collapsed point-current element term.
     pub origin: [T; 3],
     /// Net `K dS` current element for the accepted source cluster.
@@ -63,26 +63,26 @@ pub struct BoundaryElementSummary<T: DualTreeScalar> {
 }
 
 #[inline]
-pub(super) fn summarize_leaf_sources<T: DualTreeScalar>(
+pub(super) fn summarize_leaf_sources<T: Scalar>(
     source_ids: &[u32],
     sources: &[BoundaryElementTriangle<T>],
     moments: &[[T; 3]],
     out: &mut BoundaryElementSummary<T>,
-) -> DualTreeError {
+) -> HierarchicalError {
     *out = BoundaryElementSummary::default();
     for i in 0..source_ids.len() {
         let source_id = source_ids[i] as usize;
         add_source_to_summary(&sources[source_id], moments[source_id], out);
     }
     finalize_leaf_source_summary(out);
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[inline]
-pub(super) fn combine_source_summaries<T: DualTreeScalar>(
+pub(super) fn combine_source_summaries<T: Scalar>(
     children: &[BoundaryElementSummary<T>],
     out: &mut BoundaryElementSummary<T>,
-) -> DualTreeError {
+) -> HierarchicalError {
     *out = BoundaryElementSummary::default();
     for i in 0..children.len() {
         out.weight = out.weight + children[i].weight;
@@ -115,11 +115,11 @@ pub(super) fn combine_source_summaries<T: DualTreeScalar>(
         );
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[inline]
-fn add_source_to_summary<T: DualTreeScalar>(
+fn add_source_to_summary<T: Scalar>(
     source: &BoundaryElementTriangle<T>,
     moment: [T; 3],
     out: &mut BoundaryElementSummary<T>,
@@ -155,7 +155,7 @@ fn add_source_to_summary<T: DualTreeScalar>(
 }
 
 #[inline]
-fn finalize_leaf_source_summary<T: DualTreeScalar>(summary: &mut BoundaryElementSummary<T>) {
+fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<T>) {
     if summary.weight > T::ZERO {
         summary.origin = scale3(summary.origin, T::ONE / summary.weight);
         summary.dipole_origin = scale3(summary.dipole_origin, T::ONE / summary.weight);
@@ -171,11 +171,11 @@ fn finalize_leaf_source_summary<T: DualTreeScalar>(summary: &mut BoundaryElement
 }
 
 #[inline]
-pub(super) fn has_current<T: DualTreeScalar>(summary: &BoundaryElementSummary<T>) -> bool {
+pub(super) fn has_current<T: Scalar>(summary: &BoundaryElementSummary<T>) -> bool {
     norm3(summary.current_element) > T::ZERO
 }
 
 #[inline]
-fn half<T: DualTreeScalar>() -> T {
+fn half<T: Scalar>() -> T {
     T::from_f64(0.5)
 }

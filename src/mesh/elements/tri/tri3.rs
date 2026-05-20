@@ -4,20 +4,20 @@
 //! Section 8.1, Table 8.3.
 
 use crate::math::{add_scaled3, dot3, sub3};
-use crate::mesh::Scalar;
-use crate::physics::hierarchical::DualTreeScalar;
+use crate::mesh::Scalar as MeshScalar;
+use crate::physics::hierarchical::Scalar;
 
 /// Number of nodes in the linear triangular element.
 pub const NODES_PER_ELEMENT: usize = 3;
 
 /// Linear triangle shape functions on the reference simplex with vertices
 /// `(u, v) = (0, 0), (1, 0), (0, 1)`.
-pub fn shape<F: Scalar>(u: F, v: F) -> [F; NODES_PER_ELEMENT] {
+pub fn shape<F: MeshScalar>(u: F, v: F) -> [F; NODES_PER_ELEMENT] {
     [F::one() - u - v, u, v]
 }
 
 /// Shape-function gradients with respect to the reference coordinates `(u, v)`.
-pub fn grad_ref<F: Scalar>() -> [[F; 2]; NODES_PER_ELEMENT] {
+pub fn grad_ref<F: MeshScalar>() -> [[F; 2]; NODES_PER_ELEMENT] {
     [
         [-F::one(), -F::one()],
         [F::one(), F::zero()],
@@ -27,7 +27,7 @@ pub fn grad_ref<F: Scalar>() -> [[F; 2]; NODES_PER_ELEMENT] {
 
 /// Largest squared edge length of one triangle.
 #[inline]
-pub fn max_edge_length_squared<T: DualTreeScalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> T {
+pub fn max_edge_length_squared<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> T {
     let e01 = sub3(n1, n0);
     let e12 = sub3(n2, n1);
     let e20 = sub3(n0, n2);
@@ -45,7 +45,7 @@ pub fn max_edge_length_squared<T: DualTreeScalar>(n0: [T; 3], n1: [T; 3], n2: [T
 
 /// Closest point on a triangle to an observation point.
 #[inline]
-pub fn closest_point<T: DualTreeScalar>(obs: [T; 3], n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> [T; 3] {
+pub fn closest_point<T: Scalar>(obs: [T; 3], n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> [T; 3] {
     let ab = sub3(n1, n0);
     let ac = sub3(n2, n0);
     let ap = sub3(obs, n0);
@@ -93,7 +93,7 @@ pub fn closest_point<T: DualTreeScalar>(obs: [T; 3], n0: [T; 3], n1: [T; 3], n2:
 
 /// Split a triangle into three subtriangles sharing an interior point.
 #[inline]
-pub fn subdivide_about_point<T: DualTreeScalar>(
+pub fn subdivide_about_point<T: Scalar>(
     point: [T; 3],
     n0: [T; 3],
     n1: [T; 3],

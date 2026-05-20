@@ -3,7 +3,7 @@
 
 use crate::MU0_OVER_4PI;
 use crate::math::{cross3, dot3};
-use crate::physics::hierarchical::DualTreeScalar;
+use crate::physics::hierarchical::Scalar;
 
 /// Minimum observation-point distance below which point-current-element kernels
 /// return zero to avoid singular self-evaluation.
@@ -17,7 +17,7 @@ const CURRENT_ELEMENT_MIN_DISTANCE_SQ: f64 =
 /// Magnetic flux density from a point current element with vector moment
 /// `m = I Δl = K ΔS = J ΔV`.
 #[inline]
-pub(crate) fn flux_density_current_element_scalar<T: DualTreeScalar>(
+pub(crate) fn flux_density_current_element_scalar<T: Scalar>(
     src: [T; 3],
     moment: [T; 3],
     obs: [T; 3],
@@ -40,7 +40,7 @@ pub(crate) fn flux_density_current_element_scalar<T: DualTreeScalar>(
 /// Magnetic vector potential from a point current element with vector moment
 /// `m = I Δl = K ΔS = J ΔV`.
 #[inline]
-pub(crate) fn vector_potential_current_element_scalar<T: DualTreeScalar>(
+pub(crate) fn vector_potential_current_element_scalar<T: Scalar>(
     src: [T; 3],
     moment: [T; 3],
     obs: [T; 3],
@@ -61,6 +61,6 @@ pub(crate) fn vector_potential_current_element_scalar<T: DualTreeScalar>(
 }
 
 #[inline]
-fn max_scalar<T: DualTreeScalar>(a: T, b: T) -> T {
+fn max_scalar<T: Scalar>(a: T, b: T) -> T {
     if a > b { a } else { b }
 }

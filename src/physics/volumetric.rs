@@ -2,7 +2,7 @@
 /// These are context-heavy and require some care to apply
 /// in a way that is consistent with assumptions,
 /// so they are kept out of the public API.
-use crate::{MU0_OVER_4PI, physics::hierarchical::DualTreeScalar};
+use crate::{MU0_OVER_4PI, physics::hierarchical::Scalar};
 
 /// Magnetic flux density inside a uniformly magnetized sphere
 /// with some radius and total magnetic moment.
@@ -38,7 +38,7 @@ use crate::{MU0_OVER_4PI, physics::hierarchical::DualTreeScalar};
 ///
 /// * (bx, by, bz) \[T\] magnetic field components anywhere inside the sphere
 #[inline]
-pub(crate) fn flux_density_inside_magnetized_sphere<T: DualTreeScalar>(
+pub(crate) fn flux_density_inside_magnetized_sphere<T: Scalar>(
     moment: [T; 3],
     outer_radius: T,
 ) -> [T; 3] {
@@ -84,7 +84,7 @@ pub(crate) fn flux_density_inside_magnetized_sphere<T: DualTreeScalar>(
 ///
 /// * (ax, ay, az) [V-s/m] magnetic vector potential components at the target location
 #[inline]
-pub(crate) fn vector_potential_inside_magnetized_sphere_generic<T: DualTreeScalar>(
+pub(crate) fn vector_potential_inside_magnetized_sphere_generic<T: Scalar>(
     mhat_cross_rhat: [T; 3],
     mmag: T,
     rmag: T,

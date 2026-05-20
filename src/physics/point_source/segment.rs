@@ -9,7 +9,7 @@ use rayon::{
 use crate::physics::point_source::current_element::{
     flux_density_current_element_scalar, vector_potential_current_element_scalar,
 };
-use crate::{chunksize, math::cross3, physics::hierarchical::DualTreeScalar};
+use crate::{chunksize, math::cross3, physics::hierarchical::Scalar};
 
 use crate::macros::*;
 
@@ -126,7 +126,7 @@ pub fn flux_density_point_segment(
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
 #[inline]
-pub fn flux_density_point_segment_scalar<T: DualTreeScalar>(
+pub fn flux_density_point_segment_scalar<T: Scalar>(
     xyzifil: ((T, T, T), (T, T, T), T),
     xyzobs: (T, T, T),
 ) -> (T, T, T) {
@@ -258,7 +258,7 @@ pub fn vector_potential_point_segment(
 ///
 /// * `a`:        (V-s/m) Vector potential x, y, z components
 #[inline]
-pub fn vector_potential_point_segment_scalar<T: DualTreeScalar>(
+pub fn vector_potential_point_segment_scalar<T: Scalar>(
     xyzifil: ((T, T, T), (T, T, T), T),
     xyzobs: (T, T, T),
 ) -> (T, T, T) {

@@ -103,7 +103,7 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
     }
 }
 
-fn py_dual_tree_error(context: &str, error: physics::hierarchical::DualTreeError) -> PyErr {
+fn py_hierarchical_error(context: &str, error: physics::hierarchical::HierarchicalError) -> PyErr {
     PyInteropError::ValueError {
         msg: format!("{context} failed with {error:?}"),
     }
@@ -135,7 +135,7 @@ fn parse_hierarchical_construction_method(
 fn build_hierarchical_source_tree<G>(
     sources: &[G],
     construction_method: HierarchicalConstructionMethod,
-) -> Result<physics::hierarchical::ClusterTree<f64>, physics::hierarchical::DualTreeError>
+) -> Result<physics::hierarchical::ClusterTree<f64>, physics::hierarchical::HierarchicalError>
 where
     G: physics::hierarchical::BoundedGeometry<Scalar = f64>,
 {
@@ -505,7 +505,7 @@ fn hierarchical_eval_source_tree_vec3<K, C>(
     par: bool,
 ) -> PyResult<Vec<[f64; 3]>>
 where
-    K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    K: physics::hierarchical::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
     K::TargetGeometry: Copy,
     C: physics::hierarchical::TargetCollection<K>,
 {
@@ -518,8 +518,8 @@ where
         moments,
         &mut source_summaries.node_summaries,
     );
-    if err != physics::hierarchical::DualTreeError::Ok {
-        return Err(py_dual_tree_error("source summary update", err));
+    if err != physics::hierarchical::HierarchicalError::Ok {
+        return Err(py_hierarchical_error("source summary update", err));
     }
 
     let target_count = targets.len();
@@ -556,8 +556,8 @@ where
             &mut scratch,
         ),
     };
-    if err != physics::hierarchical::DualTreeError::Ok {
-        return Err(py_dual_tree_error(
+    if err != physics::hierarchical::HierarchicalError::Ok {
+        return Err(py_hierarchical_error(
             "source-tree hierarchical evaluation",
             err,
         ));
@@ -574,7 +574,7 @@ fn hierarchical_source_level_diagnostic<K, C>(
     theta: f64,
 ) -> PyResult<Vec<f64>>
 where
-    K: physics::hierarchical::DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    K: physics::hierarchical::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
     K::TargetGeometry: Copy,
     C: physics::hierarchical::TargetCollection<K>,
 {
@@ -587,8 +587,8 @@ where
         moments,
         &mut source_summaries.node_summaries,
     );
-    if err != physics::hierarchical::DualTreeError::Ok {
-        return Err(py_dual_tree_error("source summary update", err));
+    if err != physics::hierarchical::HierarchicalError::Ok {
+        return Err(py_hierarchical_error("source summary update", err));
     }
 
     let mut out = vec![0.0; targets.len()];
@@ -600,8 +600,8 @@ where
         theta,
         &mut out,
     );
-    if err != physics::hierarchical::DualTreeError::Ok {
-        return Err(py_dual_tree_error("source-level diagnostic", err));
+    if err != physics::hierarchical::HierarchicalError::Ok {
+        return Err(py_hierarchical_error("source-level diagnostic", err));
     }
     Ok(out)
 }
@@ -643,7 +643,7 @@ fn flux_density_dipole_hierarchical(
         par,
         (&mut bx, &mut by, &mut bz),
     )
-    .map_err(|err| py_dual_tree_error("hierarchical dipole flux density", err))?;
+    .map_err(|err| py_hierarchical_error("hierarchical dipole flux density", err))?;
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
@@ -684,7 +684,7 @@ fn vector_potential_dipole_hierarchical(
         par,
         (&mut ax, &mut ay, &mut az),
     )
-    .map_err(|err| py_dual_tree_error("hierarchical dipole vector potential", err))?;
+    .map_err(|err| py_hierarchical_error("hierarchical dipole vector potential", err))?;
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
@@ -728,7 +728,7 @@ fn flux_density_linear_filament_hierarchical(
         par,
         (&mut bx, &mut by, &mut bz),
     )
-    .map_err(|err| py_dual_tree_error("hierarchical linear-filament flux density", err))?;
+    .map_err(|err| py_hierarchical_error("hierarchical linear-filament flux density", err))?;
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
@@ -772,7 +772,7 @@ fn vector_potential_linear_filament_hierarchical(
         par,
         (&mut ax, &mut ay, &mut az),
     )
-    .map_err(|err| py_dual_tree_error("hierarchical linear-filament vector potential", err))?;
+    .map_err(|err| py_hierarchical_error("hierarchical linear-filament vector potential", err))?;
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
@@ -804,7 +804,7 @@ fn flux_density_triangle_mesh_hierarchical(
         par,
         (&mut bx, &mut by, &mut bz),
     )
-    .map_err(|err| py_dual_tree_error("hierarchical triangle-mesh flux density", err))?;
+    .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh flux density", err))?;
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
@@ -836,7 +836,7 @@ fn vector_potential_triangle_mesh_hierarchical(
         par,
         (&mut ax, &mut ay, &mut az),
     )
-    .map_err(|err| py_dual_tree_error("hierarchical triangle-mesh vector potential", err))?;
+    .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh vector potential", err))?;
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
@@ -874,7 +874,7 @@ impl HierarchicalDipoles {
         self.sources = build_dipole_sources_optional_radius(loc, outer_radius)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(&self.sources, self.construction_method)
-                .map_err(|err| py_dual_tree_error("source tree build", err))?,
+                .map_err(|err| py_hierarchical_error("source tree build", err))?,
         );
         Ok(())
     }
@@ -1112,7 +1112,7 @@ impl HierarchicalLinearFilaments {
         self.sources = build_linear_filament_sources(xyzfil, dlxyzfil, wire_radius)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(&self.sources, self.construction_method)
-                .map_err(|err| py_dual_tree_error("source tree build", err))?,
+                .map_err(|err| py_hierarchical_error("source tree build", err))?,
         );
         Ok(())
     }
@@ -1319,7 +1319,7 @@ impl HierarchicalBoundaryElements {
         self.sources = build_boundary_element_sources(nodes, triangles)?;
         self.source_tree = Some(
             build_hierarchical_source_tree(&self.sources, self.construction_method)
-                .map_err(|err| py_dual_tree_error("source tree build", err))?,
+                .map_err(|err| py_hierarchical_error("source tree build", err))?,
         );
         Ok(())
     }

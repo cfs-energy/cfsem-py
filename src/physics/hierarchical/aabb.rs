@@ -1,13 +1,13 @@
-use super::DualTreeScalar;
+use super::Scalar;
 
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Aabb<T: DualTreeScalar> {
+pub struct Aabb<T: Scalar> {
     pub min: [T; 3],
     pub max: [T; 3],
 }
 
-impl<T: DualTreeScalar> Aabb<T> {
+impl<T: Scalar> Aabb<T> {
     /// Empty bounding box.
     #[inline]
     pub fn empty() -> Self {

@@ -15,7 +15,7 @@ use super::kernels::{
     LinearFilamentVectorPotentialKernel,
 };
 use super::{
-    ClusterTree, DualTreeError, DualTreeKernel, EvaluationScratch, SourceNodeSummaries,
+    ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
     evaluate_source_tree_into, evaluate_source_tree_into_par,
     parallel_source_tree_evaluation_scratch_len, source_tree_evaluation_scratch_len,
     update_source_summaries_into,
@@ -46,7 +46,7 @@ use super::{
 ///     Nothing on success.
 ///
 /// Errors:
-///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
 ///     scratch storage is too small, or a kernel reports an error.
 pub fn flux_density_dipole_hierarchical(
     loc: (&[f64], &[f64], &[f64]),
@@ -56,7 +56,7 @@ pub fn flux_density_dipole_hierarchical(
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), DualTreeError> {
+) -> Result<(), HierarchicalError> {
     let sources = dipole_sources_from_slices(loc, outer_radius)?;
     let moments = vec3_from_slices(moment, sources.len())?;
     let targets = dipole_targets_from_slices(obs)?;
@@ -96,7 +96,7 @@ pub fn flux_density_dipole_hierarchical(
 ///     Nothing on success.
 ///
 /// Errors:
-///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
 ///     scratch storage is too small, or a kernel reports an error.
 pub fn vector_potential_dipole_hierarchical(
     loc: (&[f64], &[f64], &[f64]),
@@ -106,7 +106,7 @@ pub fn vector_potential_dipole_hierarchical(
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), DualTreeError> {
+) -> Result<(), HierarchicalError> {
     let sources = dipole_sources_from_slices(loc, outer_radius)?;
     let moments = vec3_from_slices(moment, sources.len())?;
     let targets = dipole_targets_from_slices(obs)?;
@@ -147,7 +147,7 @@ pub fn vector_potential_dipole_hierarchical(
 ///     Nothing on success.
 ///
 /// Errors:
-///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
 ///     scratch storage is too small, or a kernel reports an error.
 pub fn flux_density_linear_filament_hierarchical(
     xyzp: (&[f64], &[f64], &[f64]),
@@ -158,10 +158,10 @@ pub fn flux_density_linear_filament_hierarchical(
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), DualTreeError> {
+) -> Result<(), HierarchicalError> {
     let sources = linear_filament_sources_from_slices(xyzfil, dlxyzfil, wire_radius)?;
     if ifil.len() != sources.len() {
-        return Err(DualTreeError::LengthMismatch);
+        return Err(HierarchicalError::LengthMismatch);
     }
     let targets = dipole_targets_from_slices(xyzp)?;
     one_shot_vec3(
@@ -201,7 +201,7 @@ pub fn flux_density_linear_filament_hierarchical(
 ///     Nothing on success.
 ///
 /// Errors:
-///     Returns [`DualTreeError`] when input lengths are inconsistent, tree construction fails,
+///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
 ///     scratch storage is too small, or a kernel reports an error.
 pub fn vector_potential_linear_filament_hierarchical(
     xyzp: (&[f64], &[f64], &[f64]),
@@ -212,10 +212,10 @@ pub fn vector_potential_linear_filament_hierarchical(
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), DualTreeError> {
+) -> Result<(), HierarchicalError> {
     let sources = linear_filament_sources_from_slices(xyzfil, dlxyzfil, wire_radius)?;
     if ifil.len() != sources.len() {
-        return Err(DualTreeError::LengthMismatch);
+        return Err(HierarchicalError::LengthMismatch);
     }
     let targets = dipole_targets_from_slices(xyzp)?;
     one_shot_vec3(
@@ -254,7 +254,7 @@ pub fn vector_potential_linear_filament_hierarchical(
 ///     Nothing on success.
 ///
 /// Errors:
-///     Returns [`DualTreeError`] when input lengths are inconsistent, mesh conversion fails,
+///     Returns [`HierarchicalError`] when input lengths are inconsistent, mesh conversion fails,
 ///     tree construction fails, scratch storage is too small, or a kernel reports an error.
 pub fn flux_density_triangle_mesh_hierarchical(
     obs: (&[f64], &[f64], &[f64]),
@@ -264,7 +264,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), DualTreeError> {
+) -> Result<(), HierarchicalError> {
     let (sources, moments) = boundary_element_sources_from_mesh(mesh, s)?;
     let targets = dipole_targets_from_slices(obs)?;
     one_shot_vec3(
@@ -303,7 +303,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
 ///     Nothing on success.
 ///
 /// Errors:
-///     Returns [`DualTreeError`] when input lengths are inconsistent, mesh conversion fails,
+///     Returns [`HierarchicalError`] when input lengths are inconsistent, mesh conversion fails,
 ///     tree construction fails, scratch storage is too small, or a kernel reports an error.
 pub fn vector_potential_triangle_mesh_hierarchical(
     obs: (&[f64], &[f64], &[f64]),
@@ -313,7 +313,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), DualTreeError> {
+) -> Result<(), HierarchicalError> {
     let (sources, moments) = boundary_element_sources_from_mesh(mesh, s)?;
     let targets = dipole_targets_from_slices(obs)?;
     one_shot_vec3(
@@ -335,14 +335,14 @@ fn one_shot_vec3<K>(
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), DualTreeError>
+) -> Result<(), HierarchicalError>
 where
-    K: DualTreeKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    K: HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
     K::TargetGeometry: Copy,
 {
     if out.0.len() != targets.len() || out.1.len() != targets.len() || out.2.len() != targets.len()
     {
-        return Err(DualTreeError::LengthMismatch);
+        return Err(HierarchicalError::LengthMismatch);
     }
 
     let source_tree = ClusterTree::build(sources)?;
@@ -354,7 +354,7 @@ where
         moments,
         &mut source_summaries.node_summaries,
     );
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return Err(err);
     }
 
@@ -391,7 +391,7 @@ where
             &mut scratch,
         ),
     };
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return Err(err);
     }
 
@@ -405,9 +405,9 @@ where
 
 fn dipole_targets_from_slices(
     points: (&[f64], &[f64], &[f64]),
-) -> Result<Vec<DipoleTarget<f64>>, DualTreeError> {
+) -> Result<Vec<DipoleTarget<f64>>, HierarchicalError> {
     if points.0.len() != points.1.len() || points.0.len() != points.2.len() {
-        return Err(DualTreeError::LengthMismatch);
+        return Err(HierarchicalError::LengthMismatch);
     }
     let mut targets = Vec::with_capacity(points.0.len());
     for i in 0..points.0.len() {
@@ -421,10 +421,10 @@ fn dipole_targets_from_slices(
 fn dipole_sources_from_slices(
     loc: (&[f64], &[f64], &[f64]),
     outer_radius: &[f64],
-) -> Result<Vec<DipoleSource<f64>>, DualTreeError> {
+) -> Result<Vec<DipoleSource<f64>>, HierarchicalError> {
     if loc.0.len() != loc.1.len() || loc.0.len() != loc.2.len() || loc.0.len() != outer_radius.len()
     {
-        return Err(DualTreeError::LengthMismatch);
+        return Err(HierarchicalError::LengthMismatch);
     }
     let mut sources = Vec::with_capacity(loc.0.len());
     for i in 0..loc.0.len() {
@@ -440,7 +440,7 @@ fn linear_filament_sources_from_slices(
     xyzfil: (&[f64], &[f64], &[f64]),
     dlxyzfil: (&[f64], &[f64], &[f64]),
     wire_radius: &[f64],
-) -> Result<Vec<LinearFilamentSource<f64>>, DualTreeError> {
+) -> Result<Vec<LinearFilamentSource<f64>>, HierarchicalError> {
     let n = xyzfil.0.len();
     if xyzfil.1.len() != n
         || xyzfil.2.len() != n
@@ -449,7 +449,7 @@ fn linear_filament_sources_from_slices(
         || dlxyzfil.2.len() != n
         || wire_radius.len() != n
     {
-        return Err(DualTreeError::LengthMismatch);
+        return Err(HierarchicalError::LengthMismatch);
     }
     let mut sources = Vec::with_capacity(n);
     for i in 0..n {
@@ -469,9 +469,9 @@ fn linear_filament_sources_from_slices(
 fn boundary_element_sources_from_mesh(
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-) -> Result<(Vec<BoundaryElementTriangle<f64>>, Vec<[f64; 3]>), DualTreeError> {
+) -> Result<(Vec<BoundaryElementTriangle<f64>>, Vec<[f64; 3]>), HierarchicalError> {
     mesh.validate_nodal_values(s)
-        .map_err(|_| DualTreeError::LengthMismatch)?;
+        .map_err(|_| HierarchicalError::LengthMismatch)?;
     let mut sources = Vec::with_capacity(mesh.len());
     let mut moments = Vec::with_capacity(mesh.len());
     for i in 0..mesh.len() {
@@ -489,9 +489,9 @@ fn boundary_element_sources_from_mesh(
 fn vec3_from_slices(
     values: (&[f64], &[f64], &[f64]),
     n: usize,
-) -> Result<Vec<[f64; 3]>, DualTreeError> {
+) -> Result<Vec<[f64; 3]>, HierarchicalError> {
     if values.0.len() != n || values.1.len() != n || values.2.len() != n {
-        return Err(DualTreeError::LengthMismatch);
+        return Err(HierarchicalError::LengthMismatch);
     }
     let mut out = Vec::with_capacity(n);
     for i in 0..n {

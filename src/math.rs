@@ -1,6 +1,6 @@
 //! Pure-math functions supporting physics calculations.
 
-use crate::physics::hierarchical::DualTreeScalar;
+use crate::physics::hierarchical::Scalar;
 
 // Curvefit coeffs for elliptic integrals
 const ELLIPK_A: [f64; 5] = [
@@ -88,13 +88,13 @@ pub fn ellipe(m: f64) -> f64 {
 
 /// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to reduce roundoff error.
 #[inline]
-pub fn norm3<T: DualTreeScalar>(v: [T; 3]) -> T {
+pub fn norm3<T: Scalar>(v: [T; 3]) -> T {
     dot3(v, v).sqrt()
 }
 
 /// Normalize a fixed-size 3D vector.
 #[inline]
-pub fn normalize3<T: DualTreeScalar>(v: [T; 3]) -> [T; 3] {
+pub fn normalize3<T: Scalar>(v: [T; 3]) -> [T; 3] {
     scale3(v, T::ONE / norm3(v))
 }
 
@@ -102,7 +102,7 @@ pub fn normalize3<T: DualTreeScalar>(v: [T; 3]) -> [T; 3] {
 /// separately using `mul_add` which would not be assumed usable
 /// in a more general implementation.
 #[inline]
-pub fn cross3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+pub fn cross3<T: Scalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
     [
         a[1].mul_add(b[2], (T::ZERO - b[1]) * a[2]),
         a[2].mul_add(b[0], (T::ZERO - b[2]) * a[0]),
@@ -112,25 +112,25 @@ pub fn cross3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
 
 /// Scalar dot product using `mul_add`.
 #[inline]
-pub fn dot3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> T {
+pub fn dot3<T: Scalar>(a: [T; 3], b: [T; 3]) -> T {
     a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 /// Elementwise subtraction of fixed-size 3D vectors.
 #[inline]
-pub fn sub3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+pub fn sub3<T: Scalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
 /// Elementwise addition of fixed-size 3D vectors.
 #[inline]
-pub fn add3<T: DualTreeScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+pub fn add3<T: Scalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
 /// In-place elementwise addition of fixed-size 3D vectors.
 #[inline]
-pub fn add3_in_place<T: DualTreeScalar>(out: &mut [T; 3], value: [T; 3]) {
+pub fn add3_in_place<T: Scalar>(out: &mut [T; 3], value: [T; 3]) {
     for axis in 0..3 {
         out[axis] = out[axis] + value[axis];
     }
@@ -138,13 +138,13 @@ pub fn add3_in_place<T: DualTreeScalar>(out: &mut [T; 3], value: [T; 3]) {
 
 /// Scale a fixed-size 3D vector.
 #[inline]
-pub fn scale3<T: DualTreeScalar>(value: [T; 3], scale: T) -> [T; 3] {
+pub fn scale3<T: Scalar>(value: [T; 3], scale: T) -> [T; 3] {
     [value[0] * scale, value[1] * scale, value[2] * scale]
 }
 
 /// Affine combination `a + scale * b` of fixed-size 3D vectors using `mul_add`.
 #[inline]
-pub fn add_scaled3<T: DualTreeScalar>(a: [T; 3], b: [T; 3], scale: T) -> [T; 3] {
+pub fn add_scaled3<T: Scalar>(a: [T; 3], b: [T; 3], scale: T) -> [T; 3] {
     [
         scale.mul_add(b[0], a[0]),
         scale.mul_add(b[1], a[1]),
@@ -183,7 +183,7 @@ pub fn cylindrical_to_cartesian(point: [f64; 3]) -> [f64; 3] {
 ///   /    |    \
 ///  a-----m-----b  -> I  
 ///```
-pub(crate) struct PointLineDistance<T: DualTreeScalar> {
+pub(crate) struct PointLineDistance<T: Scalar> {
     /// Perpendicular distance from the infinite line defined by segment `ab` to the point `p`,
     /// clamped to the wire radius.
     pub(crate) perp: T,
@@ -218,7 +218,7 @@ pub(crate) struct PointLineDistance<T: DualTreeScalar> {
 /// Finite-thickness clamping is based only on wire radius and does not
 /// taper outside segment endpoint projections.
 #[inline]
-pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
+pub(crate) fn point_line_distance_with_endpoints<T: Scalar>(
     a: [T; 3],
     b: [T; 3],
     p: [T; 3],
@@ -302,12 +302,12 @@ pub(crate) fn point_line_distance_with_endpoints<T: DualTreeScalar>(
 }
 
 #[inline]
-fn min_scalar<T: DualTreeScalar>(a: T, b: T) -> T {
+fn min_scalar<T: Scalar>(a: T, b: T) -> T {
     if a < b { a } else { b }
 }
 
 #[inline]
-fn max_scalar<T: DualTreeScalar>(a: T, b: T) -> T {
+fn max_scalar<T: Scalar>(a: T, b: T) -> T {
     if a > b { a } else { b }
 }
 

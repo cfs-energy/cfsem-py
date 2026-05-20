@@ -5,7 +5,7 @@ use cfsem::physics::hierarchical::kernels::{
     LinearFilamentVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
-    ClusterTree, DualTreeError, DualTreeKernel, EvaluationScratch, SourceNodeSummaries,
+    ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
     evaluate_source_tree_into, evaluate_source_tree_into_par,
     parallel_source_tree_evaluation_scratch_len, update_source_summaries_into,
 };
@@ -26,7 +26,7 @@ const LOOP_WIRE_RADIUS: f64 = 0.002;
 
 struct HierarchicalLinearFilamentSolve<K>
 where
-    K: DualTreeKernel<
+    K: HierarchicalKernel<
             Scalar = f64,
             SourceGeometry = LinearFilamentSource<f64>,
             TargetGeometry = DipoleTarget<f64>,
@@ -47,7 +47,7 @@ where
 
 impl<K> HierarchicalLinearFilamentSolve<K>
 where
-    K: DualTreeKernel<
+    K: HierarchicalKernel<
             Scalar = f64,
             SourceGeometry = LinearFilamentSource<f64>,
             TargetGeometry = DipoleTarget<f64>,
@@ -113,7 +113,7 @@ where
                 &self.currents,
                 &mut self.source_summaries.node_summaries,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
         let mut scratch = EvaluationScratch {
             contribution: &mut self.scratch_value,
@@ -130,7 +130,7 @@ where
                 &mut self.vector_out,
                 &mut scratch,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
 
         for i in 0..self.vector_out.len() {
@@ -149,7 +149,7 @@ where
                 &self.currents,
                 &mut self.source_summaries.node_summaries,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
         let mut scratch = EvaluationScratch {
             contribution: &mut self.parallel_scratch_value,
@@ -166,7 +166,7 @@ where
                 &mut self.vector_out,
                 &mut scratch,
             ),
-            DualTreeError::Ok
+            HierarchicalError::Ok
         );
 
         for i in 0..self.vector_out.len() {
@@ -186,7 +186,7 @@ fn hierarchical_linear_filament_build_and_solve<K>(
     xyzobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) where
-    K: DualTreeKernel<
+    K: HierarchicalKernel<
             Scalar = f64,
             SourceGeometry = LinearFilamentSource<f64>,
             TargetGeometry = DipoleTarget<f64>,

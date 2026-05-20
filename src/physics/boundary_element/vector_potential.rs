@@ -15,11 +15,11 @@ use crate::mesh::elements::tri::tri3::{
     max_edge_length_squared as triangle_max_edge_length_squared,
     subdivide_about_point as triangle_subdivide_about_point,
 };
-use crate::physics::hierarchical::DualTreeScalar;
+use crate::physics::hierarchical::Scalar;
 use crate::physics::point_source::current_element::vector_potential_current_element_scalar;
 
 #[inline]
-fn triangle_vector_potential_inner<T: DualTreeScalar>(
+fn triangle_vector_potential_inner<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],
@@ -82,7 +82,7 @@ fn triangle_vector_potential_inner<T: DualTreeScalar>(
 /// - \[2\] for numerical treatment of triangle `1 / R` and `∇(1 / R)`
 ///   integrals with linear shape functions.
 #[inline]
-pub fn triangle_vector_potential_basis<T: DualTreeScalar>(
+pub fn triangle_vector_potential_basis<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],
@@ -150,7 +150,7 @@ pub fn triangle_vector_potential_basis<T: DualTreeScalar>(
 /// - \[3\], pp. 276-281.
 /// - \[2\], pp. 1448-1455.
 #[inline]
-pub fn vector_potential_triangle<T: DualTreeScalar>(
+pub fn vector_potential_triangle<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],

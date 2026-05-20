@@ -1,15 +1,17 @@
 #[cfg(test)]
-use super::plan::{DualInteractionPlanChunk, DualInteractionPlanView};
-use super::{BoundedGeometry, ClusterTreeView, DualTreeError, DualTreeKernel, TargetCollection};
+use super::plan::{InteractionPlanChunk, InteractionPlanView};
+use super::{
+    BoundedGeometry, ClusterTreeView, HierarchicalError, HierarchicalKernel, TargetCollection,
+};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// CPU-owned source summary storage.
-pub struct SourceNodeSummaries<K: DualTreeKernel> {
+pub struct SourceNodeSummaries<K: HierarchicalKernel> {
     pub node_summaries: Vec<K::SourceSummary>,
 }
 
-impl<K: DualTreeKernel> SourceNodeSummaries<K> {
+impl<K: HierarchicalKernel> SourceNodeSummaries<K> {
     #[inline]
     pub fn new(tree: ClusterTreeView<'_, K::Scalar>) -> Self {
         Self {
@@ -20,15 +22,15 @@ impl<K: DualTreeKernel> SourceNodeSummaries<K> {
 
 /// CPU-owned target summary storage.
 #[cfg(test)]
-pub struct TargetNodeSummaries<K: DualTreeKernel> {
+pub struct TargetNodeSummaries<K: HierarchicalKernel> {
     pub node_summaries: Vec<K::TargetSummary>,
     pub chunk_offsets: Vec<u32>,
 }
 
 #[cfg(test)]
-impl<K: DualTreeKernel> TargetNodeSummaries<K> {
+impl<K: HierarchicalKernel> TargetNodeSummaries<K> {
     #[inline]
-    pub fn new_for_plan(plan: DualInteractionPlanView<'_, K::Scalar>) -> Self {
+    pub fn new_for_plan(plan: InteractionPlanView<'_, K::Scalar>) -> Self {
         let mut chunk_offsets = Vec::with_capacity(plan.chunks.len() + 1);
         chunk_offsets.push(0);
         let mut total = 0;
@@ -65,24 +67,22 @@ pub struct EvaluationScratch<'a, O> {
 /// Number of output entries required by a plan.
 #[cfg(test)]
 #[inline]
-pub fn output_len<T: super::DualTreeScalar>(plan: DualInteractionPlanView<'_, T>) -> usize {
+pub fn output_len<T: super::Scalar>(plan: InteractionPlanView<'_, T>) -> usize {
     plan.target_count
 }
 
 /// Number of contribution scratch entries required by serial evaluation.
 #[cfg(test)]
 #[inline]
-pub fn serial_evaluation_scratch_len<T: super::DualTreeScalar>(
-    _plan: DualInteractionPlanView<'_, T>,
-) -> usize {
+pub fn serial_evaluation_scratch_len<T: super::Scalar>(_plan: InteractionPlanView<'_, T>) -> usize {
     1
 }
 
 /// Number of contribution scratch entries required by parallel evaluation.
 #[cfg(test)]
 #[inline]
-pub fn parallel_evaluation_scratch_len<T: super::DualTreeScalar>(
-    plan: DualInteractionPlanView<'_, T>,
+pub fn parallel_evaluation_scratch_len<T: super::Scalar>(
+    plan: InteractionPlanView<'_, T>,
 ) -> usize {
     plan.chunks.len()
 }
@@ -102,22 +102,22 @@ pub fn parallel_source_tree_evaluation_scratch_len(target_count: usize) -> usize
 
 /// Update source summaries for a fixed source tree and changed source moments.
 #[inline]
-pub fn update_source_summaries_into<K: DualTreeKernel>(
+pub fn update_source_summaries_into<K: HierarchicalKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
     sources: &[K::SourceGeometry],
     moments: &[K::SourceMoment],
     summaries: &mut [K::SourceSummary],
-) -> DualTreeError {
+) -> HierarchicalError {
     let err = validate_source_tree_layout(tree);
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return err;
     }
     if sources.len() != tree.n_items() || moments.len() != tree.n_items() {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if summaries.len() < tree.n_nodes() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
     for i in 0..tree.leaf_node_ids.len() {
@@ -132,7 +132,7 @@ pub fn update_source_summaries_into<K: DualTreeKernel>(
             moments,
             &mut summaries[node_id as usize],
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
     }
@@ -143,17 +143,17 @@ pub fn update_source_summaries_into<K: DualTreeKernel>(
 /// Update target summaries for fixed target geometry.
 #[cfg(test)]
 #[inline]
-pub fn update_target_summaries_into<K: DualTreeKernel>(
+pub fn update_target_summaries_into<K: HierarchicalKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
     targets: &[K::TargetGeometry],
     summaries: &mut [K::TargetSummary],
-) -> DualTreeError {
+) -> HierarchicalError {
     if targets.len() != tree.n_items() {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if summaries.len() < tree.n_nodes() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
     for i in 0..tree.leaf_node_ids.len() {
@@ -163,7 +163,7 @@ pub fn update_target_summaries_into<K: DualTreeKernel>(
         let target_ids = &tree.sorted_indices[start..start + count];
         let err =
             kernel.summarize_leaf_targets(target_ids, targets, &mut summaries[node_id as usize]);
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
     }
@@ -174,15 +174,15 @@ pub fn update_target_summaries_into<K: DualTreeKernel>(
 /// Update all target summaries owned by a chunked interaction plan.
 #[cfg(test)]
 #[inline]
-pub fn update_plan_target_summaries_into<K: DualTreeKernel>(
+pub fn update_plan_target_summaries_into<K: HierarchicalKernel>(
     kernel: &K,
-    plan: DualInteractionPlanView<'_, K::Scalar>,
+    plan: InteractionPlanView<'_, K::Scalar>,
     targets: &[K::TargetGeometry],
     summaries: &mut TargetNodeSummaries<K>,
-) -> DualTreeError {
+) -> HierarchicalError {
     if targets.len() != plan.target_count || summaries.chunk_offsets.len() != plan.chunks.len() + 1
     {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     for chunk_id in 0..plan.chunks.len() {
         let chunk = &plan.chunks[chunk_id];
@@ -194,19 +194,19 @@ pub fn update_plan_target_summaries_into<K: DualTreeKernel>(
             &targets[target_start..target_end],
             summaries.chunk_slice_mut(chunk_id),
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
     }
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 /// Evaluate the Barnes-Hut plan into `out`.
 #[cfg(test)]
 #[inline]
-pub fn evaluate_into<K: DualTreeKernel>(
+pub fn evaluate_into<K: HierarchicalKernel>(
     kernel: &K,
-    plan: DualInteractionPlanView<'_, K::Scalar>,
+    plan: InteractionPlanView<'_, K::Scalar>,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
     target_summaries: &TargetNodeSummaries<K>,
@@ -215,23 +215,23 @@ pub fn evaluate_into<K: DualTreeKernel>(
     moments: &[K::SourceMoment],
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError {
+) -> HierarchicalError {
     if sources.len() != source_tree.n_items()
         || targets.len() != plan.target_count
         || moments.len() != source_tree.n_items()
         || out.len() != plan.target_count
     {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
     let err = validate_target_summaries(plan, target_summaries);
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return err;
     }
     if scratch.contribution.is_empty() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
     for i in 0..out.len() {
@@ -254,20 +254,20 @@ pub fn evaluate_into<K: DualTreeKernel>(
             &mut out[target_start..target_end],
             &mut scratch.contribution[0],
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 /// Evaluate the Barnes-Hut plan into `out` in parallel over target chunks.
 #[cfg(test)]
 #[inline]
-pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
+pub fn evaluate_into_par<K: HierarchicalKernel + Sync>(
     kernel: &K,
-    plan: DualInteractionPlanView<'_, K::Scalar>,
+    plan: InteractionPlanView<'_, K::Scalar>,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
     target_summaries: &TargetNodeSummaries<K>,
@@ -276,26 +276,26 @@ pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
     moments: &[K::SourceMoment],
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError {
+) -> HierarchicalError {
     if sources.len() != source_tree.n_items()
         || targets.len() != plan.target_count
         || moments.len() != source_tree.n_items()
         || out.len() != plan.target_count
     {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
     let err = validate_target_summaries(plan, target_summaries);
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return err;
     }
     if scratch.contribution.len() < plan.chunks.len() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
-    let error_code = AtomicU32::new(DualTreeError::Ok as u32);
+    let error_code = AtomicU32::new(HierarchicalError::Ok as u32);
 
     (
         plan.chunks.par_iter(),
@@ -305,7 +305,7 @@ pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
         .into_par_iter()
         .enumerate()
         .for_each(|(chunk_id, (chunk, out_chunk, contribution))| {
-            if error_code.load(Ordering::Relaxed) != DualTreeError::Ok as u32 {
+            if error_code.load(Ordering::Relaxed) != HierarchicalError::Ok as u32 {
                 return;
             }
             let target_start = chunk.target_start;
@@ -322,9 +322,9 @@ pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
                 &mut out_chunk[..chunk.target_count],
                 contribution,
             );
-            if err != DualTreeError::Ok {
+            if err != HierarchicalError::Ok {
                 let _ = error_code.compare_exchange(
-                    DualTreeError::Ok as u32,
+                    HierarchicalError::Ok as u32,
                     err as u32,
                     Ordering::Relaxed,
                     Ordering::Relaxed,
@@ -332,7 +332,7 @@ pub fn evaluate_into_par<K: DualTreeKernel + Sync>(
             }
         });
 
-    DualTreeError::from_u32(error_code.load(Ordering::Relaxed))
+    HierarchicalError::from_u32(error_code.load(Ordering::Relaxed))
 }
 
 /// Evaluate targets independently against the source tree.
@@ -352,14 +352,14 @@ pub fn evaluate_source_tree_into<K, C>(
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError
+) -> HierarchicalError
 where
-    K: DualTreeKernel,
+    K: HierarchicalKernel,
     K::TargetGeometry: Copy,
     C: TargetCollection<K>,
 {
     let err = validate_source_tree_layout(source_tree);
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return err;
     }
     evaluate_source_tree_into_validated(
@@ -386,9 +386,9 @@ fn evaluate_source_tree_into_validated<K, C>(
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError
+) -> HierarchicalError
 where
-    K: DualTreeKernel,
+    K: HierarchicalKernel,
     K::TargetGeometry: Copy,
     C: TargetCollection<K>,
 {
@@ -397,10 +397,10 @@ where
         || targets.len() != out.len()
         || !targets.has_consistent_lengths()
     {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() || scratch.contribution.is_empty() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
     let mut target_summary = K::TargetSummary::default();
@@ -423,12 +423,12 @@ where
             &mut active,
             &target_ids,
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 /// Evaluate one scalar target against the source tree.
@@ -449,15 +449,15 @@ fn evaluate_source_tree_scalar<K>(
     target_summary: &mut K::TargetSummary,
     active: &mut Vec<u32>,
     target_ids: &[u32],
-) -> DualTreeError
+) -> HierarchicalError
 where
-    K: DualTreeKernel,
+    K: HierarchicalKernel,
     K::TargetGeometry: Copy,
 {
     kernel.zero_output(out);
     let err =
         kernel.summarize_leaf_targets(target_ids, core::slice::from_ref(&target), target_summary);
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return err;
     }
 
@@ -469,7 +469,7 @@ where
         let source_aabb = source_tree.node_aabb[source_node_index];
         if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
             let err = kernel.eval_far(target_summary, source_summary, contribution);
-            if err != DualTreeError::Ok {
+            if err != HierarchicalError::Ok {
                 return err;
             }
             kernel.accumulate(out, contribution);
@@ -490,7 +490,7 @@ where
                     &moments[source_id],
                     contribution,
                 );
-                if err != DualTreeError::Ok {
+                if err != HierarchicalError::Ok {
                     return err;
                 }
                 kernel.accumulate(out, contribution);
@@ -501,7 +501,7 @@ where
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 /// Evaluate targets independently against the source tree in parallel over target chunks.
@@ -521,14 +521,14 @@ pub fn evaluate_source_tree_into_par<K, C>(
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError
+) -> HierarchicalError
 where
-    K: DualTreeKernel + Sync,
+    K: HierarchicalKernel + Sync,
     K::TargetGeometry: Copy,
     C: TargetCollection<K>,
 {
     let err = validate_source_tree_layout(source_tree);
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return err;
     }
     if sources.len() != source_tree.n_items()
@@ -536,22 +536,22 @@ where
         || targets.len() != out.len()
         || !targets.has_consistent_lengths()
     {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
     if targets.is_empty() {
-        return DualTreeError::Ok;
+        return HierarchicalError::Ok;
     }
 
     let chunk_size = crate::chunksize(targets.len());
     let chunk_count = targets.len().div_ceil(chunk_size);
     if scratch.contribution.len() < chunk_count {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
-    let error_code = AtomicU32::new(DualTreeError::Ok as u32);
+    let error_code = AtomicU32::new(HierarchicalError::Ok as u32);
 
     (
         (0..chunk_count).into_par_iter(),
@@ -560,7 +560,7 @@ where
     )
         .into_par_iter()
         .for_each(|(chunk_id, out_chunk, contribution)| {
-            if error_code.load(Ordering::Relaxed) != DualTreeError::Ok as u32 {
+            if error_code.load(Ordering::Relaxed) != HierarchicalError::Ok as u32 {
                 return;
             }
             let start = chunk_id * chunk_size;
@@ -580,9 +580,9 @@ where
                 out_chunk,
                 &mut chunk_scratch,
             );
-            if err != DualTreeError::Ok {
+            if err != HierarchicalError::Ok {
                 let _ = error_code.compare_exchange(
-                    DualTreeError::Ok as u32,
+                    HierarchicalError::Ok as u32,
                     err as u32,
                     Ordering::Relaxed,
                     Ordering::Relaxed,
@@ -590,7 +590,7 @@ where
             }
         });
 
-    DualTreeError::from_u32(error_code.load(Ordering::Relaxed))
+    HierarchicalError::from_u32(error_code.load(Ordering::Relaxed))
 }
 
 /// Compute the source-tree level represented at each target by the terminal traversal nodes.
@@ -609,21 +609,21 @@ pub fn accepted_source_level_diagnostic_into<K, C>(
     targets: C,
     theta: K::Scalar,
     out: &mut [f64],
-) -> DualTreeError
+) -> HierarchicalError
 where
-    K: DualTreeKernel,
+    K: HierarchicalKernel,
     K::TargetGeometry: Copy,
     C: TargetCollection<K>,
 {
     let err = validate_source_tree_layout(source_tree);
-    if err != DualTreeError::Ok {
+    if err != HierarchicalError::Ok {
         return err;
     }
     if targets.len() != out.len() || !targets.has_consistent_lengths() {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
     let mut active = Vec::new();
@@ -663,33 +663,33 @@ where
         };
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[cfg(test)]
 #[inline]
-fn validate_target_summaries<K: DualTreeKernel>(
-    plan: DualInteractionPlanView<'_, K::Scalar>,
+fn validate_target_summaries<K: HierarchicalKernel>(
+    plan: InteractionPlanView<'_, K::Scalar>,
     summaries: &TargetNodeSummaries<K>,
-) -> DualTreeError {
+) -> HierarchicalError {
     if summaries.chunk_offsets.len() != plan.chunks.len() + 1 {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if summaries.chunk_offsets.is_empty() {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     let last = summaries.chunk_offsets[summaries.chunk_offsets.len() - 1] as usize;
     if last > summaries.node_summaries.len() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[cfg(test)]
 #[inline]
-fn evaluate_chunk_into<K: DualTreeKernel>(
+fn evaluate_chunk_into<K: HierarchicalKernel>(
     kernel: &K,
-    chunk: &DualInteractionPlanChunk<K::Scalar>,
+    chunk: &InteractionPlanChunk<K::Scalar>,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
     target_summaries: &[K::TargetSummary],
@@ -698,7 +698,7 @@ fn evaluate_chunk_into<K: DualTreeKernel>(
     moments: &[K::SourceMoment],
     out: &mut [K::Output],
     contribution: &mut K::Output,
-) -> DualTreeError {
+) -> HierarchicalError {
     let target_tree = chunk.target_tree.as_view();
     if targets.len() != target_tree.n_items()
         || out.len() != target_tree.n_items()
@@ -707,7 +707,7 @@ fn evaluate_chunk_into<K: DualTreeKernel>(
         || target_summaries.len() < target_tree.n_nodes()
         || source_summaries.len() < source_tree.n_nodes()
     {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
 
     for i in 0..out.len() {
@@ -723,7 +723,7 @@ fn evaluate_chunk_into<K: DualTreeKernel>(
             &moments[source_id],
             contribution,
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
         kernel.accumulate(&mut out[target_id], contribution);
@@ -737,7 +737,7 @@ fn evaluate_chunk_into<K: DualTreeKernel>(
             &source_summaries[source_node],
             contribution,
         );
-        if err != DualTreeError::Ok {
+        if err != HierarchicalError::Ok {
             return err;
         }
 
@@ -749,24 +749,24 @@ fn evaluate_chunk_into<K: DualTreeKernel>(
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 /// Dense exact fallback using nested range loops.
 #[inline]
-pub fn dense_direct_evaluate_into<K: DualTreeKernel>(
+pub fn dense_direct_evaluate_into<K: HierarchicalKernel>(
     kernel: &K,
     sources: &[K::SourceGeometry],
     targets: &[K::TargetGeometry],
     moments: &[K::SourceMoment],
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> DualTreeError {
+) -> HierarchicalError {
     if sources.len() != moments.len() || targets.len() != out.len() {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
     if scratch.contribution.is_empty() {
-        return DualTreeError::ScratchTooSmall;
+        return HierarchicalError::ScratchTooSmall;
     }
 
     for i in 0..out.len() {
@@ -783,14 +783,14 @@ pub fn dense_direct_evaluate_into<K: DualTreeKernel>(
                 &moments[source_id],
                 &mut scratch.contribution[0],
             );
-            if err != DualTreeError::Ok {
+            if err != HierarchicalError::Ok {
                 return err;
             }
             kernel.accumulate(target_out, &scratch.contribution[0]);
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 /// Validate the flat source-tree layout before entering hot traversal loops.
@@ -800,12 +800,12 @@ pub fn dense_direct_evaluate_into<K: DualTreeKernel>(
 /// already satisfies these invariants; this guard mainly protects borrowed
 /// views passed across API boundaries or future GPU-compatible wrappers.
 #[inline]
-fn validate_source_tree_layout<T: super::DualTreeScalar>(
+fn validate_source_tree_layout<T: super::Scalar>(
     tree: ClusterTreeView<'_, T>,
-) -> DualTreeError {
+) -> HierarchicalError {
     let n_nodes = tree.n_nodes();
     if n_nodes == 0 {
-        return DualTreeError::EmptyInput;
+        return HierarchicalError::EmptyInput;
     }
     if tree.node_left_child.len() != n_nodes
         || tree.node_right_child.len() != n_nodes
@@ -814,12 +814,12 @@ fn validate_source_tree_layout<T: super::DualTreeScalar>(
         || tree.leaf_start.len() != n_nodes
         || tree.leaf_count.len() != n_nodes
     {
-        return DualTreeError::LengthMismatch;
+        return HierarchicalError::LengthMismatch;
     }
 
     for i in 0..tree.sorted_indices.len() {
         if tree.sorted_indices[i] as usize >= tree.sorted_indices.len() {
-            return DualTreeError::LengthMismatch;
+            return HierarchicalError::LengthMismatch;
         }
     }
 
@@ -830,14 +830,14 @@ fn validate_source_tree_layout<T: super::DualTreeScalar>(
             || start > tree.sorted_indices.len()
             || count > tree.sorted_indices.len() - start
         {
-            return DualTreeError::LengthMismatch;
+            return HierarchicalError::LengthMismatch;
         }
     }
 
     for i in 0..tree.leaf_node_ids.len() {
         let node_id = tree.leaf_node_ids[i] as usize;
         if node_id >= n_nodes {
-            return DualTreeError::LengthMismatch;
+            return HierarchicalError::LengthMismatch;
         }
         let start = tree.leaf_start[node_id] as usize;
         let count = tree.leaf_count[node_id] as usize;
@@ -845,7 +845,7 @@ fn validate_source_tree_layout<T: super::DualTreeScalar>(
             || start > tree.sorted_indices.len()
             || count > tree.sorted_indices.len() - start
         {
-            return DualTreeError::LengthMismatch;
+            return HierarchicalError::LengthMismatch;
         }
     }
 
@@ -854,7 +854,7 @@ fn validate_source_tree_layout<T: super::DualTreeScalar>(
         for i in 0..tree.internal_level_offsets.len() {
             let offset = tree.internal_level_offsets[i] as usize;
             if offset < previous || offset > tree.internal_level_ids.len() {
-                return DualTreeError::LengthMismatch;
+                return HierarchicalError::LengthMismatch;
             }
             previous = offset;
         }
@@ -863,26 +863,26 @@ fn validate_source_tree_layout<T: super::DualTreeScalar>(
     for i in 0..tree.internal_level_ids.len() {
         let node_id = tree.internal_level_ids[i] as usize;
         if node_id >= n_nodes {
-            return DualTreeError::LengthMismatch;
+            return HierarchicalError::LengthMismatch;
         }
         let left = tree.node_left_child[node_id] as usize;
         let right = tree.node_right_child[node_id] as usize;
         if left >= n_nodes || right >= n_nodes {
-            return DualTreeError::LengthMismatch;
+            return HierarchicalError::LengthMismatch;
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[inline]
-fn propagate_source_summaries<K: DualTreeKernel>(
+fn propagate_source_summaries<K: HierarchicalKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
     summaries: &mut [K::SourceSummary],
-) -> DualTreeError {
+) -> HierarchicalError {
     if tree.internal_level_offsets.is_empty() {
-        return DualTreeError::Ok;
+        return HierarchicalError::Ok;
     }
 
     let n_levels = tree.internal_level_offsets.len() - 1;
@@ -901,24 +901,24 @@ fn propagate_source_summaries<K: DualTreeKernel>(
                 &child_ids,
                 &mut summaries[node_id as usize],
             );
-            if err != DualTreeError::Ok {
+            if err != HierarchicalError::Ok {
                 return err;
             }
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }
 
 #[cfg(test)]
 #[inline]
-fn propagate_target_summaries<K: DualTreeKernel>(
+fn propagate_target_summaries<K: HierarchicalKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
     summaries: &mut [K::TargetSummary],
-) -> DualTreeError {
+) -> HierarchicalError {
     if tree.internal_level_offsets.is_empty() {
-        return DualTreeError::Ok;
+        return HierarchicalError::Ok;
     }
 
     let n_levels = tree.internal_level_offsets.len() - 1;
@@ -937,11 +937,11 @@ fn propagate_target_summaries<K: DualTreeKernel>(
                 &child_ids,
                 &mut summaries[node_id as usize],
             );
-            if err != DualTreeError::Ok {
+            if err != HierarchicalError::Ok {
                 return err;
             }
         }
     }
 
-    DualTreeError::Ok
+    HierarchicalError::Ok
 }

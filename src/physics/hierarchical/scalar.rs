@@ -1,7 +1,7 @@
 use core::ops::{Add, Div, Mul, Sub};
 
 /// Scalar type supported by the generic hierarchical tree infrastructure.
-pub trait DualTreeScalar:
+pub trait Scalar:
     Copy
     + Clone
     + Default
@@ -28,7 +28,7 @@ pub trait DualTreeScalar:
     fn mul_add(self, a: Self, b: Self) -> Self;
 }
 
-impl DualTreeScalar for f32 {
+impl Scalar for f32 {
     const ZERO: Self = 0.0;
     const ONE: Self = 1.0;
 
@@ -78,7 +78,7 @@ impl DualTreeScalar for f32 {
     }
 }
 
-impl DualTreeScalar for f64 {
+impl Scalar for f64 {
     const ZERO: Self = 0.0;
     const ONE: Self = 1.0;
 

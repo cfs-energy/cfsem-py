@@ -1,9 +1,9 @@
-use super::{Aabb, DualTreeScalar};
+use super::{Aabb, Scalar};
 
 /// Runtime error code for hierarchical tree operations.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DualTreeError {
+pub enum HierarchicalError {
     Ok = 0,
     EmptyInput = 1,
     LengthMismatch = 2,
@@ -15,14 +15,14 @@ pub enum DualTreeError {
     KernelError1 = 8,
 }
 
-impl DualTreeError {
+impl HierarchicalError {
     /// Convert a raw GPU-compatible error code into a named error.
     ///
     /// Args:
     ///     value: Integer error code produced by hierarchical tree operations.
     ///
     /// Returns:
-    ///     Matching error value, or [`DualTreeError::KernelError1`] for unknown codes.
+    ///     Matching error value, or [`HierarchicalError::KernelError1`] for unknown codes.
     #[inline]
     pub fn from_u32(value: u32) -> Self {
         match value {
@@ -42,7 +42,7 @@ impl DualTreeError {
 
 /// Geometry that can be inserted into a cluster tree.
 pub trait BoundedGeometry {
-    type Scalar: DualTreeScalar;
+    type Scalar: Scalar;
 
     /// Return the axis-aligned bounds of this geometry.
     ///
@@ -62,14 +62,14 @@ pub trait BoundedGeometry {
 /// This keeps the evaluator generic over physical target point layouts. Plain
 /// slices work for Rust callers, while Python bindings can pass borrowed
 /// component columns without first allocating interleaved target structs.
-pub trait TargetCollection<K: DualTreeKernel>: Copy + Sync {
+pub trait TargetCollection<K: HierarchicalKernel>: Copy + Sync {
     /// Number of target points in the collection.
     fn len(self) -> usize;
 
     /// Return whether all column-like target storage has the same length.
     ///
     /// Evaluators call this immediately before looping over target data so
-    /// mismatched columns return [`DualTreeError::LengthMismatch`] instead of
+    /// mismatched columns return [`HierarchicalError::LengthMismatch`] instead of
     /// panicking from inside the hot target loop.
     fn has_consistent_lengths(self) -> bool;
 
@@ -88,7 +88,7 @@ pub trait TargetCollection<K: DualTreeKernel>: Copy + Sync {
 
 impl<K> TargetCollection<K> for &[K::TargetGeometry]
 where
-    K: DualTreeKernel,
+    K: HierarchicalKernel,
     K::TargetGeometry: Copy,
 {
     #[inline]
@@ -113,8 +113,8 @@ where
 }
 
 /// Trait implemented by physics kernels that can use the generic hierarchical evaluator.
-pub trait DualTreeKernel {
-    type Scalar: DualTreeScalar;
+pub trait HierarchicalKernel {
+    type Scalar: Scalar;
     type SourceGeometry: BoundedGeometry<Scalar = Self::Scalar> + Sync;
     type TargetGeometry: BoundedGeometry<Scalar = Self::Scalar> + Sync;
 
@@ -139,7 +139,7 @@ pub trait DualTreeKernel {
         sources: &[Self::SourceGeometry],
         moments: &[Self::SourceMoment],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError;
+    ) -> HierarchicalError;
 
     /// Combine child source summaries into one parent summary.
     ///
@@ -155,7 +155,7 @@ pub trait DualTreeKernel {
         children: &[Self::SourceSummary],
         child_ids: &[u32],
         out: &mut Self::SourceSummary,
-    ) -> DualTreeError;
+    ) -> HierarchicalError;
 
     /// Summarize a leaf node from target geometry.
     ///
@@ -171,7 +171,7 @@ pub trait DualTreeKernel {
         target_ids: &[u32],
         targets: &[Self::TargetGeometry],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError;
+    ) -> HierarchicalError;
 
     /// Combine child target summaries into one parent summary.
     ///
@@ -187,7 +187,7 @@ pub trait DualTreeKernel {
         children: &[Self::TargetSummary],
         child_ids: &[u32],
         out: &mut Self::TargetSummary,
-    ) -> DualTreeError;
+    ) -> HierarchicalError;
 
     /// Evaluate the exact source-target interaction.
     ///
@@ -205,7 +205,7 @@ pub trait DualTreeKernel {
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> DualTreeError;
+    ) -> HierarchicalError;
 
     /// Evaluate a far-field source summary against a target summary.
     ///
@@ -221,7 +221,7 @@ pub trait DualTreeKernel {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> DualTreeError;
+    ) -> HierarchicalError;
 
     /// Decide whether a source node is far enough from a target to use its summary.
     ///
@@ -269,10 +269,10 @@ pub trait DualTreeKernel {
     /// Returns:
     ///     Static description of the error code.
     #[inline]
-    fn describe_error(&self, error: DualTreeError) -> &'static str {
+    fn describe_error(&self, error: HierarchicalError) -> &'static str {
         match error {
-            DualTreeError::KernelError0 => "kernel error 0",
-            DualTreeError::KernelError1 => "kernel error 1",
+            HierarchicalError::KernelError0 => "kernel error 0",
+            HierarchicalError::KernelError1 => "kernel error 1",
             _ => "not a kernel error",
         }
     }
@@ -283,7 +283,7 @@ pub trait DualTreeKernel {
 /// This helper is shared by the default kernel implementation and kernel-specific
 /// acceptance hooks that first modify the effective `theta` value.
 #[inline]
-pub(crate) fn geometric_accept_far<T: DualTreeScalar>(
+pub(crate) fn geometric_accept_far<T: Scalar>(
     target_aabb: Aabb<T>,
     source_aabb: Aabb<T>,
     theta: T,

@@ -17,7 +17,7 @@ use crate::mesh::elements::tri::tri3::{
     max_edge_length_squared as triangle_max_edge_length_squared,
     subdivide_about_point as triangle_subdivide_about_point,
 };
-use crate::physics::hierarchical::DualTreeScalar;
+use crate::physics::hierarchical::Scalar;
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
 /// Midpoint-rule samples for the Duffy-style transverse edge integral in
@@ -29,7 +29,7 @@ const TRIANGLE_B_DUFFY_EDGE_SAMPLES: usize = 32;
 const TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR: f64 = 1e-12;
 
 #[inline]
-fn triangle_flux_density_inner<T: DualTreeScalar>(
+fn triangle_flux_density_inner<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],
@@ -60,7 +60,7 @@ fn triangle_flux_density_inner<T: DualTreeScalar>(
 }
 
 #[inline]
-fn accum_cross_scaled<T: DualTreeScalar>(out: &mut [T; 3], k: [T; 3], r: [T; 3], scale: T) {
+fn accum_cross_scaled<T: Scalar>(out: &mut [T; 3], k: [T; 3], r: [T; 3], scale: T) {
     let k_cross_r = cross3(k, r);
     out[0] = out[0] + scale * k_cross_r[0];
     out[1] = out[1] + scale * k_cross_r[1];
@@ -68,7 +68,7 @@ fn accum_cross_scaled<T: DualTreeScalar>(out: &mut [T; 3], k: [T; 3], r: [T; 3],
 }
 
 #[inline]
-fn triangle_flux_density_surface_duffy<T: DualTreeScalar>(
+fn triangle_flux_density_surface_duffy<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],
@@ -113,7 +113,7 @@ fn triangle_flux_density_surface_duffy<T: DualTreeScalar>(
 }
 
 #[inline]
-fn triangle_flux_density_duffy<T: DualTreeScalar>(
+fn triangle_flux_density_duffy<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],
@@ -173,7 +173,7 @@ fn triangle_flux_density_duffy<T: DualTreeScalar>(
 /// Returns:
 ///     Basis-function magnetic flux density `[bx, by, bz]` (T/A).
 #[inline]
-pub fn triangle_flux_density_basis<T: DualTreeScalar>(
+pub fn triangle_flux_density_basis<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],
@@ -236,7 +236,7 @@ pub fn triangle_flux_density_basis<T: DualTreeScalar>(
 /// Returns:
 ///     Magnetic flux density `[bx, by, bz]` (T).
 #[inline]
-pub fn flux_density_triangle<T: DualTreeScalar>(
+pub fn flux_density_triangle<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],

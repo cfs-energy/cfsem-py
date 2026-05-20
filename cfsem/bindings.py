@@ -25,16 +25,14 @@ from .cfsem import (
     flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
 )
 from .cfsem import flux_density_dipole as em_flux_density_dipole
-from .cfsem import flux_density_dipole_hierarchical as flux_density_dipole_hierarchical
+from .cfsem import flux_density_dipole_hierarchical
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
-from .cfsem import vector_potential_dipole_hierarchical as vector_potential_dipole_hierarchical
+from .cfsem import vector_potential_dipole_hierarchical
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
-from .cfsem import (
-    flux_density_linear_filament_hierarchical as flux_density_linear_filament_hierarchical,
-)
+from .cfsem import flux_density_linear_filament_hierarchical
 from .cfsem import flux_density_triangle_mesh_mapping as em_flux_density_triangle_mesh_mapping
 from .cfsem import flux_density_triangle_mesh as em_flux_density_triangle_mesh
-from .cfsem import flux_density_triangle_mesh_hierarchical as flux_density_triangle_mesh_hierarchical
+from .cfsem import flux_density_triangle_mesh_hierarchical
 from .cfsem import (
     flux_density_linear_filament_matrix as em_flux_density_linear_filament_matrix,
 )
@@ -83,9 +81,7 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
-from .cfsem import (
-    vector_potential_linear_filament_hierarchical as vector_potential_linear_filament_hierarchical,
-)
+from .cfsem import vector_potential_linear_filament_hierarchical
 from .cfsem import (
     vector_potential_triangle_mesh_mapping as em_vector_potential_triangle_mesh_mapping,
 )
@@ -94,16 +90,61 @@ from .cfsem import (
     vector_potential_linear_filament_matrix as em_vector_potential_linear_filament_matrix,
 )
 from .cfsem import (
-    vector_potential_triangle_mesh_hierarchical as vector_potential_triangle_mesh_hierarchical,
-)
-from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
 )
-from .cfsem import HierarchicalBoundaryElements as HierarchicalBoundaryElements
-from .cfsem import HierarchicalDipoles as HierarchicalDipoles
-from .cfsem import HierarchicalLinearFilaments as HierarchicalLinearFilaments
+from .cfsem import vector_potential_triangle_mesh_hierarchical
+from .cfsem import HierarchicalBoundaryElements
+from .cfsem import HierarchicalDipoles
+from .cfsem import HierarchicalLinearFilaments
 
 SparseTriplet = tuple[NDArray[float64], NDArray[uint64], NDArray[uint64]]
+
+__all__ = [
+    "SparseTriplet",
+    "body_force_density_circular_filament_cartesian",
+    "body_force_density_linear_filament",
+    "filament_helix_path",
+    "flux_circular_filament",
+    "flux_density_circular_filament",
+    "flux_density_circular_filament_cartesian",
+    "flux_density_dipole",
+    "flux_density_dipole_hierarchical",
+    "flux_density_linear_filament",
+    "flux_density_linear_filament_hierarchical",
+    "flux_density_point_segment",
+    "flux_density_triangle_mesh",
+    "flux_density_triangle_mesh_mapping",
+    "flux_density_triangle_mesh_hierarchical",
+    "gs_operator_order2",
+    "gs_operator_order4",
+    "HierarchicalBoundaryElements",
+    "HierarchicalDipoles",
+    "HierarchicalLinearFilaments",
+    "inductance_linear_filaments",
+    "inductance_piecewise_linear_filaments",
+    "mutual_inductance_circular_to_linear",
+    "rotate_filaments_about_path",
+    "triangle_mesh_current_density",
+    "triangle_mesh_flux_linkage_mapping_from_dipoles",
+    "triangle_mesh_force_mapping",
+    "triangle_mesh_force_mapping_from_circular_filaments",
+    "triangle_mesh_force_mapping_from_dipoles",
+    "triangle_mesh_force_mapping_from_linear_filaments",
+    "triangle_mesh_inductance_mapping_from_circular_filaments",
+    "triangle_mesh_inductance_mapping_from_linear_filaments",
+    "triangle_mesh_inductance_matrix",
+    "triangle_mesh_quadrature_points",
+    "triangle_mesh_self_force_mapping",
+    "vector_potential_circular_filament",
+    "vector_potential_dipole",
+    "vector_potential_dipole_hierarchical",
+    "vector_potential_linear_filament",
+    "vector_potential_linear_filament_hierarchical",
+    "vector_potential_point_segment",
+    "vector_potential_triangle_mesh",
+    "vector_potential_triangle_mesh_mapping",
+    "vector_potential_triangle_mesh_hierarchical",
+]
 
 
 def flux_circular_filament(

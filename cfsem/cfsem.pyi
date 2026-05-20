@@ -241,7 +241,28 @@ def flux_density_dipole_hierarchical(
     obs: ArrayTriple,
     theta: float = 0.01,
     par: bool = True,
-) -> ArrayTriple: ...
+) -> ArrayTriple:
+    """Hierarchical magnetic flux density of dipoles in Cartesian coordinates.
+
+    This one-shot method builds the source tree internally. This is an approximate method,
+    and no particular accuracy level is guaranteed. Truncated methods like this one may
+    average entire local loop structures out of existence; as a result, maximum relative
+    error is unbounded. This method must be tuned to a given use-case in order to be
+    useful, and should not be used to calculate safety-related field limits.
+
+    Args:
+        loc: Dipole source coordinates as component arrays.
+        moment: Dipole magnetic moment components.
+        outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
+        obs: Target point coordinates as component arrays.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic flux-density component arrays at the target points.
+    """
+    ...
+
 def vector_potential_dipole_hierarchical(
     loc: ArrayTriple,
     moment: ArrayTriple,
@@ -249,7 +270,28 @@ def vector_potential_dipole_hierarchical(
     obs: ArrayTriple,
     theta: float = 0.01,
     par: bool = True,
-) -> ArrayTriple: ...
+) -> ArrayTriple:
+    """Hierarchical magnetic vector potential of dipoles in Cartesian coordinates.
+
+    This one-shot method builds the source tree internally. This is an approximate method,
+    and no particular accuracy level is guaranteed. Truncated methods like this one may
+    average entire local loop structures out of existence; as a result, maximum relative
+    error is unbounded. This method must be tuned to a given use-case in order to be
+    useful, and should not be used to calculate safety-related field limits.
+
+    Args:
+        loc: Dipole source coordinates as component arrays.
+        moment: Dipole magnetic moment components.
+        outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
+        obs: Target point coordinates as component arrays.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic vector-potential component arrays at the target points.
+    """
+    ...
+
 def flux_density_linear_filament(
     xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
@@ -266,7 +308,29 @@ def flux_density_linear_filament_hierarchical(
     xyzp: ArrayTriple,
     theta: float = 0.05,
     par: bool = True,
-) -> ArrayTriple: ...
+) -> ArrayTriple:
+    """Hierarchical B-field calculation for many linear filament segments.
+
+    This one-shot method builds the source tree internally. This is an approximate method,
+    and no particular accuracy level is guaranteed. Truncated methods like this one may
+    average entire local loop structures out of existence; as a result, maximum relative
+    error is unbounded. This method must be tuned to a given use-case in order to be
+    useful, and should not be used to calculate safety-related field limits.
+
+    Args:
+        xyzfil: Filament segment start coordinates as component arrays.
+        dlxyzfil: Filament segment start-to-end displacement components.
+        ifil: Current in each filament segment.
+        wire_radius: Wire radius for each filament segment. Use zeros for thin wires.
+        xyzp: Target point coordinates as component arrays.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic flux-density component arrays at the target points.
+    """
+    ...
+
 def flux_density_linear_filament_matrix(
     xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
@@ -298,7 +362,29 @@ def vector_potential_linear_filament_hierarchical(
     xyzp: ArrayTriple,
     theta: float = 0.05,
     par: bool = True,
-) -> ArrayTriple: ...
+) -> ArrayTriple:
+    """Hierarchical A-field calculation for many linear filament segments.
+
+    This one-shot method builds the source tree internally. This is an approximate method,
+    and no particular accuracy level is guaranteed. Truncated methods like this one may
+    average entire local loop structures out of existence; as a result, maximum relative
+    error is unbounded. This method must be tuned to a given use-case in order to be
+    useful, and should not be used to calculate safety-related field limits.
+
+    Args:
+        xyzfil: Filament segment start coordinates as component arrays.
+        dlxyzfil: Filament segment start-to-end displacement components.
+        ifil: Current in each filament segment.
+        wire_radius: Wire radius for each filament segment. Use zeros for thin wires.
+        xyzp: Target point coordinates as component arrays.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic vector-potential component arrays at the target points.
+    """
+    ...
+
 def vector_potential_linear_filament_matrix(
     xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
@@ -362,7 +448,29 @@ def flux_density_triangle_mesh_hierarchical(
     theta: float = 0.05,
     quad: str = "dunavant3",
     par: bool = True,
-) -> ArrayTriple: ...
+) -> ArrayTriple:
+    """Hierarchical B-field calculation for a triangle mesh with nodal stream-function values.
+
+    This one-shot method builds the source tree internally. This is an approximate method,
+    and no particular accuracy level is guaranteed. Truncated methods like this one may
+    average entire local loop structures out of existence; as a result, maximum relative
+    error is unbounded. This method must be tuned to a given use-case in order to be
+    useful, and should not be used to calculate safety-related field limits.
+
+    Args:
+        nodes: Mesh node coordinates with one node per row.
+        triangles: Triangle node indices with one triangle per row.
+        s: Nodal stream-function values.
+        obs: Target point coordinates with one point per row.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        quad: Triangle quadrature rule.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic flux-density component arrays at the target points.
+    """
+    ...
+
 def vector_potential_triangle_mesh_hierarchical(
     nodes: FloatMatrix,
     triangles: IntMatrix,
@@ -371,7 +479,29 @@ def vector_potential_triangle_mesh_hierarchical(
     theta: float = 0.05,
     quad: str = "dunavant3",
     par: bool = True,
-) -> ArrayTriple: ...
+) -> ArrayTriple:
+    """Hierarchical A-field calculation for a triangle mesh with nodal stream-function values.
+
+    This one-shot method builds the source tree internally. This is an approximate method,
+    and no particular accuracy level is guaranteed. Truncated methods like this one may
+    average entire local loop structures out of existence; as a result, maximum relative
+    error is unbounded. This method must be tuned to a given use-case in order to be
+    useful, and should not be used to calculate safety-related field limits.
+
+    Args:
+        nodes: Mesh node coordinates with one node per row.
+        triangles: Triangle node indices with one triangle per row.
+        s: Nodal stream-function values.
+        obs: Target point coordinates with one point per row.
+        theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
+        quad: Triangle quadrature rule.
+        par: Whether to evaluate target batches in parallel.
+
+    Returns:
+        Magnetic vector-potential component arrays at the target points.
+    """
+    ...
+
 def flux_density_triangle_mesh_mapping(
     obs: FloatMatrix,
     nodes: FloatMatrix,

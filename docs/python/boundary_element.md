@@ -10,8 +10,6 @@
 
 ::: cfsem.vector_potential_triangle_mesh_hierarchical
 
-::: cfsem.HierarchicalBoundaryElements
-
 ## Field Mappings
 
 ::: cfsem.flux_density_triangle_mesh_mapping

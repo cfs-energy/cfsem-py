@@ -430,7 +430,6 @@ def solve_self_fields(
     geometry: Geometry,
     geometry_layout: str,
     source_geometry: str,
-    construction_method: str,
     theta: float,
     par: bool,
 ) -> dict[str, object]:
@@ -456,6 +455,9 @@ def solve_self_fields(
     if interactions <= MAX_DIRECT_SELF_INTERACTIONS:
         t0 = time.perf_counter()
         if source_geometry == "dipole":
+            dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(
+                geometry, geometry_layout
+            )
             direct_b = cfsem.flux_density_dipole(
                 dipole_loc,
                 dipole_moment,
@@ -471,6 +473,9 @@ def solve_self_fields(
                 outer_radius=dipole_outer_radius,
             )
         elif source_geometry == "boundary":
+            strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(
+                geometry, geometry_layout
+            )
             self_obs_array = np.column_stack(self_obs)
             direct_b = cfsem.flux_density_triangle_mesh(
                 self_obs_array,
@@ -487,6 +492,9 @@ def solve_self_fields(
                 par=par,
             )
         else:
+            xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(
+                geometry, geometry_layout
+            )
             direct_b = cfsem.flux_density_linear_filament(
                 self_obs,
                 xyzfil,
@@ -505,42 +513,37 @@ def solve_self_fields(
             )
         direct_time = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
     if source_geometry == "dipole":
         dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
-        solver = cfsem.HierarchicalDipoles(theta=theta, construction_method=construction_method)
-        solver.set_sources(dipole_loc, dipole_outer_radius)
-        build_time = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(self_obs, dipole_moment, par=par)
-        hierarchical_a = solver.vector_potential(self_obs, dipole_moment, par=par)
+        result_b = cfsem.flux_density_dipole_hierarchical(
+            dipole_loc, dipole_moment, dipole_outer_radius, self_obs, theta=theta, par=par
+        )
+        result_a = cfsem.vector_potential_dipole_hierarchical(
+            dipole_loc, dipole_moment, dipole_outer_radius, self_obs, theta=theta, par=par
+        )
     elif source_geometry == "boundary":
         strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(
             geometry, geometry_layout
         )
-        solver = cfsem.HierarchicalBoundaryElements(
-            theta=theta,
-            construction_method=construction_method,
+        self_obs_array = np.column_stack(self_obs)
+        result_b = cfsem.flux_density_triangle_mesh_hierarchical(
+            strip_nodes, strip_triangles, strip_stream_function, self_obs_array, theta=theta, par=par
         )
-        solver.set_sources(strip_nodes, strip_triangles)
-        build_time = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(self_obs, strip_stream_function, par=par)
-        hierarchical_a = solver.vector_potential(self_obs, strip_stream_function, par=par)
+        result_a = cfsem.vector_potential_triangle_mesh_hierarchical(
+            strip_nodes, strip_triangles, strip_stream_function, self_obs_array, theta=theta, par=par
+        )
     else:
-        solver = cfsem.HierarchicalLinearFilaments(
-            theta=theta,
-            construction_method=construction_method,
+        xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
+        result_b = cfsem.flux_density_linear_filament_hierarchical(
+            xyzfil, dlxyzfil, current, wire_radius, self_obs, theta=theta, par=par
         )
-        solver.set_sources(xyzfil, dlxyzfil, wire_radius)
-        build_time = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(self_obs, current, par=par)
-        hierarchical_a = solver.vector_potential(self_obs, current, par=par)
-    eval_time = time.perf_counter() - t0
+        result_a = cfsem.vector_potential_linear_filament_hierarchical(
+            xyzfil, dlxyzfil, current, wire_radius, self_obs, theta=theta, par=par
+        )
+    hierarchical_b = result_b.field
+    hierarchical_a = result_a.field
+    build_time = result_b.diagnostics.construction_time + result_a.diagnostics.construction_time
+    eval_time = result_b.diagnostics.evaluation_time + result_a.diagnostics.evaluation_time
 
     return {
         "direct_b": direct_b,
@@ -559,7 +562,6 @@ def solve_fields(
     geometry: Geometry,
     geometry_layout: str,
     source_geometry: str,
-    construction_method: str,
     theta: float,
     par: bool,
     calc_self_field: bool,
@@ -623,60 +625,81 @@ def solve_fields(
         )
     direct_time = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
     if source_geometry == "dipole":
         dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
-        solver = cfsem.HierarchicalDipoles(
-            theta=theta,
-            construction_method=construction_method,
-        )
-        solver.set_sources(dipole_loc, dipole_outer_radius)
         source_count = dipole_outer_radius.size
-        build_time = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.obs, dipole_moment, par=par)
-        hierarchical_a = solver.vector_potential(geometry.obs, dipole_moment, par=par)
-        accepted_source_levels_b = solver.accepted_source_levels(geometry.obs, dipole_moment, field="b")
-        accepted_source_levels_a = solver.accepted_source_levels(geometry.obs, dipole_moment, field="a")
+        result_b = cfsem.flux_density_dipole_hierarchical(
+            dipole_loc,
+            dipole_moment,
+            dipole_outer_radius,
+            geometry.obs,
+            theta=theta,
+            par=par,
+            extra_diagnostics=True,
+        )
+        result_a = cfsem.vector_potential_dipole_hierarchical(
+            dipole_loc,
+            dipole_moment,
+            dipole_outer_radius,
+            geometry.obs,
+            theta=theta,
+            par=par,
+            extra_diagnostics=True,
+        )
     elif source_geometry == "boundary":
         strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(
             geometry, geometry_layout
         )
-        solver = cfsem.HierarchicalBoundaryElements(
-            theta=theta,
-            construction_method=construction_method,
-        )
-        solver.set_sources(strip_nodes, strip_triangles)
         source_count = strip_triangles.shape[0]
-        build_time = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.obs, strip_stream_function, par=par)
-        hierarchical_a = solver.vector_potential(geometry.obs, strip_stream_function, par=par)
-        accepted_source_levels_b = solver.accepted_source_levels(
-            geometry.obs, strip_stream_function, field="b"
+        obs_array = np.column_stack(geometry.obs)
+        result_b = cfsem.flux_density_triangle_mesh_hierarchical(
+            strip_nodes,
+            strip_triangles,
+            strip_stream_function,
+            obs_array,
+            theta=theta,
+            par=par,
+            extra_diagnostics=True,
         )
-        accepted_source_levels_a = solver.accepted_source_levels(
-            geometry.obs, strip_stream_function, field="a"
+        result_a = cfsem.vector_potential_triangle_mesh_hierarchical(
+            strip_nodes,
+            strip_triangles,
+            strip_stream_function,
+            obs_array,
+            theta=theta,
+            par=par,
+            extra_diagnostics=True,
         )
     else:
         xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
-        solver = cfsem.HierarchicalLinearFilaments(
-            theta=theta,
-            construction_method=construction_method,
-        )
-        solver.set_sources(xyzfil, dlxyzfil, wire_radius)
         source_count = current.size
-        build_time = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        hierarchical_b = solver.flux_density(geometry.obs, current, par=par)
-        hierarchical_a = solver.vector_potential(geometry.obs, current, par=par)
-        accepted_source_levels_b = solver.accepted_source_levels(geometry.obs, current, field="b")
-        accepted_source_levels_a = solver.accepted_source_levels(geometry.obs, current, field="a")
-    eval_time = time.perf_counter() - t0
-    source_tree_aabbs = solver.source_tree_aabbs() if overlay_aabbs else None
+        result_b = cfsem.flux_density_linear_filament_hierarchical(
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
+            geometry.obs,
+            theta=theta,
+            par=par,
+            extra_diagnostics=True,
+        )
+        result_a = cfsem.vector_potential_linear_filament_hierarchical(
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
+            geometry.obs,
+            theta=theta,
+            par=par,
+            extra_diagnostics=True,
+        )
+    hierarchical_b = result_b.field
+    hierarchical_a = result_a.field
+    accepted_source_levels_b = result_b.diagnostics.accepted_source_level
+    accepted_source_levels_a = result_a.diagnostics.accepted_source_level
+    build_time = result_b.diagnostics.construction_time + result_a.diagnostics.construction_time
+    eval_time = result_b.diagnostics.evaluation_time + result_a.diagnostics.evaluation_time
+    source_tree_aabbs = result_b.diagnostics.source_tree if overlay_aabbs else None
 
     results: dict[str, object] = {
         "direct_b": direct_b,
@@ -700,7 +723,6 @@ def solve_fields(
             geometry,
             geometry_layout=geometry_layout,
             source_geometry=source_geometry,
-            construction_method=construction_method,
             theta=theta,
             par=par,
         )
@@ -1086,16 +1108,6 @@ def make_app():
                         value=DEFAULT_LOOP_FRACTION,
                         marks={0.0: "0", 0.25: "0.25", 0.5: "0.5", 0.75: "0.75", 1.0: "1"},
                     ),
-                    html.Label("Construction"),
-                    dcc.Dropdown(
-                        id="construction",
-                        value="recursive",
-                        clearable=False,
-                        options=[
-                            {"label": "Recursive source tree", "value": "recursive"},
-                            {"label": "Morton/LBVH source tree", "value": "morton_lbvh"},
-                        ],
-                    ),
                     html.Label("Field"),
                     dcc.RadioItems(
                         id="field",
@@ -1182,7 +1194,6 @@ def make_app():
         Input("helix-width", "value"),
         Input("bend-curvature", "value"),
         Input("loop-fraction", "value"),
-        Input("construction", "value"),
         Input("field", "value"),
         Input("theta", "value"),
         Input("source-count", "value"),
@@ -1195,7 +1206,6 @@ def make_app():
         helix_width,
         bend_curvature,
         loop_fraction,
-        construction,
         field,
         theta,
         log10_source_count,
@@ -1216,7 +1226,6 @@ def make_app():
             geometry,
             geometry_layout=geometry_layout,
             source_geometry=source_geometry,
-            construction_method=construction,
             theta=float(theta),
             par="parallel" in opts,
             calc_self_field="self-field" in opts,

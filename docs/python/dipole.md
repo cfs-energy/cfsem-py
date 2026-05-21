@@ -9,5 +9,3 @@
 ::: cfsem.vector_potential_dipole
 
 ::: cfsem.vector_potential_dipole_hierarchical
-
-::: cfsem.HierarchicalDipoles

@@ -10,8 +10,6 @@
 
 ::: cfsem.vector_potential_linear_filament_hierarchical
 
-::: cfsem.HierarchicalLinearFilaments
-
 ## Force
 
 ::: cfsem.body_force_density_linear_filament

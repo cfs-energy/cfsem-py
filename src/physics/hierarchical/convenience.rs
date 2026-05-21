@@ -3,7 +3,7 @@
 //! These helpers intentionally rebuild the source tree every call. For the
 //! operating range where the hierarchical solve wins over the dense direct
 //! methods, tree construction is usually a small part of total runtime, so this
-//! API favors direct-method ergonomics over solver object reuse.
+//! API favors direct-method ergonomics.
 
 use crate::mesh::triangle3d::TriangleMeshView;
 use crate::physics::boundary_element::QuadratureKind;
@@ -48,8 +48,7 @@ impl<K: HierarchicalKernel> DiagnosticInfo<K> {
 /// Hierarchical magnetic flux density of dipole sources at Cartesian targets.
 ///
 /// This one-shot helper mirrors the direct dipole API while rebuilding the
-/// source tree internally. Use the reusable solver pieces directly when many
-/// source-magnitude updates share fixed geometry.
+/// source tree internally.
 ///
 /// This is an approximate method, and no particular accuracy level is guaranteed.
 /// Truncated methods like this one may average entire local loop structures out of
@@ -98,8 +97,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
 /// Hierarchical magnetic vector potential of dipole sources at Cartesian targets.
 ///
 /// This one-shot helper mirrors the direct dipole API while rebuilding the
-/// source tree internally. Use the reusable solver pieces directly when many
-/// source-magnitude updates share fixed geometry.
+/// source tree internally.
 ///
 /// This is an approximate method, and no particular accuracy level is guaranteed.
 /// Truncated methods like this one may average entire local loop structures out of
@@ -148,8 +146,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
 /// Hierarchical magnetic flux density of linear filament segments.
 ///
 /// This one-shot helper mirrors [`crate::physics::linear_filament::flux_density_linear_filament`]
-/// while rebuilding the source tree internally. Use the reusable solver pieces
-/// directly when many current updates share fixed geometry.
+/// while rebuilding the source tree internally.
 ///
 /// This is an approximate method, and no particular accuracy level is guaranteed.
 /// Truncated methods like this one may average entire local loop structures out of
@@ -199,8 +196,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
 /// Hierarchical magnetic vector potential of linear filament segments.
 ///
 /// This one-shot helper mirrors [`crate::physics::linear_filament::vector_potential_linear_filament`]
-/// while rebuilding the source tree internally. Use the reusable solver pieces
-/// directly when many current updates share fixed geometry.
+/// while rebuilding the source tree internally.
 ///
 /// This is an approximate method, and no particular accuracy level is guaranteed.
 /// Truncated methods like this one may average entire local loop structures out of
@@ -250,8 +246,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
 /// Hierarchical magnetic flux density from a triangle mesh with nodal stream-function values.
 ///
 /// This one-shot helper mirrors [`crate::physics::boundary_element::flux_density_triangle_mesh`]
-/// while rebuilding the source tree internally. Use the reusable solver pieces
-/// directly when many source-value updates share fixed geometry.
+/// while rebuilding the source tree internally.
 ///
 /// This is an approximate method, and no particular accuracy level is guaranteed.
 /// Truncated methods like this one may average entire local loop structures out of
@@ -302,8 +297,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
 /// Hierarchical magnetic vector potential from a triangle mesh with nodal stream-function values.
 ///
 /// This one-shot helper mirrors [`crate::physics::boundary_element::vector_potential_triangle_mesh`]
-/// while rebuilding the source tree internally. Use the reusable solver pieces
-/// directly when many source-value updates share fixed geometry.
+/// while rebuilding the source tree internally.
 ///
 /// This is an approximate method, and no particular accuracy level is guaranteed.
 /// Truncated methods like this one may average entire local loop structures out of

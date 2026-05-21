@@ -236,24 +236,6 @@ impl<'a> XyzInput<'a> {
     fn as_tuple(&self) -> (&[f64], &[f64], &[f64]) {
         (self.x.as_slice(), self.y.as_slice(), self.z.as_slice())
     }
-
-    #[inline]
-    fn target_columns(&self) -> physics::hierarchical::kernels::DipoleTargets<'_, f64> {
-        physics::hierarchical::kernels::DipoleTargets::new(
-            self.x.as_slice(),
-            self.y.as_slice(),
-            self.z.as_slice(),
-        )
-    }
-
-    #[inline]
-    fn point(&self, index: usize) -> [f64; 3] {
-        [
-            self.x.as_slice()[index],
-            self.y.as_slice()[index],
-            self.z.as_slice()[index],
-        ]
-    }
 }
 
 fn read_f64_input_array1<'py>(
@@ -290,45 +272,6 @@ fn warn_if_readwrite_array1_noncontiguous(
         warn_hierarchical_reallocation(py, name, "output")?;
     }
     Ok(())
-}
-
-#[derive(Clone, Copy)]
-enum HierarchicalConstructionMethod {
-    Recursive,
-    MortonLbvh,
-}
-
-fn parse_hierarchical_construction_method(
-    construction_method: &str,
-) -> PyResult<HierarchicalConstructionMethod> {
-    match construction_method {
-        "recursive" => Ok(HierarchicalConstructionMethod::Recursive),
-        "morton_lbvh" | "morton-lbvh" | "lbvh" => Ok(HierarchicalConstructionMethod::MortonLbvh),
-        _ => Err(PyInteropError::ValueError {
-            msg: format!(
-                "Unsupported hierarchical construction method: {construction_method}. \
-                 Expected 'recursive' or 'morton_lbvh'."
-            ),
-        }
-        .into()),
-    }
-}
-
-fn build_hierarchical_source_tree<G>(
-    sources: &[G],
-    construction_method: HierarchicalConstructionMethod,
-) -> Result<physics::hierarchical::ClusterTree<f64>, physics::hierarchical::HierarchicalError>
-where
-    G: physics::hierarchical::BoundedGeometry<Scalar = f64> + Sync,
-{
-    match construction_method {
-        HierarchicalConstructionMethod::Recursive => {
-            physics::hierarchical::ClusterTree::build(sources)
-        }
-        HierarchicalConstructionMethod::MortonLbvh => {
-            physics::hierarchical::ClusterTree::build_morton_lbvh(sources)
-        }
-    }
 }
 
 fn read_xyz_tuple<'py>(
@@ -378,77 +321,6 @@ fn read_output_arrays<'py>(
     warn_if_readwrite_array1_noncontiguous(py, &mut out.1, &format!("{name}.1"))?;
     warn_if_readwrite_array1_noncontiguous(py, &mut out.2, &format!("{name}.2"))?;
     Ok(out)
-}
-
-fn copy_vec3_to_py_arrays<'py>(
-    values: &[[f64; 3]],
-    mut out: (
-        PyReadwriteArray1<'py, f64>,
-        PyReadwriteArray1<'py, f64>,
-        PyReadwriteArray1<'py, f64>,
-    ),
-) -> PyResult<(
-    PyReadwriteArray1<'py, f64>,
-    PyReadwriteArray1<'py, f64>,
-    PyReadwriteArray1<'py, f64>,
-)> {
-    {
-        let mut outx = out.0.as_array_mut();
-        let mut outy = out.1.as_array_mut();
-        let mut outz = out.2.as_array_mut();
-        for i in 0..values.len() {
-            outx[i] = values[i][0];
-            outy[i] = values[i][1];
-            outz[i] = values[i][2];
-        }
-    }
-    Ok(out)
-}
-
-fn vec3_to_py_tuple(
-    py: Python<'_>,
-    values: &[[f64; 3]],
-) -> (Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>) {
-    let mut outx = Vec::with_capacity(values.len());
-    let mut outy = Vec::with_capacity(values.len());
-    let mut outz = Vec::with_capacity(values.len());
-    for i in 0..values.len() {
-        outx.push(values[i][0]);
-        outy.push(values[i][1]);
-        outz.push(values[i][2]);
-    }
-    (
-        PyArray1::from_vec(py, outx).unbind(),
-        PyArray1::from_vec(py, outy).unbind(),
-        PyArray1::from_vec(py, outz).unbind(),
-    )
-}
-
-fn vec3_to_output_tuple(
-    py: Python<'_>,
-    values: &[[f64; 3]],
-    out: Option<(
-        PyReadwriteArray1<f64>,
-        PyReadwriteArray1<f64>,
-        PyReadwriteArray1<f64>,
-    )>,
-    name: &str,
-) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-    match out {
-        Some(out) => {
-            let out = read_output_arrays(py, out, values.len(), name)?;
-            let out = copy_vec3_to_py_arrays(values, out)?;
-            let out_x: PyReadonlyArray1<'_, f64> = out.0.into();
-            let out_y: PyReadonlyArray1<'_, f64> = out.1.into();
-            let out_z: PyReadonlyArray1<'_, f64> = out.2.into();
-            Ok((
-                <pyo3::Bound<'_, PyArray1<f64>> as Clone>::clone(&out_x).unbind(),
-                <pyo3::Bound<'_, PyArray1<f64>> as Clone>::clone(&out_y).unbind(),
-                <pyo3::Bound<'_, PyArray1<f64>> as Clone>::clone(&out_z).unbind(),
-            ))
-        }
-        None => Ok(vec3_to_py_tuple(py, values)),
-    }
 }
 
 fn component_vecs_to_output_tuple(
@@ -597,298 +469,18 @@ fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Ve
     levels
 }
 
-fn read_target_points<'py>(
-    py: Python<'_>,
-    target: &'py (
-        PyReadonlyArray1<'py, f64>,
-        PyReadonlyArray1<'py, f64>,
-        PyReadonlyArray1<'py, f64>,
-    ),
-) -> PyResult<XyzInput<'py>> {
-    read_xyz_tuple(py, &target, "target")
-}
-
-fn build_dipole_sources(
-    py: Python<'_>,
-    loc: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ),
-    outer_radius: PyReadonlyArray1<f64>,
-) -> PyResult<Vec<physics::hierarchical::kernels::DipoleSource<f64>>> {
-    let points = read_xyz_tuple(py, &loc, "loc")?;
-    let outer_radius = read_f64_input_array1(py, &outer_radius, "outer_radius")?;
-    if points.len() != outer_radius.len() {
-        return Err(PyInteropError::DimensionalityError {
-            msg: "loc and outer_radius must have matching lengths".to_string(),
-        }
-        .into());
-    }
-    let mut sources = Vec::with_capacity(points.len());
-    for i in 0..points.len() {
-        sources.push(physics::hierarchical::kernels::DipoleSource {
-            position: points.point(i),
-            outer_radius: outer_radius.as_slice()[i],
-        });
-    }
-    Ok(sources)
-}
-
-fn build_dipole_sources_optional_radius(
-    py: Python<'_>,
-    loc: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ),
-    outer_radius: Option<PyReadonlyArray1<f64>>,
-) -> PyResult<Vec<physics::hierarchical::kernels::DipoleSource<f64>>> {
-    match outer_radius {
-        Some(outer_radius) => build_dipole_sources(py, loc, outer_radius),
-        None => {
-            let points = read_xyz_tuple(py, &loc, "loc")?;
-            let mut sources = Vec::with_capacity(points.len());
-            for i in 0..points.len() {
-                sources.push(physics::hierarchical::kernels::DipoleSource {
-                    position: points.point(i),
-                    outer_radius: 0.0,
-                });
-            }
-            Ok(sources)
-        }
-    }
-}
-
-fn build_linear_filament_sources(
-    py: Python<'_>,
-    xyzfil: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ),
-    dlxyzfil: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ),
-    wire_radius: PyReadonlyArray1<f64>,
-) -> PyResult<Vec<physics::hierarchical::kernels::LinearFilamentSource<f64>>> {
-    let starts = read_xyz_tuple(py, &xyzfil, "xyzfil")?;
-    let deltas = read_xyz_tuple(py, &dlxyzfil, "dlxyzfil")?;
-    let wire_radius = read_f64_input_array1(py, &wire_radius, "wire_radius")?;
-    if starts.len() != deltas.len() || starts.len() != wire_radius.len() {
-        return Err(PyInteropError::DimensionalityError {
-            msg: "xyzfil, dlxyzfil, and wire_radius must have matching lengths".to_string(),
-        }
-        .into());
-    }
-    let mut sources = Vec::with_capacity(starts.len());
-    for i in 0..starts.len() {
-        let start = starts.point(i);
-        let delta = deltas.point(i);
-        sources.push(physics::hierarchical::kernels::LinearFilamentSource {
-            start,
-            end: [
-                start[0] + delta[0],
-                start[1] + delta[1],
-                start[2] + delta[2],
-            ],
-            wire_radius: wire_radius.as_slice()[i],
-        });
-    }
-    Ok(sources)
-}
-
-struct BoundaryElementGeometry {
-    nodes: (Vec<f64>, Vec<f64>, Vec<f64>),
-    triangles: (Vec<usize>, Vec<usize>, Vec<usize>),
-}
-
-impl BoundaryElementGeometry {
-    fn mesh_view(&self) -> PyResult<mesh::TriangleMeshView<'_>> {
-        mesh::TriangleMeshView::new(
-            (&self.nodes.0, &self.nodes.1, &self.nodes.2),
-            (&self.triangles.0, &self.triangles.1, &self.triangles.2),
-        )
-        .map_err(|err| PyInteropError::ValueError {
-            msg: err.to_string(),
-        })
-        .map_err(Into::into)
-    }
-}
-
-fn build_boundary_element_geometry(
-    py: Python<'_>,
-    nodes: PyReadonlyArray2<f64>,
-    triangles: PyReadonlyArray2<i64>,
-) -> PyResult<(
-    BoundaryElementGeometry,
-    Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>,
-)> {
-    warn_if_readonly_array2_noncontiguous(py, &nodes, "nodes")?;
-    warn_if_readonly_array2_noncontiguous(py, &triangles, "triangles")?;
-    let nodes = split_xyz_array2("nodes", nodes)?;
-    let (i0, i1, i2) = split_triangle_index_array2("triangles", triangles)?;
-    let geometry = BoundaryElementGeometry {
-        nodes,
-        triangles: (i0, i1, i2),
-    };
-    let mesh = geometry.mesh_view()?;
-    let mut sources = Vec::with_capacity(mesh.len());
-    for i in 0..mesh.len() {
-        let nodes = mesh.triangle_nodes(i);
-        sources.push(physics::hierarchical::kernels::BoundaryElementTriangle {
-            n0: nodes[0],
-            n1: nodes[1],
-            n2: nodes[2],
-        });
-    }
-    Ok((geometry, sources))
-}
-
-fn read_boundary_element_moments(
-    py: Python<'_>,
-    mesh: &mesh::TriangleMeshView<'_>,
-    s: &PyReadonlyArray1<'_, f64>,
-) -> PyResult<Vec<[f64; 3]>> {
-    let s = read_f64_input_array1(py, s, "s")?;
-    mesh.validate_nodal_values(s.as_slice()).map_err(|err| {
-        PyInteropError::DimensionalityError {
-            msg: err.to_string(),
-        }
-    })?;
-    let mut moments = Vec::with_capacity(mesh.len());
-    for i in 0..mesh.len() {
-        moments.push(mesh.triangle_scalars(i, s.as_slice()));
-    }
-    Ok(moments)
-}
-
-fn read_vec3_moments(
-    py: Python<'_>,
-    moment: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ),
-    n: usize,
-    name: &str,
-) -> PyResult<Vec<[f64; 3]>> {
-    let values = read_xyz_tuple(py, &moment, name)?;
-    if values.len() != n {
-        return Err(PyInteropError::DimensionalityError {
-            msg: format!("{name} must have length {n}"),
-        }
-        .into());
-    }
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        out.push(values.point(i));
-    }
-    Ok(out)
-}
-
-fn read_scalar_moments<'py>(
-    py: Python<'_>,
-    moment: &'py PyReadonlyArray1<'py, f64>,
-    n: usize,
-    name: &str,
-) -> PyResult<F64Input<'py>> {
-    let moment = read_f64_input_array1(py, &moment, name)?;
-    if moment.len() != n {
-        return Err(PyInteropError::DimensionalityError {
-            msg: format!("{name} must have length {n}"),
-        }
-        .into());
-    }
-    Ok(moment)
-}
-
-fn hierarchical_eval_source_tree_vec3<K, C>(
+fn accepted_source_level_diagnostic<K, S, C, M>(
     kernel: K,
     source_tree: &physics::hierarchical::ClusterTree<f64>,
-    sources: &[K::SourceGeometry],
+    sources: S,
     targets: C,
-    moments: &[K::SourceMoment],
-    theta: f64,
-    par: bool,
-) -> PyResult<Vec<[f64; 3]>>
-where
-    K: physics::hierarchical::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
-    K::SourceGeometry: Copy,
-    K::SourceMoment: Copy,
-    K::TargetGeometry: Copy,
-    C: physics::hierarchical::TargetCollection<K>,
-{
-    let mut source_summaries =
-        physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
-    let mut err = physics::hierarchical::update_source_summaries_into(
-        &kernel,
-        source_tree.as_view(),
-        sources,
-        moments,
-        &mut source_summaries.node_summaries,
-    );
-    if err != physics::hierarchical::HierarchicalError::Ok {
-        return Err(py_hierarchical_error("source summary update", err));
-    }
-
-    let target_count = physics::hierarchical::TargetCollection::<K>::geometry_len(targets);
-    let mut out = vec![[0.0; 3]; target_count];
-    let scratch_len = match par {
-        true => physics::hierarchical::parallel_source_tree_evaluation_scratch_len(target_count),
-        false => physics::hierarchical::source_tree_evaluation_scratch_len(),
-    };
-    let mut scratch_value = vec![[0.0; 3]; scratch_len];
-    let mut scratch = physics::hierarchical::EvaluationScratch {
-        contribution: &mut scratch_value,
-    };
-    err = match par {
-        true => physics::hierarchical::evaluate_source_tree_into_par(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            sources,
-            targets,
-            moments,
-            theta,
-            &mut out,
-            &mut scratch,
-        ),
-        false => physics::hierarchical::evaluate_source_tree_into(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            sources,
-            targets,
-            moments,
-            theta,
-            &mut out,
-            &mut scratch,
-        ),
-    };
-    if err != physics::hierarchical::HierarchicalError::Ok {
-        return Err(py_hierarchical_error(
-            "source-tree hierarchical evaluation",
-            err,
-        ));
-    }
-    Ok(out)
-}
-
-fn hierarchical_source_level_diagnostic<K, C>(
-    kernel: K,
-    source_tree: &physics::hierarchical::ClusterTree<f64>,
-    sources: &[K::SourceGeometry],
-    targets: C,
-    moments: &[K::SourceMoment],
+    moments: M,
     theta: f64,
 ) -> PyResult<Vec<f64>>
 where
     K: physics::hierarchical::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
-    K::SourceGeometry: Copy,
-    K::SourceMoment: Copy,
+    S: physics::hierarchical::SourceCollection<K> + Copy,
+    M: physics::hierarchical::SourceMomentCollection<K> + Copy,
     K::TargetGeometry: Copy,
     C: physics::hierarchical::TargetCollection<K>,
 {
@@ -965,12 +557,40 @@ fn flux_density_dipole_hierarchical(
         (&mut bx, &mut by, &mut bz),
     )
     .map_err(|err| py_hierarchical_error("hierarchical dipole flux density", err))?;
-    let source_tree = match extra_diagnostics {
-        true => Some(source_tree_diagnostics_object(
-            py,
+    let (source_tree, accepted_source_level) = if extra_diagnostics {
+        let sources = physics::hierarchical::kernels::DipoleSources::new(
+            loc.as_tuple().0,
+            loc.as_tuple().1,
+            loc.as_tuple().2,
+            outer_radius.as_slice(),
+        );
+        let targets = physics::hierarchical::kernels::DipoleTargets::new(
+            obs.as_tuple().0,
+            obs.as_tuple().1,
+            obs.as_tuple().2,
+        );
+        let moments = physics::hierarchical::kernels::DipoleMoments::new(
+            moment.as_tuple().0,
+            moment.as_tuple().1,
+            moment.as_tuple().2,
+        );
+        let levels = accepted_source_level_diagnostic(
+            physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
             &diagnostics.source_tree,
-        )?),
-        false => None,
+            sources,
+            targets,
+            moments,
+            theta,
+        )?;
+        (
+            Some(source_tree_diagnostics_object(
+                py,
+                &diagnostics.source_tree,
+            )?),
+            Some(PyArray1::from_vec(py, levels).unbind()),
+        )
+    } else {
+        (None, None)
     };
     let field = component_vecs_to_output_tuple(py, (bx, by, bz), out, "flux_density")?;
     solve_result_from_field(
@@ -981,7 +601,7 @@ fn flux_density_dipole_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        None,
+        accepted_source_level,
     )
 }
 
@@ -1030,12 +650,40 @@ fn vector_potential_dipole_hierarchical(
         (&mut ax, &mut ay, &mut az),
     )
     .map_err(|err| py_hierarchical_error("hierarchical dipole vector potential", err))?;
-    let source_tree = match extra_diagnostics {
-        true => Some(source_tree_diagnostics_object(
-            py,
+    let (source_tree, accepted_source_level) = if extra_diagnostics {
+        let sources = physics::hierarchical::kernels::DipoleSources::new(
+            loc.as_tuple().0,
+            loc.as_tuple().1,
+            loc.as_tuple().2,
+            outer_radius.as_slice(),
+        );
+        let targets = physics::hierarchical::kernels::DipoleTargets::new(
+            obs.as_tuple().0,
+            obs.as_tuple().1,
+            obs.as_tuple().2,
+        );
+        let moments = physics::hierarchical::kernels::DipoleMoments::new(
+            moment.as_tuple().0,
+            moment.as_tuple().1,
+            moment.as_tuple().2,
+        );
+        let levels = accepted_source_level_diagnostic(
+            physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
             &diagnostics.source_tree,
-        )?),
-        false => None,
+            sources,
+            targets,
+            moments,
+            theta,
+        )?;
+        (
+            Some(source_tree_diagnostics_object(
+                py,
+                &diagnostics.source_tree,
+            )?),
+            Some(PyArray1::from_vec(py, levels).unbind()),
+        )
+    } else {
+        (None, None)
     };
     let field = component_vecs_to_output_tuple(py, (ax, ay, az), out, "vector_potential")?;
     solve_result_from_field(
@@ -1046,7 +694,7 @@ fn vector_potential_dipole_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        None,
+        accepted_source_level,
     )
 }
 
@@ -1098,12 +746,34 @@ fn flux_density_linear_filament_hierarchical(
         (&mut bx, &mut by, &mut bz),
     )
     .map_err(|err| py_hierarchical_error("hierarchical linear-filament flux density", err))?;
-    let source_tree = match extra_diagnostics {
-        true => Some(source_tree_diagnostics_object(
-            py,
+    let (source_tree, accepted_source_level) = if extra_diagnostics {
+        let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
+            xyzfil.as_tuple(),
+            dlxyzfil.as_tuple(),
+            wire_radius.as_slice(),
+        );
+        let targets = physics::hierarchical::kernels::DipoleTargets::new(
+            xyzp.as_tuple().0,
+            xyzp.as_tuple().1,
+            xyzp.as_tuple().2,
+        );
+        let levels = accepted_source_level_diagnostic(
+            physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(),
             &diagnostics.source_tree,
-        )?),
-        false => None,
+            sources,
+            targets,
+            ifil.as_slice(),
+            theta,
+        )?;
+        (
+            Some(source_tree_diagnostics_object(
+                py,
+                &diagnostics.source_tree,
+            )?),
+            Some(PyArray1::from_vec(py, levels).unbind()),
+        )
+    } else {
+        (None, None)
     };
     let field = component_vecs_to_output_tuple(py, (bx, by, bz), out, "flux_density")?;
     solve_result_from_field(
@@ -1114,7 +784,7 @@ fn flux_density_linear_filament_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        None,
+        accepted_source_level,
     )
 }
 
@@ -1166,12 +836,34 @@ fn vector_potential_linear_filament_hierarchical(
         (&mut ax, &mut ay, &mut az),
     )
     .map_err(|err| py_hierarchical_error("hierarchical linear-filament vector potential", err))?;
-    let source_tree = match extra_diagnostics {
-        true => Some(source_tree_diagnostics_object(
-            py,
+    let (source_tree, accepted_source_level) = if extra_diagnostics {
+        let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
+            xyzfil.as_tuple(),
+            dlxyzfil.as_tuple(),
+            wire_radius.as_slice(),
+        );
+        let targets = physics::hierarchical::kernels::DipoleTargets::new(
+            xyzp.as_tuple().0,
+            xyzp.as_tuple().1,
+            xyzp.as_tuple().2,
+        );
+        let levels = accepted_source_level_diagnostic(
+            physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(),
             &diagnostics.source_tree,
-        )?),
-        false => None,
+            sources,
+            targets,
+            ifil.as_slice(),
+            theta,
+        )?;
+        (
+            Some(source_tree_diagnostics_object(
+                py,
+                &diagnostics.source_tree,
+            )?),
+            Some(PyArray1::from_vec(py, levels).unbind()),
+        )
+    } else {
+        (None, None)
     };
     let field = component_vecs_to_output_tuple(py, (ax, ay, az), out, "vector_potential")?;
     solve_result_from_field(
@@ -1182,7 +874,7 @@ fn vector_potential_linear_filament_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        None,
+        accepted_source_level,
     )
 }
 
@@ -1225,12 +917,31 @@ fn flux_density_triangle_mesh_hierarchical(
         (&mut bx, &mut by, &mut bz),
     )
     .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh flux density", err))?;
-    let source_tree = match extra_diagnostics {
-        true => Some(source_tree_diagnostics_object(
-            py,
+    let (source_tree, accepted_source_level) = if extra_diagnostics {
+        let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(
+            (&nodes.0, &nodes.1, &nodes.2),
+            (&triangles.0, &triangles.1, &triangles.2),
+        );
+        let targets = physics::hierarchical::kernels::DipoleTargets::new(&obs.0, &obs.1, &obs.2);
+        let moments =
+            physics::hierarchical::kernels::BoundaryElementNodalValues::new(sources, s.as_slice());
+        let levels = accepted_source_level_diagnostic(
+            physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(quad),
             &diagnostics.source_tree,
-        )?),
-        false => None,
+            sources,
+            targets,
+            moments,
+            theta,
+        )?;
+        (
+            Some(source_tree_diagnostics_object(
+                py,
+                &diagnostics.source_tree,
+            )?),
+            Some(PyArray1::from_vec(py, levels).unbind()),
+        )
+    } else {
+        (None, None)
     };
     let field = component_vecs_to_output_tuple(py, (bx, by, bz), out, "flux_density")?;
     solve_result_from_field(
@@ -1241,7 +952,7 @@ fn flux_density_triangle_mesh_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        None,
+        accepted_source_level,
     )
 }
 
@@ -1284,12 +995,31 @@ fn vector_potential_triangle_mesh_hierarchical(
         (&mut ax, &mut ay, &mut az),
     )
     .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh vector potential", err))?;
-    let source_tree = match extra_diagnostics {
-        true => Some(source_tree_diagnostics_object(
-            py,
+    let (source_tree, accepted_source_level) = if extra_diagnostics {
+        let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(
+            (&nodes.0, &nodes.1, &nodes.2),
+            (&triangles.0, &triangles.1, &triangles.2),
+        );
+        let targets = physics::hierarchical::kernels::DipoleTargets::new(&obs.0, &obs.1, &obs.2);
+        let moments =
+            physics::hierarchical::kernels::BoundaryElementNodalValues::new(sources, s.as_slice());
+        let levels = accepted_source_level_diagnostic(
+            physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(quad),
             &diagnostics.source_tree,
-        )?),
-        false => None,
+            sources,
+            targets,
+            moments,
+            theta,
+        )?;
+        (
+            Some(source_tree_diagnostics_object(
+                py,
+                &diagnostics.source_tree,
+            )?),
+            Some(PyArray1::from_vec(py, levels).unbind()),
+        )
+    } else {
+        (None, None)
     };
     let field = component_vecs_to_output_tuple(py, (ax, ay, az), out, "vector_potential")?;
     solve_result_from_field(
@@ -1300,698 +1030,8 @@ fn vector_potential_triangle_mesh_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        None,
+        accepted_source_level,
     )
-}
-
-#[pyclass(module = "cfsem", unsendable)]
-struct HierarchicalDipoles {
-    theta: f64,
-    construction_method: HierarchicalConstructionMethod,
-    sources: Vec<physics::hierarchical::kernels::DipoleSource<f64>>,
-    source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
-}
-
-#[pymethods]
-impl HierarchicalDipoles {
-    #[new]
-    #[pyo3(signature = (theta=0.01, construction_method="recursive"))]
-    fn new(theta: f64, construction_method: &str) -> PyResult<Self> {
-        Ok(Self {
-            theta,
-            construction_method: parse_hierarchical_construction_method(construction_method)?,
-            sources: Vec::new(),
-            source_tree: None,
-        })
-    }
-
-    #[pyo3(signature = (loc, outer_radius=None))]
-    fn set_sources(
-        &mut self,
-        py: Python<'_>,
-        loc: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        outer_radius: Option<PyReadonlyArray1<f64>>,
-    ) -> PyResult<()> {
-        self.sources = build_dipole_sources_optional_radius(py, loc, outer_radius)?;
-        self.source_tree = Some(
-            build_hierarchical_source_tree(&self.sources, self.construction_method)
-                .map_err(|err| py_hierarchical_error("source tree build", err))?,
-        );
-        Ok(())
-    }
-
-    #[pyo3(signature = (target, moment, par=false, out=None))]
-    fn flux_density(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        moment: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        par: bool,
-        out: Option<(
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-        )>,
-    ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_dipole_flux_density(py, target, moment, par)?;
-        vec3_to_output_tuple(py, &values, out, "flux_density")
-    }
-
-    #[pyo3(signature = (target, moment, par=false, out=None))]
-    fn vector_potential(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        moment: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        par: bool,
-        out: Option<(
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-        )>,
-    ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_dipole_vector_potential(py, target, moment, par)?;
-        vec3_to_output_tuple(py, &values, out, "vector_potential")
-    }
-
-    fn source_tree_aabbs(
-        &self,
-        py: Python<'_>,
-    ) -> PyResult<(
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-    )> {
-        Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
-    }
-
-    #[pyo3(signature = (target, moment, field="b"))]
-    fn accepted_source_levels(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        moment: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        field: &str,
-    ) -> PyResult<Py<PyArray1<f64>>> {
-        let out = self.eval_dipole_source_levels(py, target, moment, field)?;
-        Ok(PyArray1::from_vec(py, out).unbind())
-    }
-}
-
-impl HierarchicalDipoles {
-    fn source_tree(&self) -> PyResult<&physics::hierarchical::ClusterTree<f64>> {
-        self.source_tree
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "sources have not been built".to_string(),
-            })
-            .map_err(Into::into)
-    }
-
-    fn eval_dipole_flux_density(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        moment: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        par: bool,
-    ) -> PyResult<Vec<[f64; 3]>> {
-        let source_tree = self.source_tree()?;
-        let targets = read_target_points(py, &target)?;
-        let moments = read_vec3_moments(py, moment, self.sources.len(), "moment")?;
-        hierarchical_eval_source_tree_vec3(
-            physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
-            source_tree,
-            &self.sources,
-            targets.target_columns(),
-            &moments,
-            self.theta,
-            par,
-        )
-    }
-
-    fn eval_dipole_vector_potential(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        moment: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        par: bool,
-    ) -> PyResult<Vec<[f64; 3]>> {
-        let source_tree = self.source_tree()?;
-        let targets = read_target_points(py, &target)?;
-        let moments = read_vec3_moments(py, moment, self.sources.len(), "moment")?;
-        hierarchical_eval_source_tree_vec3(
-            physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
-            source_tree,
-            &self.sources,
-            targets.target_columns(),
-            &moments,
-            self.theta,
-            par,
-        )
-    }
-
-    fn eval_dipole_source_levels(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        moment: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        field: &str,
-    ) -> PyResult<Vec<f64>> {
-        let source_tree = self.source_tree()?;
-        let targets = read_target_points(py, &target)?;
-        let moments = read_vec3_moments(py, moment, self.sources.len(), "moment")?;
-        match field {
-            "b" => hierarchical_source_level_diagnostic(
-                physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
-                source_tree,
-                &self.sources,
-                targets.target_columns(),
-                &moments,
-                self.theta,
-            ),
-            "a" => hierarchical_source_level_diagnostic(
-                physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
-                source_tree,
-                &self.sources,
-                targets.target_columns(),
-                &moments,
-                self.theta,
-            ),
-            _ => Err(PyInteropError::ValueError {
-                msg: format!("Unsupported dipole diagnostic field: {field}"),
-            }
-            .into()),
-        }
-    }
-}
-
-#[pyclass(module = "cfsem", unsendable)]
-struct HierarchicalLinearFilaments {
-    theta: f64,
-    construction_method: HierarchicalConstructionMethod,
-    sources: Vec<physics::hierarchical::kernels::LinearFilamentSource<f64>>,
-    source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
-}
-
-#[pymethods]
-impl HierarchicalLinearFilaments {
-    #[new]
-    #[pyo3(signature = (theta=0.05, construction_method="recursive"))]
-    fn new(theta: f64, construction_method: &str) -> PyResult<Self> {
-        Ok(Self {
-            theta,
-            construction_method: parse_hierarchical_construction_method(construction_method)?,
-            sources: Vec::new(),
-            source_tree: None,
-        })
-    }
-
-    #[pyo3(signature = (xyzfil, dlxyzfil, wire_radius))]
-    fn set_sources(
-        &mut self,
-        py: Python<'_>,
-        xyzfil: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        dlxyzfil: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        wire_radius: PyReadonlyArray1<f64>,
-    ) -> PyResult<()> {
-        self.sources = build_linear_filament_sources(py, xyzfil, dlxyzfil, wire_radius)?;
-        self.source_tree = Some(
-            build_hierarchical_source_tree(&self.sources, self.construction_method)
-                .map_err(|err| py_hierarchical_error("source tree build", err))?,
-        );
-        Ok(())
-    }
-
-    #[pyo3(signature = (target, current, par=false, out=None))]
-    fn flux_density(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        current: PyReadonlyArray1<f64>,
-        par: bool,
-        out: Option<(
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-        )>,
-    ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_linear_filament_flux_density(py, target, current, par)?;
-        vec3_to_output_tuple(py, &values, out, "flux_density")
-    }
-
-    #[pyo3(signature = (target, current, par=false, out=None))]
-    fn vector_potential(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        current: PyReadonlyArray1<f64>,
-        par: bool,
-        out: Option<(
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-        )>,
-    ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_linear_filament_vector_potential(py, target, current, par)?;
-        vec3_to_output_tuple(py, &values, out, "vector_potential")
-    }
-
-    #[pyo3(signature = (target, current, field="b"))]
-    fn accepted_source_levels(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        current: PyReadonlyArray1<f64>,
-        field: &str,
-    ) -> PyResult<Py<PyArray1<f64>>> {
-        let out = self.eval_linear_filament_source_levels(py, target, current, field)?;
-        Ok(PyArray1::from_vec(py, out).unbind())
-    }
-
-    fn source_tree_aabbs(
-        &self,
-        py: Python<'_>,
-    ) -> PyResult<(
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-    )> {
-        Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
-    }
-}
-
-impl HierarchicalLinearFilaments {
-    fn source_tree(&self) -> PyResult<&physics::hierarchical::ClusterTree<f64>> {
-        self.source_tree
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "sources have not been built".to_string(),
-            })
-            .map_err(Into::into)
-    }
-
-    fn eval_linear_filament_flux_density(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        current: PyReadonlyArray1<f64>,
-        par: bool,
-    ) -> PyResult<Vec<[f64; 3]>> {
-        let source_tree = self.source_tree()?;
-        let targets = read_target_points(py, &target)?;
-        let currents = read_scalar_moments(py, &current, self.sources.len(), "current")?;
-        hierarchical_eval_source_tree_vec3(
-            physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(),
-            source_tree,
-            &self.sources,
-            targets.target_columns(),
-            currents.as_slice(),
-            self.theta,
-            par,
-        )
-    }
-
-    fn eval_linear_filament_vector_potential(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        current: PyReadonlyArray1<f64>,
-        par: bool,
-    ) -> PyResult<Vec<[f64; 3]>> {
-        let source_tree = self.source_tree()?;
-        let targets = read_target_points(py, &target)?;
-        let currents = read_scalar_moments(py, &current, self.sources.len(), "current")?;
-        hierarchical_eval_source_tree_vec3(
-            physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(),
-            source_tree,
-            &self.sources,
-            targets.target_columns(),
-            currents.as_slice(),
-            self.theta,
-            par,
-        )
-    }
-
-    fn eval_linear_filament_source_levels(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        current: PyReadonlyArray1<f64>,
-        field: &str,
-    ) -> PyResult<Vec<f64>> {
-        let source_tree = self.source_tree()?;
-        let targets = read_target_points(py, &target)?;
-        let currents = read_scalar_moments(py, &current, self.sources.len(), "current")?;
-        match field {
-            "b" => hierarchical_source_level_diagnostic(
-                physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(),
-                source_tree,
-                &self.sources,
-                targets.target_columns(),
-                currents.as_slice(),
-                self.theta,
-            ),
-            "a" => hierarchical_source_level_diagnostic(
-                physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(),
-                source_tree,
-                &self.sources,
-                targets.target_columns(),
-                currents.as_slice(),
-                self.theta,
-            ),
-            _ => Err(PyInteropError::ValueError {
-                msg: format!("Unsupported linear filament diagnostic field: {field}"),
-            }
-            .into()),
-        }
-    }
-}
-
-#[pyclass(module = "cfsem", unsendable)]
-struct HierarchicalBoundaryElements {
-    theta: f64,
-    construction_method: HierarchicalConstructionMethod,
-    quad_kind: physics::boundary_element::QuadratureKind,
-    geometry: Option<BoundaryElementGeometry>,
-    sources: Vec<physics::hierarchical::kernels::BoundaryElementTriangle<f64>>,
-    source_tree: Option<physics::hierarchical::ClusterTree<f64>>,
-}
-
-#[pymethods]
-impl HierarchicalBoundaryElements {
-    #[new]
-    #[pyo3(signature = (theta=0.05, quad="dunavant3", construction_method="recursive"))]
-    fn new(theta: f64, quad: &str, construction_method: &str) -> PyResult<Self> {
-        Ok(Self {
-            theta,
-            construction_method: parse_hierarchical_construction_method(construction_method)?,
-            quad_kind: parse_triangle_quadrature(quad)?,
-            geometry: None,
-            sources: Vec::new(),
-            source_tree: None,
-        })
-    }
-
-    #[pyo3(signature = (nodes, triangles))]
-    fn set_sources(
-        &mut self,
-        py: Python<'_>,
-        nodes: PyReadonlyArray2<f64>,
-        triangles: PyReadonlyArray2<i64>,
-    ) -> PyResult<()> {
-        let (geometry, sources) = build_boundary_element_geometry(py, nodes, triangles)?;
-        self.sources = sources;
-        self.source_tree = Some(
-            build_hierarchical_source_tree(&self.sources, self.construction_method)
-                .map_err(|err| py_hierarchical_error("source tree build", err))?,
-        );
-        self.geometry = Some(geometry);
-        Ok(())
-    }
-
-    #[pyo3(signature = (target, s, par=false, out=None))]
-    fn flux_density(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        s: PyReadonlyArray1<f64>,
-        par: bool,
-        out: Option<(
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-        )>,
-    ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_boundary_element_flux_density(py, target, s, par)?;
-        vec3_to_output_tuple(py, &values, out, "flux_density")
-    }
-
-    #[pyo3(signature = (target, s, par=false, out=None))]
-    fn vector_potential(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        s: PyReadonlyArray1<f64>,
-        par: bool,
-        out: Option<(
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-            PyReadwriteArray1<f64>,
-        )>,
-    ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
-        let values = self.eval_boundary_element_vector_potential(py, target, s, par)?;
-        vec3_to_output_tuple(py, &values, out, "vector_potential")
-    }
-
-    #[pyo3(signature = (target, s, field="b"))]
-    fn accepted_source_levels(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        s: PyReadonlyArray1<f64>,
-        field: &str,
-    ) -> PyResult<Py<PyArray1<f64>>> {
-        let out = self.eval_boundary_element_source_levels(py, target, s, field)?;
-        Ok(PyArray1::from_vec(py, out).unbind())
-    }
-
-    fn source_tree_aabbs(
-        &self,
-        py: Python<'_>,
-    ) -> PyResult<(
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-        Py<PyArray1<f64>>,
-    )> {
-        Ok(source_tree_aabbs_to_py_tuple(py, self.source_tree()?))
-    }
-}
-
-impl HierarchicalBoundaryElements {
-    fn source_tree(&self) -> PyResult<&physics::hierarchical::ClusterTree<f64>> {
-        self.source_tree
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "sources have not been built".to_string(),
-            })
-            .map_err(Into::into)
-    }
-
-    fn mesh_view(&self) -> PyResult<mesh::TriangleMeshView<'_>> {
-        self.geometry
-            .as_ref()
-            .ok_or_else(|| PyInteropError::ValueError {
-                msg: "sources have not been built".to_string(),
-            })?
-            .mesh_view()
-    }
-
-    fn eval_boundary_element_flux_density(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        s: PyReadonlyArray1<f64>,
-        par: bool,
-    ) -> PyResult<Vec<[f64; 3]>> {
-        let source_tree = self.source_tree()?;
-        let mesh = self.mesh_view()?;
-        let targets = read_target_points(py, &target)?;
-        let moments = read_boundary_element_moments(py, &mesh, &s)?;
-        hierarchical_eval_source_tree_vec3(
-            physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
-                self.quad_kind,
-            ),
-            source_tree,
-            &self.sources,
-            targets.target_columns(),
-            &moments,
-            self.theta,
-            par,
-        )
-    }
-
-    fn eval_boundary_element_vector_potential(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        s: PyReadonlyArray1<f64>,
-        par: bool,
-    ) -> PyResult<Vec<[f64; 3]>> {
-        let source_tree = self.source_tree()?;
-        let mesh = self.mesh_view()?;
-        let targets = read_target_points(py, &target)?;
-        let moments = read_boundary_element_moments(py, &mesh, &s)?;
-        hierarchical_eval_source_tree_vec3(
-            physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
-                self.quad_kind,
-            ),
-            source_tree,
-            &self.sources,
-            targets.target_columns(),
-            &moments,
-            self.theta,
-            par,
-        )
-    }
-
-    fn eval_boundary_element_source_levels(
-        &self,
-        py: Python<'_>,
-        target: (
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-            PyReadonlyArray1<f64>,
-        ),
-        s: PyReadonlyArray1<f64>,
-        field: &str,
-    ) -> PyResult<Vec<f64>> {
-        let source_tree = self.source_tree()?;
-        let mesh = self.mesh_view()?;
-        let targets = read_target_points(py, &target)?;
-        let moments = read_boundary_element_moments(py, &mesh, &s)?;
-        match field {
-            "b" => hierarchical_source_level_diagnostic(
-                physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
-                    self.quad_kind,
-                ),
-                source_tree,
-                &self.sources,
-                targets.target_columns(),
-                &moments,
-                self.theta,
-            ),
-            "a" => hierarchical_source_level_diagnostic(
-                physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
-                    self.quad_kind,
-                ),
-                source_tree,
-                &self.sources,
-                targets.target_columns(),
-                &moments,
-                self.theta,
-            ),
-            _ => Err(PyInteropError::ValueError {
-                msg: format!("Unsupported boundary-element diagnostic field: {field}"),
-            }
-            .into()),
-        }
-    }
 }
 
 fn read_axisym_nodes<F: NumpyElement + Copy>(
@@ -5565,9 +4605,6 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_class::<SolveResult>()?;
     m.add_class::<HierarchicalDiagnostics>()?;
-    m.add_class::<HierarchicalDipoles>()?;
-    m.add_class::<HierarchicalLinearFilaments>()?;
-    m.add_class::<HierarchicalBoundaryElements>()?;
 
     // Solenoid stress FEM
     m.add_class::<SolenoidStress2dModelF64>()?;

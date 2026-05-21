@@ -54,7 +54,6 @@ TESTING_SCALING_INTERACTION_TARGETS = np.logspace(5.0, 6.0, 2, dtype=np.float64)
 DIRECT_SCALING_MAX_INTERACTIONS = 1.0e9
 DIRECT_TRACE_COLOR = "tab:green"
 TREE_AABB_COLOR = "tab:blue"
-CONSTRUCTION_METHOD = "recursive"
 MAX_AABB_PLOT_LEVELS = 6
 NEAR_FIELD_INBOARD_FROM_FIRST_ORIGIN = 0.05  # [m]
 NEAR_FIELD_INBOARD_RADIUS = 0.001  # [m]
@@ -273,19 +272,20 @@ def hierarchical_self_field(
 ) -> tuple[NDArray[np.float64], float, float]:
     """Build and evaluate the hierarchical linear-filament self-field solve."""
 
-    solver = cfsem.HierarchicalLinearFilaments(theta=theta, construction_method=CONSTRUCTION_METHOD)
-    start = perf_counter()
-    solver.set_sources(
+    result = cfsem.flux_density_linear_filament_hierarchical(
         discretization.starts,
         discretization.deltas,
+        discretization.current,
         discretization.wire_radius,
+        discretization.centers,
+        theta=theta,
+        par=par,
     )
-    build_seconds = perf_counter() - start
-
-    start = perf_counter()
-    field = stack_field(solver.flux_density(discretization.centers, discretization.current, par=par))
-    eval_seconds = perf_counter() - start
-    return field, build_seconds, eval_seconds
+    return (
+        stack_field(result.field),
+        float(result.diagnostics.construction_time),
+        float(result.diagnostics.evaluation_time),
+    )
 
 
 def run_study(par: bool) -> list[StudyResult]:
@@ -470,13 +470,19 @@ def plot_runtime_scaling_fit_on_axis(
 def source_tree_aabbs(discretization: LoopDiscretization) -> tuple[NDArray[np.float64], ...]:
     """Build the coarse source tree and return its AABB arrays for plotting."""
 
-    solver = cfsem.HierarchicalLinearFilaments(theta=THETA_SWEEP[0], construction_method=CONSTRUCTION_METHOD)
-    solver.set_sources(
+    result = cfsem.flux_density_linear_filament_hierarchical(
         discretization.starts,
         discretization.deltas,
+        discretization.current,
         discretization.wire_radius,
+        discretization.centers,
+        theta=float(THETA_SWEEP[0]),
+        par=False,
+        extra_diagnostics=True,
     )
-    return solver.source_tree_aabbs()
+    source_tree = result.diagnostics.source_tree
+    assert source_tree is not None
+    return source_tree
 
 
 def build_figure(
@@ -540,8 +546,7 @@ def build_figure(
     scaling_legend_ax.legend(handles, labels, loc="center left", frameon=True, title="Scaling traces")
     fig.suptitle(
         "Linear-filament circular-loop self-field convergence\n"
-        f"radius={LOOP_RADIUS:g} m, current={CURRENT:g} A, wire_radius={WIRE_RADIUS:g} m, "
-        f"construction={CONSTRUCTION_METHOD}"
+        f"radius={LOOP_RADIUS:g} m, current={CURRENT:g} A, wire_radius={WIRE_RADIUS:g} m"
     )
     return fig
 
@@ -961,7 +966,7 @@ def print_results(
     print(
         "Study configuration: "
         f"radius={LOOP_RADIUS:.6g} m, current={CURRENT:.6g} A, wire_radius={WIRE_RADIUS:.6g} m, "
-        f"construction_method={CONSTRUCTION_METHOD}, theta=[{THETA_SWEEP[0]:.3g}, {THETA_SWEEP[-1]:.3g}]"
+        f"theta=[{THETA_SWEEP[0]:.3g}, {THETA_SWEEP[-1]:.3g}]"
     )
     for result in results:
         disc = result.discretization

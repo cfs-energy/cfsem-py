@@ -1,4 +1,4 @@
-"""Tests for reusable hierarchical field solvers."""
+"""Tests for stateless hierarchical field solvers."""
 
 import numpy as np
 import pytest
@@ -24,22 +24,34 @@ def _tuple_columns(values):
 
 
 def _assert_returns_output_views(returned, out):
+    if hasattr(returned, "field"):
+        returned = returned.field
     for returned_component, out_component in zip(returned, out, strict=True):
         assert np.shares_memory(returned_component, out_component)
 
 
-def test_hierarchical_dipoles_match_direct_and_reuse_tree():
+def _assert_diagnostics(result, nsource, ntarget):
+    assert result.diagnostics.construction_time >= 0.0
+    assert result.diagnostics.evaluation_time >= 0.0
+    assert result.diagnostics.source_count == nsource
+    assert result.diagnostics.target_count == ntarget
+    assert result.diagnostics.source_tree is not None
+    assert result.diagnostics.source_tree[0].size > 0
+    assert result.diagnostics.accepted_source_level is not None
+    assert result.diagnostics.accepted_source_level.shape == (ntarget,)
+
+
+def test_hierarchical_dipoles_match_direct():
     loc = (
         np.array([0.0, 0.5, -0.25]),
         np.array([0.0, 0.2, 0.1]),
         np.array([0.0, 0.1, 0.3]),
     )
-    moment0 = (
+    moment = (
         np.array([0.0, 0.2, 0.5]),
         np.array([0.0, 0.1, -0.1]),
         np.array([1.0, 0.0, 0.25]),
     )
-    moment1 = (2.0 * moment0[0], 2.0 * moment0[1], 2.0 * moment0[2])
     outer_radius = np.zeros(3)
     obs = (
         np.array([1.0, 1.3, -0.7, 0.1]),
@@ -47,21 +59,25 @@ def test_hierarchical_dipoles_match_direct_and_reuse_tree():
         np.array([0.5, 0.2, -0.2, 0.7]),
     )
 
-    solver = cfsem.HierarchicalDipoles(theta=0.0)
-    solver.set_sources(loc, outer_radius)
+    direct_b = cfsem.flux_density_dipole(loc, moment, obs, par=False, outer_radius=outer_radius)
+    direct_a = cfsem.vector_potential_dipole(loc, moment, obs, par=False, outer_radius=outer_radius)
+    result_b = cfsem.flux_density_dipole_hierarchical(
+        loc, moment, outer_radius, obs, theta=0.0, par=False, extra_diagnostics=True
+    )
+    result_a = cfsem.vector_potential_dipole_hierarchical(
+        loc, moment, outer_radius, obs, theta=0.0, par=True, extra_diagnostics=True
+    )
+    _assert_vec_close(result_b, direct_b)
+    _assert_vec_close(result_a, direct_a)
+    _assert_diagnostics(result_b, nsource=3, ntarget=4)
+    _assert_diagnostics(result_a, nsource=3, ntarget=4)
 
-    direct_b0 = cfsem.flux_density_dipole(loc, moment0, obs, par=False, outer_radius=outer_radius)
-    direct_a0 = cfsem.vector_potential_dipole(loc, moment0, obs, par=False, outer_radius=outer_radius)
-    _assert_vec_close(solver.flux_density(obs, moment0, par=False), direct_b0)
-    _assert_vec_close(solver.flux_density(obs, moment0, par=True), direct_b0)
-    _assert_vec_close(solver.vector_potential(obs, moment0, par=False), direct_a0)
-    assert solver.accepted_source_levels(obs, moment0, field="b").shape == obs[0].shape
-    assert solver.source_tree_aabbs()[0].size > 0
-
-    direct_b1 = cfsem.flux_density_dipole(loc, moment1, obs, par=False, outer_radius=outer_radius)
     out = (np.empty_like(obs[0]), np.empty_like(obs[0]), np.empty_like(obs[0]))
-    _assert_returns_output_views(solver.flux_density(obs, moment1, par=False, out=out), out)
-    _assert_vec_close(out, direct_b1)
+    returned = cfsem.flux_density_dipole_hierarchical(
+        loc, moment, outer_radius, obs, theta=0.0, par=False, out=out
+    )
+    _assert_returns_output_views(returned, out)
+    _assert_vec_close(out, direct_b)
 
 
 def test_hierarchical_linear_filaments_match_direct():
@@ -83,16 +99,18 @@ def test_hierarchical_linear_filaments_match_direct():
         np.array([0.5, 0.2, -0.2]),
     )
 
-    solver = cfsem.HierarchicalLinearFilaments(theta=0.0)
-    solver.set_sources(xyzfil, dlxyzfil, wire_radius)
-
     direct_b = cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
     direct_a = cfsem.vector_potential_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
-    _assert_vec_close(solver.flux_density(obs, current, par=False), direct_b)
-    _assert_vec_close(solver.flux_density(obs, current, par=True), direct_b)
-    _assert_vec_close(solver.vector_potential(obs, current, par=False), direct_a)
-    assert solver.accepted_source_levels(obs, current, field="a").shape == obs[0].shape
-    assert solver.source_tree_aabbs()[0].size > 0
+    result_b = cfsem.flux_density_linear_filament_hierarchical(
+        xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=False, extra_diagnostics=True
+    )
+    result_a = cfsem.vector_potential_linear_filament_hierarchical(
+        xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=True, extra_diagnostics=True
+    )
+    _assert_vec_close(result_b, direct_b)
+    _assert_vec_close(result_a, direct_a)
+    _assert_diagnostics(result_b, nsource=2, ntarget=3)
+    _assert_diagnostics(result_a, nsource=2, ntarget=3)
 
 
 def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
@@ -106,121 +124,41 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     )
     triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
     stream_function = np.array([0.0, 1.0, 0.25, -0.5])
-    obs = (
-        np.array([0.25, 1.5, -0.4]),
-        np.array([0.25, -0.2, 1.2]),
-        np.array([0.5, 0.8, -0.7]),
-    )
-    obs_array = np.column_stack(obs)
-
-    solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
-    solver.set_sources(nodes, triangles)
+    obs = np.array([[0.25, 0.25, 0.5], [1.5, -0.2, 0.8], [-0.4, 1.2, -0.7]])
 
     direct_b = cfsem.flux_density_triangle_mesh(
-        obs_array, nodes, triangles, stream_function, par=False, quad="dunavant3"
+        obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
     )
     direct_a = cfsem.vector_potential_triangle_mesh(
-        obs_array, nodes, triangles, stream_function, par=False, quad="dunavant3"
+        obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
     )
-    _assert_vec_close(solver.flux_density(obs, stream_function, par=False), direct_b)
-    _assert_vec_close(solver.flux_density(obs, stream_function, par=True), direct_b)
-    _assert_vec_close(solver.vector_potential(obs, stream_function, par=False), direct_a)
-    assert solver.accepted_source_levels(obs, stream_function, field="b").shape == obs[0].shape
-    assert solver.source_tree_aabbs()[0].size > 0
+    result_b = cfsem.flux_density_triangle_mesh_hierarchical(
+        nodes,
+        triangles,
+        stream_function,
+        obs,
+        theta=0.0,
+        quad="dunavant3",
+        par=False,
+        extra_diagnostics=True,
+    )
+    result_a = cfsem.vector_potential_triangle_mesh_hierarchical(
+        nodes,
+        triangles,
+        stream_function,
+        obs,
+        theta=0.0,
+        quad="dunavant3",
+        par=True,
+        extra_diagnostics=True,
+    )
+    _assert_vec_close(result_b, direct_b)
+    _assert_vec_close(result_a, direct_a)
+    _assert_diagnostics(result_b, nsource=2, ntarget=3)
+    _assert_diagnostics(result_a, nsource=2, ntarget=3)
 
 
-def test_hierarchical_one_shot_wrappers_match_reusable_solvers():
-    loc = (
-        np.array([0.0, 0.5]),
-        np.array([0.0, 0.2]),
-        np.array([0.0, 0.1]),
-    )
-    moment = (
-        np.array([0.0, 0.2]),
-        np.array([0.0, 0.1]),
-        np.array([1.0, -0.3]),
-    )
-    outer_radius = np.zeros(2)
-    obs = (
-        np.array([1.0, 1.3, -0.7]),
-        np.array([0.0, -0.4, 0.9]),
-        np.array([0.5, 0.2, -0.2]),
-    )
-    dipole_solver = cfsem.HierarchicalDipoles(theta=0.0)
-    dipole_solver.set_sources(loc, outer_radius=outer_radius)
-    _assert_vec_close(
-        cfsem.flux_density_dipole_hierarchical(
-            loc,
-            moment,
-            outer_radius,
-            obs,
-            theta=0.0,
-            par=False,
-        ),
-        dipole_solver.flux_density(obs, moment, par=False),
-    )
-    _assert_vec_close(
-        cfsem.vector_potential_dipole_hierarchical(
-            loc, moment, outer_radius, obs, theta=0.0, par=False
-        ),
-        dipole_solver.vector_potential(obs, moment, par=False),
-    )
-
-    xyzfil = (
-        np.array([0.0, 0.5]),
-        np.array([0.0, 0.2]),
-        np.array([0.0, 0.1]),
-    )
-    dlxyzfil = (
-        np.array([0.0, 0.1]),
-        np.array([0.4, -0.2]),
-        np.array([0.2, 0.5]),
-    )
-    current = np.array([2.0, -1.5])
-    wire_radius = np.zeros(2)
-    filament_solver = cfsem.HierarchicalLinearFilaments(theta=0.0)
-    filament_solver.set_sources(xyzfil, dlxyzfil, wire_radius)
-    _assert_vec_close(
-        cfsem.flux_density_linear_filament_hierarchical(
-            xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=False
-        ),
-        filament_solver.flux_density(obs, current, par=False),
-    )
-    _assert_vec_close(
-        cfsem.vector_potential_linear_filament_hierarchical(
-            xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=False
-        ),
-        filament_solver.vector_potential(obs, current, par=False),
-    )
-
-    nodes = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [1.0, 1.0, 0.0],
-        ]
-    )
-    triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
-    stream_function = np.array([0.0, 1.0, 0.25, -0.5])
-    obs_array = np.column_stack(obs)
-    boundary_solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
-    boundary_solver.set_sources(nodes, triangles)
-    _assert_vec_close(
-        cfsem.flux_density_triangle_mesh_hierarchical(
-            nodes, triangles, stream_function, obs_array, theta=0.0, quad="dunavant3", par=False
-        ),
-        boundary_solver.flux_density(obs, stream_function, par=False),
-    )
-    _assert_vec_close(
-        cfsem.vector_potential_triangle_mesh_hierarchical(
-            nodes, triangles, stream_function, obs_array, theta=0.0, quad="dunavant3", par=False
-        ),
-        boundary_solver.vector_potential(obs, stream_function, par=False),
-    )
-
-
-def test_hierarchical_dipole_wrapper_update_and_into_methods():
+def test_hierarchical_accepts_tuple_columns_from_2d_inputs():
     loc = np.array([[0.0, 0.0, 0.0], [0.25, 0.1, -0.1]])
     obs = np.array([[1.0, 0.0, 0.5], [0.4, -0.3, 0.2], [-0.2, 0.7, -0.1]])
     moment = (
@@ -228,102 +166,30 @@ def test_hierarchical_dipole_wrapper_update_and_into_methods():
         np.array([0.0, -0.1]),
         np.array([1.0, 0.3]),
     )
+    outer_radius = np.zeros(2)
 
-    solver = cfsem.HierarchicalDipoles(theta=0.0)
-    loc_tuple = _tuple_columns(loc)
-    obs_tuple = _tuple_columns(obs)
-    solver.set_sources(loc_tuple)
-    solver.set_sources(loc_tuple)
-
-    expected_a = cfsem.vector_potential_dipole(loc, moment, obs, par=False)
-    out = (
-        np.empty(obs.shape[0]),
-        np.empty(obs.shape[0]),
-        np.empty(obs.shape[0]),
+    expected = cfsem.vector_potential_dipole(loc, moment, obs, par=False, outer_radius=outer_radius)
+    result = cfsem.vector_potential_dipole_hierarchical(
+        _tuple_columns(loc),
+        moment,
+        outer_radius,
+        _tuple_columns(obs),
+        theta=0.0,
+        par=False,
     )
-    _assert_returns_output_views(solver.vector_potential(obs_tuple, moment, par=False, out=out), out)
-    _assert_vec_close(out, expected_a)
-
-    expected_b = cfsem.flux_density_dipole(loc, moment, obs, par=False)
-    out_b = (
-        np.empty(obs.shape[0]),
-        np.empty(obs.shape[0]),
-        np.empty(obs.shape[0]),
-    )
-    out_a = (
-        np.empty(obs.shape[0]),
-        np.empty(obs.shape[0]),
-        np.empty(obs.shape[0]),
-    )
-    _assert_returns_output_views(solver.flux_density(obs_tuple, moment, par=False, out=out_b), out_b)
-    _assert_returns_output_views(solver.vector_potential(obs_tuple, moment, par=False, out=out_a), out_a)
-    _assert_vec_close(out_b, expected_b)
-    _assert_vec_close(out_a, expected_a)
-
-
-def test_hierarchical_linear_filament_wrapper_update_methods():
-    xyzfil = np.array([[0.0, 0.0, 0.0], [0.5, 0.2, 0.1]])
-    dlxyzfil = np.array([[0.0, 0.4, 0.2], [0.1, -0.2, 0.5]])
-    current = np.array([2.0, -1.5])
-    wire_radius = np.zeros(2)
-    obs = np.array([[1.0, 0.0, 0.5], [1.3, -0.4, 0.2], [-0.7, 0.9, -0.2]])
-
-    solver = cfsem.HierarchicalLinearFilaments(theta=0.0)
-    xyzfil_tuple = _tuple_columns(xyzfil)
-    dlxyzfil_tuple = _tuple_columns(dlxyzfil)
-    obs_tuple = _tuple_columns(obs)
-    solver.set_sources(xyzfil_tuple, dlxyzfil_tuple, wire_radius)
-    solver.set_sources(xyzfil_tuple, dlxyzfil_tuple, wire_radius)
-
-    direct_b = cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
-    direct_a = cfsem.vector_potential_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
-    _assert_vec_close(solver.flux_density(obs_tuple, current, par=False), direct_b)
-    _assert_vec_close(solver.vector_potential(obs_tuple, current, par=False), direct_a)
-
-
-def test_hierarchical_boundary_element_wrapper_update_and_source_value_methods():
-    nodes = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [1.0, 1.0, 0.0],
-        ]
-    )
-    triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
-    stream_function = np.array([0.0, 1.0, 0.25, -0.5])
-    obs = np.array([[0.25, 0.25, 0.5], [1.5, -0.2, 0.8], [-0.4, 1.2, -0.7]])
-    obs_tuple = _tuple_columns(obs)
-
-    unbuilt = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
-    with pytest.raises(ValueError, match="sources have not been built"):
-        unbuilt.flux_density(obs_tuple, stream_function)
-
-    solver = cfsem.HierarchicalBoundaryElements(theta=0.0, quad="dunavant3")
-    solver.set_sources(nodes, triangles)
-    solver.set_sources(nodes, triangles)
-
-    direct_b = cfsem.flux_density_triangle_mesh(
-        obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
-    )
-    direct_a = cfsem.vector_potential_triangle_mesh(
-        obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
-    )
-    _assert_vec_close(solver.flux_density(obs_tuple, stream_function, par=False), direct_b)
-    _assert_vec_close(solver.vector_potential(obs_tuple, stream_function, par=False), direct_a)
-    assert solver.accepted_source_levels(obs_tuple, stream_function, field="a").shape == obs_tuple[0].shape
-    assert solver.source_tree_aabbs()[0].size > 0
+    _assert_vec_close(result, expected)
 
 
 def test_coordinate_tuple_conversion_rejects_invalid_shape():
-    solver = cfsem.HierarchicalDipoles(theta=0.0)
     loc = (np.zeros(2), np.zeros(2), np.zeros(2))
     obs = (np.zeros(3), np.zeros(3), np.zeros(3))
     bad_moment = (np.zeros(2), np.zeros(3), np.zeros(2))
-    solver.set_sources(loc)
+    outer_radius = np.zeros(2)
 
     with pytest.raises(ValueError, match="component arrays must have matching lengths"):
-        solver.flux_density(obs, bad_moment)
+        cfsem.flux_density_dipole_hierarchical(
+            loc, bad_moment, outer_radius, obs, theta=0.0, par=False
+        )
 
 
 def test_direct_wrapper_rejects_array_without_coordinate_dimension():

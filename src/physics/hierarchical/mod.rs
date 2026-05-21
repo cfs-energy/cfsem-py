@@ -7,8 +7,6 @@
 //! for the current kernels. Concrete physics kernels are implemented in the
 //! [`kernels`] submodule.
 //!
-//! Lower-level interaction-plan experiments remain internal to this module.
-//!
 //! # References
 //!
 //! * \[1\] PhysicsNeMo Contributors, "NVIDIA PhysicsNeMo: An open-source
@@ -20,8 +18,6 @@ mod convenience;
 mod evaluator;
 mod kernel;
 pub mod kernels;
-#[cfg(test)]
-mod plan;
 mod scalar;
 mod tree;
 

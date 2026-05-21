@@ -1,8 +1,7 @@
 use core::marker::PhantomData;
 
 use super::dipole::{
-    DipoleTarget, DipoleTargetSummary, combine_target, dipole_vector_potential,
-    summarize_target_leaf,
+    DipoleTarget, DipoleTargetSummary, dipole_vector_potential, summarize_target_leaf,
 };
 use super::linear_filament_flux_density::LinearFilamentSource;
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
@@ -139,16 +138,6 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError {
         summarize_target_leaf(target_ids, targets, out)
-    }
-
-    #[inline]
-    fn combine_target_summaries(
-        &self,
-        children: &[Self::TargetSummary],
-        _child_ids: &[u32],
-        out: &mut Self::TargetSummary,
-    ) -> HierarchicalError {
-        combine_target(children, out)
     }
 
     #[inline]

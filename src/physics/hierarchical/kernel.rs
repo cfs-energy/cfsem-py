@@ -173,22 +173,6 @@ pub trait HierarchicalKernel {
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError;
 
-    /// Combine child target summaries into one parent summary.
-    ///
-    /// Args:
-    ///     children: Target summary storage for the whole tree.
-    ///     child_ids: Child node indices to combine.
-    ///     out: Parent summary value to fill.
-    ///
-    /// Returns:
-    ///     Error code for the summary operation.
-    fn combine_target_summaries(
-        &self,
-        children: &[Self::TargetSummary],
-        child_ids: &[u32],
-        out: &mut Self::TargetSummary,
-    ) -> HierarchicalError;
-
     /// Evaluate the exact source-target interaction.
     ///
     /// Args:

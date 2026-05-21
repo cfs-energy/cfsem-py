@@ -167,27 +167,6 @@ pub(super) fn summarize_target_leaf<T: Scalar>(
 }
 
 #[inline]
-pub(super) fn combine_target<T: Scalar>(
-    children: &[DipoleTargetSummary<T>],
-    out: &mut DipoleTargetSummary<T>,
-) -> HierarchicalError {
-    *out = DipoleTargetSummary::default();
-    for i in 0..children.len() {
-        out.count = out.count + children[i].count;
-        for axis in 0..3 {
-            out.centroid[axis] =
-                children[i].centroid[axis].mul_add(children[i].count, out.centroid[axis]);
-        }
-    }
-    if out.count > T::ZERO {
-        for axis in 0..3 {
-            out.centroid[axis] = out.centroid[axis] / out.count;
-        }
-    }
-    HierarchicalError::Ok
-}
-
-#[inline]
 pub(super) fn dipole_field<T: Scalar>(
     target: [T; 3],
     source: [T; 3],

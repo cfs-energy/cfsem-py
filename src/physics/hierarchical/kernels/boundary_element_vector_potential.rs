@@ -5,8 +5,7 @@ use super::boundary_element::{
     summarize_leaf_sources,
 };
 use super::dipole::{
-    DipoleTarget, DipoleTargetSummary, combine_target, dipole_vector_potential,
-    summarize_target_leaf,
+    DipoleTarget, DipoleTargetSummary, dipole_vector_potential, summarize_target_leaf,
 };
 use crate::math::add3_in_place;
 use crate::physics::boundary_element::{QuadratureKind, vector_potential_triangle};
@@ -80,16 +79,6 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementVectorPotentialKernel<T> {
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError {
         summarize_target_leaf(target_ids, targets, out)
-    }
-
-    #[inline]
-    fn combine_target_summaries(
-        &self,
-        children: &[Self::TargetSummary],
-        _child_ids: &[u32],
-        out: &mut Self::TargetSummary,
-    ) -> HierarchicalError {
-        combine_target(children, out)
     }
 
     #[inline]

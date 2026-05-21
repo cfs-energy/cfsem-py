@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use super::dipole::{
-    DipoleSource, DipoleTarget, DipoleTargetSummary, combine_target, dipole_vector_potential,
+    DipoleSource, DipoleTarget, DipoleTargetSummary, dipole_vector_potential,
     summarize_target_leaf, summarize_weighted_source_centroid,
 };
 use crate::math::add3_in_place;
@@ -101,16 +101,6 @@ impl<T: Scalar> HierarchicalKernel for DipoleVectorPotentialKernel<T> {
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError {
         summarize_target_leaf(target_ids, targets, out)
-    }
-
-    #[inline]
-    fn combine_target_summaries(
-        &self,
-        children: &[Self::TargetSummary],
-        _child_ids: &[u32],
-        out: &mut Self::TargetSummary,
-    ) -> HierarchicalError {
-        combine_target(children, out)
     }
 
     #[inline]

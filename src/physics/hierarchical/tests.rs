@@ -1,9 +1,3 @@
-use super::evaluator::{
-    TargetNodeSummaries, evaluate_into, evaluate_into_par, output_len,
-    parallel_evaluation_scratch_len, serial_evaluation_scratch_len,
-    update_plan_target_summaries_into,
-};
-use super::plan::InteractionPlan;
 use super::*;
 use crate::physics::boundary_element::{
     QuadratureKind, flux_density_triangle, vector_potential_triangle,
@@ -137,28 +131,6 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         HierarchicalError::Ok
     }
 
-    fn combine_target_summaries(
-        &self,
-        children: &[Self::TargetSummary],
-        _child_ids: &[u32],
-        out: &mut Self::TargetSummary,
-    ) -> HierarchicalError {
-        *out = TargetSummary::default();
-        for i in 0..children.len() {
-            out.count = out.count + children[i].count;
-            for axis in 0..3 {
-                out.centroid[axis] =
-                    out.centroid[axis] + children[i].centroid[axis] * children[i].count;
-            }
-        }
-        if out.count > T::ZERO {
-            for axis in 0..3 {
-                out.centroid[axis] = out.centroid[axis] / out.count;
-            }
-        }
-        HierarchicalError::Ok
-    }
-
     fn eval_exact(
         &self,
         target: &Self::TargetGeometry,
@@ -276,7 +248,7 @@ fn dipole_exact_uses_magnetized_sphere_radius() {
 }
 
 #[test]
-fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
+fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
     let b_kernel = DipoleFluxDensityKernel::<f64>::new();
     let a_kernel = DipoleVectorPotentialKernel::<f64>::new();
     let sources = [
@@ -300,17 +272,11 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
     let moments = [[0.0, 0.0, 2.0], [0.0, 1.0, 0.5]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
 
     let mut b_source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut b_target_summaries =
-        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     let mut a_source_summaries =
         SourceNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new(source_tree.as_view());
-    let mut a_target_summaries =
-        TargetNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -319,15 +285,6 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
             &sources,
             &moments,
             &mut b_source_summaries.node_summaries,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &b_kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut b_target_summaries,
         ),
         HierarchicalError::Ok
     );
@@ -341,15 +298,6 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
         ),
         HierarchicalError::Ok
     );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &a_kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut a_target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
 
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -359,30 +307,28 @@ fn dipole_b_and_a_kernels_reuse_tree_and_plan_against_point_source() {
     let mut a_out = [[0.0; 3]; 2];
 
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &b_kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &b_source_summaries.node_summaries,
-            &b_target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            0.0,
             &mut b_out,
             &mut scratch,
         ),
         HierarchicalError::Ok
     );
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &a_kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &a_source_summaries.node_summaries,
-            &a_target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            0.0,
             &mut a_out,
             &mut scratch,
         ),
@@ -495,12 +441,8 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     let currents = [2.0, -1.5];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -512,15 +454,6 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
         ),
         HierarchicalError::Ok
     );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
 
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -529,15 +462,14 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &currents,
+            0.0,
             &mut bh,
             &mut scratch,
         ),
@@ -623,14 +555,8 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     let currents = [2.0, -1.5];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new_for_plan(
-            plan.as_view(),
-        );
 
     assert_eq!(
         update_source_summaries_into(
@@ -642,15 +568,6 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
         ),
         HierarchicalError::Ok
     );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
 
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -659,15 +576,14 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &currents,
+            0.0,
             &mut bh,
             &mut scratch,
         ),
@@ -804,21 +720,8 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     let active_only_sources = [active_source];
     let active_only_moments = [active_moment];
     let source_tree = ClusterTree::build_with_leaf_size(&active_only_sources, 1).unwrap();
-    let plan = InteractionPlan::build(
-        source_tree.as_view(),
-        targets.as_slice(),
-        1,
-        1.0e9,
-        1,
-        false,
-    )
-    .unwrap();
-    assert_eq!(plan.near_target_ids.len(), 0);
-    assert_eq!(plan.far_source_node_ids.len(), 1);
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -826,15 +729,6 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
             &active_only_sources,
             &active_only_moments,
             &mut source_summaries.node_summaries,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries
         ),
         HierarchicalError::Ok
     );
@@ -844,15 +738,14 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     };
     let mut active_only = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &active_only_sources,
             targets.as_slice(),
             &active_only_moments,
+            1.0e9,
             &mut active_only,
             &mut scratch,
         ),
@@ -862,21 +755,8 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     let sources_with_inactive = [active_source, inactive_source];
     let moments_with_inactive = [active_moment, inactive_moment];
     let source_tree = ClusterTree::build_with_leaf_size(&sources_with_inactive, 2).unwrap();
-    let plan = InteractionPlan::build(
-        source_tree.as_view(),
-        targets.as_slice(),
-        1,
-        1.0e9,
-        1,
-        false,
-    )
-    .unwrap();
-    assert_eq!(plan.near_target_ids.len(), 0);
-    assert_eq!(plan.far_source_node_ids.len(), 1);
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -887,26 +767,16 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
         ),
         HierarchicalError::Ok
     );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries
-        ),
-        HierarchicalError::Ok
-    );
     let mut with_inactive = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources_with_inactive,
             targets.as_slice(),
             &moments_with_inactive,
+            1.0e9,
             &mut with_inactive,
             &mut scratch,
         ),
@@ -955,21 +825,8 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
     }];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, sources.len()).unwrap();
-    let plan = InteractionPlan::build(
-        source_tree.as_view(),
-        targets.as_slice(),
-        1,
-        1.0e9,
-        1,
-        false,
-    )
-    .unwrap();
-    assert_eq!(plan.near_target_ids.len(), 0);
-    assert_eq!(plan.far_source_node_ids.len(), 1);
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -977,15 +834,6 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
             &sources,
             &moments,
             &mut source_summaries.node_summaries,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries
         ),
         HierarchicalError::Ok
     );
@@ -997,15 +845,14 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
     let mut far = [[0.0; 3]; 1];
     let mut direct = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            1.0e9,
             &mut far,
             &mut scratch,
         ),
@@ -1064,12 +911,8 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -1081,15 +924,6 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
         ),
         HierarchicalError::Ok
     );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
 
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -1098,15 +932,14 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            0.0,
             &mut bh,
             &mut scratch,
         ),
@@ -1173,15 +1006,9 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new(
             source_tree.as_view(),
-        );
-    let mut target_summaries =
-        TargetNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new_for_plan(
-            plan.as_view(),
         );
 
     assert_eq!(
@@ -1194,15 +1021,6 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
         ),
         HierarchicalError::Ok
     );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
 
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -1211,15 +1029,14 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            0.0,
             &mut bh,
             &mut scratch,
         ),
@@ -1280,21 +1097,8 @@ fn linear_filament_reuses_tree_for_current_updates() {
     let currents0 = [1.0, 1.0];
     let currents1 = [2.0, -1.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
 
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -1314,15 +1118,14 @@ fn linear_filament_reuses_tree_for_current_updates() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &currents0,
+            0.0,
             &mut out0,
             &mut scratch,
         ),
@@ -1340,15 +1143,14 @@ fn linear_filament_reuses_tree_for_current_updates() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &currents1,
+            0.0,
             &mut out1,
             &mut scratch,
         ),
@@ -1425,15 +1227,9 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
     }];
     let currents = [1.0, 1.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 1.0, 1, false)
-        .unwrap();
-    assert_eq!(plan.far_target_node_ids.len(), 1);
-    assert!(plan.near_target_ids.is_empty());
 
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -1444,15 +1240,6 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
         ),
         HierarchicalError::Ok
     );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
 
     let mut scratch_value = [[0.0; 3]];
     let mut scratch = EvaluationScratch {
@@ -1460,15 +1247,14 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
     };
     let mut out = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &currents,
+            1.0,
             &mut out,
             &mut scratch,
         ),
@@ -1658,31 +1444,6 @@ fn morton_tree_handles_degenerate_representative_extent() {
 }
 
 #[test]
-fn theta_zero_plan_is_all_exact() {
-    let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
-    let targets = points_f64(&[[10.0, 0.0, 0.0], [11.0, 0.0, 0.0]]);
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
-    assert_eq!(plan.near_target_ids.len(), sources.len() * targets.len());
-    assert_eq!(plan.near_source_ids.len(), sources.len() * targets.len());
-    assert!(plan.far_target_node_ids.is_empty());
-    assert!(plan.far_source_node_ids.is_empty());
-}
-
-#[test]
-fn separated_plan_has_far_pair() {
-    let sources = points_f64(&[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
-    let targets = points_f64(&[[100.0, 0.0, 0.0], [100.0, 1.0, 0.0]]);
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 1.0, 1, false)
-        .unwrap();
-    assert_eq!(plan.far_target_node_ids.len(), 1);
-    assert_eq!(plan.far_source_node_ids.len(), 1);
-    assert!(plan.near_target_ids.is_empty());
-}
-
-#[test]
 fn source_summary_update_tracks_moments() {
     let kernel = MockKernel::<f64>::new();
     let sources = points_f64(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [4.0, 0.0, 0.0]]);
@@ -1762,170 +1523,13 @@ fn theta_zero_matches_dense_direct_f64() {
 }
 
 #[test]
-fn chunked_plan_serial_and_parallel_match_dense_direct() {
-    let kernel = MockKernel::<f64>::new();
-    let sources = points_f64(&[
-        [0.0, 0.0, 0.0],
-        [1.0, 0.2, 0.0],
-        [2.0, -0.1, 0.0],
-        [3.0, 0.4, 0.0],
-    ]);
-    let targets = points_f64(&[
-        [0.1, 0.3, 0.0],
-        [0.9, -0.2, 0.0],
-        [1.3, 0.5, 0.0],
-        [1.8, -0.3, 0.0],
-        [2.4, 0.7, 0.0],
-        [2.9, -0.5, 0.0],
-        [3.2, 0.1, 0.0],
-    ]);
-    let moments = [1.0_f64, 2.0, -0.5, 3.0];
-
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 2, 0.0, 3, false)
-        .unwrap();
-    let plan_built_in_parallel =
-        InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 2, 0.0, 3, true).unwrap();
-    assert_eq!(plan.chunks.len(), 3);
-    assert_eq!(plan_built_in_parallel.chunks.len(), plan.chunks.len());
-    assert_eq!(
-        plan_built_in_parallel.near_source_ids.len(),
-        plan.near_source_ids.len()
-    );
-    assert_eq!(
-        plan_built_in_parallel.far_source_node_ids.len(),
-        plan.far_source_node_ids.len()
-    );
-    assert_eq!(output_len(plan.as_view()), targets.len());
-    assert_eq!(serial_evaluation_scratch_len(plan.as_view()), 1);
-    assert_eq!(
-        parallel_evaluation_scratch_len(plan.as_view()),
-        plan.chunks.len()
-    );
-
-    let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries = TargetNodeSummaries::<MockKernel<f64>>::new_for_plan(plan.as_view());
-    assert_eq!(
-        update_source_summaries_into(
-            &kernel,
-            source_tree.as_view(),
-            &sources,
-            &moments,
-            &mut source_summaries.node_summaries,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries
-        ),
-        HierarchicalError::Ok
-    );
-
-    let mut dense = vec![0.0_f64; output_len(plan.as_view())];
-    let mut serial = vec![0.0_f64; output_len(plan.as_view())];
-    let mut parallel = vec![0.0_f64; output_len(plan.as_view())];
-    let mut parallel_build = vec![0.0_f64; output_len(plan_built_in_parallel.as_view())];
-    let mut dense_scratch_value = [0.0_f64; 1];
-    let mut serial_scratch_value = [0.0_f64; 1];
-    let mut parallel_scratch_value = vec![0.0_f64; parallel_evaluation_scratch_len(plan.as_view())];
-    let mut parallel_build_scratch_value = [0.0_f64; 1];
-
-    assert_eq!(
-        dense_direct_evaluate_into(
-            &kernel,
-            &sources,
-            targets.as_slice(),
-            &moments,
-            &mut dense,
-            &mut EvaluationScratch {
-                contribution: &mut dense_scratch_value
-            },
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        evaluate_into(
-            &kernel,
-            plan.as_view(),
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            &target_summaries,
-            &sources,
-            targets.as_slice(),
-            &moments,
-            &mut serial,
-            &mut EvaluationScratch {
-                contribution: &mut serial_scratch_value
-            },
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        evaluate_into_par(
-            &kernel,
-            plan.as_view(),
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            &target_summaries,
-            &sources,
-            targets.as_slice(),
-            &moments,
-            &mut parallel,
-            &mut EvaluationScratch {
-                contribution: &mut parallel_scratch_value
-            },
-        ),
-        HierarchicalError::Ok
-    );
-    let mut parallel_build_target_summaries =
-        TargetNodeSummaries::<MockKernel<f64>>::new_for_plan(plan_built_in_parallel.as_view());
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan_built_in_parallel.as_view(),
-            targets.as_slice(),
-            &mut parallel_build_target_summaries,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        evaluate_into(
-            &kernel,
-            plan_built_in_parallel.as_view(),
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            &parallel_build_target_summaries,
-            &sources,
-            targets.as_slice(),
-            &moments,
-            &mut parallel_build,
-            &mut EvaluationScratch {
-                contribution: &mut parallel_build_scratch_value
-            },
-        ),
-        HierarchicalError::Ok
-    );
-
-    assert_eq!(serial, dense);
-    assert_eq!(parallel, dense);
-    assert_eq!(parallel_build, dense);
-}
-
-#[test]
 fn theta_zero_matches_dense_direct_f32() {
     let kernel = MockKernel::<f32>::new();
     let sources = points_f32(&[[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f32(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f32, 2.0, 3.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f32>>::new(source_tree.as_view());
-    let mut target_summaries = TargetNodeSummaries::<MockKernel<f32>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -1933,15 +1537,6 @@ fn theta_zero_matches_dense_direct_f32() {
             &sources,
             &moments,
             &mut source_summaries.node_summaries
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries
         ),
         HierarchicalError::Ok
     );
@@ -1953,15 +1548,14 @@ fn theta_zero_matches_dense_direct_f32() {
     let mut bh = [0.0_f32; 2];
     let mut dense = [0.0_f32; 2];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            0.0,
             &mut bh,
             &mut scratch,
         ),
@@ -2088,10 +1682,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
     let targets = points_f64(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f64, 2.0, 3.0];
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries = TargetNodeSummaries::<MockKernel<f64>>::new_for_plan(plan.as_view());
     assert_eq!(
         update_source_summaries_into(
             &kernel,
@@ -2099,15 +1690,6 @@ fn run_theta_zero_matches_dense_direct_f64() {
             &sources,
             &moments,
             &mut source_summaries.node_summaries
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries
         ),
         HierarchicalError::Ok
     );
@@ -2119,15 +1701,14 @@ fn run_theta_zero_matches_dense_direct_f64() {
     let mut bh = [0.0_f64; 2];
     let mut dense = [0.0_f64; 2];
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            0.0,
             &mut bh,
             &mut scratch,
         ),
@@ -2177,12 +1758,8 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
     let moments = [[0.0, 0.0, 1.0], [0.0, 1.0, 0.5], [1.0, 0.0, 0.0]];
 
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
-    let plan = InteractionPlan::build(source_tree.as_view(), targets.as_slice(), 1, 0.0, 1, false)
-        .unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
-    let mut target_summaries =
-        TargetNodeSummaries::<DipoleFluxDensityKernel<f64>>::new_for_plan(plan.as_view());
 
     assert_eq!(
         update_source_summaries_into(
@@ -2191,15 +1768,6 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
             &sources,
             &moments,
             &mut source_summaries.node_summaries,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(
-        update_plan_target_summaries_into(
-            &kernel,
-            plan.as_view(),
-            targets.as_slice(),
-            &mut target_summaries,
         ),
         HierarchicalError::Ok
     );
@@ -2212,15 +1780,14 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
     let mut dense = [[0.0; 3]; 2];
 
     assert_eq!(
-        evaluate_into(
+        evaluate_source_tree_into(
             &kernel,
-            plan.as_view(),
             source_tree.as_view(),
             &source_summaries.node_summaries,
-            &target_summaries,
             &sources,
             targets.as_slice(),
             &moments,
+            0.0,
             &mut bh,
             &mut scratch,
         ),

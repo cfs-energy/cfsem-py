@@ -1,8 +1,8 @@
 use core::marker::PhantomData;
 
 use super::dipole::{
-    DipoleSource, DipoleTarget, DipoleTargetSummary, combine_target, dipole_field,
-    summarize_target_leaf, summarize_weighted_source_centroid,
+    DipoleSource, DipoleTarget, DipoleTargetSummary, dipole_field, summarize_target_leaf,
+    summarize_weighted_source_centroid,
 };
 use crate::math::add3_in_place;
 use crate::physics::hierarchical::{HierarchicalError, HierarchicalKernel, Scalar};
@@ -101,16 +101,6 @@ impl<T: Scalar> HierarchicalKernel for DipoleFluxDensityKernel<T> {
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError {
         summarize_target_leaf(target_ids, targets, out)
-    }
-
-    #[inline]
-    fn combine_target_summaries(
-        &self,
-        children: &[Self::TargetSummary],
-        _child_ids: &[u32],
-        out: &mut Self::TargetSummary,
-    ) -> HierarchicalError {
-        combine_target(children, out)
     }
 
     #[inline]

@@ -6,8 +6,7 @@ use cfsem::physics::hierarchical::kernels::{
 };
 use cfsem::physics::hierarchical::{
     ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
-    evaluate_source_tree_into, evaluate_source_tree_into_par,
-    parallel_source_tree_evaluation_scratch_len, update_source_summaries_into,
+    eval, eval_par, parallel_source_tree_evaluation_scratch_len, update_source_summaries_into,
 };
 use cfsem::physics::linear_filament::{
     flux_density_linear_filament, flux_density_linear_filament_par,
@@ -101,7 +100,7 @@ where
             contribution: &mut self.scratch_value,
         };
         assert_eq!(
-            evaluate_source_tree_into(
+            eval(
                 &self.kernel,
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
@@ -137,7 +136,7 @@ where
             contribution: &mut self.parallel_scratch_value,
         };
         assert_eq!(
-            evaluate_source_tree_into_par(
+            eval_par(
                 &self.kernel,
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,

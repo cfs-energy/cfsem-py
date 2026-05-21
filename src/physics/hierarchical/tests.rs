@@ -312,7 +312,7 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
     let mut a_out = [[0.0; 3]; 2];
 
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &b_kernel,
             source_tree.as_view(),
             &b_source_summaries.node_summaries,
@@ -326,7 +326,7 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &a_kernel,
             source_tree.as_view(),
             &a_source_summaries.node_summaries,
@@ -467,7 +467,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -581,7 +581,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -743,7 +743,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     };
     let mut active_only = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -774,7 +774,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     );
     let mut with_inactive = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -850,7 +850,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
     let mut far = [[0.0; 3]; 1];
     let mut direct = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -937,7 +937,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1034,7 +1034,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1123,7 +1123,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1148,7 +1148,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1252,7 +1252,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
     };
     let mut out = [[0.0; 3]; 1];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1553,7 +1553,7 @@ fn theta_zero_matches_dense_direct_f32() {
     let mut bh = [0.0_f32; 2];
     let mut dense = [0.0_f32; 2];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1609,7 +1609,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
         contribution: &mut scratch_value,
     };
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1628,7 +1628,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
         contribution: &mut par_scratch_value,
     };
     assert_eq!(
-        evaluate_source_tree_into_par(
+        eval_par(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1706,7 +1706,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
     let mut bh = [0.0_f64; 2];
     let mut dense = [0.0_f64; 2];
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1785,7 +1785,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
     let mut dense = [[0.0; 3]; 2];
 
     assert_eq!(
-        evaluate_source_tree_into(
+        eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,

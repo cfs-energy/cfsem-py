@@ -93,7 +93,7 @@ where
 /// source-side acceptance criterion as the lower-level interaction-plan
 /// evaluator.
 #[inline]
-pub fn evaluate_source_tree_into<K, S, M, C>(
+pub fn eval<K, S, M, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
@@ -115,7 +115,7 @@ where
     if err != HierarchicalError::Ok {
         return err;
     }
-    evaluate_source_tree_into_validated(
+    eval_validated(
         kernel,
         source_tree,
         source_summaries,
@@ -129,7 +129,7 @@ where
 }
 
 #[inline]
-fn evaluate_source_tree_into_validated<K, S, M, C>(
+fn eval_validated<K, S, M, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
@@ -166,7 +166,7 @@ where
 
     for target_id in 0..targets.geometry_len() {
         let target = targets.target(target_id);
-        let err = evaluate_source_tree_scalar(
+        let err = eval_scalar(
             kernel,
             source_tree,
             source_summaries,
@@ -193,7 +193,7 @@ where
 /// Serial and parallel vector evaluators both call this helper so the source
 /// traversal and acceptance behavior cannot diverge between evaluation modes.
 #[inline]
-fn evaluate_source_tree_scalar<K, S, M>(
+fn eval_scalar<K, S, M>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
@@ -261,7 +261,7 @@ where
 /// source-tree evaluator on that slice. It shares the source tree and source
 /// summaries between workers, and avoids any cross-thread output accumulation.
 #[inline]
-pub fn evaluate_source_tree_into_par<K, S, M, C>(
+pub fn eval_par<K, S, M, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
@@ -323,7 +323,7 @@ where
             let mut chunk_scratch = EvaluationScratch {
                 contribution: core::slice::from_mut(contribution),
             };
-            let err = evaluate_source_tree_into_validated(
+            let err = eval_validated(
                 kernel,
                 source_tree,
                 source_summaries,
@@ -349,7 +349,7 @@ where
 
 /// Compute the source-tree level represented at each target by the terminal traversal nodes.
 ///
-/// This is a diagnostic companion to [`evaluate_source_tree_into`]. It mirrors
+/// This is a diagnostic companion to [`eval`]. It mirrors
 /// the same source-tree walk but does not evaluate field values. Far-accepted
 /// nodes contribute their traversal depth, while direct leaf fallbacks
 /// contribute the leaf depth. Each contribution is weighted by the number of

@@ -17,9 +17,8 @@ use super::kernels::{
 };
 use super::{
     ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, Scalar,
-    SourceCollection, SourceMomentCollection, SourceNodeSummaries, TargetCollection,
-    evaluate_source_tree_into, evaluate_source_tree_into_par,
-    parallel_source_tree_evaluation_scratch_len, source_tree_evaluation_scratch_len,
+    SourceCollection, SourceMomentCollection, SourceNodeSummaries, TargetCollection, eval,
+    eval_par, parallel_source_tree_evaluation_scratch_len, source_tree_evaluation_scratch_len,
     update_source_summaries_into,
 };
 
@@ -430,7 +429,7 @@ where
         contribution: &mut scratch_values,
     };
     err = match par {
-        true => evaluate_source_tree_into_par(
+        true => eval_par(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -441,7 +440,7 @@ where
             &mut values,
             &mut scratch,
         ),
-        false => evaluate_source_tree_into(
+        false => eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,

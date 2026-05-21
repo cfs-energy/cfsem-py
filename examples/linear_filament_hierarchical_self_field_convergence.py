@@ -383,17 +383,16 @@ def run_near_field_study(par: bool) -> NearFieldStudy:
         discretization = circular_loop_discretization(float(ds))
         for i, theta in enumerate(theta_values):
             start = perf_counter()
-            field = stack_field(
-                cfsem.flux_density_linear_filament_hierarchical(
-                    discretization.starts,
-                    discretization.deltas,
-                    discretization.current,
-                    discretization.wire_radius,
-                    obs,
-                    theta=float(theta),
-                    par=par,
-                )
+            result = cfsem.flux_density_linear_filament_hierarchical(
+                discretization.starts,
+                discretization.deltas,
+                discretization.current,
+                discretization.wire_radius,
+                obs,
+                theta=float(theta),
+                par=par,
             )
+            field = stack_field(result.field)
             run_seconds[i, j] = perf_counter() - start
             error[i, j], _max_error = relative_error_metrics(field, reference)
 

@@ -57,6 +57,219 @@ pub trait BoundedGeometry {
     fn representative_point(&self) -> [Self::Scalar; 3];
 }
 
+/// Borrowed geometry storage that can build a cluster tree without repacking.
+pub trait BoundedGeometryCollection<T: Scalar>: Copy + Sync {
+    /// Number of geometry values in the collection.
+    fn geometry_len(self) -> usize;
+
+    /// Return whether all component columns have matching lengths.
+    fn has_consistent_geometry_lengths(self) -> bool;
+
+    /// Return bounds for one geometry value.
+    fn aabb(self, index: usize) -> Aabb<T>;
+
+    /// Return the representative point used for tree ordering.
+    fn representative_point(self, index: usize) -> [T; 3];
+
+    /// Return whether the collection is empty.
+    #[inline]
+    fn is_empty(self) -> bool {
+        self.geometry_len() == 0
+    }
+}
+
+impl<T, G> BoundedGeometryCollection<T> for &[G]
+where
+    T: Scalar,
+    G: BoundedGeometry<Scalar = T> + Sync,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        <[G]>::len(self)
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn aabb(self, index: usize) -> Aabb<T> {
+        self[index].aabb()
+    }
+
+    #[inline]
+    fn representative_point(self, index: usize) -> [T; 3] {
+        self[index].representative_point()
+    }
+}
+
+impl<T, G, const N: usize> BoundedGeometryCollection<T> for &[G; N]
+where
+    T: Scalar,
+    G: BoundedGeometry<Scalar = T> + Sync,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        N
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn aabb(self, index: usize) -> Aabb<T> {
+        self[index].aabb()
+    }
+
+    #[inline]
+    fn representative_point(self, index: usize) -> [T; 3] {
+        self[index].representative_point()
+    }
+}
+
+impl<T, G> BoundedGeometryCollection<T> for &Vec<G>
+where
+    T: Scalar,
+    G: BoundedGeometry<Scalar = T> + Sync,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        self.as_slice().len()
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn aabb(self, index: usize) -> Aabb<T> {
+        self[index].aabb()
+    }
+
+    #[inline]
+    fn representative_point(self, index: usize) -> [T; 3] {
+        self[index].representative_point()
+    }
+}
+
+/// Borrowed source storage that can produce scalar source geometry values.
+pub trait SourceCollection<K: HierarchicalKernel>: BoundedGeometryCollection<K::Scalar> {
+    /// Return one scalar source geometry value.
+    fn source(self, index: usize) -> K::SourceGeometry;
+}
+
+impl<K> SourceCollection<K> for &[K::SourceGeometry]
+where
+    K: HierarchicalKernel,
+    K::SourceGeometry: Copy,
+{
+    #[inline]
+    fn source(self, index: usize) -> K::SourceGeometry {
+        self[index]
+    }
+}
+
+impl<K, const N: usize> SourceCollection<K> for &[K::SourceGeometry; N]
+where
+    K: HierarchicalKernel,
+    K::SourceGeometry: Copy,
+{
+    #[inline]
+    fn source(self, index: usize) -> K::SourceGeometry {
+        self[index]
+    }
+}
+
+impl<K> SourceCollection<K> for &Vec<K::SourceGeometry>
+where
+    K: HierarchicalKernel,
+    K::SourceGeometry: Copy,
+{
+    #[inline]
+    fn source(self, index: usize) -> K::SourceGeometry {
+        self[index]
+    }
+}
+
+/// Borrowed source moment/amplitude storage.
+pub trait SourceMomentCollection<K: HierarchicalKernel>: Copy + Sync {
+    /// Number of source moments in the collection.
+    fn geometry_len(self) -> usize;
+
+    /// Return whether all component columns have matching lengths.
+    fn has_consistent_geometry_lengths(self) -> bool;
+
+    /// Return one scalar source moment value.
+    fn moment(self, index: usize) -> K::SourceMoment;
+}
+
+impl<K> SourceMomentCollection<K> for &[K::SourceMoment]
+where
+    K: HierarchicalKernel,
+    K::SourceMoment: Copy,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        <[K::SourceMoment]>::len(self)
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn moment(self, index: usize) -> K::SourceMoment {
+        self[index]
+    }
+}
+
+impl<K, const N: usize> SourceMomentCollection<K> for &[K::SourceMoment; N]
+where
+    K: HierarchicalKernel,
+    K::SourceMoment: Copy,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        N
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn moment(self, index: usize) -> K::SourceMoment {
+        self[index]
+    }
+}
+
+impl<K> SourceMomentCollection<K> for &Vec<K::SourceMoment>
+where
+    K: HierarchicalKernel,
+    K::SourceMoment: Copy,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        self.as_slice().len()
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn moment(self, index: usize) -> K::SourceMoment {
+        self[index]
+    }
+}
+
 /// Borrowed target storage that can produce scalar target geometry values.
 ///
 /// This keeps the evaluator generic over physical target point layouts. Plain
@@ -64,14 +277,14 @@ pub trait BoundedGeometry {
 /// component columns without first allocating interleaved target structs.
 pub trait TargetCollection<K: HierarchicalKernel>: Copy + Sync {
     /// Number of target points in the collection.
-    fn len(self) -> usize;
+    fn geometry_len(self) -> usize;
 
     /// Return whether all column-like target storage has the same length.
     ///
     /// Evaluators call this immediately before looping over target data so
     /// mismatched columns return [`HierarchicalError::LengthMismatch`] instead of
     /// panicking from inside the hot target loop.
-    fn has_consistent_lengths(self) -> bool;
+    fn has_consistent_geometry_lengths(self) -> bool;
 
     /// Return one scalar target geometry value.
     fn target(self, index: usize) -> K::TargetGeometry;
@@ -82,7 +295,7 @@ pub trait TargetCollection<K: HierarchicalKernel>: Copy + Sync {
     /// Return whether the collection contains no targets.
     #[inline]
     fn is_empty(self) -> bool {
-        self.len() == 0
+        self.geometry_len() == 0
     }
 }
 
@@ -92,12 +305,12 @@ where
     K::TargetGeometry: Copy,
 {
     #[inline]
-    fn len(self) -> usize {
+    fn geometry_len(self) -> usize {
         <[K::TargetGeometry]>::len(self)
     }
 
     #[inline]
-    fn has_consistent_lengths(self) -> bool {
+    fn has_consistent_geometry_lengths(self) -> bool {
         true
     }
 
@@ -113,7 +326,7 @@ where
 }
 
 /// Trait implemented by physics kernels that can use the generic hierarchical evaluator.
-pub trait HierarchicalKernel {
+pub trait HierarchicalKernel: Sized {
     type Scalar: Scalar;
     type SourceGeometry: BoundedGeometry<Scalar = Self::Scalar> + Sync;
     type TargetGeometry: BoundedGeometry<Scalar = Self::Scalar> + Sync;
@@ -133,13 +346,16 @@ pub trait HierarchicalKernel {
     ///
     /// Returns:
     ///     Error code for the summary operation.
-    fn summarize_leaf_sources(
+    fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
-        sources: &[Self::SourceGeometry],
-        moments: &[Self::SourceMoment],
+        sources: S,
+        moments: M,
         out: &mut Self::SourceSummary,
-    ) -> HierarchicalError;
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>;
 
     /// Combine child source summaries into one parent summary.
     ///

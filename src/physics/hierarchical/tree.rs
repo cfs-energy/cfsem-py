@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use super::{Aabb, BoundedGeometry, HierarchicalError, Scalar};
+use super::{Aabb, BoundedGeometryCollection, HierarchicalError, Scalar};
 
 const INVALID_INDEX: u32 = u32::MAX;
 /// Fixed runtime leaf size for public single-source-tree solvers.
@@ -116,9 +116,9 @@ pub struct ClusterTreeView<'a, T: Scalar> {
 
 impl<T: Scalar> ClusterTree<T> {
     /// Build a CPU-owned finalized tree using longest-axis hybrid splitting.
-    pub fn build<G>(geometry: &[G]) -> Result<Self, HierarchicalError>
+    pub fn build<G>(geometry: G) -> Result<Self, HierarchicalError>
     where
-        G: BoundedGeometry<Scalar = T>,
+        G: BoundedGeometryCollection<T>,
     {
         Self::build_with_method(geometry, ClusterTreeBuildMethod::LongestAxisMedian)
     }
@@ -130,9 +130,9 @@ impl<T: Scalar> ClusterTree<T> {
     /// Morton-sorted ranges at dominant adjacent code gaps or the median when
     /// no dominant cluster gap is present. Node AABBs are still computed from
     /// the full bounded geometry, so finite-size sources remain covered.
-    pub fn build_morton_lbvh<G>(geometry: &[G]) -> Result<Self, HierarchicalError>
+    pub fn build_morton_lbvh<G>(geometry: G) -> Result<Self, HierarchicalError>
     where
-        G: BoundedGeometry<Scalar = T>,
+        G: BoundedGeometryCollection<T>,
     {
         Self::build_with_method(geometry, ClusterTreeBuildMethod::MortonLbvh)
     }
@@ -142,22 +142,22 @@ impl<T: Scalar> ClusterTree<T> {
     /// Both strategies produce the same flat runtime layout and maintain the
     /// invariant that every node owns a contiguous range in `sorted_indices`.
     pub fn build_with_method<G>(
-        geometry: &[G],
+        geometry: G,
         method: ClusterTreeBuildMethod,
     ) -> Result<Self, HierarchicalError>
     where
-        G: BoundedGeometry<Scalar = T>,
+        G: BoundedGeometryCollection<T>,
     {
         Self::build_with_leaf_size_and_method(geometry, DEFAULT_LEAF_SIZE, method)
     }
 
     #[cfg(test)]
     pub(crate) fn build_with_leaf_size<G>(
-        geometry: &[G],
+        geometry: G,
         leaf_size: usize,
     ) -> Result<Self, HierarchicalError>
     where
-        G: BoundedGeometry<Scalar = T>,
+        G: BoundedGeometryCollection<T>,
     {
         Self::build_with_leaf_size_and_method(
             geometry,
@@ -168,11 +168,11 @@ impl<T: Scalar> ClusterTree<T> {
 
     #[cfg(test)]
     pub(crate) fn build_morton_lbvh_with_leaf_size<G>(
-        geometry: &[G],
+        geometry: G,
         leaf_size: usize,
     ) -> Result<Self, HierarchicalError>
     where
-        G: BoundedGeometry<Scalar = T>,
+        G: BoundedGeometryCollection<T>,
     {
         Self::build_with_leaf_size_and_method(
             geometry,
@@ -182,20 +182,23 @@ impl<T: Scalar> ClusterTree<T> {
     }
 
     fn build_with_leaf_size_and_method<G>(
-        geometry: &[G],
+        geometry: G,
         leaf_size: usize,
         method: ClusterTreeBuildMethod,
     ) -> Result<Self, HierarchicalError>
     where
-        G: BoundedGeometry<Scalar = T>,
+        G: BoundedGeometryCollection<T>,
     {
         if geometry.is_empty() {
             return Err(HierarchicalError::EmptyInput);
         }
+        if !geometry.has_consistent_geometry_lengths() {
+            return Err(HierarchicalError::LengthMismatch);
+        }
         if leaf_size == 0 {
             return Err(HierarchicalError::InvalidLeafSize);
         }
-        if geometry.len() > u32::MAX as usize {
+        if geometry.geometry_len() > u32::MAX as usize {
             return Err(HierarchicalError::CapacityExceeded);
         }
 
@@ -207,7 +210,7 @@ impl<T: Scalar> ClusterTree<T> {
             node_range_count: Vec::new(),
             leaf_start: Vec::new(),
             leaf_count: Vec::new(),
-            sorted_indices: Vec::with_capacity(geometry.len()),
+            sorted_indices: Vec::with_capacity(geometry.geometry_len()),
             sorted_morton_codes: Vec::new(),
             leaf_node_ids: Vec::new(),
             internal_level_ids: Vec::new(),
@@ -215,7 +218,7 @@ impl<T: Scalar> ClusterTree<T> {
             max_depth: 0,
         };
 
-        for i in 0..geometry.len() {
+        for i in 0..geometry.geometry_len() {
             tree.sorted_indices.push(usize_to_u32(i)?);
         }
 
@@ -233,7 +236,7 @@ impl<T: Scalar> ClusterTree<T> {
                     geometry,
                     leaf_size,
                     0,
-                    geometry.len(),
+                    geometry.geometry_len(),
                     0,
                     &mut internal_by_depth,
                 )?;
@@ -244,7 +247,7 @@ impl<T: Scalar> ClusterTree<T> {
                     geometry,
                     leaf_size,
                     0,
-                    geometry.len(),
+                    geometry.geometry_len(),
                     0,
                     &mut internal_by_depth,
                 )?;
@@ -471,7 +474,7 @@ impl<T: Scalar> ClusterTreeView<'_, T> {
 /// splits but performs a sort at every internal node.
 fn build_range_longest_axis<T, G>(
     tree: &mut ClusterTree<T>,
-    geometry: &[G],
+    geometry: G,
     leaf_size: usize,
     start: usize,
     end: usize,
@@ -480,7 +483,7 @@ fn build_range_longest_axis<T, G>(
 ) -> Result<u32, HierarchicalError>
 where
     T: Scalar,
-    G: BoundedGeometry<Scalar = T>,
+    G: BoundedGeometryCollection<T>,
 {
     let node_id = usize_to_u32(tree.node_aabb.len())?;
     let count = end - start;
@@ -512,8 +515,8 @@ where
     // subranges, which is required by summary updates and far broadcasts.
     let axis = longest_axis(aabb);
     tree.sorted_indices[start..end].sort_by(|a, b| {
-        let pa = geometry[*a as usize].representative_point()[axis];
-        let pb = geometry[*b as usize].representative_point()[axis];
+        let pa = geometry.representative_point(*a as usize)[axis];
+        let pb = geometry.representative_point(*b as usize)[axis];
         scalar_cmp(pa, pb)
     });
 
@@ -559,7 +562,7 @@ where
 /// are built.
 fn build_range_morton<T, G>(
     tree: &mut ClusterTree<T>,
-    geometry: &[G],
+    geometry: G,
     leaf_size: usize,
     start: usize,
     end: usize,
@@ -568,7 +571,7 @@ fn build_range_morton<T, G>(
 ) -> Result<u32, HierarchicalError>
 where
     T: Scalar,
-    G: BoundedGeometry<Scalar = T>,
+    G: BoundedGeometryCollection<T>,
 {
     let node_id = usize_to_u32(tree.node_aabb.len())?;
     let count = end - start;
@@ -636,16 +639,16 @@ where
 /// Ties are resolved by the original input ID so duplicate Morton codes produce
 /// deterministic trees. The actual node bounds are still based on `aabb()`, not
 /// on representative points.
-fn sort_indices_by_morton<T, G>(indices: &mut [u32], geometry: &[G]) -> Vec<u64>
+fn sort_indices_by_morton<T, G>(indices: &mut [u32], geometry: G) -> Vec<u64>
 where
     T: Scalar,
-    G: BoundedGeometry<Scalar = T>,
+    G: BoundedGeometryCollection<T>,
 {
     let bounds = representative_point_bounds(indices, geometry);
     let mut items = Vec::with_capacity(indices.len());
     for i in 0..indices.len() {
         let input_id = indices[i];
-        let point = geometry[input_id as usize].representative_point();
+        let point = geometry.representative_point(input_id as usize);
         items.push(MortonItem {
             code: morton_code(point, bounds),
             input_id,
@@ -672,15 +675,15 @@ where
 /// The bounds are intentionally based on representative points because Morton
 /// codes order items by a single point key. Full geometry extents are handled
 /// separately by leaf and internal AABBs.
-fn representative_point_bounds<T, G>(indices: &[u32], geometry: &[G]) -> ([f64; 3], [f64; 3])
+fn representative_point_bounds<T, G>(indices: &[u32], geometry: G) -> ([f64; 3], [f64; 3])
 where
     T: Scalar,
-    G: BoundedGeometry<Scalar = T>,
+    G: BoundedGeometryCollection<T>,
 {
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
     for i in 0..indices.len() {
-        let point = geometry[indices[i] as usize].representative_point();
+        let point = geometry.representative_point(indices[i] as usize);
         for axis in 0..3 {
             let value = point[axis].to_f64();
             if value < min[axis] {
@@ -729,14 +732,14 @@ fn quantize_morton_coord(value: f64, min: f64, max: f64) -> u64 {
 }
 
 /// Compute the AABB covering `sorted_indices[start..end]`.
-fn range_aabb<T, G>(indices: &[u32], geometry: &[G], start: usize, end: usize) -> Aabb<T>
+fn range_aabb<T, G>(indices: &[u32], geometry: G, start: usize, end: usize) -> Aabb<T>
 where
     T: Scalar,
-    G: BoundedGeometry<Scalar = T>,
+    G: BoundedGeometryCollection<T>,
 {
     let mut out = Aabb::empty();
     for i in start..end {
-        out = out.union(geometry[indices[i] as usize].aabb());
+        out = out.union(geometry.aabb(indices[i] as usize));
     }
     out
 }
@@ -750,22 +753,22 @@ where
 /// helices, and other continuous source distributions.
 fn hybrid_axis_gap_split<T, G>(
     indices: &[u32],
-    geometry: &[G],
+    geometry: G,
     start: usize,
     end: usize,
     axis: usize,
 ) -> usize
 where
     T: Scalar,
-    G: BoundedGeometry<Scalar = T>,
+    G: BoundedGeometryCollection<T>,
 {
     let count = end - start;
     let median = start + count / 2;
     let mut split = median;
     let mut best_gap = T::ZERO;
     for i in start + 1..end {
-        let left = geometry[indices[i - 1] as usize].representative_point()[axis];
-        let right = geometry[indices[i] as usize].representative_point()[axis];
+        let left = geometry.representative_point(indices[i - 1] as usize)[axis];
+        let right = geometry.representative_point(indices[i] as usize)[axis];
         let gap = right - left;
         if gap > best_gap {
             best_gap = gap;
@@ -820,19 +823,13 @@ fn hybrid_morton_gap_split(codes: &[u64], start: usize, end: usize) -> usize {
 }
 
 /// Return the representative-point span along one already-sorted axis.
-fn spatial_axis_span<T, G>(
-    indices: &[u32],
-    geometry: &[G],
-    start: usize,
-    end: usize,
-    axis: usize,
-) -> T
+fn spatial_axis_span<T, G>(indices: &[u32], geometry: G, start: usize, end: usize, axis: usize) -> T
 where
     T: Scalar,
-    G: BoundedGeometry<Scalar = T>,
+    G: BoundedGeometryCollection<T>,
 {
-    let lo = geometry[indices[start] as usize].representative_point()[axis];
-    let hi = geometry[indices[end - 1] as usize].representative_point()[axis];
+    let lo = geometry.representative_point(indices[start] as usize)[axis];
+    let hi = geometry.representative_point(indices[end - 1] as usize)[axis];
     hi - lo
 }
 

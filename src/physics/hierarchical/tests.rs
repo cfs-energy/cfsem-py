@@ -62,20 +62,25 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
     type TargetSummary = TargetSummary<T>;
     type Output = T;
 
-    fn summarize_leaf_sources(
+    fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
-        sources: &[Self::SourceGeometry],
-        moments: &[Self::SourceMoment],
+        sources: S,
+        moments: M,
         out: &mut Self::SourceSummary,
-    ) -> HierarchicalError {
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>,
+    {
         *out = SourceSummary::default();
         for i in 0..source_ids.len() {
             let id = source_ids[i] as usize;
             out.count = out.count + T::ONE;
-            out.moment = out.moment + moments[id];
+            out.moment = out.moment + moments.moment(id);
+            let source = sources.source(id);
             for axis in 0..3 {
-                out.centroid[axis] = out.centroid[axis] + sources[id].point[axis];
+                out.centroid[axis] = out.centroid[axis] + source.point[axis];
             }
         }
         if out.count > T::ZERO {

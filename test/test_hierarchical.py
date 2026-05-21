@@ -7,6 +7,10 @@ import cfsem
 
 
 def _assert_vec_close(actual, expected, rtol=1e-12, atol=1e-18):
+    if hasattr(actual, "field"):
+        actual = actual.field
+    if hasattr(expected, "field"):
+        expected = expected.field
     for actual_component, expected_component in zip(actual, expected, strict=True):
         np.testing.assert_allclose(actual_component, expected_component, rtol=rtol, atol=atol)
 

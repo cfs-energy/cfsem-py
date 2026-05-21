@@ -3,7 +3,8 @@ use core::marker::PhantomData;
 use super::dipole::{DipoleTarget, DipoleTargetSummary, dipole_field, summarize_target_leaf};
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::hierarchical::{
-    Aabb, BoundedGeometry, HierarchicalError, HierarchicalKernel, Scalar, geometric_accept_far,
+    Aabb, BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
+    Scalar, SourceCollection, SourceMomentCollection, geometric_accept_far,
 };
 use crate::physics::linear_filament::flux_density_linear_filament_scalar;
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
@@ -24,6 +25,92 @@ pub struct LinearFilamentSource<T: Scalar> {
     pub end: [T; 3],
     /// Wire radius used by the exact near-field filament kernel.
     pub wire_radius: T,
+}
+
+/// Borrowed component-column linear filament source geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct LinearFilamentSources<'a, T: Scalar> {
+    pub x: &'a [T],
+    pub y: &'a [T],
+    pub z: &'a [T],
+    pub dlx: &'a [T],
+    pub dly: &'a [T],
+    pub dlz: &'a [T],
+    pub wire_radius: &'a [T],
+}
+
+impl<'a, T: Scalar> LinearFilamentSources<'a, T> {
+    /// Create borrowed linear filament source columns.
+    #[inline]
+    pub fn new(
+        xyz: (&'a [T], &'a [T], &'a [T]),
+        dlxyz: (&'a [T], &'a [T], &'a [T]),
+        wire_radius: &'a [T],
+    ) -> Self {
+        Self {
+            x: xyz.0,
+            y: xyz.1,
+            z: xyz.2,
+            dlx: dlxyz.0,
+            dly: dlxyz.1,
+            dlz: dlxyz.2,
+            wire_radius,
+        }
+    }
+
+    /// Return one scalar source geometry value.
+    #[inline]
+    pub fn source_value(self, index: usize) -> LinearFilamentSource<T> {
+        let start = [self.x[index], self.y[index], self.z[index]];
+        LinearFilamentSource {
+            start,
+            end: [
+                start[0] + self.dlx[index],
+                start[1] + self.dly[index],
+                start[2] + self.dlz[index],
+            ],
+            wire_radius: self.wire_radius[index],
+        }
+    }
+}
+
+impl<'a, T: Scalar> BoundedGeometryCollection<T> for LinearFilamentSources<'a, T> {
+    #[inline]
+    fn geometry_len(self) -> usize {
+        self.x.len()
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        let n = self.x.len();
+        self.y.len() == n
+            && self.z.len() == n
+            && self.dlx.len() == n
+            && self.dly.len() == n
+            && self.dlz.len() == n
+            && self.wire_radius.len() == n
+    }
+
+    #[inline]
+    fn aabb(self, index: usize) -> Aabb<T> {
+        self.source_value(index).aabb()
+    }
+
+    #[inline]
+    fn representative_point(self, index: usize) -> [T; 3] {
+        self.source_value(index).representative_point()
+    }
+}
+
+impl<'a, K, T> SourceCollection<K> for LinearFilamentSources<'a, T>
+where
+    K: HierarchicalKernel<Scalar = T, SourceGeometry = LinearFilamentSource<T>>,
+    T: Scalar,
+{
+    #[inline]
+    fn source(self, index: usize) -> LinearFilamentSource<T> {
+        self.source_value(index)
+    }
 }
 
 impl<T: Scalar> BoundedGeometry for LinearFilamentSource<T> {
@@ -111,17 +198,22 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentFluxDensityKernel<T> {
     type Output = [T; 3];
 
     #[inline]
-    fn summarize_leaf_sources(
+    fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
-        sources: &[Self::SourceGeometry],
-        currents: &[Self::SourceMoment],
+        sources: S,
+        currents: M,
         out: &mut Self::SourceSummary,
-    ) -> HierarchicalError {
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>,
+    {
         *out = LinearFilamentFluxDensitySummary::default();
         for i in 0..source_ids.len() {
             let source_id = source_ids[i] as usize;
-            add_source_to_summary(&sources[source_id], currents[source_id], out);
+            let source = sources.source(source_id);
+            add_source_to_summary(&source, currents.moment(source_id), out);
         }
         finalize_leaf_source_summary(out);
         HierarchicalError::Ok

@@ -1,7 +1,8 @@
 #![allow(clippy::all)] // Clippy will attempt to remove black_box() internals
 
 use cfsem::physics::hierarchical::kernels::{
-    DipoleFluxDensityKernel, DipoleSource, DipoleTarget, DipoleVectorPotentialKernel,
+    DipoleFluxDensityKernel, DipoleMoments, DipoleSource, DipoleSources, DipoleTarget,
+    DipoleTargets, DipoleVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
     ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
@@ -20,15 +21,19 @@ use std::hint::black_box;
 const HIERARCHICAL_THETA: f64 = 0.01;
 
 struct HierarchicalDipoleSolve<
-    K: HierarchicalKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
-> where
-    K::SourceGeometry: From<DipoleSource<f64>>,
-    K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
-{
+    'a,
+    K: HierarchicalKernel<
+            Scalar = f64,
+            SourceGeometry = DipoleSource<f64>,
+            TargetGeometry = DipoleTarget<f64>,
+            SourceMoment = [f64; 3],
+            Output = [f64; 3],
+        > + Sync,
+> {
     kernel: K,
-    sources: Vec<K::SourceGeometry>,
-    targets: Vec<K::TargetGeometry>,
-    moments: Vec<[f64; 3]>,
+    sources: DipoleSources<'a, f64>,
+    targets: DipoleTargets<'a, f64>,
+    moments: DipoleMoments<'a, f64>,
     source_tree: ClusterTree<f64>,
     source_summaries: SourceNodeSummaries<K>,
     vector_out: Vec<[f64; 3]>,
@@ -36,50 +41,33 @@ struct HierarchicalDipoleSolve<
     parallel_scratch_value: Vec<[f64; 3]>,
 }
 
-impl<K> HierarchicalDipoleSolve<K>
+impl<'a, K> HierarchicalDipoleSolve<'a, K>
 where
-    K: HierarchicalKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
-    K::SourceGeometry: From<DipoleSource<f64>>,
-    K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
+    K: HierarchicalKernel<
+            Scalar = f64,
+            SourceGeometry = DipoleSource<f64>,
+            TargetGeometry = DipoleTarget<f64>,
+            SourceMoment = [f64; 3],
+            Output = [f64; 3],
+        > + Sync,
 {
     fn new(
         kernel: K,
-        loc: (&[f64], &[f64], &[f64]),
-        moment: (&[f64], &[f64], &[f64]),
-        outer_radius: &[f64],
-        obs: (&[f64], &[f64], &[f64]),
+        loc: (&'a [f64], &'a [f64], &'a [f64]),
+        moment: (&'a [f64], &'a [f64], &'a [f64]),
+        outer_radius: &'a [f64],
+        obs: (&'a [f64], &'a [f64], &'a [f64]),
     ) -> Self {
-        let mut sources = Vec::with_capacity(loc.0.len());
-        for i in 0..loc.0.len() {
-            sources.push(
-                DipoleSource {
-                    position: [loc.0[i], loc.1[i], loc.2[i]],
-                    outer_radius: outer_radius[i],
-                }
-                .into(),
-            );
-        }
+        let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
+        let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
+        let moments = DipoleMoments::new(moment.0, moment.1, moment.2);
 
-        let mut targets = Vec::with_capacity(obs.0.len());
-        for i in 0..obs.0.len() {
-            targets.push(
-                DipoleTarget {
-                    position: [obs.0[i], obs.1[i], obs.2[i]],
-                }
-                .into(),
-            );
-        }
-
-        let mut moments = Vec::with_capacity(moment.0.len());
-        for i in 0..moment.0.len() {
-            moments.push([moment.0[i], moment.1[i], moment.2[i]]);
-        }
-
-        let source_tree = ClusterTree::build_morton_lbvh(&sources).unwrap();
+        let source_tree = ClusterTree::build_morton_lbvh(sources).unwrap();
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
-        let vector_out = vec![[0.0; 3]; targets.len()];
+        let target_count = obs.0.len();
+        let vector_out = vec![[0.0; 3]; target_count];
         let parallel_scratch_value =
-            vec![[0.0; 3]; parallel_source_tree_evaluation_scratch_len(targets.len())];
+            vec![[0.0; 3]; parallel_source_tree_evaluation_scratch_len(target_count)];
 
         Self {
             kernel,
@@ -99,8 +87,8 @@ where
             update_source_summaries_into(
                 &self.kernel,
                 self.source_tree.as_view(),
-                &self.sources,
-                &self.moments,
+                self.sources,
+                self.moments,
                 &mut self.source_summaries.node_summaries,
             ),
             HierarchicalError::Ok
@@ -114,9 +102,9 @@ where
                 &self.kernel,
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.sources,
-                self.targets.as_slice(),
-                &self.moments,
+                self.sources,
+                self.targets,
+                self.moments,
                 HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,
@@ -136,8 +124,8 @@ where
             update_source_summaries_into(
                 &self.kernel,
                 self.source_tree.as_view(),
-                &self.sources,
-                &self.moments,
+                self.sources,
+                self.moments,
                 &mut self.source_summaries.node_summaries,
             ),
             HierarchicalError::Ok
@@ -151,9 +139,9 @@ where
                 &self.kernel,
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.sources,
-                self.targets.as_slice(),
-                &self.moments,
+                self.sources,
+                self.targets,
+                self.moments,
                 HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,
@@ -177,9 +165,13 @@ fn hierarchical_dipole_build_and_solve<K>(
     obs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) where
-    K: HierarchicalKernel<Scalar = f64, SourceMoment = [f64; 3], Output = [f64; 3]> + Sync,
-    K::SourceGeometry: From<DipoleSource<f64>>,
-    K::TargetGeometry: From<DipoleTarget<f64>> + Copy,
+    K: HierarchicalKernel<
+            Scalar = f64,
+            SourceGeometry = DipoleSource<f64>,
+            TargetGeometry = DipoleTarget<f64>,
+            SourceMoment = [f64; 3],
+            Output = [f64; 3],
+        > + Sync,
 {
     let mut solve = HierarchicalDipoleSolve::new(kernel, loc, moment, outer_radius, obs);
     solve.solve_into(out);

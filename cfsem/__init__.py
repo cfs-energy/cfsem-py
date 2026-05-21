@@ -35,6 +35,7 @@ from cfsem.bindings import (
     gs_operator_order2,
     gs_operator_order4,
     HierarchicalBoundaryElements,
+    HierarchicalDiagnostics,
     HierarchicalDipoles,
     HierarchicalLinearFilaments,
     inductance_linear_filaments,
@@ -50,6 +51,7 @@ from cfsem.bindings import (
     vector_potential_point_segment,
     vector_potential_dipole,
     vector_potential_dipole_hierarchical,
+    SolveResult,
 )
 from cfsem.flux_solver import (
     calc_flux_density_from_flux,
@@ -125,7 +127,9 @@ __all__ = [
     "flux_density_point_segment",
     "vector_potential_point_segment",
     "HierarchicalDipoles",
+    "HierarchicalDiagnostics",
     "HierarchicalLinearFilaments",
+    "SolveResult",
     "HierarchicalBoundaryElements",
     "body_force_density_circular_filament_cartesian",
     "body_force_density_linear_filament",

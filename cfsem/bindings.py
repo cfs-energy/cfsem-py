@@ -93,9 +93,11 @@ from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
 )
 from .cfsem import vector_potential_triangle_mesh_hierarchical
+from .cfsem import HierarchicalDiagnostics
 from .cfsem import HierarchicalBoundaryElements
 from .cfsem import HierarchicalDipoles
 from .cfsem import HierarchicalLinearFilaments
+from .cfsem import SolveResult
 
 SparseTriplet = tuple[NDArray[float64], NDArray[uint64], NDArray[uint64]]
 
@@ -118,8 +120,10 @@ __all__ = [
     "gs_operator_order2",
     "gs_operator_order4",
     "HierarchicalBoundaryElements",
+    "HierarchicalDiagnostics",
     "HierarchicalDipoles",
     "HierarchicalLinearFilaments",
+    "SolveResult",
     "inductance_linear_filaments",
     "inductance_piecewise_linear_filaments",
     "mutual_inductance_circular_to_linear",

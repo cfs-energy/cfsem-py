@@ -23,7 +23,7 @@ mod tree;
 
 pub use aabb::Aabb;
 pub use convenience::{
-    flux_density_dipole_hierarchical, flux_density_linear_filament_hierarchical,
+    DiagnosticInfo, flux_density_dipole_hierarchical, flux_density_linear_filament_hierarchical,
     flux_density_triangle_mesh_hierarchical, vector_potential_dipole_hierarchical,
     vector_potential_linear_filament_hierarchical, vector_potential_triangle_mesh_hierarchical,
 };
@@ -34,7 +34,10 @@ pub use evaluator::{
     update_source_summaries_into,
 };
 pub(crate) use kernel::geometric_accept_far;
-pub use kernel::{BoundedGeometry, HierarchicalError, HierarchicalKernel, TargetCollection};
+pub use kernel::{
+    BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
+    SourceCollection, SourceMomentCollection, TargetCollection,
+};
 pub use scalar::Scalar;
 pub use tree::{ClusterTree, ClusterTreeBuildMethod, ClusterTreeView};
 

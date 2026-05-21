@@ -6,7 +6,8 @@ use super::dipole::{
 use super::linear_filament_flux_density::LinearFilamentSource;
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::hierarchical::{
-    Aabb, BoundedGeometry, HierarchicalError, HierarchicalKernel, Scalar, geometric_accept_far,
+    Aabb, BoundedGeometry, HierarchicalError, HierarchicalKernel, Scalar, SourceCollection,
+    SourceMomentCollection, geometric_accept_far,
 };
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::segment::vector_potential_point_segment_scalar;
@@ -68,17 +69,22 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     type Output = [T; 3];
 
     #[inline]
-    fn summarize_leaf_sources(
+    fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
-        sources: &[Self::SourceGeometry],
-        currents: &[Self::SourceMoment],
+        sources: S,
+        currents: M,
         out: &mut Self::SourceSummary,
-    ) -> HierarchicalError {
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>,
+    {
         *out = LinearFilamentVectorPotentialSummary::default();
         for i in 0..source_ids.len() {
             let source_id = source_ids[i] as usize;
-            add_source_to_summary(&sources[source_id], currents[source_id], out);
+            let source = sources.source(source_id);
+            add_source_to_summary(&source, currents.moment(source_id), out);
         }
         finalize_leaf_source_summary(out);
         HierarchicalError::Ok

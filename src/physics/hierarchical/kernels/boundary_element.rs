@@ -1,6 +1,9 @@
 use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::boundary_element::{calc_tri_area, triangle_current_density};
-use crate::physics::hierarchical::{Aabb, BoundedGeometry, HierarchicalError, Scalar};
+use crate::physics::hierarchical::{
+    Aabb, BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
+    Scalar, SourceCollection, SourceMomentCollection,
+};
 
 /// Triangular boundary-element source geometry.
 #[derive(Clone, Copy, Debug, Default)]
@@ -8,6 +11,138 @@ pub struct BoundaryElementTriangle<T: Scalar> {
     pub n0: [T; 3],
     pub n1: [T; 3],
     pub n2: [T; 3],
+}
+
+/// Borrowed component-column boundary-element triangle geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct BoundaryElementTriangles<'a, T: Scalar> {
+    pub node_x: &'a [T],
+    pub node_y: &'a [T],
+    pub node_z: &'a [T],
+    pub tri0: &'a [usize],
+    pub tri1: &'a [usize],
+    pub tri2: &'a [usize],
+}
+
+impl<'a, T: Scalar> BoundaryElementTriangles<'a, T> {
+    /// Create borrowed triangle mesh columns for hierarchical BEM sources.
+    #[inline]
+    pub fn new(
+        nodes: (&'a [T], &'a [T], &'a [T]),
+        triangles: (&'a [usize], &'a [usize], &'a [usize]),
+    ) -> Self {
+        Self {
+            node_x: nodes.0,
+            node_y: nodes.1,
+            node_z: nodes.2,
+            tri0: triangles.0,
+            tri1: triangles.1,
+            tri2: triangles.2,
+        }
+    }
+
+    /// Return one scalar triangle geometry value.
+    #[inline]
+    pub fn source_value(self, index: usize) -> BoundaryElementTriangle<T> {
+        let i0 = self.tri0[index];
+        let i1 = self.tri1[index];
+        let i2 = self.tri2[index];
+        BoundaryElementTriangle {
+            n0: [self.node_x[i0], self.node_y[i0], self.node_z[i0]],
+            n1: [self.node_x[i1], self.node_y[i1], self.node_z[i1]],
+            n2: [self.node_x[i2], self.node_y[i2], self.node_z[i2]],
+        }
+    }
+
+    /// Return whether every triangle index refers to an existing node.
+    #[inline]
+    pub fn indices_in_bounds(self) -> bool {
+        let nnode = self.node_x.len();
+        for i in 0..self.tri0.len() {
+            if self.tri0[i] >= nnode || self.tri1[i] >= nnode || self.tri2[i] >= nnode {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl<'a, T: Scalar> BoundedGeometryCollection<T> for BoundaryElementTriangles<'a, T> {
+    #[inline]
+    fn geometry_len(self) -> usize {
+        self.tri0.len()
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        self.node_x.len() == self.node_y.len()
+            && self.node_x.len() == self.node_z.len()
+            && self.tri0.len() == self.tri1.len()
+            && self.tri0.len() == self.tri2.len()
+            && self.indices_in_bounds()
+    }
+
+    #[inline]
+    fn aabb(self, index: usize) -> Aabb<T> {
+        self.source_value(index).aabb()
+    }
+
+    #[inline]
+    fn representative_point(self, index: usize) -> [T; 3] {
+        self.source_value(index).representative_point()
+    }
+}
+
+impl<'a, K, T> SourceCollection<K> for BoundaryElementTriangles<'a, T>
+where
+    K: HierarchicalKernel<Scalar = T, SourceGeometry = BoundaryElementTriangle<T>>,
+    T: Scalar,
+{
+    #[inline]
+    fn source(self, index: usize) -> BoundaryElementTriangle<T> {
+        self.source_value(index)
+    }
+}
+
+/// Borrowed nodal stream-function values for boundary-element source moments.
+#[derive(Clone, Copy, Debug)]
+pub struct BoundaryElementNodalValues<'a, T: Scalar> {
+    pub triangles: BoundaryElementTriangles<'a, T>,
+    pub s: &'a [T],
+}
+
+impl<'a, T: Scalar> BoundaryElementNodalValues<'a, T> {
+    /// Create borrowed nodal stream-function values for triangle moments.
+    #[inline]
+    pub fn new(triangles: BoundaryElementTriangles<'a, T>, s: &'a [T]) -> Self {
+        Self { triangles, s }
+    }
+}
+
+impl<'a, K, T> SourceMomentCollection<K> for BoundaryElementNodalValues<'a, T>
+where
+    K: HierarchicalKernel<Scalar = T, SourceMoment = [T; 3]>,
+    T: Scalar,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        self.triangles.geometry_len()
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        self.s.len() == self.triangles.node_x.len()
+            && self.triangles.has_consistent_geometry_lengths()
+    }
+
+    #[inline]
+    fn moment(self, index: usize) -> [T; 3] {
+        [
+            self.s[self.triangles.tri0[index]],
+            self.s[self.triangles.tri1[index]],
+            self.s[self.triangles.tri2[index]],
+        ]
+    }
 }
 
 impl<T: Scalar> BoundedGeometry for BoundaryElementTriangle<T> {
@@ -63,16 +198,27 @@ pub struct BoundaryElementSummary<T: Scalar> {
 }
 
 #[inline]
-pub(super) fn summarize_leaf_sources<T: Scalar>(
+pub(super) fn summarize_leaf_sources<K, T, S, M>(
     source_ids: &[u32],
-    sources: &[BoundaryElementTriangle<T>],
-    moments: &[[T; 3]],
+    sources: S,
+    moments: M,
     out: &mut BoundaryElementSummary<T>,
-) -> HierarchicalError {
+) -> HierarchicalError
+where
+    K: HierarchicalKernel<
+            Scalar = T,
+            SourceGeometry = BoundaryElementTriangle<T>,
+            SourceMoment = [T; 3],
+        >,
+    T: Scalar,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
+{
     *out = BoundaryElementSummary::default();
     for i in 0..source_ids.len() {
         let source_id = source_ids[i] as usize;
-        add_source_to_summary(&sources[source_id], moments[source_id], out);
+        let source = sources.source(source_id);
+        add_source_to_summary(&source, moments.moment(source_id), out);
     }
     finalize_leaf_source_summary(out);
     HierarchicalError::Ok

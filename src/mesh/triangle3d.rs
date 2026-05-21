@@ -124,6 +124,18 @@ impl<'a> TriangleMeshView<'a> {
         ]
     }
 
+    /// Borrow node coordinate columns.
+    #[inline]
+    pub fn node_columns(&self) -> (&'a [f64], &'a [f64], &'a [f64]) {
+        self.nodes
+    }
+
+    /// Borrow triangle index columns.
+    #[inline]
+    pub fn triangle_columns(&self) -> (&'a [usize], &'a [usize], &'a [usize]) {
+        self.triangles
+    }
+
     /// Node coordinates for one triangle.
     #[inline]
     pub fn triangle_nodes(&self, i: usize) -> [[f64; 3]; 3] {

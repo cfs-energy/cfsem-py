@@ -1,6 +1,7 @@
 use crate::math::{add3_in_place, norm3};
 use crate::physics::hierarchical::{
-    Aabb, BoundedGeometry, HierarchicalError, HierarchicalKernel, Scalar, TargetCollection,
+    Aabb, BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
+    Scalar, SourceCollection, SourceMomentCollection, TargetCollection,
 };
 use crate::physics::point_source::dipole::{
     flux_density_dipole_scalar_generic, vector_potential_dipole_scalar_generic,
@@ -11,6 +12,37 @@ use crate::physics::point_source::dipole::{
 pub struct DipoleSource<T: Scalar> {
     pub position: [T; 3],
     pub outer_radius: T,
+}
+
+/// Borrowed component-column dipole source geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct DipoleSources<'a, T: Scalar> {
+    pub x: &'a [T],
+    pub y: &'a [T],
+    pub z: &'a [T],
+    pub outer_radius: &'a [T],
+}
+
+impl<'a, T: Scalar> DipoleSources<'a, T> {
+    /// Create borrowed dipole source columns.
+    #[inline]
+    pub fn new(x: &'a [T], y: &'a [T], z: &'a [T], outer_radius: &'a [T]) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            outer_radius,
+        }
+    }
+
+    /// Return one scalar source geometry value.
+    #[inline]
+    pub fn source_value(self, index: usize) -> DipoleSource<T> {
+        DipoleSource {
+            position: [self.x[index], self.y[index], self.z[index]],
+            outer_radius: self.outer_radius[index],
+        }
+    }
 }
 
 /// Point target location for generic dipole kernels.
@@ -27,6 +59,22 @@ pub struct DipoleTargets<'a, T: Scalar> {
     pub z: &'a [T],
 }
 
+/// Borrowed component-column dipole magnetic moments.
+#[derive(Clone, Copy, Debug)]
+pub struct DipoleMoments<'a, T: Scalar> {
+    pub x: &'a [T],
+    pub y: &'a [T],
+    pub z: &'a [T],
+}
+
+impl<'a, T: Scalar> DipoleMoments<'a, T> {
+    /// Create borrowed dipole moment columns.
+    #[inline]
+    pub fn new(x: &'a [T], y: &'a [T], z: &'a [T]) -> Self {
+        Self { x, y, z }
+    }
+}
+
 impl<'a, T: Scalar> DipoleTargets<'a, T> {
     /// Create borrowed target columns.
     #[inline]
@@ -41,12 +89,12 @@ where
     T: Scalar,
 {
     #[inline]
-    fn len(self) -> usize {
+    fn geometry_len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
-    fn has_consistent_lengths(self) -> bool {
+    fn has_consistent_geometry_lengths(self) -> bool {
         self.x.len() == self.y.len() && self.x.len() == self.z.len()
     }
 
@@ -64,6 +112,62 @@ where
             y: &self.y[start..end],
             z: &self.z[start..end],
         }
+    }
+}
+
+impl<'a, T: Scalar> BoundedGeometryCollection<T> for DipoleSources<'a, T> {
+    #[inline]
+    fn geometry_len(self) -> usize {
+        self.x.len()
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        self.x.len() == self.y.len()
+            && self.x.len() == self.z.len()
+            && self.x.len() == self.outer_radius.len()
+    }
+
+    #[inline]
+    fn aabb(self, index: usize) -> Aabb<T> {
+        self.source_value(index).aabb()
+    }
+
+    #[inline]
+    fn representative_point(self, index: usize) -> [T; 3] {
+        [self.x[index], self.y[index], self.z[index]]
+    }
+}
+
+impl<'a, K, T> SourceCollection<K> for DipoleSources<'a, T>
+where
+    K: HierarchicalKernel<Scalar = T, SourceGeometry = DipoleSource<T>>,
+    T: Scalar,
+{
+    #[inline]
+    fn source(self, index: usize) -> DipoleSource<T> {
+        self.source_value(index)
+    }
+}
+
+impl<'a, K, T> SourceMomentCollection<K> for DipoleMoments<'a, T>
+where
+    K: HierarchicalKernel<Scalar = T, SourceMoment = [T; 3]>,
+    T: Scalar,
+{
+    #[inline]
+    fn geometry_len(self) -> usize {
+        self.x.len()
+    }
+
+    #[inline]
+    fn has_consistent_geometry_lengths(self) -> bool {
+        self.x.len() == self.y.len() && self.x.len() == self.z.len()
+    }
+
+    #[inline]
+    fn moment(self, index: usize) -> [T; 3] {
+        [self.x[index], self.y[index], self.z[index]]
     }
 }
 
@@ -118,25 +222,30 @@ pub struct DipoleTargetSummary<T: Scalar> {
 }
 
 #[inline]
-pub(super) fn summarize_weighted_source_centroid<T: Scalar>(
+pub(super) fn summarize_weighted_source_centroid<T, S, F>(
     source_ids: &[u32],
-    sources: &[DipoleSource<T>],
-    moments: &[[T; 3]],
+    sources: S,
+    moment_at: F,
     centroid: &mut [T; 3],
     weight: &mut T,
-) {
+) where
+    T: Scalar,
+    S: BoundedGeometryCollection<T>,
+    F: Fn(usize) -> [T; 3],
+{
     *centroid = [T::ZERO; 3];
     *weight = T::ZERO;
     for i in 0..source_ids.len() {
         let source_id = source_ids[i] as usize;
-        let source_weight = norm3(moments[source_id]);
+        let moment = moment_at(source_id);
+        let source_weight = norm3(moment);
         if source_weight <= T::ZERO {
             continue;
         }
         *weight = *weight + source_weight;
+        let position = sources.representative_point(source_id);
         for axis in 0..3 {
-            centroid[axis] =
-                sources[source_id].position[axis].mul_add(source_weight, centroid[axis]);
+            centroid[axis] = position[axis].mul_add(source_weight, centroid[axis]);
         }
     }
     if *weight > T::ZERO {

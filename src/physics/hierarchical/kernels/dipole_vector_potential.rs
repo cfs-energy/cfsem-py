@@ -5,7 +5,9 @@ use super::dipole::{
     summarize_target_leaf, summarize_weighted_source_centroid,
 };
 use crate::math::add3_in_place;
-use crate::physics::hierarchical::{HierarchicalError, HierarchicalKernel, Scalar};
+use crate::physics::hierarchical::{
+    HierarchicalError, HierarchicalKernel, Scalar, SourceCollection, SourceMomentCollection,
+};
 
 /// Source summary for dipole vector-potential clusters.
 #[derive(Clone, Copy, Debug, Default)]
@@ -43,24 +45,28 @@ impl<T: Scalar> HierarchicalKernel for DipoleVectorPotentialKernel<T> {
     type Output = [T; 3];
 
     #[inline]
-    fn summarize_leaf_sources(
+    fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
-        sources: &[Self::SourceGeometry],
-        moments: &[Self::SourceMoment],
+        sources: S,
+        moments: M,
         out: &mut Self::SourceSummary,
-    ) -> HierarchicalError {
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>,
+    {
         *out = DipoleVectorPotentialSummary::default();
         summarize_weighted_source_centroid(
             source_ids,
             sources,
-            moments,
+            |source_id| moments.moment(source_id),
             &mut out.centroid,
             &mut out.weight,
         );
         for i in 0..source_ids.len() {
             let source_id = source_ids[i] as usize;
-            add3_in_place(&mut out.moment, moments[source_id]);
+            add3_in_place(&mut out.moment, moments.moment(source_id));
         }
         HierarchicalError::Ok
     }

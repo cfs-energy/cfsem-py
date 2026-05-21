@@ -1,8 +1,8 @@
 #![allow(clippy::all)] // Clippy will attempt to remove black_box() internals
 
 use cfsem::physics::hierarchical::kernels::{
-    DipoleTarget, LinearFilamentFluxDensityKernel, LinearFilamentSource,
-    LinearFilamentVectorPotentialKernel,
+    DipoleTarget, DipoleTargets, LinearFilamentFluxDensityKernel, LinearFilamentSource,
+    LinearFilamentSources, LinearFilamentVectorPotentialKernel,
 };
 use cfsem::physics::hierarchical::{
     ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
@@ -24,7 +24,7 @@ const LOOP_OBS_FRACTION_OFFSET: f64 = 0.027;
 const LOOP_CURRENT: f64 = 0.5;
 const LOOP_WIRE_RADIUS: f64 = 0.002;
 
-struct HierarchicalLinearFilamentSolve<K>
+struct HierarchicalLinearFilamentSolve<'a, K>
 where
     K: HierarchicalKernel<
             Scalar = f64,
@@ -35,9 +35,9 @@ where
         > + Sync,
 {
     kernel: K,
-    sources: Vec<LinearFilamentSource<f64>>,
-    targets: Vec<DipoleTarget<f64>>,
-    currents: Vec<f64>,
+    sources: LinearFilamentSources<'a, f64>,
+    targets: DipoleTargets<'a, f64>,
+    currents: &'a [f64],
     source_tree: ClusterTree<f64>,
     source_summaries: SourceNodeSummaries<K>,
     vector_out: Vec<[f64; 3]>,
@@ -45,7 +45,7 @@ where
     parallel_scratch_value: Vec<[f64; 3]>,
 }
 
-impl<K> HierarchicalLinearFilamentSolve<K>
+impl<'a, K> HierarchicalLinearFilamentSolve<'a, K>
 where
     K: HierarchicalKernel<
             Scalar = f64,
@@ -57,45 +57,27 @@ where
 {
     fn new(
         kernel: K,
-        xyzfil: (&[f64], &[f64], &[f64]),
-        dlxyzfil: (&[f64], &[f64], &[f64]),
-        currents: &[f64],
-        wire_radius: &[f64],
-        xyzobs: (&[f64], &[f64], &[f64]),
+        xyzfil: (&'a [f64], &'a [f64], &'a [f64]),
+        dlxyzfil: (&'a [f64], &'a [f64], &'a [f64]),
+        currents: &'a [f64],
+        wire_radius: &'a [f64],
+        xyzobs: (&'a [f64], &'a [f64], &'a [f64]),
     ) -> Self {
-        let mut sources = Vec::with_capacity(xyzfil.0.len());
-        for i in 0..xyzfil.0.len() {
-            let start = [xyzfil.0[i], xyzfil.1[i], xyzfil.2[i]];
-            let end = [
-                xyzfil.0[i] + dlxyzfil.0[i],
-                xyzfil.1[i] + dlxyzfil.1[i],
-                xyzfil.2[i] + dlxyzfil.2[i],
-            ];
-            sources.push(LinearFilamentSource {
-                start,
-                end,
-                wire_radius: wire_radius[i],
-            });
-        }
+        let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
+        let targets = DipoleTargets::new(xyzobs.0, xyzobs.1, xyzobs.2);
 
-        let mut targets = Vec::with_capacity(xyzobs.0.len());
-        for i in 0..xyzobs.0.len() {
-            targets.push(DipoleTarget {
-                position: [xyzobs.0[i], xyzobs.1[i], xyzobs.2[i]],
-            });
-        }
-
-        let source_tree = ClusterTree::build_morton_lbvh(&sources).unwrap();
+        let source_tree = ClusterTree::build_morton_lbvh(sources).unwrap();
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
-        let vector_out = vec![[0.0; 3]; targets.len()];
+        let target_count = xyzobs.0.len();
+        let vector_out = vec![[0.0; 3]; target_count];
         let parallel_scratch_value =
-            vec![[0.0; 3]; parallel_source_tree_evaluation_scratch_len(targets.len())];
+            vec![[0.0; 3]; parallel_source_tree_evaluation_scratch_len(target_count)];
 
         Self {
             kernel,
             sources,
             targets,
-            currents: currents.to_vec(),
+            currents,
             source_tree,
             source_summaries,
             vector_out,
@@ -109,8 +91,8 @@ where
             update_source_summaries_into(
                 &self.kernel,
                 self.source_tree.as_view(),
-                &self.sources,
-                &self.currents,
+                self.sources,
+                self.currents,
                 &mut self.source_summaries.node_summaries,
             ),
             HierarchicalError::Ok
@@ -123,9 +105,9 @@ where
                 &self.kernel,
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.sources,
-                self.targets.as_slice(),
-                &self.currents,
+                self.sources,
+                self.targets,
+                self.currents,
                 HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,
@@ -145,8 +127,8 @@ where
             update_source_summaries_into(
                 &self.kernel,
                 self.source_tree.as_view(),
-                &self.sources,
-                &self.currents,
+                self.sources,
+                self.currents,
                 &mut self.source_summaries.node_summaries,
             ),
             HierarchicalError::Ok
@@ -159,9 +141,9 @@ where
                 &self.kernel,
                 self.source_tree.as_view(),
                 &self.source_summaries.node_summaries,
-                &self.sources,
-                self.targets.as_slice(),
-                &self.currents,
+                self.sources,
+                self.targets,
+                self.currents,
                 HIERARCHICAL_THETA,
                 &mut self.vector_out,
                 &mut scratch,

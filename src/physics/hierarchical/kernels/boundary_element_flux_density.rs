@@ -7,7 +7,9 @@ use super::boundary_element::{
 use super::dipole::{DipoleTarget, DipoleTargetSummary, dipole_field, summarize_target_leaf};
 use crate::math::add3_in_place;
 use crate::physics::boundary_element::{QuadratureKind, flux_density_triangle};
-use crate::physics::hierarchical::{HierarchicalError, HierarchicalKernel, Scalar};
+use crate::physics::hierarchical::{
+    HierarchicalError, HierarchicalKernel, Scalar, SourceCollection, SourceMomentCollection,
+};
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
 /// Boundary-element flux-density Barnes-Hut kernel.
@@ -49,14 +51,18 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     type Output = [T; 3];
 
     #[inline]
-    fn summarize_leaf_sources(
+    fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
-        sources: &[Self::SourceGeometry],
-        moments: &[Self::SourceMoment],
+        sources: S,
+        moments: M,
         out: &mut Self::SourceSummary,
-    ) -> HierarchicalError {
-        summarize_leaf_sources(source_ids, sources, moments, out)
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>,
+    {
+        summarize_leaf_sources::<Self, T, S, M>(source_ids, sources, moments, out)
     }
 
     #[inline]

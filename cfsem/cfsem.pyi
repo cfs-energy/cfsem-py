@@ -17,6 +17,29 @@ ArrayTriple: TypeAlias = tuple[FloatArray, FloatArray, FloatArray]
 ArrayPair: TypeAlias = tuple[FloatArray, FloatArray]
 SparseF64: TypeAlias = tuple[FloatArray, UIntArray, UIntArray, int, int]
 SparseF32: TypeAlias = tuple[Float32Array, UIntArray, UIntArray, int, int]
+SourceTreeDiagnostics: TypeAlias = tuple[
+    FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray
+]
+
+class HierarchicalDiagnostics:
+    @property
+    def construction_time(self) -> float: ...
+    @property
+    def evaluation_time(self) -> float: ...
+    @property
+    def source_count(self) -> int: ...
+    @property
+    def target_count(self) -> int: ...
+    @property
+    def source_tree(self) -> SourceTreeDiagnostics | None: ...
+    @property
+    def accepted_source_level(self) -> FloatArray | None: ...
+
+class SolveResult:
+    @property
+    def field(self) -> ArrayTriple: ...
+    @property
+    def diagnostics(self) -> HierarchicalDiagnostics: ...
 
 class QuadMeshQueryF64(TypedDict):
     nearest_node_indices: UIntArray
@@ -241,7 +264,9 @@ def flux_density_dipole_hierarchical(
     obs: ArrayTriple,
     theta: float = 0.01,
     par: bool = True,
-) -> ArrayTriple:
+    out: ArrayTriple | None = None,
+    extra_diagnostics: bool = False,
+) -> SolveResult:
     """Hierarchical magnetic flux density of dipoles in Cartesian coordinates.
 
     This one-shot method builds the source tree internally. This is an approximate method,
@@ -257,9 +282,12 @@ def flux_density_dipole_hierarchical(
         obs: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         par: Whether to evaluate target batches in parallel.
+        out: Optional output component arrays to fill.
+        extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
-        Magnetic flux-density component arrays at the target points.
+        Field component arrays and diagnostics. If `out` is provided, returns `out` in
+        `SolveResult.field`.
     """
     ...
 
@@ -270,7 +298,9 @@ def vector_potential_dipole_hierarchical(
     obs: ArrayTriple,
     theta: float = 0.01,
     par: bool = True,
-) -> ArrayTriple:
+    out: ArrayTriple | None = None,
+    extra_diagnostics: bool = False,
+) -> SolveResult:
     """Hierarchical magnetic vector potential of dipoles in Cartesian coordinates.
 
     This one-shot method builds the source tree internally. This is an approximate method,
@@ -286,9 +316,12 @@ def vector_potential_dipole_hierarchical(
         obs: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         par: Whether to evaluate target batches in parallel.
+        out: Optional output component arrays to fill.
+        extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
-        Magnetic vector-potential component arrays at the target points.
+        Field component arrays and diagnostics. If `out` is provided, returns `out` in
+        `SolveResult.field`.
     """
     ...
 
@@ -308,7 +341,9 @@ def flux_density_linear_filament_hierarchical(
     xyzp: ArrayTriple,
     theta: float = 0.05,
     par: bool = True,
-) -> ArrayTriple:
+    out: ArrayTriple | None = None,
+    extra_diagnostics: bool = False,
+) -> SolveResult:
     """Hierarchical B-field calculation for many linear filament segments.
 
     This one-shot method builds the source tree internally. This is an approximate method,
@@ -325,9 +360,12 @@ def flux_density_linear_filament_hierarchical(
         xyzp: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         par: Whether to evaluate target batches in parallel.
+        out: Optional output component arrays to fill.
+        extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
-        Magnetic flux-density component arrays at the target points.
+        Field component arrays and diagnostics. If `out` is provided, returns `out` in
+        `SolveResult.field`.
     """
     ...
 
@@ -362,7 +400,9 @@ def vector_potential_linear_filament_hierarchical(
     xyzp: ArrayTriple,
     theta: float = 0.05,
     par: bool = True,
-) -> ArrayTriple:
+    out: ArrayTriple | None = None,
+    extra_diagnostics: bool = False,
+) -> SolveResult:
     """Hierarchical A-field calculation for many linear filament segments.
 
     This one-shot method builds the source tree internally. This is an approximate method,
@@ -379,9 +419,12 @@ def vector_potential_linear_filament_hierarchical(
         xyzp: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         par: Whether to evaluate target batches in parallel.
+        out: Optional output component arrays to fill.
+        extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
-        Magnetic vector-potential component arrays at the target points.
+        Field component arrays and diagnostics. If `out` is provided, returns `out` in
+        `SolveResult.field`.
     """
     ...
 
@@ -448,7 +491,9 @@ def flux_density_triangle_mesh_hierarchical(
     theta: float = 0.05,
     quad: str = "dunavant3",
     par: bool = True,
-) -> ArrayTriple:
+    out: ArrayTriple | None = None,
+    extra_diagnostics: bool = False,
+) -> SolveResult:
     """Hierarchical B-field calculation for a triangle mesh with nodal stream-function values.
 
     This one-shot method builds the source tree internally. This is an approximate method,
@@ -465,9 +510,12 @@ def flux_density_triangle_mesh_hierarchical(
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         quad: Triangle quadrature rule.
         par: Whether to evaluate target batches in parallel.
+        out: Optional output component arrays to fill.
+        extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
-        Magnetic flux-density component arrays at the target points.
+        Field component arrays and diagnostics. If `out` is provided, returns `out` in
+        `SolveResult.field`.
     """
     ...
 
@@ -479,7 +527,9 @@ def vector_potential_triangle_mesh_hierarchical(
     theta: float = 0.05,
     quad: str = "dunavant3",
     par: bool = True,
-) -> ArrayTriple:
+    out: ArrayTriple | None = None,
+    extra_diagnostics: bool = False,
+) -> SolveResult:
     """Hierarchical A-field calculation for a triangle mesh with nodal stream-function values.
 
     This one-shot method builds the source tree internally. This is an approximate method,
@@ -496,9 +546,12 @@ def vector_potential_triangle_mesh_hierarchical(
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         quad: Triangle quadrature rule.
         par: Whether to evaluate target batches in parallel.
+        out: Optional output component arrays to fill.
+        extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
-        Magnetic vector-potential component arrays at the target points.
+        Field component arrays and diagnostics. If `out` is provided, returns `out` in
+        `SolveResult.field`.
     """
     ...
 

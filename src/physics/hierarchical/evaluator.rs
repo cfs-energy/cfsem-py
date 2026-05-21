@@ -1,5 +1,6 @@
 use super::{
-    BoundedGeometry, ClusterTreeView, HierarchicalError, HierarchicalKernel, TargetCollection,
+    BoundedGeometry, ClusterTreeView, HierarchicalError, HierarchicalKernel, SourceCollection,
+    SourceMomentCollection, TargetCollection,
 };
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -38,18 +39,27 @@ pub fn parallel_source_tree_evaluation_scratch_len(target_count: usize) -> usize
 
 /// Update source summaries for a fixed source tree and changed source moments.
 #[inline]
-pub fn update_source_summaries_into<K: HierarchicalKernel>(
+pub fn update_source_summaries_into<K, S, M>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
-    sources: &[K::SourceGeometry],
-    moments: &[K::SourceMoment],
+    sources: S,
+    moments: M,
     summaries: &mut [K::SourceSummary],
-) -> HierarchicalError {
+) -> HierarchicalError
+where
+    K: HierarchicalKernel,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
+{
     let err = validate_source_tree_layout(tree);
     if err != HierarchicalError::Ok {
         return err;
     }
-    if sources.len() != tree.n_items() || moments.len() != tree.n_items() {
+    if sources.geometry_len() != tree.n_items()
+        || !sources.has_consistent_geometry_lengths()
+        || moments.geometry_len() != tree.n_items()
+        || !moments.has_consistent_geometry_lengths()
+    {
         return HierarchicalError::LengthMismatch;
     }
     if summaries.len() < tree.n_nodes() {
@@ -83,13 +93,13 @@ pub fn update_source_summaries_into<K: HierarchicalKernel>(
 /// source-side acceptance criterion as the lower-level interaction-plan
 /// evaluator.
 #[inline]
-pub fn evaluate_source_tree_into<K, C>(
+pub fn evaluate_source_tree_into<K, S, M, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
-    sources: &[K::SourceGeometry],
+    sources: S,
     targets: C,
-    moments: &[K::SourceMoment],
+    moments: M,
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
@@ -97,6 +107,8 @@ pub fn evaluate_source_tree_into<K, C>(
 where
     K: HierarchicalKernel,
     K::TargetGeometry: Copy,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
     C: TargetCollection<K>,
 {
     let err = validate_source_tree_layout(source_tree);
@@ -117,13 +129,13 @@ where
 }
 
 #[inline]
-fn evaluate_source_tree_into_validated<K, C>(
+fn evaluate_source_tree_into_validated<K, S, M, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
-    sources: &[K::SourceGeometry],
+    sources: S,
     targets: C,
-    moments: &[K::SourceMoment],
+    moments: M,
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
@@ -131,12 +143,16 @@ fn evaluate_source_tree_into_validated<K, C>(
 where
     K: HierarchicalKernel,
     K::TargetGeometry: Copy,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
     C: TargetCollection<K>,
 {
-    if sources.len() != source_tree.n_items()
-        || moments.len() != source_tree.n_items()
-        || targets.len() != out.len()
-        || !targets.has_consistent_lengths()
+    if sources.geometry_len() != source_tree.n_items()
+        || !sources.has_consistent_geometry_lengths()
+        || moments.geometry_len() != source_tree.n_items()
+        || !moments.has_consistent_geometry_lengths()
+        || targets.geometry_len() != out.len()
+        || !targets.has_consistent_geometry_lengths()
     {
         return HierarchicalError::LengthMismatch;
     }
@@ -148,7 +164,7 @@ where
     let mut active = Vec::new();
     let target_ids = [0_u32];
 
-    for target_id in 0..targets.len() {
+    for target_id in 0..targets.geometry_len() {
         let target = targets.target(target_id);
         let err = evaluate_source_tree_scalar(
             kernel,
@@ -177,13 +193,13 @@ where
 /// Serial and parallel vector evaluators both call this helper so the source
 /// traversal and acceptance behavior cannot diverge between evaluation modes.
 #[inline]
-fn evaluate_source_tree_scalar<K>(
+fn evaluate_source_tree_scalar<K, S, M>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
-    sources: &[K::SourceGeometry],
+    sources: S,
     target: K::TargetGeometry,
-    moments: &[K::SourceMoment],
+    moments: M,
     theta: K::Scalar,
     out: &mut K::Output,
     contribution: &mut K::Output,
@@ -194,6 +210,8 @@ fn evaluate_source_tree_scalar<K>(
 where
     K: HierarchicalKernel,
     K::TargetGeometry: Copy,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
 {
     kernel.zero_output(out);
     let err =
@@ -222,12 +240,9 @@ where
             let source_ids = &source_tree.sorted_indices[start..end];
             for i in 0..source_ids.len() {
                 let source_id = source_ids[i] as usize;
-                kernel.eval_exact(
-                    &target,
-                    &sources[source_id],
-                    &moments[source_id],
-                    contribution,
-                );
+                let source = sources.source(source_id);
+                let moment = moments.moment(source_id);
+                kernel.eval_exact(&target, &source, &moment, contribution);
                 kernel.accumulate(out, contribution);
             }
         } else {
@@ -246,13 +261,13 @@ where
 /// source-tree evaluator on that slice. It shares the source tree and source
 /// summaries between workers, and avoids any cross-thread output accumulation.
 #[inline]
-pub fn evaluate_source_tree_into_par<K, C>(
+pub fn evaluate_source_tree_into_par<K, S, M, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
-    sources: &[K::SourceGeometry],
+    sources: S,
     targets: C,
-    moments: &[K::SourceMoment],
+    moments: M,
     theta: K::Scalar,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
@@ -260,16 +275,20 @@ pub fn evaluate_source_tree_into_par<K, C>(
 where
     K: HierarchicalKernel + Sync,
     K::TargetGeometry: Copy,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
     C: TargetCollection<K>,
 {
     let err = validate_source_tree_layout(source_tree);
     if err != HierarchicalError::Ok {
         return err;
     }
-    if sources.len() != source_tree.n_items()
-        || moments.len() != source_tree.n_items()
-        || targets.len() != out.len()
-        || !targets.has_consistent_lengths()
+    if sources.geometry_len() != source_tree.n_items()
+        || !sources.has_consistent_geometry_lengths()
+        || moments.geometry_len() != source_tree.n_items()
+        || !moments.has_consistent_geometry_lengths()
+        || targets.geometry_len() != out.len()
+        || !targets.has_consistent_geometry_lengths()
     {
         return HierarchicalError::LengthMismatch;
     }
@@ -280,8 +299,8 @@ where
         return HierarchicalError::Ok;
     }
 
-    let chunk_size = crate::chunksize(targets.len());
-    let chunk_count = targets.len().div_ceil(chunk_size);
+    let chunk_size = crate::chunksize(targets.geometry_len());
+    let chunk_count = targets.geometry_len().div_ceil(chunk_size);
     if scratch.contribution.len() < chunk_count {
         return HierarchicalError::ScratchTooSmall;
     }
@@ -354,7 +373,7 @@ where
     if err != HierarchicalError::Ok {
         return err;
     }
-    if targets.len() != out.len() || !targets.has_consistent_lengths() {
+    if targets.geometry_len() != out.len() || !targets.has_consistent_geometry_lengths() {
         return HierarchicalError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() {
@@ -362,7 +381,7 @@ where
     }
 
     let mut active = Vec::new();
-    for target_id in 0..targets.len() {
+    for target_id in 0..targets.geometry_len() {
         let target = targets.target(target_id);
         let mut weighted_level = 0.0_f64;
         let mut represented_sources = 0.0_f64;
@@ -403,15 +422,26 @@ where
 
 /// Dense exact fallback using nested range loops.
 #[inline]
-pub fn dense_direct_evaluate_into<K: HierarchicalKernel>(
+pub fn dense_direct_evaluate_into<K, S, C, M>(
     kernel: &K,
-    sources: &[K::SourceGeometry],
-    targets: &[K::TargetGeometry],
-    moments: &[K::SourceMoment],
+    sources: S,
+    targets: C,
+    moments: M,
     out: &mut [K::Output],
     scratch: &mut EvaluationScratch<'_, K::Output>,
-) -> HierarchicalError {
-    if sources.len() != moments.len() || targets.len() != out.len() {
+) -> HierarchicalError
+where
+    K: HierarchicalKernel,
+    S: SourceCollection<K>,
+    C: TargetCollection<K>,
+    M: SourceMomentCollection<K>,
+{
+    if sources.geometry_len() != moments.geometry_len()
+        || !sources.has_consistent_geometry_lengths()
+        || !moments.has_consistent_geometry_lengths()
+        || targets.geometry_len() != out.len()
+        || !targets.has_consistent_geometry_lengths()
+    {
         return HierarchicalError::LengthMismatch;
     }
     if scratch.contribution.is_empty() {
@@ -422,16 +452,13 @@ pub fn dense_direct_evaluate_into<K: HierarchicalKernel>(
         kernel.zero_output(&mut out[i]);
     }
 
-    for target_id in 0..targets.len() {
-        let target = &targets[target_id];
+    for target_id in 0..targets.geometry_len() {
+        let target = targets.target(target_id);
         let target_out = &mut out[target_id];
-        for source_id in 0..sources.len() {
-            kernel.eval_exact(
-                target,
-                &sources[source_id],
-                &moments[source_id],
-                &mut scratch.contribution[0],
-            );
+        for source_id in 0..sources.geometry_len() {
+            let source = sources.source(source_id);
+            let moment = moments.moment(source_id);
+            kernel.eval_exact(&target, &source, &moment, &mut scratch.contribution[0]);
             kernel.accumulate(target_out, &scratch.contribution[0]);
         }
     }

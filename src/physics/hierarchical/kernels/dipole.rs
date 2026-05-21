@@ -194,9 +194,8 @@ pub(super) fn dipole_field<T: Scalar>(
     moment: [T; 3],
     outer_radius: T,
     out: &mut [T; 3],
-) -> HierarchicalError {
+) {
     *out = flux_density_dipole_scalar_generic(source, moment, outer_radius, target);
-    HierarchicalError::Ok
 }
 
 #[inline]
@@ -206,7 +205,6 @@ pub(super) fn dipole_vector_potential<T: Scalar>(
     moment: [T; 3],
     outer_radius: T,
     out: &mut [T; 3],
-) -> HierarchicalError {
+) {
     *out = vector_potential_dipole_scalar_generic(source, moment, outer_radius, target);
-    HierarchicalError::Ok
 }

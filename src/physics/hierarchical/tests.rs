@@ -165,10 +165,9 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         let r2 = dist2(target.point, source.point);
         *out = *moment / (T::ONE + r2);
-        HierarchicalError::Ok
     }
 
     fn eval_far(
@@ -176,10 +175,9 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         let r2 = dist2(target.centroid, source.centroid);
         *out = source.moment / (T::ONE + r2);
-        HierarchicalError::Ok
     }
 
     fn zero_output(&self, out: &mut Self::Output) {
@@ -266,10 +264,7 @@ fn dipole_exact_uses_magnetized_sphere_radius() {
     let moment = [0.0, 0.0, 3.0];
     let mut out = [0.0; 3];
 
-    assert_eq!(
-        kernel.eval_exact(&target, &source, &moment, &mut out),
-        HierarchicalError::Ok
-    );
+    kernel.eval_exact(&target, &source, &moment, &mut out);
 
     let expected = crate::physics::point_source::dipole::flux_density_dipole_scalar(
         (0.0, 0.0, 0.0),
@@ -454,10 +449,7 @@ fn linear_filament_exact_matches_scalar_and_supports_f32() {
     let current = 3.0;
     let mut out = [0.0; 3];
 
-    assert_eq!(
-        kernel.eval_exact(&target, &source, &current, &mut out),
-        HierarchicalError::Ok
-    );
+    kernel.eval_exact(&target, &source, &current, &mut out);
     let expected = crate::physics::linear_filament::flux_density_linear_filament_scalar(
         (
             (source.start[0], source.start[1], source.start[2]),
@@ -750,10 +742,7 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
 
     let b_kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
     let mut b_out = [0.0; 3];
-    assert_eq!(
-        b_kernel.eval_exact(&target, &source, &moment, &mut b_out),
-        HierarchicalError::Ok
-    );
+    b_kernel.eval_exact(&target, &source, &moment, &mut b_out);
     assert_eq!(
         b_out,
         flux_density_triangle(
@@ -768,10 +757,7 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
 
     let a_kernel = BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind);
     let mut a_out = [0.0; 3];
-    assert_eq!(
-        a_kernel.eval_exact(&target, &source, &moment, &mut a_out),
-        HierarchicalError::Ok
-    );
+    a_kernel.eval_exact(&target, &source, &moment, &mut a_out);
     assert_eq!(
         a_out,
         vector_potential_triangle(

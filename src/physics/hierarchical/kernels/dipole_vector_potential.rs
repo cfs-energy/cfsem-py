@@ -120,7 +120,7 @@ impl<T: Scalar> HierarchicalKernel for DipoleVectorPotentialKernel<T> {
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         dipole_vector_potential(
             target.position,
             source.position,
@@ -136,18 +136,14 @@ impl<T: Scalar> HierarchicalKernel for DipoleVectorPotentialKernel<T> {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
-        let err = dipole_vector_potential(
+    ) {
+        dipole_vector_potential(
             target.centroid,
             source.centroid,
             source.moment,
             T::ZERO,
             out,
         );
-        if err != HierarchicalError::Ok {
-            return err;
-        }
-        HierarchicalError::Ok
     }
 
     #[inline]

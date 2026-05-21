@@ -197,15 +197,13 @@ pub trait HierarchicalKernel {
     ///     moment: Source amplitude or moment.
     ///     out: Contribution value to fill.
     ///
-    /// Returns:
-    ///     Error code for the interaction.
     fn eval_exact(
         &self,
         target: &Self::TargetGeometry,
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> HierarchicalError;
+    );
 
     /// Evaluate a far-field source summary against a target summary.
     ///
@@ -214,14 +212,12 @@ pub trait HierarchicalKernel {
     ///     source: Source summary value.
     ///     out: Contribution value to fill.
     ///
-    /// Returns:
-    ///     Error code for the interaction.
     fn eval_far(
         &self,
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> HierarchicalError;
+    );
 
     /// Decide whether a source node is far enough from a target to use its summary.
     ///

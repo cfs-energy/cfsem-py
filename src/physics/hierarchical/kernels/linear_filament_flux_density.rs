@@ -202,7 +202,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentFluxDensityKernel<T> {
         source: &Self::SourceGeometry,
         current: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         *out = tuple_to_array(flux_density_linear_filament_scalar(
             (
                 array_to_tuple(source.start),
@@ -212,7 +212,6 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentFluxDensityKernel<T> {
             source.wire_radius,
             array_to_tuple(target.position),
         ));
-        HierarchicalError::Ok
     }
 
     #[inline]
@@ -221,10 +220,10 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentFluxDensityKernel<T> {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         *out = [T::ZERO; 3];
         if source.weight <= T::ZERO {
-            return HierarchicalError::Ok;
+            return;
         }
 
         if source.magnitude > T::ZERO {
@@ -237,19 +236,14 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentFluxDensityKernel<T> {
         }
 
         let mut dipole_out = [T::ZERO; 3];
-        let err = dipole_field(
+        dipole_field(
             target.centroid,
             source.dipole_origin,
             source.dipole_moment,
             T::ZERO,
             &mut dipole_out,
         );
-        if err != HierarchicalError::Ok {
-            return err;
-        }
         add3_in_place(out, dipole_out);
-
-        HierarchicalError::Ok
     }
 
     #[inline]

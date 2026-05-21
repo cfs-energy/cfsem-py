@@ -120,7 +120,7 @@ impl<T: Scalar> HierarchicalKernel for DipoleFluxDensityKernel<T> {
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         dipole_field(
             target.position,
             source.position,
@@ -136,18 +136,14 @@ impl<T: Scalar> HierarchicalKernel for DipoleFluxDensityKernel<T> {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
-        let err = dipole_field(
+    ) {
+        dipole_field(
             target.centroid,
             source.centroid,
             source.moment,
             T::ZERO,
             out,
         );
-        if err != HierarchicalError::Ok {
-            return err;
-        }
-        HierarchicalError::Ok
     }
 
     #[inline]

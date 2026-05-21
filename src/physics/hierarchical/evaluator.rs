@@ -468,10 +468,7 @@ where
         let source_summary = &source_summaries[source_node_index];
         let source_aabb = source_tree.node_aabb[source_node_index];
         if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
-            let err = kernel.eval_far(target_summary, source_summary, contribution);
-            if err != HierarchicalError::Ok {
-                return err;
-            }
+            kernel.eval_far(target_summary, source_summary, contribution);
             kernel.accumulate(out, contribution);
             continue;
         }
@@ -484,15 +481,12 @@ where
             let source_ids = &source_tree.sorted_indices[start..end];
             for i in 0..source_ids.len() {
                 let source_id = source_ids[i] as usize;
-                let err = kernel.eval_exact(
+                kernel.eval_exact(
                     &target,
                     &sources[source_id],
                     &moments[source_id],
                     contribution,
                 );
-                if err != HierarchicalError::Ok {
-                    return err;
-                }
                 kernel.accumulate(out, contribution);
             }
         } else {
@@ -717,29 +711,23 @@ fn evaluate_chunk_into<K: HierarchicalKernel>(
     for pair in 0..chunk.near_target_ids.len() {
         let target_id = chunk.near_target_ids[pair] as usize;
         let source_id = chunk.near_source_ids[pair] as usize;
-        let err = kernel.eval_exact(
+        kernel.eval_exact(
             &targets[target_id],
             &sources[source_id],
             &moments[source_id],
             contribution,
         );
-        if err != HierarchicalError::Ok {
-            return err;
-        }
         kernel.accumulate(&mut out[target_id], contribution);
     }
 
     for pair in 0..chunk.far_target_node_ids.len() {
         let target_node = chunk.far_target_node_ids[pair] as usize;
         let source_node = chunk.far_source_node_ids[pair] as usize;
-        let err = kernel.eval_far(
+        kernel.eval_far(
             &target_summaries[target_node],
             &source_summaries[source_node],
             contribution,
         );
-        if err != HierarchicalError::Ok {
-            return err;
-        }
 
         let start = target_tree.node_range_start[target_node] as usize;
         let count = target_tree.node_range_count[target_node] as usize;
@@ -777,15 +765,12 @@ pub fn dense_direct_evaluate_into<K: HierarchicalKernel>(
         let target = &targets[target_id];
         let target_out = &mut out[target_id];
         for source_id in 0..sources.len() {
-            let err = kernel.eval_exact(
+            kernel.eval_exact(
                 target,
                 &sources[source_id],
                 &moments[source_id],
                 &mut scratch.contribution[0],
             );
-            if err != HierarchicalError::Ok {
-                return err;
-            }
             kernel.accumulate(target_out, &scratch.contribution[0]);
         }
     }

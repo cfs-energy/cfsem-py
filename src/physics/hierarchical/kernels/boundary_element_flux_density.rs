@@ -98,7 +98,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
         source: &Self::SourceGeometry,
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         *out = flux_density_triangle(
             source.n0,
             source.n1,
@@ -107,7 +107,6 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
             target.position,
             self.quad_kind,
         );
-        HierarchicalError::Ok
     }
 
     #[inline]
@@ -116,10 +115,10 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
         target: &Self::TargetSummary,
         source: &Self::SourceSummary,
         out: &mut Self::Output,
-    ) -> HierarchicalError {
+    ) {
         *out = [T::ZERO; 3];
         if source.weight <= T::ZERO {
-            return HierarchicalError::Ok;
+            return;
         }
 
         if has_current(source) {
@@ -131,19 +130,14 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
         }
 
         let mut dipole_out = [T::ZERO; 3];
-        let err = dipole_field(
+        dipole_field(
             target.centroid,
             source.dipole_origin,
             source.dipole_moment,
             T::ZERO,
             &mut dipole_out,
         );
-        if err != HierarchicalError::Ok {
-            return err;
-        }
         add3_in_place(out, dipole_out);
-
-        HierarchicalError::Ok
     }
 
     #[inline]

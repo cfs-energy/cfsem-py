@@ -14,19 +14,11 @@ UIntMatrix: TypeAlias = NDArray[uint64]
 FloatTensor3: TypeAlias = NDArray[float64]
 Float32Tensor3: TypeAlias = NDArray[float32]
 ArrayTriple: TypeAlias = tuple[FloatArray, FloatArray, FloatArray]
-Float32ArrayTriple: TypeAlias = tuple[Float32Array, Float32Array, Float32Array]
-HierarchicalArrayTriple: TypeAlias = ArrayTriple | Float32ArrayTriple
 ArrayPair: TypeAlias = tuple[FloatArray, FloatArray]
 SparseF64: TypeAlias = tuple[FloatArray, UIntArray, UIntArray, int, int]
 SparseF32: TypeAlias = tuple[Float32Array, UIntArray, UIntArray, int, int]
 SourceTreeDiagnostics: TypeAlias = tuple[
-    FloatArray | Float32Array,
-    FloatArray | Float32Array,
-    FloatArray | Float32Array,
-    FloatArray | Float32Array,
-    FloatArray | Float32Array,
-    FloatArray | Float32Array,
-    FloatArray | Float32Array,
+    FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray
 ]
 
 class HierarchicalDiagnostics:
@@ -41,11 +33,11 @@ class HierarchicalDiagnostics:
     @property
     def source_tree(self) -> SourceTreeDiagnostics | None: ...
     @property
-    def accepted_source_level(self) -> FloatArray | Float32Array | None: ...
+    def accepted_source_level(self) -> FloatArray | None: ...
 
 class SolveResult:
     @property
-    def field(self) -> HierarchicalArrayTriple: ...
+    def field(self) -> ArrayTriple: ...
     @property
     def diagnostics(self) -> HierarchicalDiagnostics: ...
 
@@ -266,14 +258,14 @@ def vector_potential_dipole(
     par: bool,
 ) -> ArrayTriple: ...
 def flux_density_dipole_hierarchical(
-    loc: HierarchicalArrayTriple,
-    moment: HierarchicalArrayTriple,
-    outer_radius: FloatArray | Float32Array,
-    obs: HierarchicalArrayTriple,
+    loc: ArrayTriple,
+    moment: ArrayTriple,
+    outer_radius: FloatArray,
+    obs: ArrayTriple,
     theta: float = 0.01,
     construction_method: str = "recursive",
     par: bool = True,
-    out: HierarchicalArrayTriple | None = None,
+    out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
 ) -> SolveResult:
     """Hierarchical magnetic flux density of dipoles in Cartesian coordinates.
@@ -302,26 +294,15 @@ def flux_density_dipole_hierarchical(
     """
     ...
 
-def flux_density_dipole_hierarchical_f32(
-    loc: Float32ArrayTriple,
-    moment: Float32ArrayTriple,
-    outer_radius: Float32Array,
-    obs: Float32ArrayTriple,
-    theta: float = 0.01,
-    construction_method: str = "recursive",
-    par: bool = True,
-    out: Float32ArrayTriple | None = None,
-    extra_diagnostics: bool = False,
-) -> SolveResult: ...
 def vector_potential_dipole_hierarchical(
-    loc: HierarchicalArrayTriple,
-    moment: HierarchicalArrayTriple,
-    outer_radius: FloatArray | Float32Array,
-    obs: HierarchicalArrayTriple,
+    loc: ArrayTriple,
+    moment: ArrayTriple,
+    outer_radius: FloatArray,
+    obs: ArrayTriple,
     theta: float = 0.01,
     construction_method: str = "recursive",
     par: bool = True,
-    out: HierarchicalArrayTriple | None = None,
+    out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
 ) -> SolveResult:
     """Hierarchical magnetic vector potential of dipoles in Cartesian coordinates.
@@ -350,17 +331,6 @@ def vector_potential_dipole_hierarchical(
     """
     ...
 
-def vector_potential_dipole_hierarchical_f32(
-    loc: Float32ArrayTriple,
-    moment: Float32ArrayTriple,
-    outer_radius: Float32Array,
-    obs: Float32ArrayTriple,
-    theta: float = 0.01,
-    construction_method: str = "recursive",
-    par: bool = True,
-    out: Float32ArrayTriple | None = None,
-    extra_diagnostics: bool = False,
-) -> SolveResult: ...
 def flux_density_linear_filament(
     xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
@@ -370,15 +340,15 @@ def flux_density_linear_filament(
     par: bool = True,
 ) -> ArrayTriple: ...
 def flux_density_linear_filament_hierarchical(
-    xyzfil: HierarchicalArrayTriple,
-    dlxyzfil: HierarchicalArrayTriple,
-    ifil: FloatArray | Float32Array,
-    wire_radius: FloatArray | Float32Array,
-    xyzp: HierarchicalArrayTriple,
+    xyzfil: ArrayTriple,
+    dlxyzfil: ArrayTriple,
+    ifil: FloatArray,
+    wire_radius: FloatArray,
+    xyzp: ArrayTriple,
     theta: float = 0.05,
     construction_method: str = "recursive",
     par: bool = True,
-    out: HierarchicalArrayTriple | None = None,
+    out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
 ) -> SolveResult:
     """Hierarchical B-field calculation for many linear filament segments.
@@ -408,18 +378,6 @@ def flux_density_linear_filament_hierarchical(
     """
     ...
 
-def flux_density_linear_filament_hierarchical_f32(
-    xyzfil: Float32ArrayTriple,
-    dlxyzfil: Float32ArrayTriple,
-    ifil: Float32Array,
-    wire_radius: Float32Array,
-    xyzp: Float32ArrayTriple,
-    theta: float = 0.05,
-    construction_method: str = "recursive",
-    par: bool = True,
-    out: Float32ArrayTriple | None = None,
-    extra_diagnostics: bool = False,
-) -> SolveResult: ...
 def flux_density_linear_filament_matrix(
     xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
@@ -444,15 +402,15 @@ def vector_potential_linear_filament(
     par: bool = True,
 ) -> ArrayTriple: ...
 def vector_potential_linear_filament_hierarchical(
-    xyzfil: HierarchicalArrayTriple,
-    dlxyzfil: HierarchicalArrayTriple,
-    ifil: FloatArray | Float32Array,
-    wire_radius: FloatArray | Float32Array,
-    xyzp: HierarchicalArrayTriple,
+    xyzfil: ArrayTriple,
+    dlxyzfil: ArrayTriple,
+    ifil: FloatArray,
+    wire_radius: FloatArray,
+    xyzp: ArrayTriple,
     theta: float = 0.05,
     construction_method: str = "recursive",
     par: bool = True,
-    out: HierarchicalArrayTriple | None = None,
+    out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
 ) -> SolveResult:
     """Hierarchical A-field calculation for many linear filament segments.
@@ -482,18 +440,6 @@ def vector_potential_linear_filament_hierarchical(
     """
     ...
 
-def vector_potential_linear_filament_hierarchical_f32(
-    xyzfil: Float32ArrayTriple,
-    dlxyzfil: Float32ArrayTriple,
-    ifil: Float32Array,
-    wire_radius: Float32Array,
-    xyzp: Float32ArrayTriple,
-    theta: float = 0.05,
-    construction_method: str = "recursive",
-    par: bool = True,
-    out: Float32ArrayTriple | None = None,
-    extra_diagnostics: bool = False,
-) -> SolveResult: ...
 def vector_potential_linear_filament_matrix(
     xyzp: ArrayTriple,
     xyzfil: ArrayTriple,

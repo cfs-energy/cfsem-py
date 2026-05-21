@@ -118,7 +118,7 @@ struct HierarchicalDiagnostics {
     source_count: usize,
     target_count: usize,
     source_tree: Option<Py<PyAny>>,
-    accepted_source_level: Option<Py<PyAny>>,
+    accepted_source_level: Option<Py<PyArray1<f64>>>,
 }
 
 #[pymethods]
@@ -149,7 +149,7 @@ impl HierarchicalDiagnostics {
     }
 
     #[getter]
-    fn accepted_source_level(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+    fn accepted_source_level(&self, py: Python<'_>) -> Option<Py<PyArray1<f64>>> {
         self.accepted_source_level
             .as_ref()
             .map(|value| value.clone_ref(py))
@@ -314,36 +314,30 @@ where
     Ok(out)
 }
 
-fn output_arrays_to_py_tuple<T>(
+fn output_arrays_to_py_tuple(
     out: &(
-        PyReadwriteArray1<'_, T>,
-        PyReadwriteArray1<'_, T>,
-        PyReadwriteArray1<'_, T>,
+        PyReadwriteArray1<'_, f64>,
+        PyReadwriteArray1<'_, f64>,
+        PyReadwriteArray1<'_, f64>,
     ),
-) -> (Py<PyAny>, Py<PyAny>, Py<PyAny>)
-where
-    T: NumpyElement,
-{
+) -> (Py<PyAny>, Py<PyAny>, Py<PyAny>) {
     (
-        <pyo3::Bound<'_, PyArray1<T>> as Clone>::clone(&out.0)
+        <pyo3::Bound<'_, PyArray1<f64>> as Clone>::clone(&out.0)
             .unbind()
             .into(),
-        <pyo3::Bound<'_, PyArray1<T>> as Clone>::clone(&out.1)
+        <pyo3::Bound<'_, PyArray1<f64>> as Clone>::clone(&out.1)
             .unbind()
             .into(),
-        <pyo3::Bound<'_, PyArray1<T>> as Clone>::clone(&out.2)
+        <pyo3::Bound<'_, PyArray1<f64>> as Clone>::clone(&out.2)
             .unbind()
             .into(),
     )
 }
 
-fn component_vecs_to_py_tuple<T>(
+fn component_vecs_to_py_tuple(
     py: Python<'_>,
-    values: (Vec<T>, Vec<T>, Vec<T>),
-) -> (Py<PyAny>, Py<PyAny>, Py<PyAny>)
-where
-    T: NumpyElement,
-{
+    values: (Vec<f64>, Vec<f64>, Vec<f64>),
+) -> (Py<PyAny>, Py<PyAny>, Py<PyAny>) {
     (
         PyArray1::from_vec(py, values.0).unbind().into(),
         PyArray1::from_vec(py, values.1).unbind().into(),
@@ -383,21 +377,18 @@ where
     Ok((outx, outy, outz))
 }
 
-fn source_tree_aabbs_to_py_tuple<T>(
+fn source_tree_aabbs_to_py_tuple(
     py: Python<'_>,
-    tree: &physics::hierarchical::ClusterTree<T>,
+    tree: &physics::hierarchical::ClusterTree<f64>,
 ) -> (
-    Py<PyArray1<T>>,
-    Py<PyArray1<T>>,
-    Py<PyArray1<T>>,
-    Py<PyArray1<T>>,
-    Py<PyArray1<T>>,
-    Py<PyArray1<T>>,
-    Py<PyArray1<T>>,
-)
-where
-    T: physics::hierarchical::Scalar + NumpyElement,
-{
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+    Py<PyArray1<f64>>,
+) {
     let mut min_x = Vec::with_capacity(tree.node_aabb.len());
     let mut min_y = Vec::with_capacity(tree.node_aabb.len());
     let mut min_z = Vec::with_capacity(tree.node_aabb.len());
@@ -425,13 +416,10 @@ where
     )
 }
 
-fn source_tree_diagnostics_object<T>(
+fn source_tree_diagnostics_object(
     py: Python<'_>,
-    tree: &physics::hierarchical::ClusterTree<T>,
-) -> PyResult<Py<PyAny>>
-where
-    T: physics::hierarchical::Scalar + NumpyElement,
-{
+    tree: &physics::hierarchical::ClusterTree<f64>,
+) -> PyResult<Py<PyAny>> {
     let (min_x, min_y, min_z, max_x, max_y, max_z, levels) =
         source_tree_aabbs_to_py_tuple(py, tree);
     Ok(
@@ -449,7 +437,7 @@ fn solve_result_from_field(
     source_count: usize,
     target_count: usize,
     source_tree: Option<Py<PyAny>>,
-    accepted_source_level: Option<Py<PyAny>>,
+    accepted_source_level: Option<Py<PyArray1<f64>>>,
 ) -> PyResult<Py<SolveResult>> {
     let field = PyTuple::new(py, [field.0, field.1, field.2])?
         .unbind()
@@ -468,23 +456,20 @@ fn solve_result_from_field(
     Py::new(py, SolveResult { field, diagnostics })
 }
 
-fn source_tree_node_levels<T>(tree: &physics::hierarchical::ClusterTree<T>) -> Vec<T>
-where
-    T: physics::hierarchical::Scalar,
-{
-    let mut levels = vec![T::ZERO; tree.node_aabb.len()];
+fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Vec<f64> {
+    let mut levels = vec![0.0; tree.node_aabb.len()];
     let mut active = Vec::new();
     if !tree.node_aabb.is_empty() {
         active.push((0_usize, 0_u32));
     }
     while let Some((node, level)) = active.pop() {
-        levels[node] = T::from_f64(f64::from(level));
+        levels[node] = f64::from(level);
         let left = tree.node_left_child[node];
-        if left != physics::hierarchical::ClusterTreeView::<T>::invalid_index() {
+        if left != physics::hierarchical::ClusterTreeView::<f64>::invalid_index() {
             active.push((left as usize, level + 1));
         }
         let right = tree.node_right_child[node];
-        if right != physics::hierarchical::ClusterTreeView::<T>::invalid_index() {
+        if right != physics::hierarchical::ClusterTreeView::<f64>::invalid_index() {
             active.push((right as usize, level + 1));
         }
     }
@@ -509,17 +494,16 @@ fn parse_hierarchical_construction_method(
     }
 }
 
-fn accepted_source_level_diagnostic<K, T, S, C, M>(
+fn accepted_source_level_diagnostic<K, S, C, M>(
     kernel: K,
-    source_tree: &physics::hierarchical::ClusterTree<T>,
+    source_tree: &physics::hierarchical::ClusterTree<f64>,
     sources: S,
     targets: C,
     moments: M,
-    theta: T,
-) -> PyResult<Vec<T>>
+    theta: f64,
+) -> PyResult<Vec<f64>>
 where
-    K: physics::hierarchical::HierarchicalKernel<Scalar = T, Output = [T; 3]> + Sync,
-    T: physics::hierarchical::Scalar,
+    K: physics::hierarchical::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
     S: physics::hierarchical::SourceCollection<K> + Copy,
     M: physics::hierarchical::SourceMomentCollection<K> + Copy,
     K::TargetGeometry: Copy,
@@ -538,8 +522,7 @@ where
         return Err(py_hierarchical_error("source summary update", err));
     }
 
-    let mut out =
-        vec![T::ZERO; physics::hierarchical::TargetCollection::<K>::geometry_len(targets)];
+    let mut out = vec![0.0; physics::hierarchical::TargetCollection::<K>::geometry_len(targets)];
     err = physics::hierarchical::accepted_source_level_diagnostic_into(
         &kernel,
         source_tree.as_view(),
@@ -553,276 +536,6 @@ where
     }
     Ok(out)
 }
-
-macro_rules! define_dipole_hierarchical_f32 {
-    ($name:ident, $rust_fn:ident, $kernel:ty, $context:literal, $out_name:literal, $default_theta:literal) => {
-        #[pyfunction(signature = (loc, moment, outer_radius, obs, theta=$default_theta, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
-        fn $name(
-            py: Python<'_>,
-            loc: (
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-            ),
-            moment: (
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-            ),
-            outer_radius: PyReadonlyArray1<f32>,
-            obs: (
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-            ),
-            theta: f32,
-            construction_method: &str,
-            par: bool,
-            out: Option<(
-                PyReadwriteArray1<f32>,
-                PyReadwriteArray1<f32>,
-                PyReadwriteArray1<f32>,
-            )>,
-            extra_diagnostics: bool,
-        ) -> PyResult<Py<SolveResult>> {
-            let loc = read_xyz_tuple(py, &loc, "loc")?;
-            let moment = read_xyz_tuple(py, &moment, "moment")?;
-            let outer_radius = read_float_input_array1(py, &outer_radius, "outer_radius")?;
-            let obs = read_xyz_tuple(py, &obs, "obs")?;
-            let construction_method = parse_hierarchical_construction_method(construction_method)?;
-            let (field, diagnostics) = match out {
-                Some(out) => {
-                    let mut out = read_output_arrays(out, obs.len(), $out_name)?;
-                    let diagnostics = {
-                        let (outx, outy, outz) = output_slices_mut(&mut out, $out_name)?;
-                        physics::hierarchical::$rust_fn(
-                            loc.as_tuple(),
-                            moment.as_tuple(),
-                            outer_radius.as_slice(),
-                            obs.as_tuple(),
-                            construction_method,
-                            theta,
-                            par,
-                            (outx, outy, outz),
-                        )
-                        .map_err(|err| py_hierarchical_error($context, err))?
-                    };
-                    (output_arrays_to_py_tuple(&out), diagnostics)
-                }
-                None => {
-                    let mut x = vec![0.0_f32; obs.len()];
-                    let mut y = vec![0.0_f32; obs.len()];
-                    let mut z = vec![0.0_f32; obs.len()];
-                    let diagnostics = physics::hierarchical::$rust_fn(
-                        loc.as_tuple(),
-                        moment.as_tuple(),
-                        outer_radius.as_slice(),
-                        obs.as_tuple(),
-                        construction_method,
-                        theta,
-                        par,
-                        (&mut x, &mut y, &mut z),
-                    )
-                    .map_err(|err| py_hierarchical_error($context, err))?;
-                    (component_vecs_to_py_tuple(py, (x, y, z)), diagnostics)
-                }
-            };
-            let (source_tree, accepted_source_level) = if extra_diagnostics {
-                let sources = physics::hierarchical::kernels::DipoleSources::new(
-                    loc.as_tuple().0,
-                    loc.as_tuple().1,
-                    loc.as_tuple().2,
-                    outer_radius.as_slice(),
-                );
-                let targets = physics::hierarchical::kernels::DipoleTargets::new(
-                    obs.as_tuple().0,
-                    obs.as_tuple().1,
-                    obs.as_tuple().2,
-                );
-                let moments = physics::hierarchical::kernels::DipoleMoments::new(
-                    moment.as_tuple().0,
-                    moment.as_tuple().1,
-                    moment.as_tuple().2,
-                );
-                let levels = accepted_source_level_diagnostic(
-                    <$kernel>::new(),
-                    &diagnostics.source_tree,
-                    sources,
-                    targets,
-                    moments,
-                    theta,
-                )?;
-                (
-                    Some(source_tree_diagnostics_object(py, &diagnostics.source_tree)?),
-                    Some(PyArray1::from_vec(py, levels).unbind().into()),
-                )
-            } else {
-                (None, None)
-            };
-            solve_result_from_field(
-                py,
-                field,
-                diagnostics.construction_seconds,
-                diagnostics.evaluation_seconds,
-                diagnostics.source_count,
-                diagnostics.target_count,
-                source_tree,
-                accepted_source_level,
-            )
-        }
-    };
-}
-
-macro_rules! define_linear_filament_hierarchical_f32 {
-    ($name:ident, $rust_fn:ident, $kernel:ty, $context:literal, $out_name:literal) => {
-        #[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
-        fn $name(
-            py: Python<'_>,
-            xyzfil: (
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-            ),
-            dlxyzfil: (
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-            ),
-            ifil: PyReadonlyArray1<f32>,
-            wire_radius: PyReadonlyArray1<f32>,
-            xyzp: (
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-                PyReadonlyArray1<f32>,
-            ),
-            theta: f32,
-            construction_method: &str,
-            par: bool,
-            out: Option<(
-                PyReadwriteArray1<f32>,
-                PyReadwriteArray1<f32>,
-                PyReadwriteArray1<f32>,
-            )>,
-            extra_diagnostics: bool,
-        ) -> PyResult<Py<SolveResult>> {
-            let xyzp = read_xyz_tuple(py, &xyzp, "xyzp")?;
-            let xyzfil = read_xyz_tuple(py, &xyzfil, "xyzfil")?;
-            let dlxyzfil = read_xyz_tuple(py, &dlxyzfil, "dlxyzfil")?;
-            let ifil = read_float_input_array1(py, &ifil, "ifil")?;
-            let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
-            let construction_method = parse_hierarchical_construction_method(construction_method)?;
-            let (field, diagnostics) = match out {
-                Some(out) => {
-                    let mut out = read_output_arrays(out, xyzp.len(), $out_name)?;
-                    let diagnostics = {
-                        let (outx, outy, outz) = output_slices_mut(&mut out, $out_name)?;
-                        physics::hierarchical::$rust_fn(
-                            xyzp.as_tuple(),
-                            xyzfil.as_tuple(),
-                            dlxyzfil.as_tuple(),
-                            ifil.as_slice(),
-                            wire_radius.as_slice(),
-                            construction_method,
-                            theta,
-                            par,
-                            (outx, outy, outz),
-                        )
-                        .map_err(|err| py_hierarchical_error($context, err))?
-                    };
-                    (output_arrays_to_py_tuple(&out), diagnostics)
-                }
-                None => {
-                    let mut x = vec![0.0_f32; xyzp.len()];
-                    let mut y = vec![0.0_f32; xyzp.len()];
-                    let mut z = vec![0.0_f32; xyzp.len()];
-                    let diagnostics = physics::hierarchical::$rust_fn(
-                        xyzp.as_tuple(),
-                        xyzfil.as_tuple(),
-                        dlxyzfil.as_tuple(),
-                        ifil.as_slice(),
-                        wire_radius.as_slice(),
-                        construction_method,
-                        theta,
-                        par,
-                        (&mut x, &mut y, &mut z),
-                    )
-                    .map_err(|err| py_hierarchical_error($context, err))?;
-                    (component_vecs_to_py_tuple(py, (x, y, z)), diagnostics)
-                }
-            };
-            let (source_tree, accepted_source_level) = if extra_diagnostics {
-                let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
-                    xyzfil.as_tuple(),
-                    dlxyzfil.as_tuple(),
-                    wire_radius.as_slice(),
-                );
-                let targets = physics::hierarchical::kernels::DipoleTargets::new(
-                    xyzp.as_tuple().0,
-                    xyzp.as_tuple().1,
-                    xyzp.as_tuple().2,
-                );
-                let levels = accepted_source_level_diagnostic(
-                    <$kernel>::new(),
-                    &diagnostics.source_tree,
-                    sources,
-                    targets,
-                    ifil.as_slice(),
-                    theta,
-                )?;
-                (
-                    Some(source_tree_diagnostics_object(py, &diagnostics.source_tree)?),
-                    Some(PyArray1::from_vec(py, levels).unbind().into()),
-                )
-            } else {
-                (None, None)
-            };
-            solve_result_from_field(
-                py,
-                field,
-                diagnostics.construction_seconds,
-                diagnostics.evaluation_seconds,
-                diagnostics.source_count,
-                diagnostics.target_count,
-                source_tree,
-                accepted_source_level,
-            )
-        }
-    };
-}
-
-define_dipole_hierarchical_f32!(
-    flux_density_dipole_hierarchical_f32,
-    flux_density_dipole_hierarchical,
-    physics::hierarchical::kernels::DipoleFluxDensityKernel<f32>,
-    "hierarchical dipole flux density",
-    "flux_density",
-    0.01
-);
-
-define_dipole_hierarchical_f32!(
-    vector_potential_dipole_hierarchical_f32,
-    vector_potential_dipole_hierarchical,
-    physics::hierarchical::kernels::DipoleVectorPotentialKernel<f32>,
-    "hierarchical dipole vector potential",
-    "vector_potential",
-    0.01
-);
-
-define_linear_filament_hierarchical_f32!(
-    flux_density_linear_filament_hierarchical_f32,
-    flux_density_linear_filament_hierarchical,
-    physics::hierarchical::kernels::LinearFilamentFluxDensityKernel<f32>,
-    "hierarchical linear-filament flux density",
-    "flux_density"
-);
-
-define_linear_filament_hierarchical_f32!(
-    vector_potential_linear_filament_hierarchical_f32,
-    vector_potential_linear_filament_hierarchical,
-    physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel<f32>,
-    "hierarchical linear-filament vector potential",
-    "vector_potential"
-);
 
 #[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_dipole_hierarchical(
@@ -5062,15 +4775,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        flux_density_dipole_hierarchical_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         vector_potential_dipole_hierarchical,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        vector_potential_dipole_hierarchical_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
@@ -5078,15 +4783,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        flux_density_linear_filament_hierarchical_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         vector_potential_linear_filament_hierarchical,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        vector_potential_linear_filament_hierarchical_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

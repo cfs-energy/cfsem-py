@@ -7,7 +7,7 @@ passed as contiguous and reallocating into contiguous inputs if necessary.
 
 from typing import Literal
 
-from numpy import asarray, ascontiguousarray, column_stack, float32, float64, full, int64, uint64, zeros_like
+from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, uint64, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -25,18 +25,11 @@ from .cfsem import (
     flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
 )
 from .cfsem import flux_density_dipole as em_flux_density_dipole
-from .cfsem import flux_density_dipole_hierarchical as _flux_density_dipole_hierarchical_f64
-from .cfsem import flux_density_dipole_hierarchical_f32 as _flux_density_dipole_hierarchical_f32
+from .cfsem import flux_density_dipole_hierarchical
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
-from .cfsem import vector_potential_dipole_hierarchical as _vector_potential_dipole_hierarchical_f64
-from .cfsem import vector_potential_dipole_hierarchical_f32 as _vector_potential_dipole_hierarchical_f32
+from .cfsem import vector_potential_dipole_hierarchical
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
-from .cfsem import (
-    flux_density_linear_filament_hierarchical as _flux_density_linear_filament_hierarchical_f64,
-)
-from .cfsem import (
-    flux_density_linear_filament_hierarchical_f32 as _flux_density_linear_filament_hierarchical_f32,
-)
+from .cfsem import flux_density_linear_filament_hierarchical
 from .cfsem import flux_density_triangle_mesh_mapping as em_flux_density_triangle_mesh_mapping
 from .cfsem import flux_density_triangle_mesh as em_flux_density_triangle_mesh
 from .cfsem import flux_density_triangle_mesh_hierarchical
@@ -88,12 +81,7 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
-from .cfsem import (
-    vector_potential_linear_filament_hierarchical as _vector_potential_linear_filament_hierarchical_f64,
-)
-from .cfsem import (
-    vector_potential_linear_filament_hierarchical_f32 as _vector_potential_linear_filament_hierarchical_f32,
-)
+from .cfsem import vector_potential_linear_filament_hierarchical
 from .cfsem import (
     vector_potential_triangle_mesh_mapping as em_vector_potential_triangle_mesh_mapping,
 )
@@ -155,164 +143,6 @@ __all__ = [
     "vector_potential_triangle_mesh_mapping",
     "vector_potential_triangle_mesh_hierarchical",
 ]
-
-
-def _iter_hierarchical_arrays(*values):
-    for value in values:
-        if value is None:
-            continue
-        if isinstance(value, tuple):
-            yield from value
-        else:
-            yield value
-
-
-def _hierarchical_dtype(first_input, *inputs, out=None):
-    first = next(_iter_hierarchical_arrays(first_input))
-    dtype = asarray(first).dtype
-    if dtype == float32:
-        expected = float32
-    elif dtype == float64:
-        expected = float64
-    else:
-        raise TypeError("hierarchical inputs must use either float32 or float64 arrays")
-
-    for array in _iter_hierarchical_arrays(first_input, *inputs, out):
-        if asarray(array).dtype != expected:
-            raise TypeError("hierarchical inputs and output arrays must all have the same dtype")
-    return expected
-
-
-def flux_density_dipole_hierarchical(
-    loc,
-    moment,
-    outer_radius,
-    obs,
-    theta=0.01,
-    construction_method="recursive",
-    par=True,
-    out=None,
-    extra_diagnostics=False,
-):
-    """Hierarchical magnetic flux density of dipoles with float32/float64 dispatch.
-
-    The solve dtype is inferred from the first source coordinate component. All other
-    numeric inputs and optional output arrays must have the same dtype.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-    """
-
-    dtype = _hierarchical_dtype(loc, moment, outer_radius, obs, out=out)
-    func = (
-        _flux_density_dipole_hierarchical_f32 if dtype == float32 else _flux_density_dipole_hierarchical_f64
-    )
-    return func(loc, moment, outer_radius, obs, theta, construction_method, par, out, extra_diagnostics)
-
-
-def vector_potential_dipole_hierarchical(
-    loc,
-    moment,
-    outer_radius,
-    obs,
-    theta=0.01,
-    construction_method="recursive",
-    par=True,
-    out=None,
-    extra_diagnostics=False,
-):
-    """Hierarchical magnetic vector potential of dipoles with float32/float64 dispatch.
-
-    The solve dtype is inferred from the first source coordinate component. All other
-    numeric inputs and optional output arrays must have the same dtype.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-    """
-
-    dtype = _hierarchical_dtype(loc, moment, outer_radius, obs, out=out)
-    func = (
-        _vector_potential_dipole_hierarchical_f32
-        if dtype == float32
-        else _vector_potential_dipole_hierarchical_f64
-    )
-    return func(loc, moment, outer_radius, obs, theta, construction_method, par, out, extra_diagnostics)
-
-
-def flux_density_linear_filament_hierarchical(
-    xyzfil,
-    dlxyzfil,
-    ifil,
-    wire_radius,
-    xyzp,
-    theta=0.05,
-    construction_method="recursive",
-    par=True,
-    out=None,
-    extra_diagnostics=False,
-):
-    """Hierarchical B-field calculation for linear filaments with float32/float64 dispatch.
-
-    The solve dtype is inferred from the first source coordinate component. All other
-    numeric inputs and optional output arrays must have the same dtype.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-    """
-
-    dtype = _hierarchical_dtype(xyzfil, dlxyzfil, ifil, wire_radius, xyzp, out=out)
-    func = (
-        _flux_density_linear_filament_hierarchical_f32
-        if dtype == float32
-        else _flux_density_linear_filament_hierarchical_f64
-    )
-    return func(
-        xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta, construction_method, par, out, extra_diagnostics
-    )
-
-
-def vector_potential_linear_filament_hierarchical(
-    xyzfil,
-    dlxyzfil,
-    ifil,
-    wire_radius,
-    xyzp,
-    theta=0.05,
-    construction_method="recursive",
-    par=True,
-    out=None,
-    extra_diagnostics=False,
-):
-    """Hierarchical A-field calculation for linear filaments with float32/float64 dispatch.
-
-    The solve dtype is inferred from the first source coordinate component. All other
-    numeric inputs and optional output arrays must have the same dtype.
-
-    This is an approximate method, and no particular accuracy level is guaranteed.
-    Truncated methods like this one may average entire local loop structures out of
-    existence; as a result, maximum relative error is unbounded. This method must be
-    tuned to a given use-case in order to be useful, and should not be used to calculate
-    safety-related field limits.
-    """
-
-    dtype = _hierarchical_dtype(xyzfil, dlxyzfil, ifil, wire_radius, xyzp, out=out)
-    func = (
-        _vector_potential_linear_filament_hierarchical_f32
-        if dtype == float32
-        else _vector_potential_linear_filament_hierarchical_f64
-    )
-    return func(
-        xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta, construction_method, par, out, extra_diagnostics
-    )
 
 
 def flux_circular_filament(

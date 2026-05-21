@@ -1,6 +1,6 @@
 use super::{
-    BoundedGeometry, ClusterTreeView, HierarchicalError, HierarchicalKernel, SourceCollection,
-    SourceMomentCollection, TargetCollection,
+    BoundedGeometry, ClusterTreeView, HierarchicalError, HierarchicalKernel, Scalar,
+    SourceCollection, SourceMomentCollection, TargetCollection,
 };
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -362,7 +362,7 @@ pub fn accepted_source_level_diagnostic_into<K, C>(
     source_summaries: &[K::SourceSummary],
     targets: C,
     theta: K::Scalar,
-    out: &mut [f64],
+    out: &mut [K::Scalar],
 ) -> HierarchicalError
 where
     K: HierarchicalKernel,
@@ -383,26 +383,29 @@ where
     let mut active = Vec::new();
     for target_id in 0..targets.geometry_len() {
         let target = targets.target(target_id);
-        let mut weighted_level = 0.0_f64;
-        let mut represented_sources = 0.0_f64;
+        let mut weighted_level = K::Scalar::ZERO;
+        let mut represented_sources = K::Scalar::ZERO;
 
         active.clear();
         active.push((0_u32, 0_u32));
         while let Some((source_node, source_level)) = active.pop() {
             let source_node_index = source_node as usize;
-            let source_count = source_tree.node_range_count[source_node_index] as f64;
+            let source_count =
+                K::Scalar::from_f64(source_tree.node_range_count[source_node_index] as f64);
             let source_summary = &source_summaries[source_node_index];
             let source_aabb = source_tree.node_aabb[source_node_index];
             if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
-                weighted_level += f64::from(source_level) * source_count;
-                represented_sources += source_count;
+                weighted_level =
+                    weighted_level + K::Scalar::from_f64(f64::from(source_level)) * source_count;
+                represented_sources = represented_sources + source_count;
                 continue;
             }
 
             let leaf_count = source_tree.leaf_count[source_node_index];
             if leaf_count > 0 {
-                weighted_level += f64::from(source_level) * source_count;
-                represented_sources += source_count;
+                weighted_level =
+                    weighted_level + K::Scalar::from_f64(f64::from(source_level)) * source_count;
+                represented_sources = represented_sources + source_count;
             } else {
                 let next_level = source_level + 1;
                 active.push((source_tree.node_left_child[source_node_index], next_level));
@@ -410,10 +413,10 @@ where
             }
         }
 
-        out[target_id] = if represented_sources > 0.0 {
+        out[target_id] = if represented_sources > K::Scalar::ZERO {
             weighted_level / represented_sources
         } else {
-            f64::NAN
+            K::Scalar::from_f64(f64::NAN)
         };
     }
 

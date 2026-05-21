@@ -180,6 +180,73 @@ def test_hierarchical_rejects_noncontiguous_output():
         )
 
 
+def test_hierarchical_linear_filament_preserves_float32_dtype_and_diagnostics():
+    xyzfil = (
+        np.array([0.0, 0.5], dtype=np.float32),
+        np.array([0.0, 0.2], dtype=np.float32),
+        np.array([0.0, 0.1], dtype=np.float32),
+    )
+    dlxyzfil = (
+        np.array([0.0, 0.1], dtype=np.float32),
+        np.array([0.4, -0.2], dtype=np.float32),
+        np.array([0.2, 0.5], dtype=np.float32),
+    )
+    current = np.array([2.0, -1.5], dtype=np.float32)
+    wire_radius = np.zeros(2, dtype=np.float32)
+    obs = (
+        np.array([1.0, 1.3, -0.7], dtype=np.float32),
+        np.array([0.0, -0.4, 0.9], dtype=np.float32),
+        np.array([0.5, 0.2, -0.2], dtype=np.float32),
+    )
+
+    result = cfsem.flux_density_linear_filament_hierarchical(
+        xyzfil,
+        dlxyzfil,
+        current,
+        wire_radius,
+        obs,
+        theta=0.0,
+        par=False,
+        extra_diagnostics=True,
+    )
+
+    for component in result.field:
+        assert component.dtype == np.float32
+    assert result.diagnostics.accepted_source_level is not None
+    assert result.diagnostics.accepted_source_level.dtype == np.float32
+    assert result.diagnostics.source_tree is not None
+    assert result.diagnostics.source_tree[0].dtype == np.float32
+
+
+def test_hierarchical_dipole_rejects_mixed_float_dtypes():
+    loc = (
+        np.array([0.0], dtype=np.float32),
+        np.array([0.0], dtype=np.float32),
+        np.array([0.0], dtype=np.float32),
+    )
+    moment = (
+        np.array([0.0], dtype=np.float32),
+        np.array([0.0], dtype=np.float32),
+        np.array([1.0], dtype=np.float32),
+    )
+    outer_radius = np.zeros(1, dtype=np.float64)
+    obs = (
+        np.array([1.0], dtype=np.float32),
+        np.array([0.0], dtype=np.float32),
+        np.array([0.0], dtype=np.float32),
+    )
+
+    with pytest.raises(TypeError, match="same dtype"):
+        cfsem.flux_density_dipole_hierarchical(
+            loc,
+            moment,
+            outer_radius,
+            obs,
+            theta=0.0,
+            par=False,
+        )
+
+
 def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     nodes = np.array(
         [

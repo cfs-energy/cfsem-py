@@ -19,8 +19,8 @@ impl<K: HierarchicalKernel> SourceNodeSummaries<K> {
 }
 
 /// Scratch storage for exact and far contribution evaluation.
-pub struct EvaluationScratch<'a, O> {
-    pub contribution: &'a mut [O],
+pub struct EvaluationScratch<'a, Output> {
+    pub contribution: &'a mut [Output],
 }
 
 /// Number of contribution scratch entries required by source-tree-only evaluation.

@@ -23,6 +23,15 @@ use super::{
     update_source_summaries_into,
 };
 
+/// Source-tree construction method for stateless hierarchical solves.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConstructionMethod {
+    /// Recursively split sources using spatial median/gap logic.
+    Recursive,
+    /// Sort sources by Morton code and build an LBVH-style tree.
+    MortonLbvh,
+}
+
 /// Diagnostic information returned by stateless hierarchical solves.
 pub struct DiagnosticInfo<K: HierarchicalKernel> {
     /// Source tree built for this solve.
@@ -61,6 +70,7 @@ impl<K: HierarchicalKernel> DiagnosticInfo<K> {
 ///     moment: Dipole magnetic moment components.
 ///     outer_radius: Radius for the magnetized-sphere near-field treatment.
 ///     obs: Observation point coordinates.
+///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
 ///     out: Output component slices to fill.
@@ -76,6 +86,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
     moment: (&[T], &[T], &[T]),
     outer_radius: &[T],
     obs: (&[T], &[T], &[T]),
+    construction_method: ConstructionMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
@@ -88,6 +99,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
         sources,
         moments,
         targets,
+        construction_method,
         theta,
         par,
         out,
@@ -110,6 +122,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
 ///     moment: Dipole magnetic moment components.
 ///     outer_radius: Radius for the magnetized-sphere near-field treatment.
 ///     obs: Observation point coordinates.
+///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
 ///     out: Output component slices to fill.
@@ -125,6 +138,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
     moment: (&[T], &[T], &[T]),
     outer_radius: &[T],
     obs: (&[T], &[T], &[T]),
+    construction_method: ConstructionMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
@@ -137,6 +151,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
         sources,
         moments,
         targets,
+        construction_method,
         theta,
         par,
         out,
@@ -160,6 +175,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
 ///     dlxyzfil: Filament segment start-to-end displacement components.
 ///     ifil: Current in each filament segment.
 ///     wire_radius: Wire radius for each filament segment.
+///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
 ///     out: Output component slices to fill.
@@ -176,6 +192,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
     dlxyzfil: (&[T], &[T], &[T]),
     ifil: &[T],
     wire_radius: &[T],
+    construction_method: ConstructionMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
@@ -187,6 +204,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
         sources,
         ifil,
         targets,
+        construction_method,
         theta,
         par,
         out,
@@ -210,6 +228,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
 ///     dlxyzfil: Filament segment start-to-end displacement components.
 ///     ifil: Current in each filament segment.
 ///     wire_radius: Wire radius for each filament segment.
+///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
 ///     out: Output component slices to fill.
@@ -226,6 +245,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
     dlxyzfil: (&[T], &[T], &[T]),
     ifil: &[T],
     wire_radius: &[T],
+    construction_method: ConstructionMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
@@ -237,6 +257,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
         sources,
         ifil,
         targets,
+        construction_method,
         theta,
         par,
         out,
@@ -259,6 +280,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
 ///     mesh: Triangle mesh source geometry.
 ///     s: Nodal stream-function values.
 ///     quad_kind: Triangle quadrature rule.
+///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
 ///     out: Output component slices to fill.
@@ -274,6 +296,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
+    construction_method: ConstructionMethod,
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -288,6 +311,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
         sources,
         moments,
         targets,
+        construction_method,
         theta,
         par,
         out,
@@ -310,6 +334,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
 ///     mesh: Triangle mesh source geometry.
 ///     s: Nodal stream-function values.
 ///     quad_kind: Triangle quadrature rule.
+///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
 ///     out: Output component slices to fill.
@@ -325,6 +350,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
+    construction_method: ConstructionMethod,
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -339,6 +365,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
         sources,
         moments,
         targets,
+        construction_method,
         theta,
         par,
         out,
@@ -350,6 +377,7 @@ fn one_shot_vec3<K, T, S, M, C>(
     sources: S,
     moments: M,
     targets: C,
+    construction_method: ConstructionMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
@@ -374,7 +402,10 @@ where
     }
 
     let construction_start = Instant::now();
-    let source_tree = ClusterTree::build(sources)?;
+    let source_tree = match construction_method {
+        ConstructionMethod::Recursive => ClusterTree::build(sources)?,
+        ConstructionMethod::MortonLbvh => ClusterTree::build_morton_lbvh(sources)?,
+    };
     let mut source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
     let mut err = update_source_summaries_into(
         &kernel,

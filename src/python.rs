@@ -469,6 +469,24 @@ fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Ve
     levels
 }
 
+fn parse_hierarchical_construction_method(
+    construction_method: &str,
+) -> PyResult<physics::hierarchical::ConstructionMethod> {
+    match construction_method {
+        "recursive" => Ok(physics::hierarchical::ConstructionMethod::Recursive),
+        "morton_lbvh" | "morton-lbvh" | "lbvh" => {
+            Ok(physics::hierarchical::ConstructionMethod::MortonLbvh)
+        }
+        _ => Err(PyInteropError::ValueError {
+            msg: format!(
+                "Unsupported hierarchical construction method: {construction_method}. \
+                 Expected 'recursive' or 'morton_lbvh'."
+            ),
+        }
+        .into()),
+    }
+}
+
 fn accepted_source_level_diagnostic<K, S, C, M>(
     kernel: K,
     source_tree: &physics::hierarchical::ClusterTree<f64>,
@@ -512,7 +530,7 @@ where
     Ok(out)
 }
 
-#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -532,6 +550,7 @@ fn flux_density_dipole_hierarchical(
         PyReadonlyArray1<f64>,
     ),
     theta: f64,
+    construction_method: &str,
     par: bool,
     out: Option<(
         PyReadwriteArray1<f64>,
@@ -544,6 +563,7 @@ fn flux_density_dipole_hierarchical(
     let moment = read_xyz_tuple(py, &moment, "moment")?;
     let outer_radius = read_f64_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
+    let construction_method = parse_hierarchical_construction_method(construction_method)?;
     let mut bx = vec![0.0; obs.len()];
     let mut by = vec![0.0; obs.len()];
     let mut bz = vec![0.0; obs.len()];
@@ -552,6 +572,7 @@ fn flux_density_dipole_hierarchical(
         moment.as_tuple(),
         outer_radius.as_slice(),
         obs.as_tuple(),
+        construction_method,
         theta,
         par,
         (&mut bx, &mut by, &mut bz),
@@ -605,7 +626,7 @@ fn flux_density_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -625,6 +646,7 @@ fn vector_potential_dipole_hierarchical(
         PyReadonlyArray1<f64>,
     ),
     theta: f64,
+    construction_method: &str,
     par: bool,
     out: Option<(
         PyReadwriteArray1<f64>,
@@ -637,6 +659,7 @@ fn vector_potential_dipole_hierarchical(
     let moment = read_xyz_tuple(py, &moment, "moment")?;
     let outer_radius = read_f64_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
+    let construction_method = parse_hierarchical_construction_method(construction_method)?;
     let mut ax = vec![0.0; obs.len()];
     let mut ay = vec![0.0; obs.len()];
     let mut az = vec![0.0; obs.len()];
@@ -645,6 +668,7 @@ fn vector_potential_dipole_hierarchical(
         moment.as_tuple(),
         outer_radius.as_slice(),
         obs.as_tuple(),
+        construction_method,
         theta,
         par,
         (&mut ax, &mut ay, &mut az),
@@ -698,7 +722,7 @@ fn vector_potential_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_linear_filament_hierarchical(
     py: Python<'_>,
     xyzfil: (
@@ -719,6 +743,7 @@ fn flux_density_linear_filament_hierarchical(
         PyReadonlyArray1<f64>,
     ),
     theta: f64,
+    construction_method: &str,
     par: bool,
     out: Option<(
         PyReadwriteArray1<f64>,
@@ -732,6 +757,7 @@ fn flux_density_linear_filament_hierarchical(
     let dlxyzfil = read_xyz_tuple(py, &dlxyzfil, "dlxyzfil")?;
     let ifil = read_f64_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_f64_input_array1(py, &wire_radius, "wire_radius")?;
+    let construction_method = parse_hierarchical_construction_method(construction_method)?;
     let mut bx = vec![0.0; xyzp.len()];
     let mut by = vec![0.0; xyzp.len()];
     let mut bz = vec![0.0; xyzp.len()];
@@ -741,6 +767,7 @@ fn flux_density_linear_filament_hierarchical(
         dlxyzfil.as_tuple(),
         ifil.as_slice(),
         wire_radius.as_slice(),
+        construction_method,
         theta,
         par,
         (&mut bx, &mut by, &mut bz),
@@ -788,7 +815,7 @@ fn flux_density_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_linear_filament_hierarchical(
     py: Python<'_>,
     xyzfil: (
@@ -809,6 +836,7 @@ fn vector_potential_linear_filament_hierarchical(
         PyReadonlyArray1<f64>,
     ),
     theta: f64,
+    construction_method: &str,
     par: bool,
     out: Option<(
         PyReadwriteArray1<f64>,
@@ -822,6 +850,7 @@ fn vector_potential_linear_filament_hierarchical(
     let dlxyzfil = read_xyz_tuple(py, &dlxyzfil, "dlxyzfil")?;
     let ifil = read_f64_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_f64_input_array1(py, &wire_radius, "wire_radius")?;
+    let construction_method = parse_hierarchical_construction_method(construction_method)?;
     let mut ax = vec![0.0; xyzp.len()];
     let mut ay = vec![0.0; xyzp.len()];
     let mut az = vec![0.0; xyzp.len()];
@@ -831,6 +860,7 @@ fn vector_potential_linear_filament_hierarchical(
         dlxyzfil.as_tuple(),
         ifil.as_slice(),
         wire_radius.as_slice(),
+        construction_method,
         theta,
         par,
         (&mut ax, &mut ay, &mut az),
@@ -878,7 +908,7 @@ fn vector_potential_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_triangle_mesh_hierarchical(
     py: Python<'_>,
     nodes: PyReadonlyArray2<f64>,
@@ -887,6 +917,7 @@ fn flux_density_triangle_mesh_hierarchical(
     obs: PyReadonlyArray2<f64>,
     theta: f64,
     quad: &str,
+    construction_method: &str,
     par: bool,
     out: Option<(
         PyReadwriteArray1<f64>,
@@ -904,6 +935,7 @@ fn flux_density_triangle_mesh_hierarchical(
     let mesh = triangle_mesh_view(&nodes, &triangles)?;
     let s = read_f64_input_array1(py, &s, "s")?;
     let quad = parse_triangle_quadrature(quad)?;
+    let construction_method = parse_hierarchical_construction_method(construction_method)?;
     let mut bx = vec![0.0; obs.0.len()];
     let mut by = vec![0.0; obs.0.len()];
     let mut bz = vec![0.0; obs.0.len()];
@@ -912,6 +944,7 @@ fn flux_density_triangle_mesh_hierarchical(
         &mesh,
         s.as_slice(),
         quad,
+        construction_method,
         theta,
         par,
         (&mut bx, &mut by, &mut bz),
@@ -956,7 +989,7 @@ fn flux_density_triangle_mesh_hierarchical(
     )
 }
 
-#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_triangle_mesh_hierarchical(
     py: Python<'_>,
     nodes: PyReadonlyArray2<f64>,
@@ -965,6 +998,7 @@ fn vector_potential_triangle_mesh_hierarchical(
     obs: PyReadonlyArray2<f64>,
     theta: f64,
     quad: &str,
+    construction_method: &str,
     par: bool,
     out: Option<(
         PyReadwriteArray1<f64>,
@@ -982,6 +1016,7 @@ fn vector_potential_triangle_mesh_hierarchical(
     let mesh = triangle_mesh_view(&nodes, &triangles)?;
     let s = read_f64_input_array1(py, &s, "s")?;
     let quad = parse_triangle_quadrature(quad)?;
+    let construction_method = parse_hierarchical_construction_method(construction_method)?;
     let mut ax = vec![0.0; obs.0.len()];
     let mut ay = vec![0.0; obs.0.len()];
     let mut az = vec![0.0; obs.0.len()];
@@ -990,6 +1025,7 @@ fn vector_potential_triangle_mesh_hierarchical(
         &mesh,
         s.as_slice(),
         quad,
+        construction_method,
         theta,
         par,
         (&mut ax, &mut ay, &mut az),

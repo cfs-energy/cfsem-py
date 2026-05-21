@@ -23,9 +23,10 @@ mod tree;
 
 pub use aabb::Aabb;
 pub use convenience::{
-    DiagnosticInfo, flux_density_dipole_hierarchical, flux_density_linear_filament_hierarchical,
-    flux_density_triangle_mesh_hierarchical, vector_potential_dipole_hierarchical,
-    vector_potential_linear_filament_hierarchical, vector_potential_triangle_mesh_hierarchical,
+    ConstructionMethod, DiagnosticInfo, flux_density_dipole_hierarchical,
+    flux_density_linear_filament_hierarchical, flux_density_triangle_mesh_hierarchical,
+    vector_potential_dipole_hierarchical, vector_potential_linear_filament_hierarchical,
+    vector_potential_triangle_mesh_hierarchical,
 };
 pub use evaluator::{
     EvaluationScratch, SourceNodeSummaries, accepted_source_level_diagnostic_into,

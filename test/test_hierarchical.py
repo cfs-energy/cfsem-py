@@ -113,6 +113,52 @@ def test_hierarchical_linear_filaments_match_direct():
     _assert_diagnostics(result_a, nsource=2, ntarget=3)
 
 
+def test_hierarchical_construction_method_is_exposed():
+    xyzfil = (
+        np.array([0.0, 0.5, -0.2]),
+        np.array([0.0, 0.2, 0.1]),
+        np.array([0.0, 0.1, 0.4]),
+    )
+    dlxyzfil = (
+        np.array([0.0, 0.1, 0.2]),
+        np.array([0.4, -0.2, 0.1]),
+        np.array([0.2, 0.5, -0.3]),
+    )
+    current = np.array([2.0, -1.5, 0.7])
+    wire_radius = np.zeros(3)
+    obs = (
+        np.array([1.0, 1.3, -0.7]),
+        np.array([0.0, -0.4, 0.9]),
+        np.array([0.5, 0.2, -0.2]),
+    )
+
+    direct = cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
+    result = cfsem.flux_density_linear_filament_hierarchical(
+        xyzfil,
+        dlxyzfil,
+        current,
+        wire_radius,
+        obs,
+        theta=0.0,
+        construction_method="morton_lbvh",
+        par=False,
+        extra_diagnostics=True,
+    )
+    _assert_vec_close(result, direct)
+    _assert_diagnostics(result, nsource=3, ntarget=3)
+
+    with pytest.raises(ValueError, match="Unsupported hierarchical construction method"):
+        cfsem.flux_density_linear_filament_hierarchical(
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
+            obs,
+            construction_method="not-a-method",
+            par=False,
+        )
+
+
 def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     nodes = np.array(
         [

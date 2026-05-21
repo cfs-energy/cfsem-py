@@ -430,6 +430,7 @@ def solve_self_fields(
     geometry: Geometry,
     geometry_layout: str,
     source_geometry: str,
+    construction_method: str,
     theta: float,
     par: bool,
 ) -> dict[str, object]:
@@ -516,10 +517,22 @@ def solve_self_fields(
     if source_geometry == "dipole":
         dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
         result_b = cfsem.flux_density_dipole_hierarchical(
-            dipole_loc, dipole_moment, dipole_outer_radius, self_obs, theta=theta, par=par
+            dipole_loc,
+            dipole_moment,
+            dipole_outer_radius,
+            self_obs,
+            theta=theta,
+            construction_method=construction_method,
+            par=par,
         )
         result_a = cfsem.vector_potential_dipole_hierarchical(
-            dipole_loc, dipole_moment, dipole_outer_radius, self_obs, theta=theta, par=par
+            dipole_loc,
+            dipole_moment,
+            dipole_outer_radius,
+            self_obs,
+            theta=theta,
+            construction_method=construction_method,
+            par=par,
         )
     elif source_geometry == "boundary":
         strip_nodes, strip_triangles, strip_stream_function = boundary_source_arrays(
@@ -527,18 +540,44 @@ def solve_self_fields(
         )
         self_obs_array = np.column_stack(self_obs)
         result_b = cfsem.flux_density_triangle_mesh_hierarchical(
-            strip_nodes, strip_triangles, strip_stream_function, self_obs_array, theta=theta, par=par
+            strip_nodes,
+            strip_triangles,
+            strip_stream_function,
+            self_obs_array,
+            theta=theta,
+            construction_method=construction_method,
+            par=par,
         )
         result_a = cfsem.vector_potential_triangle_mesh_hierarchical(
-            strip_nodes, strip_triangles, strip_stream_function, self_obs_array, theta=theta, par=par
+            strip_nodes,
+            strip_triangles,
+            strip_stream_function,
+            self_obs_array,
+            theta=theta,
+            construction_method=construction_method,
+            par=par,
         )
     else:
         xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
         result_b = cfsem.flux_density_linear_filament_hierarchical(
-            xyzfil, dlxyzfil, current, wire_radius, self_obs, theta=theta, par=par
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
+            self_obs,
+            theta=theta,
+            construction_method=construction_method,
+            par=par,
         )
         result_a = cfsem.vector_potential_linear_filament_hierarchical(
-            xyzfil, dlxyzfil, current, wire_radius, self_obs, theta=theta, par=par
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
+            self_obs,
+            theta=theta,
+            construction_method=construction_method,
+            par=par,
         )
     hierarchical_b = result_b.field
     hierarchical_a = result_a.field
@@ -562,6 +601,7 @@ def solve_fields(
     geometry: Geometry,
     geometry_layout: str,
     source_geometry: str,
+    construction_method: str,
     theta: float,
     par: bool,
     calc_self_field: bool,
@@ -634,6 +674,7 @@ def solve_fields(
             dipole_outer_radius,
             geometry.obs,
             theta=theta,
+            construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
@@ -643,6 +684,7 @@ def solve_fields(
             dipole_outer_radius,
             geometry.obs,
             theta=theta,
+            construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
@@ -658,6 +700,7 @@ def solve_fields(
             strip_stream_function,
             obs_array,
             theta=theta,
+            construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
@@ -667,6 +710,7 @@ def solve_fields(
             strip_stream_function,
             obs_array,
             theta=theta,
+            construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
@@ -680,6 +724,7 @@ def solve_fields(
             wire_radius,
             geometry.obs,
             theta=theta,
+            construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
@@ -690,6 +735,7 @@ def solve_fields(
             wire_radius,
             geometry.obs,
             theta=theta,
+            construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
@@ -723,6 +769,7 @@ def solve_fields(
             geometry,
             geometry_layout=geometry_layout,
             source_geometry=source_geometry,
+            construction_method=construction_method,
             theta=theta,
             par=par,
         )
@@ -1108,6 +1155,16 @@ def make_app():
                         value=DEFAULT_LOOP_FRACTION,
                         marks={0.0: "0", 0.25: "0.25", 0.5: "0.5", 0.75: "0.75", 1.0: "1"},
                     ),
+                    html.Label("Construction"),
+                    dcc.Dropdown(
+                        id="construction",
+                        value="recursive",
+                        clearable=False,
+                        options=[
+                            {"label": "Recursive source tree", "value": "recursive"},
+                            {"label": "Morton/LBVH source tree", "value": "morton_lbvh"},
+                        ],
+                    ),
                     html.Label("Field"),
                     dcc.RadioItems(
                         id="field",
@@ -1194,6 +1251,7 @@ def make_app():
         Input("helix-width", "value"),
         Input("bend-curvature", "value"),
         Input("loop-fraction", "value"),
+        Input("construction", "value"),
         Input("field", "value"),
         Input("theta", "value"),
         Input("source-count", "value"),
@@ -1206,6 +1264,7 @@ def make_app():
         helix_width,
         bend_curvature,
         loop_fraction,
+        construction,
         field,
         theta,
         log10_source_count,
@@ -1226,6 +1285,7 @@ def make_app():
             geometry,
             geometry_layout=geometry_layout,
             source_geometry=source_geometry,
+            construction_method=str(construction),
             theta=float(theta),
             par="parallel" in opts,
             calc_self_field="self-field" in opts,
@@ -1257,7 +1317,7 @@ def make_app():
             f"nsrc={results['source_count']}, nobs={geometry.obs[0].size}, "
             f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
             f"theta={float(theta):.2f}\n"
-            f"geometry={geometry_layout}, kernel={source_geometry}\n"
+            f"geometry={geometry_layout}, kernel={source_geometry}, construction={construction}\n"
             f"twist_pitch={float(twist_pitch):.3f}, helix_width={float(helix_width):.3f}, "
             f"bend_curvature={float(bend_curvature):.3f}, loop_fraction={float(loop_fraction):.2f}\n"
             f"original source-target interactions={results['source_target_interactions']:.1E}\n"

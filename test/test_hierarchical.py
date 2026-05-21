@@ -159,6 +159,27 @@ def test_hierarchical_construction_method_is_exposed():
         )
 
 
+def test_hierarchical_rejects_noncontiguous_output():
+    xyzfil = (np.array([0.0]), np.array([0.0]), np.array([0.0]))
+    dlxyzfil = (np.array([0.1]), np.array([0.0]), np.array([0.0]))
+    current = np.array([1.0])
+    wire_radius = np.zeros(1)
+    obs = (np.array([0.0, 0.2, 0.4]), np.zeros(3), np.ones(3))
+    out = (np.empty(6)[::2], np.empty(6)[::2], np.empty(6)[::2])
+
+    with pytest.raises(ValueError, match="output arrays must be contiguous"):
+        cfsem.flux_density_linear_filament_hierarchical(
+            xyzfil,
+            dlxyzfil,
+            current,
+            wire_radius,
+            obs,
+            theta=0.0,
+            par=False,
+            out=out,
+        )
+
+
 def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     nodes = np.array(
         [

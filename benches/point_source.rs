@@ -1,13 +1,14 @@
 #![allow(clippy::all)] // Clippy will attempt to remove black_box() internals
 
+use cfsem::physics::hierarchical::evaluator::{
+    EvaluationScratch, SourceNodeSummaries, eval, eval_par, scratch_len_par, update_summaries,
+};
+use cfsem::physics::hierarchical::kernel::{HierarchicalError, HierarchicalKernel};
 use cfsem::physics::hierarchical::kernels::{
     DipoleFluxDensityKernel, DipoleMoments, DipoleSource, DipoleSources, DipoleTarget,
     DipoleTargets, DipoleVectorPotentialKernel,
 };
-use cfsem::physics::hierarchical::{
-    ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
-    eval, eval_par, scratch_len_par, update_summaries,
-};
+use cfsem::physics::hierarchical::tree::ClusterTree;
 use cfsem::physics::point_source::{
     flux_density_dipole, flux_density_dipole_par, vector_potential_dipole,
     vector_potential_dipole_par,

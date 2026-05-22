@@ -104,7 +104,10 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
     }
 }
 
-fn py_hierarchical_error(context: &str, error: physics::hierarchical::HierarchicalError) -> PyErr {
+fn py_hierarchical_error(
+    context: &str,
+    error: physics::hierarchical::kernel::HierarchicalError,
+) -> PyErr {
     PyInteropError::ValueError {
         msg: format!("{context} failed with {error:?}"),
     }
@@ -379,7 +382,7 @@ where
 
 fn source_tree_aabbs_to_py_tuple(
     py: Python<'_>,
-    tree: &physics::hierarchical::ClusterTree<f64>,
+    tree: &physics::hierarchical::tree::ClusterTree<f64>,
 ) -> (
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
@@ -418,7 +421,7 @@ fn source_tree_aabbs_to_py_tuple(
 
 fn source_tree_diagnostics_object(
     py: Python<'_>,
-    tree: &physics::hierarchical::ClusterTree<f64>,
+    tree: &physics::hierarchical::tree::ClusterTree<f64>,
 ) -> PyResult<Py<PyAny>> {
     let (min_x, min_y, min_z, max_x, max_y, max_z, levels) =
         source_tree_aabbs_to_py_tuple(py, tree);
@@ -456,7 +459,7 @@ fn solve_result_from_field(
     Py::new(py, SolveResult { field, diagnostics })
 }
 
-fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Vec<f64> {
+fn source_tree_node_levels(tree: &physics::hierarchical::tree::ClusterTree<f64>) -> Vec<f64> {
     let mut levels = vec![0.0; tree.node_aabb.len()];
     let mut active = Vec::new();
     if !tree.node_aabb.is_empty() {
@@ -465,22 +468,24 @@ fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Ve
     while let Some((node, level)) = active.pop() {
         levels[node] = f64::from(level);
         let left = tree.node_left_child[node];
-        if left != physics::hierarchical::ClusterTreeView::<f64>::invalid_index() {
+        if left != physics::hierarchical::tree::ClusterTreeView::<f64>::invalid_index() {
             active.push((left as usize, level + 1));
         }
         let right = tree.node_right_child[node];
-        if right != physics::hierarchical::ClusterTreeView::<f64>::invalid_index() {
+        if right != physics::hierarchical::tree::ClusterTreeView::<f64>::invalid_index() {
             active.push((right as usize, level + 1));
         }
     }
     levels
 }
 
-fn parse_build_method(construction_method: &str) -> PyResult<physics::hierarchical::BuildMethod> {
+fn parse_build_method(
+    construction_method: &str,
+) -> PyResult<physics::hierarchical::tree::BuildMethod> {
     match construction_method {
-        "recursive" => Ok(physics::hierarchical::BuildMethod::Recursive),
+        "recursive" => Ok(physics::hierarchical::tree::BuildMethod::Recursive),
         "morton_lbvh" | "morton-lbvh" | "lbvh" => {
-            Ok(physics::hierarchical::BuildMethod::MortonLbvh)
+            Ok(physics::hierarchical::tree::BuildMethod::MortonLbvh)
         }
         _ => Err(PyInteropError::ValueError {
             msg: format!(
@@ -494,34 +499,34 @@ fn parse_build_method(construction_method: &str) -> PyResult<physics::hierarchic
 
 fn accepted_levels_diagnostic<K, S, C, M>(
     kernel: K,
-    source_tree: &physics::hierarchical::ClusterTree<f64>,
+    source_tree: &physics::hierarchical::tree::ClusterTree<f64>,
     sources: S,
     targets: C,
     moments: M,
     theta: f64,
 ) -> PyResult<Vec<f64>>
 where
-    K: physics::hierarchical::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
-    S: physics::hierarchical::SourceCollection<K> + Copy,
-    M: physics::hierarchical::SourceMomentCollection<K> + Copy,
+    K: physics::hierarchical::kernel::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
+    S: physics::hierarchical::kernel::SourceCollection<K> + Copy,
+    M: physics::hierarchical::kernel::SourceMomentCollection<K> + Copy,
     K::TargetGeometry: Copy,
-    C: physics::hierarchical::TargetCollection<K>,
+    C: physics::hierarchical::kernel::TargetCollection<K>,
 {
     let mut source_summaries =
-        physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
-    let mut err = physics::hierarchical::update_summaries(
+        physics::hierarchical::evaluator::SourceNodeSummaries::<K>::new(source_tree.as_view());
+    let mut err = physics::hierarchical::evaluator::update_summaries(
         &kernel,
         source_tree.as_view(),
         sources,
         moments,
         &mut source_summaries.node_summaries,
     );
-    if err != physics::hierarchical::HierarchicalError::Ok {
+    if err != physics::hierarchical::kernel::HierarchicalError::Ok {
         return Err(py_hierarchical_error("source summary update", err));
     }
 
-    let mut out = vec![0.0; physics::hierarchical::TargetCollection::<K>::len(targets)];
-    err = physics::hierarchical::accepted_levels(
+    let mut out = vec![0.0; physics::hierarchical::kernel::TargetCollection::<K>::len(targets)];
+    err = physics::hierarchical::evaluator::accepted_levels(
         &kernel,
         source_tree.as_view(),
         &source_summaries.node_summaries,
@@ -529,7 +534,7 @@ where
         theta,
         &mut out,
     );
-    if err != physics::hierarchical::HierarchicalError::Ok {
+    if err != physics::hierarchical::kernel::HierarchicalError::Ok {
         return Err(py_hierarchical_error("source-level diagnostic", err));
     }
     Ok(out)

@@ -45,6 +45,32 @@ struct MortonItem {
     input_id: u32,
 }
 
+/// Parent child slot filled by a pending tree-build frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ChildSlot {
+    /// Root frame has no parent.
+    Root,
+    /// Attach the built node as its parent's left child.
+    Left,
+    /// Attach the built node as its parent's right child.
+    Right,
+}
+
+/// Explicit stack frame used by the iterative longest-axis builder.
+#[derive(Clone, Copy, Debug)]
+struct LongestAxisBuildFrame {
+    /// Start of the contiguous item range in `sorted_indices`.
+    start: usize,
+    /// End of the contiguous item range in `sorted_indices`.
+    end: usize,
+    /// Depth of this node in the tree.
+    depth: usize,
+    /// Parent node ID, ignored for the root frame.
+    parent: u32,
+    /// Which child slot of `parent` this frame fills.
+    slot: ChildSlot,
+}
+
 /// CPU-owned finalized binary cluster tree.
 ///
 /// The runtime representation is deliberately a flat set of vectors rather than
@@ -187,7 +213,6 @@ impl<T: Scalar> ClusterTree<T> {
                     geometry,
                     0,
                     geometry.len(),
-                    0,
                     &mut internal_by_depth,
                 )?;
             }
@@ -417,71 +442,106 @@ impl<T: Scalar> ClusterTreeView<'_, T> {
     }
 }
 
-/// Recursively build a tree by sorting each range along its longest AABB axis.
+/// Iteratively build a tree by sorting each range along its longest AABB axis.
 ///
-/// This is the original builder. It tends to produce good axis-aligned spatial
-/// splits but performs a sort at every internal node.
+/// This builder tends to produce good axis-aligned spatial splits but performs
+/// a sort at every internal node. It uses an explicit stack instead of
+/// recursion because each node's AABB can be computed from its full source
+/// range before child nodes are constructed.
 fn build_range_longest_axis<T, G>(
     tree: &mut ClusterTree<T>,
     geometry: G,
     start: usize,
     end: usize,
-    depth: usize,
     internal_by_depth: &mut Vec<Vec<u32>>,
-) -> Result<u32, HierarchicalError>
+) -> Result<(), HierarchicalError>
 where
     T: Scalar,
     G: BoundedGeometryCollection<T>,
 {
-    let node_id = usize_to_u32(tree.node_aabb.len())?;
-    let count = end - start;
-    let aabb = range_aabb(&tree.sorted_indices, geometry, start, end);
-
-    // Allocate and initialize the node before recursing so child indices can
-    // refer back to stable node IDs.
-    tree.node_aabb.push(aabb);
-    tree.node_left_child.push(INVALID_INDEX);
-    tree.node_right_child.push(INVALID_INDEX);
-    tree.node_range_start.push(usize_to_u32(start)?);
-    tree.node_range_count.push(usize_to_u32(count)?);
-    tree.leaf_start.push(INVALID_INDEX);
-    tree.leaf_count.push(0);
-
-    if depth > tree.max_depth as usize {
-        tree.max_depth = usize_to_u32(depth)?;
-    }
-
-    if count <= 1 {
-        let node = node_id as usize;
-        tree.leaf_start[node] = usize_to_u32(start)?;
-        tree.leaf_count[node] = usize_to_u32(count)?;
-        tree.leaf_node_ids.push(node_id);
-        return Ok(node_id);
-    }
-
-    // Reorder only this node's contiguous range. Children inherit contiguous
-    // subranges, which is required by summary updates and far broadcasts.
-    let axis = longest_axis(aabb);
-    tree.sorted_indices[start..end].sort_by(|a, b| {
-        let pa = geometry.representative_point(*a as usize)[axis];
-        let pb = geometry.representative_point(*b as usize)[axis];
-        scalar_cmp(pa, pb)
+    let mut stack = Vec::new();
+    stack.push(LongestAxisBuildFrame {
+        start,
+        end,
+        depth: 0,
+        parent: INVALID_INDEX,
+        slot: ChildSlot::Root,
     });
 
-    let mid = hybrid_axis_gap_split(&tree.sorted_indices, geometry, start, end, axis);
-    if internal_by_depth.len() <= depth {
-        internal_by_depth.resize_with(depth + 1, Vec::new);
+    while let Some(frame) = stack.pop() {
+        let node_id = usize_to_u32(tree.node_aabb.len())?;
+        let count = frame.end - frame.start;
+        let aabb = range_aabb(&tree.sorted_indices, geometry, frame.start, frame.end);
+
+        // Allocate and initialize the node before pushing child frames so child
+        // frames can refer back to this stable node ID.
+        tree.node_aabb.push(aabb);
+        tree.node_left_child.push(INVALID_INDEX);
+        tree.node_right_child.push(INVALID_INDEX);
+        tree.node_range_start.push(usize_to_u32(frame.start)?);
+        tree.node_range_count.push(usize_to_u32(count)?);
+        tree.leaf_start.push(INVALID_INDEX);
+        tree.leaf_count.push(0);
+
+        match frame.slot {
+            ChildSlot::Root => {}
+            ChildSlot::Left => {
+                tree.node_left_child[frame.parent as usize] = node_id;
+            }
+            ChildSlot::Right => {
+                tree.node_right_child[frame.parent as usize] = node_id;
+            }
+        }
+
+        if frame.depth > tree.max_depth as usize {
+            tree.max_depth = usize_to_u32(frame.depth)?;
+        }
+
+        if count <= 1 {
+            let node = node_id as usize;
+            tree.leaf_start[node] = usize_to_u32(frame.start)?;
+            tree.leaf_count[node] = usize_to_u32(count)?;
+            tree.leaf_node_ids.push(node_id);
+            continue;
+        }
+
+        // Reorder only this node's contiguous range. Children inherit
+        // contiguous subranges, which is required by summary updates and far
+        // broadcasts.
+        let axis = longest_axis(aabb);
+        tree.sorted_indices[frame.start..frame.end].sort_by(|a, b| {
+            let pa = geometry.representative_point(*a as usize)[axis];
+            let pb = geometry.representative_point(*b as usize)[axis];
+            scalar_cmp(pa, pb)
+        });
+
+        let mid =
+            hybrid_axis_gap_split(&tree.sorted_indices, geometry, frame.start, frame.end, axis);
+        if internal_by_depth.len() <= frame.depth {
+            internal_by_depth.resize_with(frame.depth + 1, Vec::new);
+        }
+        internal_by_depth[frame.depth].push(node_id);
+
+        let child_depth = frame.depth + 1;
+        // Push right first so the LIFO stack visits the left subtree before the
+        // right subtree, matching the previous recursive node ordering.
+        stack.push(LongestAxisBuildFrame {
+            start: mid,
+            end: frame.end,
+            depth: child_depth,
+            parent: node_id,
+            slot: ChildSlot::Right,
+        });
+        stack.push(LongestAxisBuildFrame {
+            start: frame.start,
+            end: mid,
+            depth: child_depth,
+            parent: node_id,
+            slot: ChildSlot::Left,
+        });
     }
-    internal_by_depth[depth].push(node_id);
 
-    let left = build_range_longest_axis(tree, geometry, start, mid, depth + 1, internal_by_depth)?;
-    let right = build_range_longest_axis(tree, geometry, mid, end, depth + 1, internal_by_depth)?;
-
-    let node = node_id as usize;
-    tree.node_left_child[node] = left;
-    tree.node_right_child[node] = right;
-
-    Ok(node_id)
+    Ok(())
 }
 
 /// Recursively build a tree over an already Morton-sorted item range.

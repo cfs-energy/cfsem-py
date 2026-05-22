@@ -742,8 +742,8 @@ def solve_fields(
         )
     hierarchical_b = result_b.field
     hierarchical_a = result_a.field
-    accepted_source_levels_b = result_b.diagnostics.accepted_source_level
-    accepted_source_levels_a = result_a.diagnostics.accepted_source_level
+    accepted_levels_b = result_b.diagnostics.accepted_levels
+    accepted_levels_a = result_a.diagnostics.accepted_levels
     build_time = result_b.diagnostics.construction_time + result_a.diagnostics.construction_time
     eval_time = result_b.diagnostics.evaluation_time + result_a.diagnostics.evaluation_time
     source_tree_aabbs = result_b.diagnostics.source_tree if overlay_aabbs else None
@@ -761,8 +761,8 @@ def solve_fields(
         "source_target_interactions": source_count * geometry.obs[0].size,
         "geometry_layout": geometry_layout,
     }
-    results["accepted_source_levels_b"] = accepted_source_levels_b
-    results["accepted_source_levels_a"] = accepted_source_levels_a
+    results["accepted_levels_b"] = accepted_levels_b
+    results["accepted_levels_a"] = accepted_levels_a
     if source_tree_aabbs is not None:
         results["source_tree_aabbs"] = source_tree_aabbs
     if calc_self_field:
@@ -875,8 +875,8 @@ def make_figure(
     middle = np.log10(np.maximum(field_magnitude(hierarchical), 1e-30))
     right = np.log10(np.maximum(relative_error(hierarchical, direct), 1e-16)) if show_error else middle - left
     right_title = "log10 relative error" if show_error else "log10 magnitude difference"
-    accepted_source_levels = results.get(f"accepted_source_levels_{field}")
-    show_level_diagnostic = isinstance(accepted_source_levels, np.ndarray)
+    accepted_levels = results.get(f"accepted_levels_{field}")
+    show_level_diagnostic = isinstance(accepted_levels, np.ndarray)
     col_count = 4 if show_level_diagnostic else 3
 
     fig = make_subplots(
@@ -903,7 +903,7 @@ def make_figure(
         (right, right_title),
     ]
     if show_level_diagnostic:
-        traces.append((accepted_source_levels, "mean terminal source level"))
+        traces.append((accepted_levels, "accepted levels"))
     for col, (values, title) in enumerate(traces, start=1):
         colorscale = "Viridis"
         if col == 3:

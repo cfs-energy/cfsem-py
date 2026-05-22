@@ -353,8 +353,8 @@ where
 /// the same source-tree walk but does not evaluate field values. Far-accepted
 /// nodes contribute their traversal depth, while direct leaf fallbacks
 /// contribute the leaf depth. Each contribution is weighted by the number of
-/// original source items represented by that terminal node, giving a per-target
-/// mean accepted source level.
+/// original source items represented by each terminal node, giving per-target
+/// accepted levels.
 #[inline]
 pub fn accepted_levels<K, C>(
     kernel: &K,

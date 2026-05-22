@@ -94,6 +94,7 @@ __all__ = [
     "solve_flux_axisymmetric",
     "filament_helix_path",
     "inductance_linear_filaments",
+    "inductance_matrix_axisymmetric_coaxial_rectangular_coils",
     "inductance_piecewise_linear_filaments",
     "self_inductance_piecewise_linear_filaments",
     "self_inductance_axisymmetric_coil",

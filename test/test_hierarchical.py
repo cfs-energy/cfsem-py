@@ -37,8 +37,8 @@ def _assert_diagnostics(result, nsource, ntarget):
     assert result.diagnostics.target_count == ntarget
     assert result.diagnostics.source_tree is not None
     assert result.diagnostics.source_tree[0].size > 0
-    assert result.diagnostics.accepted_source_level is not None
-    assert result.diagnostics.accepted_source_level.shape == (ntarget,)
+    assert result.diagnostics.accepted_levels is not None
+    assert result.diagnostics.accepted_levels.shape == (ntarget,)
 
 
 def test_hierarchical_dipoles_match_direct():

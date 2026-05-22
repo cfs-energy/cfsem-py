@@ -118,7 +118,7 @@ struct HierarchicalDiagnostics {
     source_count: usize,
     target_count: usize,
     source_tree: Option<Py<PyAny>>,
-    accepted_source_level: Option<Py<PyArray1<f64>>>,
+    accepted_levels: Option<Py<PyArray1<f64>>>,
 }
 
 #[pymethods]
@@ -149,8 +149,8 @@ impl HierarchicalDiagnostics {
     }
 
     #[getter]
-    fn accepted_source_level(&self, py: Python<'_>) -> Option<Py<PyArray1<f64>>> {
-        self.accepted_source_level
+    fn accepted_levels(&self, py: Python<'_>) -> Option<Py<PyArray1<f64>>> {
+        self.accepted_levels
             .as_ref()
             .map(|value| value.clone_ref(py))
     }
@@ -437,7 +437,7 @@ fn solve_result_from_field(
     source_count: usize,
     target_count: usize,
     source_tree: Option<Py<PyAny>>,
-    accepted_source_level: Option<Py<PyArray1<f64>>>,
+    accepted_levels: Option<Py<PyArray1<f64>>>,
 ) -> PyResult<Py<SolveResult>> {
     let field = PyTuple::new(py, [field.0, field.1, field.2])?
         .unbind()
@@ -450,7 +450,7 @@ fn solve_result_from_field(
             source_count,
             target_count,
             source_tree,
-            accepted_source_level,
+            accepted_levels,
         },
     )?;
     Py::new(py, SolveResult { field, diagnostics })
@@ -606,7 +606,7 @@ fn flux_density_dipole_hierarchical(
             (component_vecs_to_py_tuple(py, (bx, by, bz)), diagnostics)
         }
     };
-    let (source_tree, accepted_source_level) = if extra_diagnostics {
+    let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::DipoleSources::new(
             loc.as_tuple().0,
             loc.as_tuple().1,
@@ -649,7 +649,7 @@ fn flux_density_dipole_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        accepted_source_level,
+        accepted_levels,
     )
 }
 
@@ -724,7 +724,7 @@ fn vector_potential_dipole_hierarchical(
             (component_vecs_to_py_tuple(py, (ax, ay, az)), diagnostics)
         }
     };
-    let (source_tree, accepted_source_level) = if extra_diagnostics {
+    let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::DipoleSources::new(
             loc.as_tuple().0,
             loc.as_tuple().1,
@@ -767,7 +767,7 @@ fn vector_potential_dipole_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        accepted_source_level,
+        accepted_levels,
     )
 }
 
@@ -850,7 +850,7 @@ fn flux_density_linear_filament_hierarchical(
             (component_vecs_to_py_tuple(py, (bx, by, bz)), diagnostics)
         }
     };
-    let (source_tree, accepted_source_level) = if extra_diagnostics {
+    let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
             xyzfil.as_tuple(),
             dlxyzfil.as_tuple(),
@@ -887,7 +887,7 @@ fn flux_density_linear_filament_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        accepted_source_level,
+        accepted_levels,
     )
 }
 
@@ -970,7 +970,7 @@ fn vector_potential_linear_filament_hierarchical(
             (component_vecs_to_py_tuple(py, (ax, ay, az)), diagnostics)
         }
     };
-    let (source_tree, accepted_source_level) = if extra_diagnostics {
+    let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
             xyzfil.as_tuple(),
             dlxyzfil.as_tuple(),
@@ -1007,7 +1007,7 @@ fn vector_potential_linear_filament_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        accepted_source_level,
+        accepted_levels,
     )
 }
 
@@ -1078,7 +1078,7 @@ fn flux_density_triangle_mesh_hierarchical(
             (component_vecs_to_py_tuple(py, (bx, by, bz)), diagnostics)
         }
     };
-    let (source_tree, accepted_source_level) = if extra_diagnostics {
+    let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(
             (&nodes.0, &nodes.1, &nodes.2),
             (&triangles.0, &triangles.1, &triangles.2),
@@ -1112,7 +1112,7 @@ fn flux_density_triangle_mesh_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        accepted_source_level,
+        accepted_levels,
     )
 }
 
@@ -1185,7 +1185,7 @@ fn vector_potential_triangle_mesh_hierarchical(
             (component_vecs_to_py_tuple(py, (ax, ay, az)), diagnostics)
         }
     };
-    let (source_tree, accepted_source_level) = if extra_diagnostics {
+    let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(
             (&nodes.0, &nodes.1, &nodes.2),
             (&triangles.0, &triangles.1, &triangles.2),
@@ -1219,7 +1219,7 @@ fn vector_potential_triangle_mesh_hierarchical(
         diagnostics.source_count,
         diagnostics.target_count,
         source_tree,
-        accepted_source_level,
+        accepted_levels,
     )
 }
 

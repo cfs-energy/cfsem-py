@@ -205,6 +205,12 @@ pub trait SourceMomentCollection<K: HierarchicalKernel>: Copy + Sync {
 
     /// Return one scalar source moment value.
     fn moment(self, index: usize) -> K::SourceMoment;
+
+    /// Return whether the collection contains no source moments.
+    #[inline]
+    fn is_empty(self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<K> SourceMomentCollection<K> for &[K::SourceMoment]

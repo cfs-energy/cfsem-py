@@ -7,7 +7,7 @@ use rayon::{
 
 use crate::{
     MU0_OVER_4PI, chunksize,
-    macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
+    macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
     math::{cross3, dot3},
     physics::{
         hierarchical::Scalar,
@@ -118,6 +118,7 @@ pub fn flux_density_dipole(
 
     check_length_3tup!(m, &loc);
     check_length_3tup!(m, &moment);
+    check_length!(m, outer_radius);
     check_length_3tup!(n, &obs);
     check_length_3tup!(n, &out);
 
@@ -283,6 +284,7 @@ pub fn vector_potential_dipole(
 
     check_length_3tup!(m, &loc);
     check_length_3tup!(m, &moment);
+    check_length!(m, outer_radius);
     check_length_3tup!(n, &obs);
     check_length_3tup!(n, &out);
 

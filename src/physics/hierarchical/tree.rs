@@ -71,6 +71,29 @@ struct LongestAxisBuildFrame {
     slot: ChildSlot,
 }
 
+/// Explicit stack frame used by the iterative Morton builder.
+#[derive(Clone, Copy, Debug)]
+enum MortonBuildFrame {
+    /// Allocate a node and, if internal, schedule its children and finish step.
+    Enter {
+        /// Start of the contiguous item range in `sorted_indices`.
+        start: usize,
+        /// End of the contiguous item range in `sorted_indices`.
+        end: usize,
+        /// Depth of this node in the tree.
+        depth: usize,
+        /// Parent node ID, ignored for the root frame.
+        parent: u32,
+        /// Which child slot of `parent` this frame fills.
+        slot: ChildSlot,
+    },
+    /// Finalize an internal node's AABB after both children have been built.
+    Finish {
+        /// Internal node ID to finalize.
+        node_id: u32,
+    },
+}
+
 /// CPU-owned finalized binary cluster tree.
 ///
 /// The runtime representation is deliberately a flat set of vectors rather than
@@ -222,7 +245,6 @@ impl<T: Scalar> ClusterTree<T> {
                     geometry,
                     0,
                     geometry.len(),
-                    0,
                     &mut internal_by_depth,
                 )?;
             }
@@ -544,69 +566,119 @@ where
     Ok(())
 }
 
-/// Recursively build a tree over an already Morton-sorted item range.
+/// Iteratively build a tree over an already Morton-sorted item range.
 ///
 /// The Morton sort supplies spatial locality. Each internal node splits its
 /// range at a dominant adjacent Morton-code gap or the median when no dominant
 /// gap exists. This avoids additional per-node sorting while separating obvious
 /// code-space clusters without letting ordinary sampling gaps create skinny
-/// trees. Internal AABBs are propagated from children after both child subtrees
-/// are built.
+/// trees. Internal AABBs are propagated from children in explicit finish
+/// frames after both child subtrees are built.
 fn build_range_morton<T, G>(
     tree: &mut ClusterTree<T>,
     geometry: G,
     start: usize,
     end: usize,
-    depth: usize,
     internal_by_depth: &mut Vec<Vec<u32>>,
-) -> Result<u32, HierarchicalError>
+) -> Result<(), HierarchicalError>
 where
     T: Scalar,
     G: BoundedGeometryCollection<T>,
 {
-    let node_id = usize_to_u32(tree.node_aabb.len())?;
-    let count = end - start;
+    let mut stack = Vec::new();
+    stack.push(MortonBuildFrame::Enter {
+        start,
+        end,
+        depth: 0,
+        parent: INVALID_INDEX,
+        slot: ChildSlot::Root,
+    });
 
-    // Internal Morton nodes get their AABB after child construction. Leaves
-    // compute directly from the bounded geometry in their sorted range.
-    tree.node_aabb.push(Aabb::empty());
-    tree.node_left_child.push(INVALID_INDEX);
-    tree.node_right_child.push(INVALID_INDEX);
-    tree.node_range_start.push(usize_to_u32(start)?);
-    tree.node_range_count.push(usize_to_u32(count)?);
-    tree.leaf_start.push(INVALID_INDEX);
-    tree.leaf_count.push(0);
+    while let Some(frame) = stack.pop() {
+        match frame {
+            MortonBuildFrame::Enter {
+                start,
+                end,
+                depth,
+                parent,
+                slot,
+            } => {
+                let node_id = usize_to_u32(tree.node_aabb.len())?;
+                let count = end - start;
 
-    if depth > tree.max_depth as usize {
-        tree.max_depth = usize_to_u32(depth)?;
+                // Internal Morton nodes get their AABB in a finish frame after
+                // child construction. Leaves compute directly from geometry.
+                tree.node_aabb.push(Aabb::empty());
+                tree.node_left_child.push(INVALID_INDEX);
+                tree.node_right_child.push(INVALID_INDEX);
+                tree.node_range_start.push(usize_to_u32(start)?);
+                tree.node_range_count.push(usize_to_u32(count)?);
+                tree.leaf_start.push(INVALID_INDEX);
+                tree.leaf_count.push(0);
+
+                match slot {
+                    ChildSlot::Root => {}
+                    ChildSlot::Left => {
+                        tree.node_left_child[parent as usize] = node_id;
+                    }
+                    ChildSlot::Right => {
+                        tree.node_right_child[parent as usize] = node_id;
+                    }
+                }
+
+                if depth > tree.max_depth as usize {
+                    tree.max_depth = usize_to_u32(depth)?;
+                }
+
+                if count <= 1 {
+                    let node = node_id as usize;
+                    tree.node_aabb[node] = range_aabb(&tree.sorted_indices, geometry, start, end);
+                    tree.leaf_start[node] = usize_to_u32(start)?;
+                    tree.leaf_count[node] = usize_to_u32(count)?;
+                    tree.leaf_node_ids.push(node_id);
+                    continue;
+                }
+
+                // Split at a dominant adjacent Morton-code gap when one
+                // exists; otherwise use the median to keep continuous or
+                // uniformly sampled geometry balanced.
+                let mid = hybrid_morton_gap_split(tree.sorted_morton_codes.as_slice(), start, end);
+                if internal_by_depth.len() <= depth {
+                    internal_by_depth.resize_with(depth + 1, Vec::new);
+                }
+                internal_by_depth[depth].push(node_id);
+
+                let child_depth = depth + 1;
+                // Finish must run after both child enter frames, so it is
+                // pushed before the children on this LIFO stack. Right is
+                // pushed before left to preserve the previous recursive node
+                // ordering.
+                stack.push(MortonBuildFrame::Finish { node_id });
+                stack.push(MortonBuildFrame::Enter {
+                    start: mid,
+                    end,
+                    depth: child_depth,
+                    parent: node_id,
+                    slot: ChildSlot::Right,
+                });
+                stack.push(MortonBuildFrame::Enter {
+                    start,
+                    end: mid,
+                    depth: child_depth,
+                    parent: node_id,
+                    slot: ChildSlot::Left,
+                });
+            }
+            MortonBuildFrame::Finish { node_id } => {
+                let node = node_id as usize;
+                let left = tree.node_left_child[node] as usize;
+                let right = tree.node_right_child[node] as usize;
+                tree.node_aabb[node] = tree.node_aabb[left].union(tree.node_aabb[right]);
+            }
+        }
     }
 
-    if count <= 1 {
-        let node = node_id as usize;
-        tree.node_aabb[node] = range_aabb(&tree.sorted_indices, geometry, start, end);
-        tree.leaf_start[node] = usize_to_u32(start)?;
-        tree.leaf_count[node] = usize_to_u32(count)?;
-        tree.leaf_node_ids.push(node_id);
-        return Ok(node_id);
-    }
-
-    // Split at a dominant adjacent Morton-code gap when one exists; otherwise
-    // use the median to keep continuous or uniformly sampled geometry balanced.
-    let mid = hybrid_morton_gap_split(tree.sorted_morton_codes.as_slice(), start, end);
-    if internal_by_depth.len() <= depth {
-        internal_by_depth.resize_with(depth + 1, Vec::new);
-    }
-    internal_by_depth[depth].push(node_id);
-
-    let left = build_range_morton(tree, geometry, start, mid, depth + 1, internal_by_depth)?;
-    let right = build_range_morton(tree, geometry, mid, end, depth + 1, internal_by_depth)?;
-
-    let node = node_id as usize;
-    tree.node_left_child[node] = left;
-    tree.node_right_child[node] = right;
-    tree.node_aabb[node] = tree.node_aabb[left as usize].union(tree.node_aabb[right as usize]);
-
-    Ok(node_id)
+    Ok(())
 }
 
 /// Sort input IDs by Morton code computed from each item's representative point.

@@ -29,16 +29,15 @@ const MORTON_MAX_COORD: u64 = (1_u64 << MORTON_BITS_PER_AXIS) - 1;
 /// CPU tree construction strategy.
 ///
 /// Both builders are implemented with explicit stack buffers rather than true
-/// recursion. The strategy name `Recursive` is retained for API compatibility
-/// with earlier versions of the hierarchical solver.
+/// recursion.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BuildMethod {
     /// Sort each node range by the longest AABB axis, then split at a dominant
     /// adjacent spatial gap on that axis or the median otherwise.
     ///
-    /// This method follows the same divide-and-conquer tree shape as a recursive
-    /// builder, but uses an explicit stack internally.
-    Recursive,
+    /// This method follows a top-down divide-and-conquer tree shape, but uses an
+    /// explicit stack internally.
+    LongestAxis,
     /// Sort once by Morton code, then split contiguous ranges at a dominant
     /// adjacent Morton-code gap or the median otherwise.
     ///
@@ -176,7 +175,7 @@ impl<T: Scalar> ClusterTree<T> {
     where
         G: BoundedGeometryCollection<T>,
     {
-        Self::build_with_method(geometry, BuildMethod::Recursive)
+        Self::build_with_method(geometry, BuildMethod::LongestAxis)
     }
 
     /// Build a CPU-owned finalized tree using Morton-code LBVH ordering.
@@ -240,7 +239,7 @@ impl<T: Scalar> ClusterTree<T> {
 
         let mut internal_by_depth: Vec<Vec<u32>> = Vec::new();
         match method {
-            BuildMethod::Recursive => {
+            BuildMethod::LongestAxis => {
                 build_range_longest_axis(
                     &mut tree,
                     geometry,
@@ -556,7 +555,7 @@ where
 
         let child_depth = frame.depth + 1;
         // Push right first so the LIFO stack visits the left subtree before the
-        // right subtree, matching the previous recursive node ordering.
+        // right subtree, preserving deterministic left-first node ordering.
         stack.push(LongestAxisBuildFrame {
             start: mid,
             end: frame.end,
@@ -661,7 +660,7 @@ where
                 let child_depth = depth + 1;
                 // Finish must run after both child enter frames, so it is
                 // pushed before the children on this LIFO stack. Right is
-                // pushed before left to preserve the previous recursive node
+                // pushed before left to preserve deterministic left-first node
                 // ordering.
                 stack.push(MortonBuildFrame::Finish { node_id });
                 stack.push(MortonBuildFrame::Enter {

@@ -483,14 +483,16 @@ fn parse_build_method(
     construction_method: &str,
 ) -> PyResult<physics::hierarchical::tree::BuildMethod> {
     match construction_method {
-        "recursive" => Ok(physics::hierarchical::tree::BuildMethod::Recursive),
+        "longest_axis" | "longest-axis" => {
+            Ok(physics::hierarchical::tree::BuildMethod::LongestAxis)
+        }
         "morton_lbvh" | "morton-lbvh" | "lbvh" => {
             Ok(physics::hierarchical::tree::BuildMethod::MortonLbvh)
         }
         _ => Err(PyInteropError::ValueError {
             msg: format!(
                 "Unsupported hierarchical construction method: {construction_method}. \
-                 Expected 'recursive' or 'morton_lbvh'."
+                 Expected 'longest_axis' or 'morton_lbvh'."
             ),
         }
         .into()),
@@ -540,7 +542,7 @@ where
     Ok(out)
 }
 
-#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -658,7 +660,7 @@ fn flux_density_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -776,7 +778,7 @@ fn vector_potential_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_linear_filament_hierarchical(
     py: Python<'_>,
     xyzfil: (
@@ -896,7 +898,7 @@ fn flux_density_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_linear_filament_hierarchical(
     py: Python<'_>,
     xyzfil: (
@@ -1016,7 +1018,7 @@ fn vector_potential_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_triangle_mesh_hierarchical(
     py: Python<'_>,
     nodes: PyReadonlyArray2<f64>,
@@ -1121,7 +1123,7 @@ fn flux_density_triangle_mesh_hierarchical(
     )
 }
 
-#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="recursive", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_triangle_mesh_hierarchical(
     py: Python<'_>,
     nodes: PyReadonlyArray2<f64>,

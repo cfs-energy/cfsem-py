@@ -263,7 +263,7 @@ def flux_density_dipole_hierarchical(
     outer_radius: FloatArray,
     obs: ArrayTriple,
     theta: float = 0.01,
-    construction_method: str = "recursive",
+    construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
@@ -282,7 +282,7 @@ def flux_density_dipole_hierarchical(
         outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
         obs: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        construction_method: Source-tree construction method, either `"recursive"` or
+        construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
         out: Optional output component arrays to fill.
@@ -300,7 +300,7 @@ def vector_potential_dipole_hierarchical(
     outer_radius: FloatArray,
     obs: ArrayTriple,
     theta: float = 0.01,
-    construction_method: str = "recursive",
+    construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
@@ -319,7 +319,7 @@ def vector_potential_dipole_hierarchical(
         outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
         obs: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        construction_method: Source-tree construction method, either `"recursive"` or
+        construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
         out: Optional output component arrays to fill.
@@ -346,7 +346,7 @@ def flux_density_linear_filament_hierarchical(
     wire_radius: FloatArray,
     xyzp: ArrayTriple,
     theta: float = 0.05,
-    construction_method: str = "recursive",
+    construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
@@ -366,7 +366,7 @@ def flux_density_linear_filament_hierarchical(
         wire_radius: Wire radius for each filament segment. Use zeros for thin wires.
         xyzp: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        construction_method: Source-tree construction method, either `"recursive"` or
+        construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
         out: Optional output component arrays to fill.
@@ -408,7 +408,7 @@ def vector_potential_linear_filament_hierarchical(
     wire_radius: FloatArray,
     xyzp: ArrayTriple,
     theta: float = 0.05,
-    construction_method: str = "recursive",
+    construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
@@ -428,7 +428,7 @@ def vector_potential_linear_filament_hierarchical(
         wire_radius: Wire radius for each filament segment. Use zeros for thin wires.
         xyzp: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        construction_method: Source-tree construction method, either `"recursive"` or
+        construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
         out: Optional output component arrays to fill.
@@ -502,7 +502,7 @@ def flux_density_triangle_mesh_hierarchical(
     obs: FloatMatrix,
     theta: float = 0.05,
     quad: str = "dunavant3",
-    construction_method: str = "recursive",
+    construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
@@ -522,7 +522,7 @@ def flux_density_triangle_mesh_hierarchical(
         obs: Target point coordinates with one point per row.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         quad: Triangle quadrature rule.
-        construction_method: Source-tree construction method, either `"recursive"` or
+        construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
         out: Optional output component arrays to fill.
@@ -541,7 +541,7 @@ def vector_potential_triangle_mesh_hierarchical(
     obs: FloatMatrix,
     theta: float = 0.05,
     quad: str = "dunavant3",
-    construction_method: str = "recursive",
+    construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
@@ -561,7 +561,7 @@ def vector_potential_triangle_mesh_hierarchical(
         obs: Target point coordinates with one point per row.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         quad: Triangle quadrature rule.
-        construction_method: Source-tree construction method, either `"recursive"` or
+        construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
         out: Optional output component arrays to fill.

@@ -1407,7 +1407,7 @@ fn tree_covers_each_input_once() {
 }
 
 #[test]
-fn recursive_tree_splits_separated_clusters_at_spatial_gap() {
+fn longest_axis_tree_splits_separated_clusters_at_spatial_gap() {
     let points = points_f64(&[
         [-10.0, -10.0, 0.0],
         [-10.1, -10.0, 0.0],
@@ -1427,7 +1427,7 @@ fn recursive_tree_splits_separated_clusters_at_spatial_gap() {
 }
 
 #[test]
-fn recursive_tree_uses_median_for_uniform_spatial_gaps() {
+fn longest_axis_tree_uses_median_for_uniform_spatial_gaps() {
     let points = points_f64(&[
         [-3.0, 0.0, 0.0],
         [-2.0, 0.0, 0.0],

@@ -392,7 +392,7 @@ where
 
     let construction_start = Instant::now();
     let source_tree = match construction_method {
-        BuildMethod::Recursive => ClusterTree::build(sources)?,
+        BuildMethod::LongestAxis => ClusterTree::build(sources)?,
         BuildMethod::MortonLbvh => ClusterTree::build_morton_lbvh(sources)?,
     };
     let mut source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());

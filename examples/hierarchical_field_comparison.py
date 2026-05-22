@@ -1159,10 +1159,10 @@ def make_app():
                     html.Label("Construction"),
                     dcc.Dropdown(
                         id="construction",
-                        value="recursive",
+                        value="longest_axis",
                         clearable=False,
                         options=[
-                            {"label": "Recursive source tree", "value": "recursive"},
+                            {"label": "Longest-axis source tree", "value": "longest_axis"},
                             {"label": "Morton/LBVH source tree", "value": "morton_lbvh"},
                         ],
                     ),

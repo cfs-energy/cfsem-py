@@ -61,7 +61,7 @@ where
         let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
         let moments = DipoleMoments::new(moment.0, moment.1, moment.2);
 
-        let source_tree = ClusterTree::build_morton_lbvh(sources).unwrap();
+        let source_tree = ClusterTree::build(sources).unwrap();
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let target_count = obs.0.len();
         let parallel_scratch_value = vec![[0.0; 3]; scratch_len_par(target_count)];

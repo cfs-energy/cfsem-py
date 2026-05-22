@@ -1,14 +1,9 @@
 #![allow(clippy::all)] // Clippy will attempt to remove black_box() internals
 
-use cfsem::physics::hierarchical::evaluator::{
-    EvaluationScratch, SourceNodeSummaries, eval, eval_par, scratch_len_par, update_summaries,
+use cfsem::physics::hierarchical::tree::BuildMethod;
+use cfsem::physics::hierarchical::{
+    flux_density_dipole_hierarchical, vector_potential_dipole_hierarchical,
 };
-use cfsem::physics::hierarchical::kernel::{HierarchicalError, HierarchicalKernel};
-use cfsem::physics::hierarchical::kernels::{
-    DipoleFluxDensityKernel, DipoleMoments, DipoleSource, DipoleSources, DipoleTarget,
-    DipoleTargets, DipoleVectorPotentialKernel,
-};
-use cfsem::physics::hierarchical::tree::ClusterTree;
 use cfsem::physics::point_source::{
     flux_density_dipole, flux_density_dipole_par, vector_potential_dipole,
     vector_potential_dipole_par,
@@ -19,149 +14,6 @@ use std::time::Duration;
 use std::hint::black_box;
 
 const HIERARCHICAL_THETA: f64 = 0.01;
-
-struct HierarchicalDipoleSolve<
-    'a,
-    K: HierarchicalKernel<
-            Scalar = f64,
-            SourceGeometry = DipoleSource<f64>,
-            TargetGeometry = DipoleTarget<f64>,
-            SourceMoment = [f64; 3],
-            Output = [f64; 3],
-        > + Sync,
-> {
-    kernel: K,
-    sources: DipoleSources<'a, f64>,
-    targets: DipoleTargets<'a, f64>,
-    moments: DipoleMoments<'a, f64>,
-    source_tree: ClusterTree<f64>,
-    source_summaries: SourceNodeSummaries<K>,
-    scratch_value: [[f64; 3]; 1],
-    parallel_scratch_value: Vec<[f64; 3]>,
-}
-
-impl<'a, K> HierarchicalDipoleSolve<'a, K>
-where
-    K: HierarchicalKernel<
-            Scalar = f64,
-            SourceGeometry = DipoleSource<f64>,
-            TargetGeometry = DipoleTarget<f64>,
-            SourceMoment = [f64; 3],
-            Output = [f64; 3],
-        > + Sync,
-{
-    fn new(
-        kernel: K,
-        loc: (&'a [f64], &'a [f64], &'a [f64]),
-        moment: (&'a [f64], &'a [f64], &'a [f64]),
-        outer_radius: &'a [f64],
-        obs: (&'a [f64], &'a [f64], &'a [f64]),
-    ) -> Self {
-        let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
-        let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
-        let moments = DipoleMoments::new(moment.0, moment.1, moment.2);
-
-        let source_tree = ClusterTree::build(sources).unwrap();
-        let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
-        let target_count = obs.0.len();
-        let parallel_scratch_value = vec![[0.0; 3]; scratch_len_par(target_count)];
-
-        Self {
-            kernel,
-            sources,
-            targets,
-            moments,
-            source_tree,
-            source_summaries,
-            scratch_value: [[0.0; 3]; 1],
-            parallel_scratch_value,
-        }
-    }
-
-    fn solve_into(&mut self, out: (&mut [f64], &mut [f64], &mut [f64])) {
-        assert_eq!(
-            update_summaries(
-                &self.kernel,
-                self.source_tree.as_view(),
-                self.sources,
-                self.moments,
-                &mut self.source_summaries.node_summaries,
-            ),
-            HierarchicalError::Ok
-        );
-
-        let mut scratch = EvaluationScratch {
-            contribution: &mut self.scratch_value,
-        };
-        let out_components = [out.0, out.1, out.2];
-        assert_eq!(
-            eval(
-                &self.kernel,
-                self.source_tree.as_view(),
-                &self.source_summaries.node_summaries,
-                self.sources,
-                self.targets,
-                self.moments,
-                HIERARCHICAL_THETA,
-                out_components,
-                &mut scratch,
-            ),
-            HierarchicalError::Ok
-        );
-    }
-
-    fn solve_into_par(&mut self, out: (&mut [f64], &mut [f64], &mut [f64])) {
-        assert_eq!(
-            update_summaries(
-                &self.kernel,
-                self.source_tree.as_view(),
-                self.sources,
-                self.moments,
-                &mut self.source_summaries.node_summaries,
-            ),
-            HierarchicalError::Ok
-        );
-
-        let mut scratch = EvaluationScratch {
-            contribution: &mut self.parallel_scratch_value,
-        };
-        let out_components = [out.0, out.1, out.2];
-        assert_eq!(
-            eval_par(
-                &self.kernel,
-                self.source_tree.as_view(),
-                &self.source_summaries.node_summaries,
-                self.sources,
-                self.targets,
-                self.moments,
-                HIERARCHICAL_THETA,
-                out_components,
-                &mut scratch,
-            ),
-            HierarchicalError::Ok
-        );
-    }
-}
-
-fn hierarchical_dipole_build_and_solve<K>(
-    kernel: K,
-    loc: (&[f64], &[f64], &[f64]),
-    moment: (&[f64], &[f64], &[f64]),
-    outer_radius: &[f64],
-    obs: (&[f64], &[f64], &[f64]),
-    out: (&mut [f64], &mut [f64], &mut [f64]),
-) where
-    K: HierarchicalKernel<
-            Scalar = f64,
-            SourceGeometry = DipoleSource<f64>,
-            TargetGeometry = DipoleTarget<f64>,
-            SourceMoment = [f64; 3],
-            Output = [f64; 3],
-        > + Sync,
-{
-    let mut solve = HierarchicalDipoleSolve::new(kernel, loc, moment, outer_radius, obs);
-    solve.solve_into(out);
-}
 
 fn bench_flux_density_dipole(c: &mut Criterion) {
     let mut group = c.benchmark_group("Flux Density of a Magnetic Dipole");
@@ -241,13 +93,6 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                 },
             );
 
-            let mut hierarchical = HierarchicalDipoleSolve::new(
-                DipoleFluxDensityKernel::<f64>::new(),
-                (&locx, &locy, &locz),
-                (&momx, &momy, &momz),
-                &outer_radius,
-                (&obsx, &obsy, &obsz),
-            );
             group.bench_with_input(
                 BenchmarkId::new(
                     format!(
@@ -259,7 +104,19 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                 &ntot,
                 |b, &_| {
                     b.iter(|| {
-                        black_box(hierarchical.solve_into((&mut outx, &mut outy, &mut outz)))
+                        black_box(
+                            flux_density_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                &outer_radius,
+                                (&obsx, &obsy, &obsz),
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                false,
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
+                        )
                     });
                 },
             );
@@ -274,29 +131,19 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                 &ntot,
                 |b, &_| {
                     b.iter(|| {
-                        black_box(hierarchical.solve_into_par((&mut outx, &mut outy, &mut outz)))
-                    });
-                },
-            );
-            group.bench_with_input(
-                BenchmarkId::new(
-                    format!(
-                        "Flux Density of a Magnetic Dipole, Hierarchical Build+Solve\n{} src × {} obs",
-                        ndipoles, nobs
-                    ),
-                    ntot,
-                ),
-                &ntot,
-                |b, &_| {
-                    b.iter(|| {
-                        black_box(hierarchical_dipole_build_and_solve(
-                            DipoleFluxDensityKernel::<f64>::new(),
-                            (&locx, &locy, &locz),
-                            (&momx, &momy, &momz),
-                            &outer_radius,
-                            (&obsx, &obsy, &obsz),
-                            (&mut outx, &mut outy, &mut outz),
-                        ))
+                        black_box(
+                            flux_density_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                &outer_radius,
+                                (&obsx, &obsy, &obsz),
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                true,
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
+                        )
                     });
                 },
             );
@@ -384,13 +231,6 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                 },
             );
 
-            let mut hierarchical_moment = HierarchicalDipoleSolve::new(
-                DipoleVectorPotentialKernel::<f64>::new(),
-                (&locx, &locy, &locz),
-                (&momx, &momy, &momz),
-                &outer_radius,
-                (&obsx, &obsy, &obsz),
-            );
             group.bench_with_input(
                 BenchmarkId::new(
                     format!(
@@ -402,7 +242,19 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                 &ntot,
                 |b, &_| {
                     b.iter(|| {
-                        black_box(hierarchical_moment.solve_into((&mut outx, &mut outy, &mut outz)))
+                        black_box(
+                            vector_potential_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                &outer_radius,
+                                (&obsx, &obsy, &obsz),
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                false,
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
+                        )
                     });
                 },
             );
@@ -418,30 +270,18 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                 |b, &_| {
                     b.iter(|| {
                         black_box(
-                            hierarchical_moment.solve_into_par((&mut outx, &mut outy, &mut outz)),
+                            vector_potential_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                &outer_radius,
+                                (&obsx, &obsy, &obsz),
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                true,
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
                         )
-                    });
-                },
-            );
-            group.bench_with_input(
-                BenchmarkId::new(
-                    format!(
-                        "Vector Potential of a Magnetic Dipole, Hierarchical Build+Solve\n{} src × {} obs",
-                        ndipoles, nobs
-                    ),
-                    ntot,
-                ),
-                &ntot,
-                |b, &_| {
-                    b.iter(|| {
-                        black_box(hierarchical_dipole_build_and_solve(
-                            DipoleVectorPotentialKernel::<f64>::new(),
-                            (&locx, &locy, &locz),
-                            (&momx, &momy, &momz),
-                            &outer_radius,
-                            (&obsx, &obsy, &obsz),
-                            (&mut outx, &mut outy, &mut outz),
-                        ))
                     });
                 },
             );

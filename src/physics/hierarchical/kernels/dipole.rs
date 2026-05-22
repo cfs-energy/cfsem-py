@@ -221,6 +221,75 @@ pub struct DipoleTargetSummary<T: Scalar> {
     pub count: T,
 }
 
+/// Source summary shared by dipole flux-density and vector-potential kernels.
+///
+/// Both fields use the same Barnes-Hut source approximation: one total dipole
+/// moment located at the moment-magnitude-weighted source centroid.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DipoleSummary<T: Scalar> {
+    /// Moment-magnitude-weighted source location used by the far-field term.
+    pub centroid: [T; 3],
+    /// Total dipole moment for all sources in the node.
+    pub moment: [T; 3],
+    /// Sum of source moment magnitudes used for centroid weighting.
+    pub weight: T,
+}
+
+/// Build a shared dipole source summary from leaf source indices.
+#[inline]
+pub(super) fn summarize_dipole_leaf_sources<T, S, F>(
+    source_ids: &[u32],
+    sources: S,
+    moment_at: F,
+    out: &mut DipoleSummary<T>,
+) -> HierarchicalError
+where
+    T: Scalar,
+    S: BoundedGeometryCollection<T>,
+    F: Fn(usize) -> [T; 3],
+{
+    *out = DipoleSummary::default();
+    summarize_weighted_source_centroid(
+        source_ids,
+        sources,
+        &moment_at,
+        &mut out.centroid,
+        &mut out.weight,
+    );
+    for i in 0..source_ids.len() {
+        let source_id = source_ids[i] as usize;
+        add3_in_place(&mut out.moment, moment_at(source_id));
+    }
+    HierarchicalError::Ok
+}
+
+/// Combine child dipole summaries into one parent summary.
+#[inline]
+pub(super) fn combine_dipole_source_summaries<T: Scalar>(
+    children: &[DipoleSummary<T>],
+    out: &mut DipoleSummary<T>,
+) -> HierarchicalError {
+    *out = DipoleSummary::default();
+    for i in 0..children.len() {
+        out.weight = out.weight + children[i].weight;
+        for axis in 0..3 {
+            out.centroid[axis] =
+                children[i].centroid[axis].mul_add(children[i].weight, out.centroid[axis]);
+        }
+    }
+    if out.weight > T::ZERO {
+        for axis in 0..3 {
+            out.centroid[axis] = out.centroid[axis] / out.weight;
+        }
+    }
+
+    for i in 0..children.len() {
+        add3_in_place(&mut out.moment, children[i].moment);
+    }
+
+    HierarchicalError::Ok
+}
+
 #[inline]
 pub(super) fn summarize_weighted_source_centroid<T, S, F>(
     source_ids: &[u32],

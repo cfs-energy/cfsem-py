@@ -1,8 +1,9 @@
 use core::marker::PhantomData;
 
 use super::dipole::{
-    DipoleSource, DipoleTarget, DipoleTargetSummary, dipole_vector_potential,
-    summarize_target_leaf, summarize_weighted_source_centroid,
+    DipoleSource, DipoleSummary, DipoleTarget, DipoleTargetSummary,
+    combine_dipole_source_summaries, dipole_vector_potential, summarize_dipole_leaf_sources,
+    summarize_target_leaf,
 };
 use crate::math::add3_in_place;
 use crate::physics::hierarchical::{
@@ -10,12 +11,7 @@ use crate::physics::hierarchical::{
 };
 
 /// Source summary for dipole vector-potential clusters.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DipoleVectorPotentialSummary<T: Scalar> {
-    pub centroid: [T; 3],
-    pub moment: [T; 3],
-    pub weight: T,
-}
+pub type DipoleVectorPotentialSummary<T> = DipoleSummary<T>;
 
 /// Dipole vector-potential Barnes-Hut kernel.
 ///
@@ -56,19 +52,12 @@ impl<T: Scalar> HierarchicalKernel for DipoleVectorPotentialKernel<T> {
         S: SourceCollection<Self>,
         M: SourceMomentCollection<Self>,
     {
-        *out = DipoleVectorPotentialSummary::default();
-        summarize_weighted_source_centroid(
+        summarize_dipole_leaf_sources(
             source_ids,
             sources,
             |source_id| moments.moment(source_id),
-            &mut out.centroid,
-            &mut out.weight,
-        );
-        for i in 0..source_ids.len() {
-            let source_id = source_ids[i] as usize;
-            add3_in_place(&mut out.moment, moments.moment(source_id));
-        }
-        HierarchicalError::Ok
+            out,
+        )
     }
 
     #[inline]
@@ -78,25 +67,7 @@ impl<T: Scalar> HierarchicalKernel for DipoleVectorPotentialKernel<T> {
         _child_ids: &[u32],
         out: &mut Self::SourceSummary,
     ) -> HierarchicalError {
-        *out = DipoleVectorPotentialSummary::default();
-        for i in 0..children.len() {
-            out.weight = out.weight + children[i].weight;
-            for axis in 0..3 {
-                out.centroid[axis] =
-                    children[i].centroid[axis].mul_add(children[i].weight, out.centroid[axis]);
-            }
-        }
-        if out.weight > T::ZERO {
-            for axis in 0..3 {
-                out.centroid[axis] = out.centroid[axis] / out.weight;
-            }
-        }
-
-        for i in 0..children.len() {
-            add3_in_place(&mut out.moment, children[i].moment);
-        }
-
-        HierarchicalError::Ok
+        combine_dipole_source_summaries(children, out)
     }
 
     #[inline]

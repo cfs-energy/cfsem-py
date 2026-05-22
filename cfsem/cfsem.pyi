@@ -665,35 +665,6 @@ def triangle_mesh_force_mapping_from_dipoles(
     par: bool = True,
     quad: str = "dunavant3",
 ) -> ArrayTriple: ...
-def triangle_mesh_force_mapping_from_linear_filaments_matrix(
-    xyzfil: ArrayTriple,
-    dlxyzfil: ArrayTriple,
-    wire_radius: FloatArray,
-    nodes_tgt: FloatMatrix,
-    triangles_tgt: IntMatrix,
-    s_tgt: FloatArray,
-    par: bool = True,
-    quad: str = "dunavant3",
-) -> FloatArray: ...
-def triangle_mesh_force_mapping_from_dipoles_matrix(
-    loc: ArrayTriple,
-    moment_dir: ArrayTriple,
-    outer_radius: FloatArray,
-    nodes_tgt: FloatMatrix,
-    triangles_tgt: IntMatrix,
-    s_tgt: FloatArray,
-    par: bool = True,
-    quad: str = "dunavant3",
-) -> FloatArray: ...
-def triangle_mesh_force_mapping_from_circular_filaments_matrix(
-    rfil: FloatArray,
-    zfil: FloatArray,
-    nodes_tgt: FloatMatrix,
-    triangles_tgt: IntMatrix,
-    s_tgt: FloatArray,
-    par: bool = True,
-    quad: str = "dunavant3",
-) -> FloatArray: ...
 def solenoid_stress_fem_assemble_model_2d_f64(
     nodes: FloatMatrix,
     elements: UIntMatrix,

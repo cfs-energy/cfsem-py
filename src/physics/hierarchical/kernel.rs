@@ -13,6 +13,7 @@ pub enum HierarchicalError {
     CapacityExceeded = 6,
     KernelError0 = 7,
     KernelError1 = 8,
+    Unknown = 9,
 }
 
 impl HierarchicalError {
@@ -35,7 +36,7 @@ impl HierarchicalError {
             6 => Self::CapacityExceeded,
             7 => Self::KernelError0,
             8 => Self::KernelError1,
-            _ => Self::KernelError1,
+            _ => Self::Unknown,
         }
     }
 }

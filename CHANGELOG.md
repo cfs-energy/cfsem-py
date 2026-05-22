@@ -1,6 +1,6 @@
 # Changelog
 
-## 9.0.0 2026-05-07
+## 9.0.0 2026-05-22
 
 * Rust
     * !Consolidate math helper functions and use consistent array argument format
@@ -25,8 +25,6 @@
     * Add hierarchical functions and diagnostics result types to public exports
     * Add `MU_0` and `inductance_matrix_axisymmetric_coaxial_rectangular_coils` to public exports
     * Correct wrapper type hints for sparse triplets and circular-to-linear mutual inductance
-    * Build Python extension with the release profile
-    * Fix README license URL formatting
 
 ## 8.3.0 2026-05-04
 

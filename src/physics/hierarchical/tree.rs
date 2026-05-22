@@ -4,10 +4,10 @@ use super::{Aabb, BoundedGeometryCollection, HierarchicalError, Scalar};
 
 const INVALID_INDEX: u32 = u32::MAX;
 /// Adjacent spatial gap must exceed this multiple of the mean sorted gap before
-/// the recursive builder treats it as a cluster boundary.
+/// the longest-axis builder treats it as a cluster boundary.
 const SPATIAL_GAP_DOMINANCE_FACTOR: f64 = 4.0;
 /// Adjacent spatial gap must cover at least this fraction of the node span
-/// before the recursive builder treats it as a cluster boundary.
+/// before the longest-axis builder treats it as a cluster boundary.
 const SPATIAL_GAP_MIN_SPAN_FRACTION: f64 = 0.05;
 /// Adjacent Morton-code gap must exceed this multiple of the mean sorted code
 /// gap before the LBVH builder treats it as a cluster boundary.
@@ -27,13 +27,22 @@ const MORTON_BITS_PER_AXIS: u32 = 21;
 const MORTON_MAX_COORD: u64 = (1_u64 << MORTON_BITS_PER_AXIS) - 1;
 
 /// CPU tree construction strategy.
+///
+/// Both builders are implemented with explicit stack buffers rather than true
+/// recursion. The strategy name `Recursive` is retained for API compatibility
+/// with earlier versions of the hierarchical solver.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BuildMethod {
-    /// Recursively sort each node range by the longest AABB axis, then split
-    /// at a dominant adjacent spatial gap on that axis or the median otherwise.
+    /// Sort each node range by the longest AABB axis, then split at a dominant
+    /// adjacent spatial gap on that axis or the median otherwise.
+    ///
+    /// This method follows the same divide-and-conquer tree shape as a recursive
+    /// builder, but uses an explicit stack internally.
     Recursive,
     /// Sort once by Morton code, then split contiguous ranges at a dominant
     /// adjacent Morton-code gap or the median otherwise.
+    ///
+    /// This method also uses an explicit stack internally.
     MortonLbvh,
 }
 
@@ -222,8 +231,9 @@ impl<T: Scalar> ClusterTree<T> {
             tree.sorted_indices.push(usize_to_u32(i)?);
         }
 
-        // LBVH pays one global sort up front. The recursive builder can then
-        // split ranges at code gaps or medians without reordering within subtrees.
+        // LBVH pays one global sort up front. The explicit-stack builder can
+        // then split ranges at code gaps or medians without reordering within
+        // subtrees.
         if method == BuildMethod::MortonLbvh {
             tree.sorted_morton_codes = sort_indices_by_morton(&mut tree.sorted_indices, geometry);
         }

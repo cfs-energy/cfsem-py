@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -1064,12 +1063,17 @@ def make_self_field_figure(results: dict[str, object], field: str):
     return fig
 
 
-def speedup_text(direct_time: Any, hierarchical_time: Any) -> str:
-    direct = float(direct_time)
-    hierarchical = float(hierarchical_time)
-    if hierarchical <= 0.0:
+def speedup_text(direct_time: float, hierarchical_time: float) -> str:
+    if hierarchical_time <= 0.0:
         return "n/a"
-    return f"{direct / hierarchical:.2f}x"
+    return f"{direct_time / hierarchical_time:.2f}x"
+
+
+def result_float(results: dict[str, object], key: str) -> float:
+    value = results[key]
+    if isinstance(value, int | float | np.floating):
+        return float(value)
+    raise TypeError(f"{key} must be numeric")
 
 
 def make_app():
@@ -1305,7 +1309,10 @@ def make_app():
             self_speedup = (
                 "n/a"
                 if self_field["direct_skipped"]
-                else speedup_text(self_field["direct_time"], self_field["hierarchical_eval_time"])
+                else speedup_text(
+                    float(self_field["direct_time"]),
+                    float(self_field["hierarchical_eval_time"]),
+                )
             )
             self_text = (
                 f"\nself-field source-source interactions={self_field['interactions']:.1E}\n"
@@ -1314,6 +1321,10 @@ def make_app():
                 f"evaluation={self_field['hierarchical_eval_time']:.3f}s, "
                 f"speedup={self_speedup}"
             )
+        direct_build_time = result_float(results, "direct_build_time")
+        direct_time = result_float(results, "direct_time")
+        build_time = result_float(results, "build_time")
+        eval_time = result_float(results, "eval_time")
         timing = (
             f"nsrc={results['source_count']}, nobs={geometry.obs[0].size}, "
             f"plane={geometry.obs_grid[0].shape[0]}x{geometry.obs_grid[0].shape[1]}\n"
@@ -1322,11 +1333,11 @@ def make_app():
             f"twist_pitch={float(twist_pitch):.3f}, helix_width={float(helix_width):.3f}, "
             f"bend_curvature={float(bend_curvature):.3f}, loop_fraction={float(loop_fraction):.2f}\n"
             f"original source-target interactions={results['source_target_interactions']:.1E}\n"
-            f"direct:       construction={results['direct_build_time']:.3f}s, "
-            f"evaluation={results['direct_time']:.3f}s\n"
-            f"hierarchical: construction={results['build_time']:.3f}s, "
-            f"evaluation={results['eval_time']:.3f}s, "
-            f"speedup={speedup_text(results['direct_time'], results['eval_time'])}"
+            f"direct:       construction={direct_build_time:.3f}s, "
+            f"evaluation={direct_time:.3f}s\n"
+            f"hierarchical: construction={build_time:.3f}s, "
+            f"evaluation={eval_time:.3f}s, "
+            f"speedup={speedup_text(direct_time, eval_time)}"
             f"{self_text}"
         )
         return fig, self_fig, timing

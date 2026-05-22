@@ -291,7 +291,7 @@ def flux_density_dipole_hierarchical(
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
-        out: Optional output component arrays to fill.
+        out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
@@ -328,7 +328,7 @@ def vector_potential_dipole_hierarchical(
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
-        out: Optional output component arrays to fill.
+        out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
@@ -375,7 +375,7 @@ def flux_density_linear_filament_hierarchical(
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
-        out: Optional output component arrays to fill.
+        out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
@@ -437,7 +437,7 @@ def vector_potential_linear_filament_hierarchical(
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
-        out: Optional output component arrays to fill.
+        out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
@@ -531,7 +531,7 @@ def flux_density_triangle_mesh_hierarchical(
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
-        out: Optional output component arrays to fill.
+        out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:
@@ -570,7 +570,7 @@ def vector_potential_triangle_mesh_hierarchical(
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
-        out: Optional output component arrays to fill.
+        out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
 
     Returns:

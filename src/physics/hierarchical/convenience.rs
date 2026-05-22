@@ -65,7 +65,7 @@ impl<K: HierarchicalKernel> Diagnostics<K> {
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Nothing on success.
+///     Source-tree diagnostics and construction/evaluation timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -117,7 +117,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Nothing on success.
+///     Source-tree diagnostics and construction/evaluation timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -170,7 +170,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Nothing on success.
+///     Source-tree diagnostics and construction/evaluation timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -223,7 +223,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Nothing on success.
+///     Source-tree diagnostics and construction/evaluation timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -275,7 +275,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Nothing on success.
+///     Source-tree diagnostics and construction/evaluation timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, mesh conversion fails,
@@ -329,7 +329,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Nothing on success.
+///     Source-tree diagnostics and construction/evaluation timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, mesh conversion fails,

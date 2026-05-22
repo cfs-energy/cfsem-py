@@ -20,8 +20,12 @@ SparseF32: TypeAlias = tuple[Float32Array, UIntArray, UIntArray, int, int]
 SourceTreeDiagnostics: TypeAlias = tuple[
     FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray
 ]
+# Source tree diagnostic tuple order:
+# min_x, min_y, min_z, max_x, max_y, max_z, level.
 
 class HierarchicalDiagnostics:
+    """Timing, size, and optional tree diagnostics from a hierarchical solve."""
+
     @property
     def construction_time(self) -> float: ...
     @property
@@ -36,6 +40,8 @@ class HierarchicalDiagnostics:
     def accepted_levels(self) -> FloatArray | None: ...
 
 class SolveResult:
+    """Field arrays and diagnostics returned by a hierarchical solve."""
+
     @property
     def field(self) -> ArrayTriple: ...
     @property

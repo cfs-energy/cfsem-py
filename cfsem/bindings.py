@@ -1,8 +1,11 @@
 """
 Symmetric bindings for backend calcs.
 
-This fulfills the function of typing stubs, while also guaranteeing arrays are
-passed as contiguous and reallocating into contiguous inputs if necessary.
+These wrappers provide the ergonomic public Python API around lower-level Rust
+extension functions. Most wrappers normalize accepted array layouts into
+contiguous component arrays before calling Rust. Hierarchical one-shot solvers
+are imported directly from the Rust extension and are documented in
+`cfsem/cfsem.pyi`.
 """
 
 from typing import Literal

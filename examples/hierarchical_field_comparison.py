@@ -456,9 +456,7 @@ def solve_self_fields(
     if interactions <= MAX_DIRECT_SELF_INTERACTIONS:
         t0 = time.perf_counter()
         if source_geometry == "dipole":
-            dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(
-                geometry, geometry_layout
-            )
+            dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
             direct_b = cfsem.flux_density_dipole(
                 dipole_loc,
                 dipole_moment,
@@ -493,9 +491,7 @@ def solve_self_fields(
                 par=par,
             )
         else:
-            xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(
-                geometry, geometry_layout
-            )
+            xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
             direct_b = cfsem.flux_density_linear_filament(
                 self_obs,
                 xyzfil,
@@ -1302,9 +1298,7 @@ def make_app():
         self_text = ""
         if isinstance(self_field, dict):
             direct_self = (
-                "skipped"
-                if self_field["direct_skipped"]
-                else f"{float(self_field['direct_time']):.3f}s"
+                "skipped" if self_field["direct_skipped"] else f"{float(self_field['direct_time']):.3f}s"
             )
             self_speedup = (
                 "n/a"

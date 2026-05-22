@@ -126,6 +126,7 @@ __all__ = [
     "vector_potential_point_segment",
     "HierarchicalDiagnostics",
     "SolveResult",
+    "MU_0",
     "body_force_density_circular_filament_cartesian",
     "body_force_density_linear_filament",
     "DimensionalityError",

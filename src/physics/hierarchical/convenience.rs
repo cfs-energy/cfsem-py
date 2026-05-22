@@ -409,7 +409,6 @@ where
     let construction_seconds = construction_start.elapsed().as_secs_f64();
 
     let evaluation_start = Instant::now();
-    let mut values = vec![[T::ZERO; 3]; targets.len()];
     let scratch_len = match par {
         true => scratch_len_par(targets.len()),
         false => scratch_len(),
@@ -418,6 +417,7 @@ where
     let mut scratch = EvaluationScratch {
         contribution: &mut scratch_values,
     };
+    let out_components = [out.0, out.1, out.2];
     err = match par {
         true => eval_par(
             &kernel,
@@ -427,7 +427,7 @@ where
             targets,
             moments,
             theta,
-            &mut values,
+            out_components,
             &mut scratch,
         ),
         false => eval(
@@ -438,7 +438,7 @@ where
             targets,
             moments,
             theta,
-            &mut values,
+            out_components,
             &mut scratch,
         ),
     };
@@ -447,11 +447,6 @@ where
     }
     let evaluation_seconds = evaluation_start.elapsed().as_secs_f64();
 
-    for i in 0..values.len() {
-        out.0[i] = values[i][0];
-        out.1[i] = values[i][1];
-        out.2[i] = values[i][2];
-    }
     Ok(Diagnostics {
         source_tree,
         construction_seconds,

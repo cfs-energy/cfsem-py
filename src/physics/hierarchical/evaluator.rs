@@ -2,7 +2,6 @@ use super::{
     BoundedGeometry, ClusterTreeView, HierarchicalError, HierarchicalKernel, Scalar,
     SourceCollection, SourceMomentCollection, TargetCollection,
 };
-use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// CPU-owned source summary storage.
@@ -86,26 +85,27 @@ where
     propagate_source_summaries(kernel, tree, summaries)
 }
 
-/// Evaluate targets independently against the source tree.
+/// Evaluate vector-valued targets independently against the source tree.
 ///
 /// This is the public hierarchical evaluation path. Each target is summarized
-/// as a single target leaf, then walked against the source tree using the same
-/// source-side acceptance criterion as the lower-level interaction-plan
-/// evaluator.
+/// as a single target leaf, walked against the source tree, and written directly
+/// into caller-provided component slices. The output slice count must match the
+/// kernel output dimension `D`.
 #[inline]
-pub fn eval<K, S, M, C>(
+pub fn eval<K, T, S, M, C, const D: usize>(
     kernel: &K,
-    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_tree: ClusterTreeView<'_, T>,
     source_summaries: &[K::SourceSummary],
     sources: S,
     targets: C,
     moments: M,
-    theta: K::Scalar,
-    out: &mut [K::Output],
-    scratch: &mut EvaluationScratch<'_, K::Output>,
+    theta: T,
+    out: [&mut [T]; D],
+    scratch: &mut EvaluationScratch<'_, [T; D]>,
 ) -> HierarchicalError
 where
-    K: HierarchicalKernel,
+    K: HierarchicalKernel<Scalar = T, Output = [T; D]>,
+    T: Scalar,
     K::TargetGeometry: Copy,
     S: SourceCollection<K>,
     M: SourceMomentCollection<K>,
@@ -129,32 +129,38 @@ where
 }
 
 #[inline]
-fn eval_validated<K, S, M, C>(
+fn eval_validated<K, T, S, M, C, const D: usize>(
     kernel: &K,
-    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_tree: ClusterTreeView<'_, T>,
     source_summaries: &[K::SourceSummary],
     sources: S,
     targets: C,
     moments: M,
-    theta: K::Scalar,
-    out: &mut [K::Output],
-    scratch: &mut EvaluationScratch<'_, K::Output>,
+    theta: T,
+    out: [&mut [T]; D],
+    scratch: &mut EvaluationScratch<'_, [T; D]>,
 ) -> HierarchicalError
 where
-    K: HierarchicalKernel,
+    K: HierarchicalKernel<Scalar = T, Output = [T; D]>,
+    T: Scalar,
     K::TargetGeometry: Copy,
     S: SourceCollection<K>,
     M: SourceMomentCollection<K>,
     C: TargetCollection<K>,
 {
-    if sources.len() != source_tree.n_items()
+    if D == 0
+        || sources.len() != source_tree.n_items()
         || !sources.valid_lengths()
         || moments.len() != source_tree.n_items()
         || !moments.valid_lengths()
-        || targets.len() != out.len()
         || !targets.valid_lengths()
     {
         return HierarchicalError::LengthMismatch;
+    }
+    for component in 0..D {
+        if out[component].len() != targets.len() {
+            return HierarchicalError::LengthMismatch;
+        }
     }
     if source_summaries.len() < source_tree.n_nodes() || scratch.contribution.is_empty() {
         return HierarchicalError::ScratchTooSmall;
@@ -163,6 +169,7 @@ where
     let mut target_summary = K::TargetSummary::default();
     let mut active = Vec::new();
     let target_ids = [0_u32];
+    let mut target_out = [T::ZERO; D];
 
     for target_id in 0..targets.len() {
         let target = targets.target(target_id);
@@ -174,7 +181,7 @@ where
             target,
             moments,
             theta,
-            &mut out[target_id],
+            &mut target_out,
             &mut scratch.contribution[0],
             &mut target_summary,
             &mut active,
@@ -182,6 +189,9 @@ where
         );
         if err != HierarchicalError::Ok {
             return err;
+        }
+        for component in 0..D {
+            out[component][target_id] = target_out[component];
         }
     }
 
@@ -254,26 +264,28 @@ where
     HierarchicalError::Ok
 }
 
-/// Evaluate targets independently against the source tree in parallel over target chunks.
+/// Evaluate vector-valued targets against the source tree in parallel over target chunks.
 ///
 /// This is intentionally the simplest parallelization of the single-tree
-/// solver: each worker owns a disjoint target/output slice and runs the serial
-/// source-tree evaluator on that slice. It shares the source tree and source
-/// summaries between workers, and avoids any cross-thread output accumulation.
+/// solver: each worker owns disjoint target and component output slices and
+/// runs the serial source-tree evaluator on that slice. It shares the source
+/// tree and source summaries between workers, and avoids any cross-thread
+/// output accumulation.
 #[inline]
-pub fn eval_par<K, S, M, C>(
+pub fn eval_par<K, T, S, M, C, const D: usize>(
     kernel: &K,
-    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_tree: ClusterTreeView<'_, T>,
     source_summaries: &[K::SourceSummary],
     sources: S,
     targets: C,
     moments: M,
-    theta: K::Scalar,
-    out: &mut [K::Output],
-    scratch: &mut EvaluationScratch<'_, K::Output>,
+    theta: T,
+    out: [&mut [T]; D],
+    scratch: &mut EvaluationScratch<'_, [T; D]>,
 ) -> HierarchicalError
 where
-    K: HierarchicalKernel + Sync,
+    K: HierarchicalKernel<Scalar = T, Output = [T; D]> + Sync,
+    T: Scalar,
     K::TargetGeometry: Copy,
     S: SourceCollection<K>,
     M: SourceMomentCollection<K>,
@@ -283,14 +295,19 @@ where
     if err != HierarchicalError::Ok {
         return err;
     }
-    if sources.len() != source_tree.n_items()
+    if D == 0
+        || sources.len() != source_tree.n_items()
         || !sources.valid_lengths()
         || moments.len() != source_tree.n_items()
         || !moments.valid_lengths()
-        || targets.len() != out.len()
         || !targets.valid_lengths()
     {
         return HierarchicalError::LengthMismatch;
+    }
+    for component in 0..D {
+        if out[component].len() != targets.len() {
+            return HierarchicalError::LengthMismatch;
+        }
     }
     if source_summaries.len() < source_tree.n_nodes() {
         return HierarchicalError::ScratchTooSmall;
@@ -306,45 +323,131 @@ where
     }
 
     let error_code = AtomicU32::new(HierarchicalError::Ok as u32);
+    eval_par_chunks(
+        kernel,
+        source_tree,
+        source_summaries,
+        sources,
+        targets,
+        moments,
+        theta,
+        out,
+        &mut scratch.contribution[..chunk_count],
+        chunk_size,
+        &error_code,
+    );
 
-    (
-        (0..chunk_count).into_par_iter(),
-        out.par_chunks_mut(chunk_size),
-        scratch.contribution[..chunk_count].par_iter_mut(),
-    )
-        .into_par_iter()
-        .for_each(|(chunk_id, out_chunk, contribution)| {
-            if error_code.load(Ordering::Relaxed) != HierarchicalError::Ok as u32 {
-                return;
-            }
-            let start = chunk_id * chunk_size;
-            let end = start + out_chunk.len();
-            let target_chunk = targets.slice(start, end);
-            let mut chunk_scratch = EvaluationScratch {
-                contribution: core::slice::from_mut(contribution),
-            };
-            let err = eval_validated(
+    HierarchicalError::from_u32(error_code.load(Ordering::Relaxed))
+}
+
+#[inline]
+fn eval_par_chunks<K, T, S, M, C, const D: usize>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, T>,
+    source_summaries: &[K::SourceSummary],
+    sources: S,
+    targets: C,
+    moments: M,
+    theta: T,
+    out: [&mut [T]; D],
+    scratch_contributions: &mut [[T; D]],
+    chunk_size: usize,
+    error_code: &AtomicU32,
+) where
+    K: HierarchicalKernel<Scalar = T, Output = [T; D]> + Sync,
+    T: Scalar,
+    K::TargetGeometry: Copy,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
+    C: TargetCollection<K>,
+{
+    if error_code.load(Ordering::Relaxed) != HierarchicalError::Ok as u32 {
+        return;
+    }
+
+    let target_count = targets.len();
+    if target_count <= chunk_size {
+        let mut chunk_scratch = EvaluationScratch {
+            contribution: &mut scratch_contributions[..1],
+        };
+        let err = eval_validated(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            &mut chunk_scratch,
+        );
+        if err != HierarchicalError::Ok {
+            let _ = error_code.compare_exchange(
+                HierarchicalError::Ok as u32,
+                err as u32,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
+        }
+        return;
+    }
+
+    let chunk_count = target_count.div_ceil(chunk_size);
+    let left_chunk_count = chunk_count / 2;
+    let left_target_count = left_chunk_count * chunk_size;
+    let (left_out, right_out) = split_output_components(out, left_target_count);
+    let (left_scratch, right_scratch) = scratch_contributions.split_at_mut(left_chunk_count);
+    let left_targets = targets.slice(0, left_target_count);
+    let right_targets = targets.slice(left_target_count, target_count);
+
+    rayon::join(
+        || {
+            eval_par_chunks(
                 kernel,
                 source_tree,
                 source_summaries,
                 sources,
-                target_chunk,
+                left_targets,
                 moments,
                 theta,
-                out_chunk,
-                &mut chunk_scratch,
+                left_out,
+                left_scratch,
+                chunk_size,
+                error_code,
             );
-            if err != HierarchicalError::Ok {
-                let _ = error_code.compare_exchange(
-                    HierarchicalError::Ok as u32,
-                    err as u32,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                );
-            }
-        });
+        },
+        || {
+            eval_par_chunks(
+                kernel,
+                source_tree,
+                source_summaries,
+                sources,
+                right_targets,
+                moments,
+                theta,
+                right_out,
+                right_scratch,
+                chunk_size,
+                error_code,
+            );
+        },
+    );
+}
 
-    HierarchicalError::from_u32(error_code.load(Ordering::Relaxed))
+#[inline]
+fn split_output_components<T, const D: usize>(
+    mut out: [&mut [T]; D],
+    mid: usize,
+) -> ([&mut [T]; D], [&mut [T]; D]) {
+    let mut left: [&mut [T]; D] = std::array::from_fn(|_| &mut [] as &mut [T]);
+    let mut right: [&mut [T]; D] = std::array::from_fn(|_| &mut [] as &mut [T]);
+    for component in 0..D {
+        let full = std::mem::take(&mut out[component]);
+        let (left_component, right_component) = full.split_at_mut(mid);
+        left[component] = left_component;
+        right[component] = right_component;
+    }
+    (left, right)
 }
 
 /// Compute the source-tree level represented at each target by the terminal traversal nodes.

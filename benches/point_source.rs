@@ -36,7 +36,6 @@ struct HierarchicalDipoleSolve<
     moments: DipoleMoments<'a, f64>,
     source_tree: ClusterTree<f64>,
     source_summaries: SourceNodeSummaries<K>,
-    vector_out: Vec<[f64; 3]>,
     scratch_value: [[f64; 3]; 1],
     parallel_scratch_value: Vec<[f64; 3]>,
 }
@@ -65,7 +64,6 @@ where
         let source_tree = ClusterTree::build_morton_lbvh(sources).unwrap();
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let target_count = obs.0.len();
-        let vector_out = vec![[0.0; 3]; target_count];
         let parallel_scratch_value = vec![[0.0; 3]; scratch_len_par(target_count)];
 
         Self {
@@ -75,7 +73,6 @@ where
             moments,
             source_tree,
             source_summaries,
-            vector_out,
             scratch_value: [[0.0; 3]; 1],
             parallel_scratch_value,
         }
@@ -96,6 +93,7 @@ where
         let mut scratch = EvaluationScratch {
             contribution: &mut self.scratch_value,
         };
+        let out_components = [out.0, out.1, out.2];
         assert_eq!(
             eval(
                 &self.kernel,
@@ -105,17 +103,11 @@ where
                 self.targets,
                 self.moments,
                 HIERARCHICAL_THETA,
-                &mut self.vector_out,
+                out_components,
                 &mut scratch,
             ),
             HierarchicalError::Ok
         );
-
-        for i in 0..self.vector_out.len() {
-            out.0[i] = self.vector_out[i][0];
-            out.1[i] = self.vector_out[i][1];
-            out.2[i] = self.vector_out[i][2];
-        }
     }
 
     fn solve_into_par(&mut self, out: (&mut [f64], &mut [f64], &mut [f64])) {
@@ -133,6 +125,7 @@ where
         let mut scratch = EvaluationScratch {
             contribution: &mut self.parallel_scratch_value,
         };
+        let out_components = [out.0, out.1, out.2];
         assert_eq!(
             eval_par(
                 &self.kernel,
@@ -142,17 +135,11 @@ where
                 self.targets,
                 self.moments,
                 HIERARCHICAL_THETA,
-                &mut self.vector_out,
+                out_components,
                 &mut scratch,
             ),
             HierarchicalError::Ok
         );
-
-        for i in 0..self.vector_out.len() {
-            out.0[i] = self.vector_out[i][0];
-            out.1[i] = self.vector_out[i][1];
-            out.2[i] = self.vector_out[i][2];
-        }
     }
 }
 

@@ -60,7 +60,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
     type SourceMoment = T;
     type SourceSummary = SourceSummary<T>;
     type TargetSummary = TargetSummary<T>;
-    type Output = T;
+    type Output = [T; 1];
 
     fn summarize_leaf_sources<S, M>(
         &self,
@@ -144,7 +144,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         out: &mut Self::Output,
     ) {
         let r2 = dist2(target.point, source.point);
-        *out = *moment / (T::ONE + r2);
+        out[0] = *moment / (T::ONE + r2);
     }
 
     fn eval_far(
@@ -154,15 +154,15 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         out: &mut Self::Output,
     ) {
         let r2 = dist2(target.centroid, source.centroid);
-        *out = source.moment / (T::ONE + r2);
+        out[0] = source.moment / (T::ONE + r2);
     }
 
     fn zero_output(&self, out: &mut Self::Output) {
-        *out = T::ZERO;
+        out[0] = T::ZERO;
     }
 
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
-        *out = *out + *contribution;
+        out[0] = out[0] + contribution[0];
     }
 }
 
@@ -193,6 +193,100 @@ fn points_f32(values: &[[f32; 3]]) -> Vec<MockPoint<f32>> {
         out.push(MockPoint { point: values[i] });
     }
     out
+}
+
+fn eval_rows<K, T, S, M, C, const D: usize, const N: usize>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, T>,
+    source_summaries: &[K::SourceSummary],
+    sources: S,
+    targets: C,
+    moments: M,
+    theta: T,
+    out: &mut [[T; D]; N],
+    scratch: &mut EvaluationScratch<'_, [T; D]>,
+) -> HierarchicalError
+where
+    K: HierarchicalKernel<Scalar = T, Output = [T; D]>,
+    T: Scalar,
+    K::TargetGeometry: Copy,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
+    C: TargetCollection<K>,
+{
+    let mut columns: [Vec<T>; D] = std::array::from_fn(|_| vec![T::ZERO; N]);
+    let mut column_slices: [&mut [T]; D] = std::array::from_fn(|_| &mut [] as &mut [T]);
+    for (slice, column) in column_slices.iter_mut().zip(columns.iter_mut()) {
+        *slice = column.as_mut_slice();
+    }
+    let err = super::eval(
+        kernel,
+        source_tree,
+        source_summaries,
+        sources,
+        targets,
+        moments,
+        theta,
+        column_slices,
+        scratch,
+    );
+    if err != HierarchicalError::Ok {
+        return err;
+    }
+
+    for target_id in 0..N {
+        for component in 0..D {
+            out[target_id][component] = columns[component][target_id];
+        }
+    }
+    HierarchicalError::Ok
+}
+
+fn eval_par_rows<K, T, S, M, C, const D: usize, const N: usize>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, T>,
+    source_summaries: &[K::SourceSummary],
+    sources: S,
+    targets: C,
+    moments: M,
+    theta: T,
+    out: &mut [[T; D]; N],
+    scratch: &mut EvaluationScratch<'_, [T; D]>,
+) -> HierarchicalError
+where
+    K: HierarchicalKernel<Scalar = T, Output = [T; D]> + Sync,
+    T: Scalar,
+    K::TargetGeometry: Copy,
+    S: SourceCollection<K>,
+    M: SourceMomentCollection<K>,
+    C: TargetCollection<K>,
+{
+    let mut columns: [Vec<T>; D] = std::array::from_fn(|_| vec![T::ZERO; N]);
+    let mut column_slices: [&mut [T]; D] = std::array::from_fn(|_| &mut [] as &mut [T]);
+    for (slice, column) in column_slices.iter_mut().zip(columns.iter_mut()) {
+        *slice = column.as_mut_slice();
+    }
+    let err = super::eval_par(
+        kernel,
+        source_tree,
+        source_summaries,
+        sources,
+        targets,
+        moments,
+        theta,
+        column_slices,
+        scratch,
+    );
+    if err != HierarchicalError::Ok {
+        return err;
+    }
+
+    for target_id in 0..N {
+        for component in 0..D {
+            out[target_id][component] = columns[component][target_id];
+        }
+    }
+    HierarchicalError::Ok
 }
 
 #[test]
@@ -312,7 +406,7 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
     let mut a_out = [[0.0; 3]; 2];
 
     assert_eq!(
-        eval(
+        eval_rows(
             &b_kernel,
             source_tree.as_view(),
             &b_source_summaries.node_summaries,
@@ -326,7 +420,7 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        eval(
+        eval_rows(
             &a_kernel,
             source_tree.as_view(),
             &a_source_summaries.node_summaries,
@@ -467,7 +561,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -581,7 +675,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -743,7 +837,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     };
     let mut active_only = [[0.0; 3]; 1];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -774,7 +868,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     );
     let mut with_inactive = [[0.0; 3]; 1];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -850,7 +944,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
     let mut far = [[0.0; 3]; 1];
     let mut direct = [[0.0; 3]; 1];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -937,7 +1031,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1034,7 +1128,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
     let mut bh = [[0.0; 3]; 2];
     let mut dense = [[0.0; 3]; 2];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1123,7 +1217,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1148,7 +1242,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1252,7 +1346,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
     };
     let mut out = [[0.0; 3]; 1];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1546,14 +1640,14 @@ fn theta_zero_matches_dense_direct_f32() {
         HierarchicalError::Ok
     );
 
-    let mut scratch_value = [0.0_f32];
+    let mut scratch_value = [[0.0_f32; 1]];
     let mut scratch = EvaluationScratch {
         contribution: &mut scratch_value,
     };
-    let mut bh = [0.0_f32; 2];
-    let mut dense = [0.0_f32; 2];
+    let mut bh = [[0.0_f32; 1]; 2];
+    let mut dense = [[0.0_f32; 1]; 2];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1578,7 +1672,7 @@ fn theta_zero_matches_dense_direct_f32() {
         HierarchicalError::Ok
     );
     for i in 0..bh.as_slice().len() {
-        assert!((bh[i] - dense[i]).abs() < 1e-5);
+        assert!((bh[i][0] - dense[i][0]).abs() < 1e-5);
     }
 }
 
@@ -1601,15 +1695,15 @@ fn source_tree_theta_zero_matches_dense_direct() {
         HierarchicalError::Ok
     );
 
-    let mut source_tree_out = [0.0; 2];
-    let mut source_tree_out_par = [0.0; 2];
-    let mut dense = [0.0; 2];
-    let mut scratch_value = [0.0];
+    let mut source_tree_out = [[0.0; 1]; 2];
+    let mut source_tree_out_par = [[0.0; 1]; 2];
+    let mut dense = [[0.0; 1]; 2];
+    let mut scratch_value = [[0.0; 1]];
     let mut scratch = EvaluationScratch {
         contribution: &mut scratch_value,
     };
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1622,12 +1716,12 @@ fn source_tree_theta_zero_matches_dense_direct() {
         ),
         HierarchicalError::Ok
     );
-    let mut par_scratch_value = vec![0.0; scratch_len_par(targets.as_slice().len())];
+    let mut par_scratch_value = vec![[0.0; 1]; scratch_len_par(targets.as_slice().len())];
     let mut par_scratch = EvaluationScratch {
         contribution: &mut par_scratch_value,
     };
     assert_eq!(
-        eval_par(
+        eval_par_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1652,8 +1746,8 @@ fn source_tree_theta_zero_matches_dense_direct() {
         HierarchicalError::Ok
     );
     for i in 0..targets.as_slice().len() {
-        assert!((source_tree_out[i] - dense[i]).abs() < 1.0e-14);
-        assert!((source_tree_out_par[i] - dense[i]).abs() < 1.0e-14);
+        assert!((source_tree_out[i][0] - dense[i][0]).abs() < 1.0e-14);
+        assert!((source_tree_out_par[i][0] - dense[i][0]).abs() < 1.0e-14);
     }
 }
 
@@ -1663,7 +1757,7 @@ fn dense_direct_reports_empty_scratch() {
     let sources = points_f64(&[[0.0, 0.0, 0.0]]);
     let targets = points_f64(&[[1.0, 0.0, 0.0]]);
     let moments = [1.0];
-    let mut out = [0.0];
+    let mut out = [[0.0; 1]];
     let mut scratch = EvaluationScratch {
         contribution: &mut [],
     };
@@ -1698,14 +1792,14 @@ fn run_theta_zero_matches_dense_direct_f64() {
         HierarchicalError::Ok
     );
 
-    let mut scratch_value = [0.0_f64];
+    let mut scratch_value = [[0.0_f64; 1]];
     let mut scratch = EvaluationScratch {
         contribution: &mut scratch_value,
     };
-    let mut bh = [0.0_f64; 2];
-    let mut dense = [0.0_f64; 2];
+    let mut bh = [[0.0_f64; 1]; 2];
+    let mut dense = [[0.0_f64; 1]; 2];
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -1730,7 +1824,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
         HierarchicalError::Ok
     );
     for i in 0..bh.as_slice().len() {
-        assert!((bh[i] - dense[i]).abs() < 1e-12);
+        assert!((bh[i][0] - dense[i][0]).abs() < 1e-12);
     }
 }
 
@@ -1784,7 +1878,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
     let mut dense = [[0.0; 3]; 2];
 
     assert_eq!(
-        eval(
+        eval_rows(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,

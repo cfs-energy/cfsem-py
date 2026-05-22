@@ -60,10 +60,10 @@ pub trait BoundedGeometry {
 /// Borrowed geometry storage that can build a cluster tree without repacking.
 pub trait BoundedGeometryCollection<T: Scalar>: Copy + Sync {
     /// Number of geometry values in the collection.
-    fn geometry_len(self) -> usize;
+    fn len(self) -> usize;
 
     /// Return whether all component columns have matching lengths.
-    fn has_consistent_geometry_lengths(self) -> bool;
+    fn valid_lengths(self) -> bool;
 
     /// Return bounds for one geometry value.
     fn aabb(self, index: usize) -> Aabb<T>;
@@ -74,7 +74,7 @@ pub trait BoundedGeometryCollection<T: Scalar>: Copy + Sync {
     /// Return whether the collection is empty.
     #[inline]
     fn is_empty(self) -> bool {
-        self.geometry_len() == 0
+        self.len() == 0
     }
 }
 
@@ -84,12 +84,12 @@ where
     G: BoundedGeometry<Scalar = T> + Sync,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         <[G]>::len(self)
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         true
     }
 
@@ -110,12 +110,12 @@ where
     G: BoundedGeometry<Scalar = T> + Sync,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         N
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         true
     }
 
@@ -136,12 +136,12 @@ where
     G: BoundedGeometry<Scalar = T> + Sync,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         self.as_slice().len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         true
     }
 
@@ -198,10 +198,10 @@ where
 /// Borrowed source moment/amplitude storage.
 pub trait SourceMomentCollection<K: HierarchicalKernel>: Copy + Sync {
     /// Number of source moments in the collection.
-    fn geometry_len(self) -> usize;
+    fn len(self) -> usize;
 
     /// Return whether all component columns have matching lengths.
-    fn has_consistent_geometry_lengths(self) -> bool;
+    fn valid_lengths(self) -> bool;
 
     /// Return one scalar source moment value.
     fn moment(self, index: usize) -> K::SourceMoment;
@@ -213,12 +213,12 @@ where
     K::SourceMoment: Copy,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         <[K::SourceMoment]>::len(self)
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         true
     }
 
@@ -234,12 +234,12 @@ where
     K::SourceMoment: Copy,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         N
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         true
     }
 
@@ -255,12 +255,12 @@ where
     K::SourceMoment: Copy,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         self.as_slice().len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         true
     }
 
@@ -277,14 +277,14 @@ where
 /// component columns without first allocating interleaved target structs.
 pub trait TargetCollection<K: HierarchicalKernel>: Copy + Sync {
     /// Number of target points in the collection.
-    fn geometry_len(self) -> usize;
+    fn len(self) -> usize;
 
     /// Return whether all column-like target storage has the same length.
     ///
     /// Evaluators call this immediately before looping over target data so
     /// mismatched columns return [`HierarchicalError::LengthMismatch`] instead of
     /// panicking from inside the hot target loop.
-    fn has_consistent_geometry_lengths(self) -> bool;
+    fn valid_lengths(self) -> bool;
 
     /// Return one scalar target geometry value.
     fn target(self, index: usize) -> K::TargetGeometry;
@@ -295,7 +295,7 @@ pub trait TargetCollection<K: HierarchicalKernel>: Copy + Sync {
     /// Return whether the collection contains no targets.
     #[inline]
     fn is_empty(self) -> bool {
-        self.geometry_len() == 0
+        self.len() == 0
     }
 }
 
@@ -305,12 +305,12 @@ where
     K::TargetGeometry: Copy,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         <[K::TargetGeometry]>::len(self)
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         true
     }
 

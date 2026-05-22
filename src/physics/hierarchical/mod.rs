@@ -23,15 +23,13 @@ mod tree;
 
 pub use aabb::Aabb;
 pub use convenience::{
-    ConstructionMethod, DiagnosticInfo, flux_density_dipole_hierarchical,
-    flux_density_linear_filament_hierarchical, flux_density_triangle_mesh_hierarchical,
-    vector_potential_dipole_hierarchical, vector_potential_linear_filament_hierarchical,
-    vector_potential_triangle_mesh_hierarchical,
+    Diagnostics, flux_density_dipole_hierarchical, flux_density_linear_filament_hierarchical,
+    flux_density_triangle_mesh_hierarchical, vector_potential_dipole_hierarchical,
+    vector_potential_linear_filament_hierarchical, vector_potential_triangle_mesh_hierarchical,
 };
 pub use evaluator::{
-    EvaluationScratch, SourceNodeSummaries, accepted_source_level_diagnostic_into,
-    dense_direct_evaluate_into, eval, eval_par, parallel_source_tree_evaluation_scratch_len,
-    source_tree_evaluation_scratch_len, update_source_summaries_into,
+    EvaluationScratch, SourceNodeSummaries, accepted_levels, eval, eval_dense, eval_par,
+    scratch_len, scratch_len_par, update_summaries,
 };
 pub(crate) use kernel::geometric_accept_far;
 pub use kernel::{
@@ -39,7 +37,7 @@ pub use kernel::{
     SourceCollection, SourceMomentCollection, TargetCollection,
 };
 pub use scalar::Scalar;
-pub use tree::{ClusterTree, ClusterTreeBuildMethod, ClusterTreeView};
+pub use tree::{BuildMethod, ClusterTree, ClusterTreeView};
 
 #[cfg(test)]
 mod tests;

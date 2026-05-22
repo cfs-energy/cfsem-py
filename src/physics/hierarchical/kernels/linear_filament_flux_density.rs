@@ -76,12 +76,12 @@ impl<'a, T: Scalar> LinearFilamentSources<'a, T> {
 
 impl<'a, T: Scalar> BoundedGeometryCollection<T> for LinearFilamentSources<'a, T> {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         let n = self.x.len();
         self.y.len() == n
             && self.z.len() == n

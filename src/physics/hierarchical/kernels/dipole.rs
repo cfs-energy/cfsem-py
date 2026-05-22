@@ -89,12 +89,12 @@ where
     T: Scalar,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         self.x.len() == self.y.len() && self.x.len() == self.z.len()
     }
 
@@ -117,12 +117,12 @@ where
 
 impl<'a, T: Scalar> BoundedGeometryCollection<T> for DipoleSources<'a, T> {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         self.x.len() == self.y.len()
             && self.x.len() == self.z.len()
             && self.x.len() == self.outer_radius.len()
@@ -156,12 +156,12 @@ where
     T: Scalar,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         self.x.len() == self.y.len() && self.x.len() == self.z.len()
     }
 

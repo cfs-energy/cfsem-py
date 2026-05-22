@@ -26,20 +26,20 @@ pub struct EvaluationScratch<'a, Output> {
 
 /// Number of contribution scratch entries required by source-tree-only evaluation.
 #[inline]
-pub fn source_tree_evaluation_scratch_len() -> usize {
+pub fn scratch_len() -> usize {
     1
 }
 
 /// Number of contribution scratch entries required by parallel source-tree evaluation.
 #[inline]
-pub fn parallel_source_tree_evaluation_scratch_len(target_count: usize) -> usize {
+pub fn scratch_len_par(target_count: usize) -> usize {
     let chunk_size = crate::chunksize(target_count);
     target_count.div_ceil(chunk_size).max(1)
 }
 
 /// Update source summaries for a fixed source tree and changed source moments.
 #[inline]
-pub fn update_source_summaries_into<K, S, M>(
+pub fn update_summaries<K, S, M>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,
     sources: S,
@@ -55,10 +55,10 @@ where
     if err != HierarchicalError::Ok {
         return err;
     }
-    if sources.geometry_len() != tree.n_items()
-        || !sources.has_consistent_geometry_lengths()
-        || moments.geometry_len() != tree.n_items()
-        || !moments.has_consistent_geometry_lengths()
+    if sources.len() != tree.n_items()
+        || !sources.valid_lengths()
+        || moments.len() != tree.n_items()
+        || !moments.valid_lengths()
     {
         return HierarchicalError::LengthMismatch;
     }
@@ -147,12 +147,12 @@ where
     M: SourceMomentCollection<K>,
     C: TargetCollection<K>,
 {
-    if sources.geometry_len() != source_tree.n_items()
-        || !sources.has_consistent_geometry_lengths()
-        || moments.geometry_len() != source_tree.n_items()
-        || !moments.has_consistent_geometry_lengths()
-        || targets.geometry_len() != out.len()
-        || !targets.has_consistent_geometry_lengths()
+    if sources.len() != source_tree.n_items()
+        || !sources.valid_lengths()
+        || moments.len() != source_tree.n_items()
+        || !moments.valid_lengths()
+        || targets.len() != out.len()
+        || !targets.valid_lengths()
     {
         return HierarchicalError::LengthMismatch;
     }
@@ -164,7 +164,7 @@ where
     let mut active = Vec::new();
     let target_ids = [0_u32];
 
-    for target_id in 0..targets.geometry_len() {
+    for target_id in 0..targets.len() {
         let target = targets.target(target_id);
         let err = eval_scalar(
             kernel,
@@ -283,12 +283,12 @@ where
     if err != HierarchicalError::Ok {
         return err;
     }
-    if sources.geometry_len() != source_tree.n_items()
-        || !sources.has_consistent_geometry_lengths()
-        || moments.geometry_len() != source_tree.n_items()
-        || !moments.has_consistent_geometry_lengths()
-        || targets.geometry_len() != out.len()
-        || !targets.has_consistent_geometry_lengths()
+    if sources.len() != source_tree.n_items()
+        || !sources.valid_lengths()
+        || moments.len() != source_tree.n_items()
+        || !moments.valid_lengths()
+        || targets.len() != out.len()
+        || !targets.valid_lengths()
     {
         return HierarchicalError::LengthMismatch;
     }
@@ -299,8 +299,8 @@ where
         return HierarchicalError::Ok;
     }
 
-    let chunk_size = crate::chunksize(targets.geometry_len());
-    let chunk_count = targets.geometry_len().div_ceil(chunk_size);
+    let chunk_size = crate::chunksize(targets.len());
+    let chunk_count = targets.len().div_ceil(chunk_size);
     if scratch.contribution.len() < chunk_count {
         return HierarchicalError::ScratchTooSmall;
     }
@@ -356,7 +356,7 @@ where
 /// original source items represented by that terminal node, giving a per-target
 /// mean accepted source level.
 #[inline]
-pub fn accepted_source_level_diagnostic_into<K, C>(
+pub fn accepted_levels<K, C>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
@@ -373,7 +373,7 @@ where
     if err != HierarchicalError::Ok {
         return err;
     }
-    if targets.geometry_len() != out.len() || !targets.has_consistent_geometry_lengths() {
+    if targets.len() != out.len() || !targets.valid_lengths() {
         return HierarchicalError::LengthMismatch;
     }
     if source_summaries.len() < source_tree.n_nodes() {
@@ -381,7 +381,7 @@ where
     }
 
     let mut active = Vec::new();
-    for target_id in 0..targets.geometry_len() {
+    for target_id in 0..targets.len() {
         let target = targets.target(target_id);
         let mut weighted_level = K::Scalar::ZERO;
         let mut represented_sources = K::Scalar::ZERO;
@@ -425,7 +425,7 @@ where
 
 /// Dense exact fallback using nested range loops.
 #[inline]
-pub fn dense_direct_evaluate_into<K, S, C, M>(
+pub fn eval_dense<K, S, C, M>(
     kernel: &K,
     sources: S,
     targets: C,
@@ -439,11 +439,11 @@ where
     C: TargetCollection<K>,
     M: SourceMomentCollection<K>,
 {
-    if sources.geometry_len() != moments.geometry_len()
-        || !sources.has_consistent_geometry_lengths()
-        || !moments.has_consistent_geometry_lengths()
-        || targets.geometry_len() != out.len()
-        || !targets.has_consistent_geometry_lengths()
+    if sources.len() != moments.len()
+        || !sources.valid_lengths()
+        || !moments.valid_lengths()
+        || targets.len() != out.len()
+        || !targets.valid_lengths()
     {
         return HierarchicalError::LengthMismatch;
     }
@@ -455,10 +455,10 @@ where
         kernel.zero_output(&mut out[i]);
     }
 
-    for target_id in 0..targets.geometry_len() {
+    for target_id in 0..targets.len() {
         let target = targets.target(target_id);
         let target_out = &mut out[target_id];
-        for source_id in 0..sources.geometry_len() {
+        for source_id in 0..sources.len() {
             let source = sources.source(source_id);
             let moment = moments.moment(source_id);
             kernel.eval_exact(&target, &source, &moment, &mut scratch.contribution[0]);

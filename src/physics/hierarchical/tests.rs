@@ -284,7 +284,7 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
         SourceNodeSummaries::<DipoleVectorPotentialKernel<f64>>::new(source_tree.as_view());
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &b_kernel,
             source_tree.as_view(),
             &sources,
@@ -294,7 +294,7 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &a_kernel,
             source_tree.as_view(),
             &sources,
@@ -340,10 +340,10 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
         HierarchicalError::Ok
     );
 
-    for target_id in 0..targets.len() {
+    for target_id in 0..targets.as_slice().len() {
         let mut expected_b = [0.0; 3];
         let mut expected_a = [0.0; 3];
-        for source_id in 0..sources.len() {
+        for source_id in 0..sources.as_slice().len() {
             let source = sources[source_id];
             let moment = moments[source_id];
             let target = targets[target_id];
@@ -450,7 +450,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -481,7 +481,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -524,7 +524,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     )
     .unwrap();
 
-    for i in 0..bh.len() {
+    for i in 0..bh.as_slice().len() {
         for axis in 0..3 {
             assert!((bh[i][axis] - dense[i][axis]).abs() < 1.0e-20);
         }
@@ -564,7 +564,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
         SourceNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(source_tree.as_view());
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -595,7 +595,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -638,7 +638,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     )
     .unwrap();
 
-    for i in 0..bh.len() {
+    for i in 0..bh.as_slice().len() {
         for axis in 0..3 {
             assert!((bh[i][axis] - dense[i][axis]).abs() < 1.0e-20);
         }
@@ -728,7 +728,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &active_only_sources,
@@ -763,7 +763,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources_with_inactive,
@@ -829,11 +829,12 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
         position: [20.0, 10.0, 7.0],
     }];
 
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, sources.len()).unwrap();
+    let source_tree =
+        ClusterTree::build_with_leaf_size(&sources, sources.as_slice().len()).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -864,7 +865,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -920,7 +921,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -951,7 +952,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -962,9 +963,9 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
         HierarchicalError::Ok
     );
 
-    for target_id in 0..targets.len() {
+    for target_id in 0..targets.as_slice().len() {
         let mut direct = [0.0; 3];
-        for source_id in 0..sources.len() {
+        for source_id in 0..sources.as_slice().len() {
             let contrib = flux_density_triangle(
                 sources[source_id].n0,
                 sources[source_id].n1,
@@ -1017,7 +1018,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
         );
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1048,7 +1049,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -1059,9 +1060,9 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
         HierarchicalError::Ok
     );
 
-    for target_id in 0..targets.len() {
+    for target_id in 0..targets.as_slice().len() {
         let mut direct = [0.0; 3];
-        for source_id in 0..sources.len() {
+        for source_id in 0..sources.as_slice().len() {
             let contrib = vector_potential_triangle(
                 sources[source_id].n0,
                 sources[source_id].n1,
@@ -1113,7 +1114,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
     let mut out1 = [[0.0; 3]; 1];
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1138,7 +1139,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
     );
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1236,7 +1237,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1456,7 +1457,7 @@ fn source_summary_update_tracks_moments() {
     let mut summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
 
     let moments_a = [1.0, 2.0, 3.0];
-    let err = update_source_summaries_into(
+    let err = update_summaries(
         &kernel,
         source_tree.as_view(),
         &sources,
@@ -1467,7 +1468,7 @@ fn source_summary_update_tracks_moments() {
     assert_eq!(summaries.node_summaries[0].moment, 6.0);
 
     let moments_b = [2.0, 4.0, 6.0];
-    let err = update_source_summaries_into(
+    let err = update_summaries(
         &kernel,
         source_tree.as_view(),
         &sources,
@@ -1497,7 +1498,7 @@ fn dipole_source_summary_centroid_tracks_moment_weights() {
 
     let moments_a = [[1.0, 0.0, 0.0], [3.0, 0.0, 0.0]];
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1510,7 +1511,7 @@ fn dipole_source_summary_centroid_tracks_moment_weights() {
 
     let moments_b = [[4.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1536,7 +1537,7 @@ fn theta_zero_matches_dense_direct_f32() {
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f32>>::new(source_tree.as_view());
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1567,7 +1568,7 @@ fn theta_zero_matches_dense_direct_f32() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -1577,7 +1578,7 @@ fn theta_zero_matches_dense_direct_f32() {
         ),
         HierarchicalError::Ok
     );
-    for i in 0..bh.len() {
+    for i in 0..bh.as_slice().len() {
         assert!((bh[i] - dense[i]).abs() < 1e-5);
     }
 }
@@ -1591,7 +1592,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1622,8 +1623,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
         ),
         HierarchicalError::Ok
     );
-    let mut par_scratch_value =
-        vec![0.0; parallel_source_tree_evaluation_scratch_len(targets.len())];
+    let mut par_scratch_value = vec![0.0; scratch_len_par(targets.as_slice().len())];
     let mut par_scratch = EvaluationScratch {
         contribution: &mut par_scratch_value,
     };
@@ -1642,7 +1642,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -1652,7 +1652,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
         ),
         HierarchicalError::Ok
     );
-    for i in 0..targets.len() {
+    for i in 0..targets.as_slice().len() {
         assert!((source_tree_out[i] - dense[i]).abs() < 1.0e-14);
         assert!((source_tree_out_par[i] - dense[i]).abs() < 1.0e-14);
     }
@@ -1669,7 +1669,7 @@ fn dense_direct_reports_empty_scratch() {
         contribution: &mut [],
     };
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -1689,7 +1689,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
     let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1720,7 +1720,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -1730,7 +1730,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
         ),
         HierarchicalError::Ok
     );
-    for i in 0..bh.len() {
+    for i in 0..bh.as_slice().len() {
         assert!((bh[i] - dense[i]).abs() < 1e-12);
     }
 }
@@ -1767,7 +1767,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
 
     assert_eq!(
-        update_source_summaries_into(
+        update_summaries(
             &kernel,
             source_tree.as_view(),
             &sources,
@@ -1799,7 +1799,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
         HierarchicalError::Ok
     );
     assert_eq!(
-        dense_direct_evaluate_into(
+        eval_dense(
             &kernel,
             &sources,
             targets.as_slice(),
@@ -1810,7 +1810,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
         HierarchicalError::Ok
     );
 
-    for i in 0..bh.len() {
+    for i in 0..bh.as_slice().len() {
         for axis in 0..3 {
             assert!((bh[i][axis] - dense[i][axis]).abs() < 1.0e-20);
         }

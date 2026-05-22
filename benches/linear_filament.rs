@@ -6,7 +6,7 @@ use cfsem::physics::hierarchical::kernels::{
 };
 use cfsem::physics::hierarchical::{
     ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, SourceNodeSummaries,
-    eval, eval_par, parallel_source_tree_evaluation_scratch_len, update_source_summaries_into,
+    eval, eval_par, scratch_len_par, update_summaries,
 };
 use cfsem::physics::linear_filament::{
     flux_density_linear_filament, flux_density_linear_filament_par,
@@ -69,8 +69,7 @@ where
         let source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
         let target_count = xyzobs.0.len();
         let vector_out = vec![[0.0; 3]; target_count];
-        let parallel_scratch_value =
-            vec![[0.0; 3]; parallel_source_tree_evaluation_scratch_len(target_count)];
+        let parallel_scratch_value = vec![[0.0; 3]; scratch_len_par(target_count)];
 
         Self {
             kernel,
@@ -87,7 +86,7 @@ where
 
     fn solve_into(&mut self, out: (&mut [f64], &mut [f64], &mut [f64])) {
         assert_eq!(
-            update_source_summaries_into(
+            update_summaries(
                 &self.kernel,
                 self.source_tree.as_view(),
                 self.sources,
@@ -123,7 +122,7 @@ where
 
     fn solve_into_par(&mut self, out: (&mut [f64], &mut [f64], &mut [f64])) {
         assert_eq!(
-            update_source_summaries_into(
+            update_summaries(
                 &self.kernel,
                 self.source_tree.as_view(),
                 self.sources,

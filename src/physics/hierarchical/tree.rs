@@ -30,10 +30,10 @@ const MORTON_MAX_COORD: u64 = (1_u64 << MORTON_BITS_PER_AXIS) - 1;
 
 /// CPU tree construction strategy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClusterTreeBuildMethod {
+pub enum BuildMethod {
     /// Recursively sort each node range by the longest AABB axis, then split
     /// at a dominant adjacent spatial gap on that axis or the median otherwise.
-    LongestAxisMedian,
+    Recursive,
     /// Sort once by Morton code, then split contiguous ranges at a dominant
     /// adjacent Morton-code gap or the median otherwise.
     MortonLbvh,
@@ -120,7 +120,7 @@ impl<T: Scalar> ClusterTree<T> {
     where
         G: BoundedGeometryCollection<T>,
     {
-        Self::build_with_method(geometry, ClusterTreeBuildMethod::LongestAxisMedian)
+        Self::build_with_method(geometry, BuildMethod::Recursive)
     }
 
     /// Build a CPU-owned finalized tree using Morton-code LBVH ordering.
@@ -134,17 +134,14 @@ impl<T: Scalar> ClusterTree<T> {
     where
         G: BoundedGeometryCollection<T>,
     {
-        Self::build_with_method(geometry, ClusterTreeBuildMethod::MortonLbvh)
+        Self::build_with_method(geometry, BuildMethod::MortonLbvh)
     }
 
     /// Build a CPU-owned finalized tree with the selected construction strategy.
     ///
     /// Both strategies produce the same flat runtime layout and maintain the
     /// invariant that every node owns a contiguous range in `sorted_indices`.
-    pub fn build_with_method<G>(
-        geometry: G,
-        method: ClusterTreeBuildMethod,
-    ) -> Result<Self, HierarchicalError>
+    pub fn build_with_method<G>(geometry: G, method: BuildMethod) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometryCollection<T>,
     {
@@ -159,11 +156,7 @@ impl<T: Scalar> ClusterTree<T> {
     where
         G: BoundedGeometryCollection<T>,
     {
-        Self::build_with_leaf_size_and_method(
-            geometry,
-            leaf_size,
-            ClusterTreeBuildMethod::LongestAxisMedian,
-        )
+        Self::build_with_leaf_size_and_method(geometry, leaf_size, BuildMethod::Recursive)
     }
 
     #[cfg(test)]
@@ -174,17 +167,13 @@ impl<T: Scalar> ClusterTree<T> {
     where
         G: BoundedGeometryCollection<T>,
     {
-        Self::build_with_leaf_size_and_method(
-            geometry,
-            leaf_size,
-            ClusterTreeBuildMethod::MortonLbvh,
-        )
+        Self::build_with_leaf_size_and_method(geometry, leaf_size, BuildMethod::MortonLbvh)
     }
 
     fn build_with_leaf_size_and_method<G>(
         geometry: G,
         leaf_size: usize,
-        method: ClusterTreeBuildMethod,
+        method: BuildMethod,
     ) -> Result<Self, HierarchicalError>
     where
         G: BoundedGeometryCollection<T>,
@@ -192,13 +181,13 @@ impl<T: Scalar> ClusterTree<T> {
         if geometry.is_empty() {
             return Err(HierarchicalError::EmptyInput);
         }
-        if !geometry.has_consistent_geometry_lengths() {
+        if !geometry.valid_lengths() {
             return Err(HierarchicalError::LengthMismatch);
         }
         if leaf_size == 0 {
             return Err(HierarchicalError::InvalidLeafSize);
         }
-        if geometry.geometry_len() > u32::MAX as usize {
+        if geometry.len() > u32::MAX as usize {
             return Err(HierarchicalError::CapacityExceeded);
         }
 
@@ -210,7 +199,7 @@ impl<T: Scalar> ClusterTree<T> {
             node_range_count: Vec::new(),
             leaf_start: Vec::new(),
             leaf_count: Vec::new(),
-            sorted_indices: Vec::with_capacity(geometry.geometry_len()),
+            sorted_indices: Vec::with_capacity(geometry.len()),
             sorted_morton_codes: Vec::new(),
             leaf_node_ids: Vec::new(),
             internal_level_ids: Vec::new(),
@@ -218,36 +207,36 @@ impl<T: Scalar> ClusterTree<T> {
             max_depth: 0,
         };
 
-        for i in 0..geometry.geometry_len() {
+        for i in 0..geometry.len() {
             tree.sorted_indices.push(usize_to_u32(i)?);
         }
 
         // LBVH pays one global sort up front. The recursive builder can then
         // split ranges at code gaps or medians without reordering within subtrees.
-        if method == ClusterTreeBuildMethod::MortonLbvh {
+        if method == BuildMethod::MortonLbvh {
             tree.sorted_morton_codes = sort_indices_by_morton(&mut tree.sorted_indices, geometry);
         }
 
         let mut internal_by_depth: Vec<Vec<u32>> = Vec::new();
         match method {
-            ClusterTreeBuildMethod::LongestAxisMedian => {
+            BuildMethod::Recursive => {
                 build_range_longest_axis(
                     &mut tree,
                     geometry,
                     leaf_size,
                     0,
-                    geometry.geometry_len(),
+                    geometry.len(),
                     0,
                     &mut internal_by_depth,
                 )?;
             }
-            ClusterTreeBuildMethod::MortonLbvh => {
+            BuildMethod::MortonLbvh => {
                 build_range_morton(
                     &mut tree,
                     geometry,
                     leaf_size,
                     0,
-                    geometry.geometry_len(),
+                    geometry.len(),
                     0,
                     &mut internal_by_depth,
                 )?;

@@ -16,23 +16,13 @@ use super::kernels::{
     LinearFilamentSources, LinearFilamentVectorPotentialKernel,
 };
 use super::{
-    ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, Scalar,
+    BuildMethod, ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, Scalar,
     SourceCollection, SourceMomentCollection, SourceNodeSummaries, TargetCollection, eval,
-    eval_par, parallel_source_tree_evaluation_scratch_len, source_tree_evaluation_scratch_len,
-    update_source_summaries_into,
+    eval_par, scratch_len, scratch_len_par, update_summaries,
 };
 
-/// Source-tree construction method for stateless hierarchical solves.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConstructionMethod {
-    /// Recursively split sources using spatial median/gap logic.
-    Recursive,
-    /// Sort sources by Morton code and build an LBVH-style tree.
-    MortonLbvh,
-}
-
 /// Diagnostic information returned by stateless hierarchical solves.
-pub struct DiagnosticInfo<K: HierarchicalKernel> {
+pub struct Diagnostics<K: HierarchicalKernel> {
     /// Source tree built for this solve.
     pub source_tree: ClusterTree<K::Scalar>,
     /// Wall-clock construction time in seconds.
@@ -45,7 +35,7 @@ pub struct DiagnosticInfo<K: HierarchicalKernel> {
     pub target_count: usize,
 }
 
-impl<K: HierarchicalKernel> DiagnosticInfo<K> {
+impl<K: HierarchicalKernel> Diagnostics<K> {
     /// Borrow the source tree built for this solve.
     #[inline]
     pub fn source_tree(&self) -> &ClusterTree<K::Scalar> {
@@ -85,11 +75,11 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
     moment: (&[T], &[T], &[T]),
     outer_radius: &[T],
     obs: (&[T], &[T], &[T]),
-    construction_method: ConstructionMethod,
+    construction_method: BuildMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
-) -> Result<DiagnosticInfo<DipoleFluxDensityKernel<T>>, HierarchicalError> {
+) -> Result<Diagnostics<DipoleFluxDensityKernel<T>>, HierarchicalError> {
     let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
     let moments = DipoleMoments::new(moment.0, moment.1, moment.2);
     let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
@@ -137,11 +127,11 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
     moment: (&[T], &[T], &[T]),
     outer_radius: &[T],
     obs: (&[T], &[T], &[T]),
-    construction_method: ConstructionMethod,
+    construction_method: BuildMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
-) -> Result<DiagnosticInfo<DipoleVectorPotentialKernel<T>>, HierarchicalError> {
+) -> Result<Diagnostics<DipoleVectorPotentialKernel<T>>, HierarchicalError> {
     let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
     let moments = DipoleMoments::new(moment.0, moment.1, moment.2);
     let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
@@ -191,11 +181,11 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
     dlxyzfil: (&[T], &[T], &[T]),
     ifil: &[T],
     wire_radius: &[T],
-    construction_method: ConstructionMethod,
+    construction_method: BuildMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
-) -> Result<DiagnosticInfo<LinearFilamentFluxDensityKernel<T>>, HierarchicalError> {
+) -> Result<Diagnostics<LinearFilamentFluxDensityKernel<T>>, HierarchicalError> {
     let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
     let targets = DipoleTargets::new(xyzp.0, xyzp.1, xyzp.2);
     one_shot_vec3(
@@ -244,11 +234,11 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
     dlxyzfil: (&[T], &[T], &[T]),
     ifil: &[T],
     wire_radius: &[T],
-    construction_method: ConstructionMethod,
+    construction_method: BuildMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
-) -> Result<DiagnosticInfo<LinearFilamentVectorPotentialKernel<T>>, HierarchicalError> {
+) -> Result<Diagnostics<LinearFilamentVectorPotentialKernel<T>>, HierarchicalError> {
     let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
     let targets = DipoleTargets::new(xyzp.0, xyzp.1, xyzp.2);
     one_shot_vec3(
@@ -295,11 +285,11 @@ pub fn flux_density_triangle_mesh_hierarchical(
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
-    construction_method: ConstructionMethod,
+    construction_method: BuildMethod,
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<DiagnosticInfo<BoundaryElementFluxDensityKernel<f64>>, HierarchicalError> {
+) -> Result<Diagnostics<BoundaryElementFluxDensityKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
         .map_err(|_| HierarchicalError::LengthMismatch)?;
     let sources = BoundaryElementTriangles::new(mesh.node_columns(), mesh.triangle_columns());
@@ -349,11 +339,11 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
     quad_kind: QuadratureKind,
-    construction_method: ConstructionMethod,
+    construction_method: BuildMethod,
     theta: f64,
     par: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<DiagnosticInfo<BoundaryElementVectorPotentialKernel<f64>>, HierarchicalError> {
+) -> Result<Diagnostics<BoundaryElementVectorPotentialKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
         .map_err(|_| HierarchicalError::LengthMismatch)?;
     let sources = BoundaryElementTriangles::new(mesh.node_columns(), mesh.triangle_columns());
@@ -376,11 +366,11 @@ fn one_shot_vec3<K, T, S, M, C>(
     sources: S,
     moments: M,
     targets: C,
-    construction_method: ConstructionMethod,
+    construction_method: BuildMethod,
     theta: T,
     par: bool,
     out: (&mut [T], &mut [T], &mut [T]),
-) -> Result<DiagnosticInfo<K>, HierarchicalError>
+) -> Result<Diagnostics<K>, HierarchicalError>
 where
     K: HierarchicalKernel<Scalar = T, Output = [T; 3]> + Sync,
     T: Scalar,
@@ -389,24 +379,24 @@ where
     K::TargetGeometry: Copy,
     C: TargetCollection<K>,
 {
-    if out.0.len() != targets.geometry_len()
-        || out.1.len() != targets.geometry_len()
-        || out.2.len() != targets.geometry_len()
-        || !targets.has_consistent_geometry_lengths()
-        || sources.geometry_len() != moments.geometry_len()
-        || !sources.has_consistent_geometry_lengths()
-        || !moments.has_consistent_geometry_lengths()
+    if out.0.len() != targets.len()
+        || out.1.len() != targets.len()
+        || out.2.len() != targets.len()
+        || !targets.valid_lengths()
+        || sources.len() != moments.len()
+        || !sources.valid_lengths()
+        || !moments.valid_lengths()
     {
         return Err(HierarchicalError::LengthMismatch);
     }
 
     let construction_start = Instant::now();
     let source_tree = match construction_method {
-        ConstructionMethod::Recursive => ClusterTree::build(sources)?,
-        ConstructionMethod::MortonLbvh => ClusterTree::build_morton_lbvh(sources)?,
+        BuildMethod::Recursive => ClusterTree::build(sources)?,
+        BuildMethod::MortonLbvh => ClusterTree::build_morton_lbvh(sources)?,
     };
     let mut source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
-    let mut err = update_source_summaries_into(
+    let mut err = update_summaries(
         &kernel,
         source_tree.as_view(),
         sources,
@@ -419,10 +409,10 @@ where
     let construction_seconds = construction_start.elapsed().as_secs_f64();
 
     let evaluation_start = Instant::now();
-    let mut values = vec![[T::ZERO; 3]; targets.geometry_len()];
+    let mut values = vec![[T::ZERO; 3]; targets.len()];
     let scratch_len = match par {
-        true => parallel_source_tree_evaluation_scratch_len(targets.geometry_len()),
-        false => source_tree_evaluation_scratch_len(),
+        true => scratch_len_par(targets.len()),
+        false => scratch_len(),
     };
     let mut scratch_values = vec![[T::ZERO; 3]; scratch_len];
     let mut scratch = EvaluationScratch {
@@ -462,11 +452,11 @@ where
         out.1[i] = values[i][1];
         out.2[i] = values[i][2];
     }
-    Ok(DiagnosticInfo {
+    Ok(Diagnostics {
         source_tree,
         construction_seconds,
         evaluation_seconds,
-        source_count: sources.geometry_len(),
-        target_count: targets.geometry_len(),
+        source_count: sources.len(),
+        target_count: targets.len(),
     })
 }

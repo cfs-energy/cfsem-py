@@ -69,12 +69,12 @@ impl<'a, T: Scalar> BoundaryElementTriangles<'a, T> {
 
 impl<'a, T: Scalar> BoundedGeometryCollection<T> for BoundaryElementTriangles<'a, T> {
     #[inline]
-    fn geometry_len(self) -> usize {
+    fn len(self) -> usize {
         self.tri0.len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
+    fn valid_lengths(self) -> bool {
         self.node_x.len() == self.node_y.len()
             && self.node_x.len() == self.node_z.len()
             && self.tri0.len() == self.tri1.len()
@@ -125,14 +125,13 @@ where
     T: Scalar,
 {
     #[inline]
-    fn geometry_len(self) -> usize {
-        self.triangles.geometry_len()
+    fn len(self) -> usize {
+        self.triangles.len()
     }
 
     #[inline]
-    fn has_consistent_geometry_lengths(self) -> bool {
-        self.s.len() == self.triangles.node_x.len()
-            && self.triangles.has_consistent_geometry_lengths()
+    fn valid_lengths(self) -> bool {
+        self.s.len() == self.triangles.node_x.len() && self.triangles.valid_lengths()
     }
 
     #[inline]

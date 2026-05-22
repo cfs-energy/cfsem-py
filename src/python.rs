@@ -476,13 +476,11 @@ fn source_tree_node_levels(tree: &physics::hierarchical::ClusterTree<f64>) -> Ve
     levels
 }
 
-fn parse_hierarchical_construction_method(
-    construction_method: &str,
-) -> PyResult<physics::hierarchical::ConstructionMethod> {
+fn parse_build_method(construction_method: &str) -> PyResult<physics::hierarchical::BuildMethod> {
     match construction_method {
-        "recursive" => Ok(physics::hierarchical::ConstructionMethod::Recursive),
+        "recursive" => Ok(physics::hierarchical::BuildMethod::Recursive),
         "morton_lbvh" | "morton-lbvh" | "lbvh" => {
-            Ok(physics::hierarchical::ConstructionMethod::MortonLbvh)
+            Ok(physics::hierarchical::BuildMethod::MortonLbvh)
         }
         _ => Err(PyInteropError::ValueError {
             msg: format!(
@@ -494,7 +492,7 @@ fn parse_hierarchical_construction_method(
     }
 }
 
-fn accepted_source_level_diagnostic<K, S, C, M>(
+fn accepted_levels_diagnostic<K, S, C, M>(
     kernel: K,
     source_tree: &physics::hierarchical::ClusterTree<f64>,
     sources: S,
@@ -511,7 +509,7 @@ where
 {
     let mut source_summaries =
         physics::hierarchical::SourceNodeSummaries::<K>::new(source_tree.as_view());
-    let mut err = physics::hierarchical::update_source_summaries_into(
+    let mut err = physics::hierarchical::update_summaries(
         &kernel,
         source_tree.as_view(),
         sources,
@@ -522,8 +520,8 @@ where
         return Err(py_hierarchical_error("source summary update", err));
     }
 
-    let mut out = vec![0.0; physics::hierarchical::TargetCollection::<K>::geometry_len(targets)];
-    err = physics::hierarchical::accepted_source_level_diagnostic_into(
+    let mut out = vec![0.0; physics::hierarchical::TargetCollection::<K>::len(targets)];
+    err = physics::hierarchical::accepted_levels(
         &kernel,
         source_tree.as_view(),
         &source_summaries.node_summaries,
@@ -570,7 +568,7 @@ fn flux_density_dipole_hierarchical(
     let moment = read_xyz_tuple(py, &moment, "moment")?;
     let outer_radius = read_float_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
-    let construction_method = parse_hierarchical_construction_method(construction_method)?;
+    let construction_method = parse_build_method(construction_method)?;
     let (field, diagnostics) = match out {
         Some(out) => {
             let mut out = read_output_arrays(out, obs.len(), "flux_density")?;
@@ -625,7 +623,7 @@ fn flux_density_dipole_hierarchical(
             moment.as_tuple().1,
             moment.as_tuple().2,
         );
-        let levels = accepted_source_level_diagnostic(
+        let levels = accepted_levels_diagnostic(
             physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
             &diagnostics.source_tree,
             sources,
@@ -688,7 +686,7 @@ fn vector_potential_dipole_hierarchical(
     let moment = read_xyz_tuple(py, &moment, "moment")?;
     let outer_radius = read_float_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
-    let construction_method = parse_hierarchical_construction_method(construction_method)?;
+    let construction_method = parse_build_method(construction_method)?;
     let (field, diagnostics) = match out {
         Some(out) => {
             let mut out = read_output_arrays(out, obs.len(), "vector_potential")?;
@@ -743,7 +741,7 @@ fn vector_potential_dipole_hierarchical(
             moment.as_tuple().1,
             moment.as_tuple().2,
         );
-        let levels = accepted_source_level_diagnostic(
+        let levels = accepted_levels_diagnostic(
             physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
             &diagnostics.source_tree,
             sources,
@@ -808,7 +806,7 @@ fn flux_density_linear_filament_hierarchical(
     let dlxyzfil = read_xyz_tuple(py, &dlxyzfil, "dlxyzfil")?;
     let ifil = read_float_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
-    let construction_method = parse_hierarchical_construction_method(construction_method)?;
+    let construction_method = parse_build_method(construction_method)?;
     let (field, diagnostics) = match out {
         Some(out) => {
             let mut out = read_output_arrays(out, xyzp.len(), "flux_density")?;
@@ -863,7 +861,7 @@ fn flux_density_linear_filament_hierarchical(
             xyzp.as_tuple().1,
             xyzp.as_tuple().2,
         );
-        let levels = accepted_source_level_diagnostic(
+        let levels = accepted_levels_diagnostic(
             physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(),
             &diagnostics.source_tree,
             sources,
@@ -928,7 +926,7 @@ fn vector_potential_linear_filament_hierarchical(
     let dlxyzfil = read_xyz_tuple(py, &dlxyzfil, "dlxyzfil")?;
     let ifil = read_float_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
-    let construction_method = parse_hierarchical_construction_method(construction_method)?;
+    let construction_method = parse_build_method(construction_method)?;
     let (field, diagnostics) = match out {
         Some(out) => {
             let mut out = read_output_arrays(out, xyzp.len(), "vector_potential")?;
@@ -983,7 +981,7 @@ fn vector_potential_linear_filament_hierarchical(
             xyzp.as_tuple().1,
             xyzp.as_tuple().2,
         );
-        let levels = accepted_source_level_diagnostic(
+        let levels = accepted_levels_diagnostic(
             physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(),
             &diagnostics.source_tree,
             sources,
@@ -1040,7 +1038,7 @@ fn flux_density_triangle_mesh_hierarchical(
     let mesh = triangle_mesh_view(&nodes, &triangles)?;
     let s = read_float_input_array1(py, &s, "s")?;
     let quad = parse_triangle_quadrature(quad)?;
-    let construction_method = parse_hierarchical_construction_method(construction_method)?;
+    let construction_method = parse_build_method(construction_method)?;
     let (field, diagnostics) = match out {
         Some(out) => {
             let mut out = read_output_arrays(out, obs.0.len(), "flux_density")?;
@@ -1088,7 +1086,7 @@ fn flux_density_triangle_mesh_hierarchical(
         let targets = physics::hierarchical::kernels::DipoleTargets::new(&obs.0, &obs.1, &obs.2);
         let moments =
             physics::hierarchical::kernels::BoundaryElementNodalValues::new(sources, s.as_slice());
-        let levels = accepted_source_level_diagnostic(
+        let levels = accepted_levels_diagnostic(
             physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(quad),
             &diagnostics.source_tree,
             sources,
@@ -1145,7 +1143,7 @@ fn vector_potential_triangle_mesh_hierarchical(
     let mesh = triangle_mesh_view(&nodes, &triangles)?;
     let s = read_float_input_array1(py, &s, "s")?;
     let quad = parse_triangle_quadrature(quad)?;
-    let construction_method = parse_hierarchical_construction_method(construction_method)?;
+    let construction_method = parse_build_method(construction_method)?;
     let (field, diagnostics) = match out {
         Some(out) => {
             let mut out = read_output_arrays(out, obs.0.len(), "vector_potential")?;
@@ -1195,7 +1193,7 @@ fn vector_potential_triangle_mesh_hierarchical(
         let targets = physics::hierarchical::kernels::DipoleTargets::new(&obs.0, &obs.1, &obs.2);
         let moments =
             physics::hierarchical::kernels::BoundaryElementNodalValues::new(sources, s.as_slice());
-        let levels = accepted_source_level_diagnostic(
+        let levels = accepted_levels_diagnostic(
             physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(quad),
             &diagnostics.source_tree,
             sources,

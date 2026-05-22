@@ -3,8 +3,6 @@ use core::cmp::Ordering;
 use super::{Aabb, BoundedGeometryCollection, HierarchicalError, Scalar};
 
 const INVALID_INDEX: u32 = u32::MAX;
-/// Fixed runtime leaf size for public single-source-tree solvers.
-const DEFAULT_LEAF_SIZE: usize = 1;
 /// Adjacent spatial gap must exceed this multiple of the mean sorted gap before
 /// the recursive builder treats it as a cluster boundary.
 const SPATIAL_GAP_DOMINANCE_FACTOR: f64 = 4.0;
@@ -145,47 +143,11 @@ impl<T: Scalar> ClusterTree<T> {
     where
         G: BoundedGeometryCollection<T>,
     {
-        Self::build_with_leaf_size_and_method(geometry, DEFAULT_LEAF_SIZE, method)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn build_with_leaf_size<G>(
-        geometry: G,
-        leaf_size: usize,
-    ) -> Result<Self, HierarchicalError>
-    where
-        G: BoundedGeometryCollection<T>,
-    {
-        Self::build_with_leaf_size_and_method(geometry, leaf_size, BuildMethod::Recursive)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn build_morton_lbvh_with_leaf_size<G>(
-        geometry: G,
-        leaf_size: usize,
-    ) -> Result<Self, HierarchicalError>
-    where
-        G: BoundedGeometryCollection<T>,
-    {
-        Self::build_with_leaf_size_and_method(geometry, leaf_size, BuildMethod::MortonLbvh)
-    }
-
-    fn build_with_leaf_size_and_method<G>(
-        geometry: G,
-        leaf_size: usize,
-        method: BuildMethod,
-    ) -> Result<Self, HierarchicalError>
-    where
-        G: BoundedGeometryCollection<T>,
-    {
         if geometry.is_empty() {
             return Err(HierarchicalError::EmptyInput);
         }
         if !geometry.valid_lengths() {
             return Err(HierarchicalError::LengthMismatch);
-        }
-        if leaf_size == 0 {
-            return Err(HierarchicalError::InvalidLeafSize);
         }
         if geometry.len() > u32::MAX as usize {
             return Err(HierarchicalError::CapacityExceeded);
@@ -223,7 +185,6 @@ impl<T: Scalar> ClusterTree<T> {
                 build_range_longest_axis(
                     &mut tree,
                     geometry,
-                    leaf_size,
                     0,
                     geometry.len(),
                     0,
@@ -234,7 +195,6 @@ impl<T: Scalar> ClusterTree<T> {
                 build_range_morton(
                     &mut tree,
                     geometry,
-                    leaf_size,
                     0,
                     geometry.len(),
                     0,
@@ -464,7 +424,6 @@ impl<T: Scalar> ClusterTreeView<'_, T> {
 fn build_range_longest_axis<T, G>(
     tree: &mut ClusterTree<T>,
     geometry: G,
-    leaf_size: usize,
     start: usize,
     end: usize,
     depth: usize,
@@ -492,7 +451,7 @@ where
         tree.max_depth = usize_to_u32(depth)?;
     }
 
-    if count <= leaf_size {
+    if count <= 1 {
         let node = node_id as usize;
         tree.leaf_start[node] = usize_to_u32(start)?;
         tree.leaf_count[node] = usize_to_u32(count)?;
@@ -515,24 +474,8 @@ where
     }
     internal_by_depth[depth].push(node_id);
 
-    let left = build_range_longest_axis(
-        tree,
-        geometry,
-        leaf_size,
-        start,
-        mid,
-        depth + 1,
-        internal_by_depth,
-    )?;
-    let right = build_range_longest_axis(
-        tree,
-        geometry,
-        leaf_size,
-        mid,
-        end,
-        depth + 1,
-        internal_by_depth,
-    )?;
+    let left = build_range_longest_axis(tree, geometry, start, mid, depth + 1, internal_by_depth)?;
+    let right = build_range_longest_axis(tree, geometry, mid, end, depth + 1, internal_by_depth)?;
 
     let node = node_id as usize;
     tree.node_left_child[node] = left;
@@ -552,7 +495,6 @@ where
 fn build_range_morton<T, G>(
     tree: &mut ClusterTree<T>,
     geometry: G,
-    leaf_size: usize,
     start: usize,
     end: usize,
     depth: usize,
@@ -579,7 +521,7 @@ where
         tree.max_depth = usize_to_u32(depth)?;
     }
 
-    if count <= leaf_size {
+    if count <= 1 {
         let node = node_id as usize;
         tree.node_aabb[node] = range_aabb(&tree.sorted_indices, geometry, start, end);
         tree.leaf_start[node] = usize_to_u32(start)?;
@@ -596,24 +538,8 @@ where
     }
     internal_by_depth[depth].push(node_id);
 
-    let left = build_range_morton(
-        tree,
-        geometry,
-        leaf_size,
-        start,
-        mid,
-        depth + 1,
-        internal_by_depth,
-    )?;
-    let right = build_range_morton(
-        tree,
-        geometry,
-        leaf_size,
-        mid,
-        end,
-        depth + 1,
-        internal_by_depth,
-    )?;
+    let left = build_range_morton(tree, geometry, start, mid, depth + 1, internal_by_depth)?;
+    let right = build_range_morton(tree, geometry, mid, end, depth + 1, internal_by_depth)?;
 
     let node = node_id as usize;
     tree.node_left_child[node] = left;

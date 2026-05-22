@@ -276,7 +276,7 @@ fn dipole_b_and_a_kernels_reuse_tree_against_point_source() {
     ];
     let moments = [[0.0, 0.0, 2.0], [0.0, 1.0, 0.5]];
 
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
 
     let mut b_source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
@@ -445,7 +445,7 @@ fn linear_filament_theta_zero_matches_dense_and_serial_direct() {
     ];
     let currents = [2.0, -1.5];
 
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
 
@@ -559,7 +559,7 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
     ];
     let currents = [2.0, -1.5];
 
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentVectorPotentialKernel<f64>>::new(source_tree.as_view());
 
@@ -724,7 +724,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
 
     let active_only_sources = [active_source];
     let active_only_moments = [active_moment];
-    let source_tree = ClusterTree::build_with_leaf_size(&active_only_sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&active_only_sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
@@ -759,7 +759,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
 
     let sources_with_inactive = [active_source, inactive_source];
     let moments_with_inactive = [active_moment, inactive_moment];
-    let source_tree = ClusterTree::build_with_leaf_size(&sources_with_inactive, 2).unwrap();
+    let source_tree = ClusterTree::build(&sources_with_inactive).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
@@ -829,8 +829,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
         position: [20.0, 10.0, 7.0],
     }];
 
-    let source_tree =
-        ClusterTree::build_with_leaf_size(&sources, sources.as_slice().len()).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
@@ -916,7 +915,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
     ];
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
 
@@ -1011,7 +1010,7 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
     ];
     let moments = [[0.0, 1.0, -0.25], [0.25, 1.0, 0.0]];
 
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<BoundaryElementVectorPotentialKernel<f64>>::new(
             source_tree.as_view(),
@@ -1102,7 +1101,7 @@ fn linear_filament_reuses_tree_for_current_updates() {
     }];
     let currents0 = [1.0, 1.0];
     let currents1 = [2.0, -1.0];
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
 
@@ -1232,7 +1231,7 @@ fn linear_filament_far_cluster_uses_point_segment_source_term() {
         position: [30.0, 2.0, 0.5],
     }];
     let currents = [1.0, 1.0];
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
 
     let mut source_summaries =
         SourceNodeSummaries::<LinearFilamentFluxDensityKernel<f64>>::new(source_tree.as_view());
@@ -1293,7 +1292,7 @@ fn tree_covers_each_input_once() {
         [0.0, 0.0, 0.0],
         [4.0, 0.0, 0.0],
     ]);
-    let tree = ClusterTree::build_with_leaf_size(&points, 2).unwrap();
+    let tree = ClusterTree::build(&points).unwrap();
     assert_eq!(tree.sorted_indices.len(), points.len());
 
     let mut seen = vec![false; points.len()];
@@ -1308,7 +1307,7 @@ fn tree_covers_each_input_once() {
 
     for i in 0..tree.leaf_node_ids.len() {
         let node = tree.leaf_node_ids[i] as usize;
-        assert!(tree.leaf_count[node] <= 2);
+        assert_eq!(tree.leaf_count[node], 1);
         assert!(tree.leaf_start[node] != ClusterTreeView::<f64>::invalid_index());
     }
 }
@@ -1325,7 +1324,7 @@ fn recursive_tree_splits_separated_clusters_at_spatial_gap() {
         [10.0, 10.0, 0.0],
         [10.1, 10.0, 0.0],
     ]);
-    let tree = ClusterTree::build_with_leaf_size(&points, 1).unwrap();
+    let tree = ClusterTree::build(&points).unwrap();
     let left = tree.node_left_child[0] as usize;
     let right = tree.node_right_child[0] as usize;
 
@@ -1345,7 +1344,7 @@ fn recursive_tree_uses_median_for_uniform_spatial_gaps() {
         [3.0, 0.0, 0.0],
         [4.0, 0.0, 0.0],
     ]);
-    let tree = ClusterTree::build_with_leaf_size(&points, 1).unwrap();
+    let tree = ClusterTree::build(&points).unwrap();
     let left = tree.node_left_child[0] as usize;
     let right = tree.node_right_child[0] as usize;
 
@@ -1365,7 +1364,7 @@ fn morton_tree_covers_each_input_once() {
         [2.0, 5.0, 1.0],
         [2.5, 5.5, 1.25],
     ]);
-    let tree = ClusterTree::build_morton_lbvh_with_leaf_size(&points, 2).unwrap();
+    let tree = ClusterTree::build_morton_lbvh(&points).unwrap();
     assert_eq!(tree.sorted_indices.len(), points.len());
     assert_eq!(tree.node_range_start[0], 0);
     assert_eq!(tree.node_range_count[0] as usize, points.len());
@@ -1382,7 +1381,7 @@ fn morton_tree_covers_each_input_once() {
 
     for i in 0..tree.leaf_node_ids.len() {
         let node = tree.leaf_node_ids[i] as usize;
-        assert!(tree.leaf_count[node] <= 2);
+        assert_eq!(tree.leaf_count[node], 1);
         assert!(tree.leaf_start[node] != ClusterTreeView::<f64>::invalid_index());
     }
 
@@ -1407,7 +1406,7 @@ fn morton_tree_uses_median_for_uniform_code_gaps() {
         [3.0, 0.0, 0.0],
         [4.0, 0.0, 0.0],
     ]);
-    let tree = ClusterTree::build_morton_lbvh_with_leaf_size(&points, 1).unwrap();
+    let tree = ClusterTree::build_morton_lbvh(&points).unwrap();
     let left = tree.node_left_child[0] as usize;
     let right = tree.node_right_child[0] as usize;
 
@@ -1427,7 +1426,7 @@ fn morton_tree_splits_separated_clusters_at_code_gap() {
         [10.0, 10.0, 0.0],
         [10.1, 10.0, 0.0],
     ]);
-    let tree = ClusterTree::build_morton_lbvh_with_leaf_size(&points, 1).unwrap();
+    let tree = ClusterTree::build_morton_lbvh(&points).unwrap();
     let left = tree.node_left_child[0] as usize;
     let right = tree.node_right_child[0] as usize;
 
@@ -1443,7 +1442,7 @@ fn morton_tree_splits_separated_clusters_at_code_gap() {
 #[test]
 fn morton_tree_handles_degenerate_representative_extent() {
     let points = points_f32(&[[1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [1.0, 2.0, 3.0]]);
-    let tree = ClusterTree::build_morton_lbvh_with_leaf_size(&points, 1).unwrap();
+    let tree = ClusterTree::build_morton_lbvh(&points).unwrap();
     assert_eq!(tree.sorted_indices, vec![0, 1, 2]);
     assert_eq!(tree.leaf_node_ids.len(), 3);
     assert_eq!(tree.max_depth, 2);
@@ -1453,7 +1452,7 @@ fn morton_tree_handles_degenerate_representative_extent() {
 fn source_summary_update_tracks_moments() {
     let kernel = MockKernel::<f64>::new();
     let sources = points_f64(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [4.0, 0.0, 0.0]]);
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
 
     let moments_a = [1.0, 2.0, 3.0];
@@ -1492,7 +1491,7 @@ fn dipole_source_summary_centroid_tracks_moment_weights() {
             outer_radius: 0.0,
         },
     ];
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 2).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
 
@@ -1534,7 +1533,7 @@ fn theta_zero_matches_dense_direct_f32() {
     let sources = points_f32(&[[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f32(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f32, 2.0, 3.0];
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f32>>::new(source_tree.as_view());
     assert_eq!(
         update_summaries(
@@ -1589,7 +1588,7 @@ fn source_tree_theta_zero_matches_dense_direct() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.2, 0.0], [2.0, -0.1, 0.0]]);
     let targets = points_f64(&[[0.3, 0.0, 0.0], [3.0, 0.4, 0.0]]);
     let moments = [1.0, -2.0, 0.5];
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
         update_summaries(
@@ -1686,7 +1685,7 @@ fn run_theta_zero_matches_dense_direct_f64() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f64(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);
     let moments = [1.0_f64, 2.0, 3.0];
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
     assert_eq!(
         update_summaries(
@@ -1762,7 +1761,7 @@ fn dipole_flux_density_kernel_theta_zero_matches_dense() {
     ];
     let moments = [[0.0, 0.0, 1.0], [0.0, 1.0, 0.5], [1.0, 0.0, 0.0]];
 
-    let source_tree = ClusterTree::build_with_leaf_size(&sources, 1).unwrap();
+    let source_tree = ClusterTree::build(&sources).unwrap();
     let mut source_summaries =
         SourceNodeSummaries::<DipoleFluxDensityKernel<f64>>::new(source_tree.as_view());
 

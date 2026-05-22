@@ -8,7 +8,6 @@ pub enum HierarchicalError {
     EmptyInput = 1,
     LengthMismatch = 2,
     ScratchTooSmall = 3,
-    InvalidLeafSize = 4,
     InvalidTheta = 5,
     CapacityExceeded = 6,
     KernelError0 = 7,
@@ -23,7 +22,7 @@ impl HierarchicalError {
     ///     value: Integer error code produced by hierarchical tree operations.
     ///
     /// Returns:
-    ///     Matching error value, or [`HierarchicalError::KernelError1`] for unknown codes.
+    ///     Matching error value, or [`HierarchicalError::Unknown`] for unknown codes.
     #[inline]
     pub fn from_u32(value: u32) -> Self {
         match value {
@@ -31,7 +30,6 @@ impl HierarchicalError {
             1 => Self::EmptyInput,
             2 => Self::LengthMismatch,
             3 => Self::ScratchTooSmall,
-            4 => Self::InvalidLeafSize,
             5 => Self::InvalidTheta,
             6 => Self::CapacityExceeded,
             7 => Self::KernelError0,

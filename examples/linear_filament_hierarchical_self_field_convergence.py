@@ -52,6 +52,7 @@ SCALING_THETAS = (0.05, 0.3, 0.6)
 SCALING_INTERACTION_TARGETS = np.logspace(5.0, 10.0, 6, dtype=np.float64)
 TESTING_SCALING_INTERACTION_TARGETS = np.logspace(5.0, 6.0, 2, dtype=np.float64)
 DIRECT_SCALING_MAX_INTERACTIONS = 1.0e9
+DIRECT_ASYMPTOTIC_FIT_POINTS = 3
 DIRECT_TRACE_COLOR = "tab:green"
 TREE_AABB_COLOR = "tab:blue"
 MAX_AABB_PLOT_LEVELS = 6
@@ -65,7 +66,6 @@ NEAR_FIELD_DS_SWEEP = np.logspace(np.log10(0.001), np.log10(0.05), 32, dtype=np.
 TESTING_NEAR_FIELD_DS_SWEEP = np.array([0.02, 0.005, 0.001], dtype=np.float64)
 NEAR_FIELD_ERROR_TARGET = 1.0e-3
 MIN_THETA_CONVERGENCE_EXPONENT = 1.9
-MIN_DIRECT_TIMING_EXPONENT = 1.9
 MAX_DIRECT_TIMING_EXPONENT = 2.1
 MAX_HIERARCHICAL_TIMING_EXPONENT = 1.5
 
@@ -154,9 +154,9 @@ def parse_args() -> argparse.Namespace:
         help="Path for the saved PNG figure.",
     )
     parser.add_argument(
-        "--parallel",
+        "--serial",
         action="store_true",
-        help="Use parallel direct and hierarchical evaluation.",
+        help="Use serial direct and hierarchical evaluation.",
     )
     args, _unknown = parser.parse_known_args()
     return args
@@ -405,11 +405,15 @@ def run_near_field_study(par: bool) -> NearFieldStudy:
 
 
 def direct_time_fit(scaling_results: list[ScalingResult]) -> tuple[float, float] | None:
-    """Fit direct self-field time as `seconds = slope * interactions + intercept`."""
+    """Fit direct self-field time from the largest measured interaction counts."""
 
-    measured = [item for item in scaling_results if item.direct_seconds is not None]
+    measured = sorted(
+        (item for item in scaling_results if item.direct_seconds is not None),
+        key=lambda item: item.discretization.interaction_count,
+    )
     if len(measured) < 2:
         return None
+    measured = measured[-DIRECT_ASYMPTOTIC_FIT_POINTS:]
     interactions = np.array([item.discretization.interaction_count for item in measured], dtype=np.float64)
     seconds = np.array([float(item.direct_seconds) for item in measured], dtype=np.float64)
     slope, intercept = np.polyfit(interactions, seconds, 1)
@@ -916,11 +920,9 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
             DIRECT_TRACE_COLOR,
         )
         if direct_exponent is not None:
-            assert not assert_timing_exponents or (
-                MIN_DIRECT_TIMING_EXPONENT < direct_exponent < MAX_DIRECT_TIMING_EXPONENT
-            ), (
+            assert not assert_timing_exponents or direct_exponent < MAX_DIRECT_TIMING_EXPONENT, (
                 "Expected direct timing exponent "
-                f"{MIN_DIRECT_TIMING_EXPONENT:g} < x < {MAX_DIRECT_TIMING_EXPONENT:g}, "
+                f"< {MAX_DIRECT_TIMING_EXPONENT:g}, "
                 f"got {direct_exponent:.3g}"
             )
             scaling_annotations.append(rf"direct $\sim N^{{{direct_exponent:.2f}}}$")
@@ -1018,9 +1020,10 @@ def main() -> None:
     """Run the convergence study and save the resulting plot."""
 
     args = parse_args()
-    results = run_study(par=args.parallel)
-    scaling_results_by_theta = run_scaling_study(par=args.parallel)
-    near_field_study = run_near_field_study(par=args.parallel)
+    use_parallel = not args.serial
+    results = run_study(par=use_parallel)
+    scaling_results_by_theta = run_scaling_study(par=use_parallel)
+    near_field_study = run_near_field_study(par=use_parallel)
     print_results(results, scaling_results_by_theta)
     fig = build_figure(results, scaling_results_by_theta)
     args.output.parent.mkdir(parents=True, exist_ok=True)

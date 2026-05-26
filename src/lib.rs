@@ -11,7 +11,7 @@ pub mod python;
 #[cfg(feature = "python")]
 use python::*;
 
-use std::num::NonZeroUsize;
+use std::sync::LazyLock;
 
 pub mod math;
 pub mod mesh;
@@ -27,15 +27,15 @@ pub const MU_0: f64 = 0.999_999_999_87 * core::f64::consts::PI * 4e-7; // [H/m]
 /// (H/m) Recurring constant multiple of `mu_0`
 pub const MU0_OVER_4PI: f64 = MU_0 / (4.0 * core::f64::consts::PI);
 
+/// Number of physical CPU cores available to Rayon-backed parallel loops.
+///
+/// This is populated once on first access and then reused so chunk-size
+/// selection does not repeatedly query the OS.
+static PHYSICAL_CORES: LazyLock<usize> = LazyLock::new(num_cpus::get_physical);
+
 /// Chunk size for parallelism
 pub(crate) fn chunksize(nelem: usize) -> usize {
-    let ncores = std::thread::available_parallelism()
-        .unwrap_or(NonZeroUsize::MIN)
-        .get();
-
-    let ncores = (ncores / 2).max(1); // Heuristic for physical cores
-
-    (nelem / ncores).max(1)
+    (nelem / (*PHYSICAL_CORES).max(1)).max(1)
 }
 
 #[macro_use]

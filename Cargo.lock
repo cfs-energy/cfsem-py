@@ -137,6 +137,7 @@ dependencies = [
  "libm",
  "nalgebra",
  "num-traits",
+ "num_cpus",
  "numpy",
  "pyo3",
  "rayon",

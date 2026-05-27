@@ -6,6 +6,7 @@
     * !Consolidate math helper functions and use consistent array argument format
     * !Update filament, dipole, and boundary-element kernel functions and their dependencies to be generic over float type
     * !Remove Python 3.9 support
+    * Improve parallel chunking by using lazy-static physical CPU count
     * Implement single-source-tree Barnes-Hut system under `hierarchical` module
     * Implement tree kernels for filaments, dipoles, and boundary-element mesh
     * Add hierarchical linear-filament and dipole benchmarks

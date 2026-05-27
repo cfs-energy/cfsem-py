@@ -391,6 +391,8 @@ fn source_tree_aabbs_to_py_tuple(
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
+    Py<PyArray1<u64>>,
+    Py<PyArray1<u64>>,
 ) {
     let mut min_x = Vec::with_capacity(tree.node_aabb.len());
     let mut min_y = Vec::with_capacity(tree.node_aabb.len());
@@ -408,6 +410,12 @@ fn source_tree_aabbs_to_py_tuple(
         max_y.push(aabb.max[1]);
         max_z.push(aabb.max[2]);
     }
+    let mut left_child = Vec::with_capacity(tree.node_left_child.len());
+    let mut right_child = Vec::with_capacity(tree.node_right_child.len());
+    for i in 0..tree.node_left_child.len() {
+        left_child.push(u64::from(tree.node_left_child[i]));
+        right_child.push(u64::from(tree.node_right_child[i]));
+    }
     (
         PyArray1::from_vec(py, min_x).unbind(),
         PyArray1::from_vec(py, min_y).unbind(),
@@ -416,6 +424,8 @@ fn source_tree_aabbs_to_py_tuple(
         PyArray1::from_vec(py, max_y).unbind(),
         PyArray1::from_vec(py, max_z).unbind(),
         PyArray1::from_vec(py, levels).unbind(),
+        PyArray1::from_vec(py, left_child).unbind(),
+        PyArray1::from_vec(py, right_child).unbind(),
     )
 }
 
@@ -423,13 +433,20 @@ fn source_tree_diagnostics_object(
     py: Python<'_>,
     tree: &physics::hierarchical::tree::ClusterTree<f64>,
 ) -> PyResult<Py<PyAny>> {
-    let (min_x, min_y, min_z, max_x, max_y, max_z, levels) =
+    let (min_x, min_y, min_z, max_x, max_y, max_z, levels, left_child, right_child) =
         source_tree_aabbs_to_py_tuple(py, tree);
-    Ok(
-        PyTuple::new(py, [min_x, min_y, min_z, max_x, max_y, max_z, levels])?
-            .unbind()
-            .into(),
-    )
+    let items: Vec<Py<PyAny>> = vec![
+        min_x.into(),
+        min_y.into(),
+        min_z.into(),
+        max_x.into(),
+        max_y.into(),
+        max_z.into(),
+        levels.into(),
+        left_child.into(),
+        right_child.into(),
+    ];
+    Ok(PyTuple::new(py, items)?.unbind().into())
 }
 
 fn solve_result_from_field(

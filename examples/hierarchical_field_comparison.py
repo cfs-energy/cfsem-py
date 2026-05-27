@@ -602,6 +602,7 @@ def solve_fields(
     par: bool,
     calc_self_field: bool,
     overlay_aabbs: bool,
+    overlay_tree_links: bool,
 ) -> dict[str, object]:
     direct_build_time = 0.0
 
@@ -741,7 +742,7 @@ def solve_fields(
     accepted_levels_a = result_a.diagnostics.accepted_levels
     build_time = result_b.diagnostics.construction_time + result_a.diagnostics.construction_time
     eval_time = result_b.diagnostics.evaluation_time + result_a.diagnostics.evaluation_time
-    source_tree_aabbs = result_b.diagnostics.source_tree if overlay_aabbs else None
+    source_tree_aabbs = result_b.diagnostics.source_tree if overlay_aabbs or overlay_tree_links else None
 
     results: dict[str, object] = {
         "direct_b": direct_b,
@@ -786,13 +787,14 @@ def decimate_path_for_plot(path: np.ndarray, max_points: int = MAX_PLOTTED_PATH_
     return decimated
 
 
-def aabb_overlay_path(
-    aabbs: tuple[np.ndarray, ...],
+def selected_aabb_indices(
+    levels: np.ndarray,
     max_boxes: int = MAX_PLOTTED_AABBS,
-) -> tuple[list[float | None], list[float | None]]:
-    min_x, _min_y, min_z, max_x, _max_y, max_z, levels = aabbs
-    if min_x.size == 0:
-        return [], []
+) -> np.ndarray:
+    """Return a level-coherent prefix of source-tree node indices for plotting."""
+
+    if levels.size == 0:
+        return np.array([], dtype=np.int64)
     indices_by_level: list[np.ndarray] = []
     count = 0
     for level in np.unique(levels.astype(np.int64)):
@@ -801,7 +803,15 @@ def aabb_overlay_path(
             break
         indices_by_level.append(level_indices)
         count += level_indices.size
-    indices = np.concatenate(indices_by_level) if indices_by_level else np.array([0])
+    return np.concatenate(indices_by_level) if indices_by_level else np.array([0], dtype=np.int64)
+
+
+def aabb_overlay_path(
+    aabbs: tuple[np.ndarray, ...],
+    max_boxes: int = MAX_PLOTTED_AABBS,
+) -> tuple[list[float | None], list[float | None]]:
+    min_x, _min_y, min_z, max_x, _max_y, max_z, levels = aabbs[:7]
+    indices = selected_aabb_indices(levels, max_boxes)
 
     xs: list[float | None] = []
     zs: list[float | None] = []
@@ -810,6 +820,47 @@ def aabb_overlay_path(
         xs.extend([min_x[i], max_x[i], max_x[i], min_x[i], min_x[i], None])
         zs.extend([min_z[i], min_z[i], max_z[i], max_z[i], min_z[i], None])
     return xs, zs
+
+
+def aabb_child_link_path(
+    aabbs: tuple[np.ndarray, ...],
+    max_boxes: int = MAX_PLOTTED_AABBS,
+) -> tuple[list[float | None], list[float | None]]:
+    """Return parent-to-child AABB center links for the plotted source-tree nodes."""
+
+    if len(aabbs) < 9:
+        return [], []
+    min_x, _min_y, min_z, max_x, _max_y, max_z, levels, left_child, right_child = aabbs[:9]
+    indices = selected_aabb_indices(levels, max_boxes)
+    if indices.size == 0:
+        return [], []
+    plotted = set(int(index) for index in indices)
+    center_x = 0.5 * (min_x + max_x)
+    center_z = 0.5 * (min_z + max_z)
+
+    xs: list[float | None] = []
+    zs: list[float | None] = []
+    for parent in indices:
+        parent_index = int(parent)
+        for child in (int(left_child[parent_index]), int(right_child[parent_index])):
+            if child not in plotted or child >= min_x.size:
+                continue
+            xs.extend([float(center_x[parent_index]), float(center_x[child]), None])
+            zs.extend([float(center_z[parent_index]), float(center_z[child]), None])
+    return xs, zs
+
+
+def aabb_center_marker_points(
+    aabbs: tuple[np.ndarray, ...],
+    max_boxes: int = MAX_PLOTTED_AABBS,
+) -> tuple[list[float], list[float]]:
+    """Return center points for the plotted source-tree AABBs."""
+
+    min_x, _min_y, min_z, max_x, _max_y, max_z, levels = aabbs[:7]
+    indices = selected_aabb_indices(levels, max_boxes)
+    center_x = 0.5 * (min_x + max_x)
+    center_z = 0.5 * (min_z + max_z)
+    return [float(center_x[int(index)]) for index in indices], [float(center_z[int(index)]) for index in indices]
 
 
 def source_geometry_overlay_path(
@@ -857,6 +908,7 @@ def make_figure(
     field: str,
     show_error: bool,
     overlay_aabbs: bool,
+    overlay_tree_links: bool,
 ):
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -887,11 +939,17 @@ def make_figure(
     xg, zg = geometry.obs_grid
     geometry_layout = str(results.get("geometry_layout", "helical"))
     geom_x0, geom_z0, geom_x1, geom_z1 = source_geometry_overlay_path(geometry, geometry_layout)
-    aabb_overlay = results.get("source_tree_aabbs") if overlay_aabbs else None
+    source_tree_overlay = results.get("source_tree_aabbs")
+    aabb_overlay = source_tree_overlay if overlay_aabbs else None
+    link_overlay = source_tree_overlay if overlay_tree_links else None
     aabb_x: list[float | None] = []
     aabb_z: list[float | None] = []
+    link_x: list[float | None] = []
+    link_z: list[float | None] = []
     if isinstance(aabb_overlay, tuple):
         aabb_x, aabb_z = aabb_overlay_path(aabb_overlay)
+    if isinstance(link_overlay, tuple):
+        link_x, link_z = aabb_child_link_path(link_overlay)
     traces = [
         (left, "log10 |direct|"),
         (middle, "log10 |hierarchical|"),
@@ -942,6 +1000,19 @@ def make_figure(
             row=1,
             col=col,
         )
+        if link_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=link_x,
+                    y=link_z,
+                    mode="lines",
+                    line={"color": "rgba(10, 70, 160, 0.45)", "width": 1},
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=1,
+                col=col,
+            )
         if aabb_x:
             fig.add_trace(
                 go.Scatter(
@@ -965,6 +1036,115 @@ def make_figure(
         height=360,
         margin={"l": 40, "r": 40, "t": 54, "b": 8},
         title=f"{'B-field' if field == 'b' else 'A-field'} comparison on the centerline plane",
+    )
+    return fig
+
+
+def make_hierarchical_detail_figure(
+    geometry: Geometry,
+    results: dict[str, object],
+    field: str,
+    overlay_aabbs: bool,
+    overlay_tree_links: bool,
+):
+    import plotly.graph_objects as go
+
+    hierarchical = results[f"hierarchical_{field}"]
+    assert isinstance(hierarchical, tuple)
+    values = np.log10(np.maximum(field_magnitude(hierarchical), 1e-30))
+    xg, zg = geometry.obs_grid
+    geometry_layout = str(results.get("geometry_layout", "helical"))
+    geom_x0, geom_z0, geom_x1, geom_z1 = source_geometry_overlay_path(geometry, geometry_layout)
+    source_tree_overlay = results.get("source_tree_aabbs")
+    aabb_x: list[float | None] = []
+    aabb_z: list[float | None] = []
+    link_x: list[float | None] = []
+    link_z: list[float | None] = []
+    node_x: list[float] = []
+    node_z: list[float] = []
+    if overlay_aabbs and isinstance(source_tree_overlay, tuple):
+        aabb_x, aabb_z = aabb_overlay_path(source_tree_overlay)
+    if overlay_tree_links and isinstance(source_tree_overlay, tuple):
+        link_x, link_z = aabb_child_link_path(source_tree_overlay)
+        node_x, node_z = aabb_center_marker_points(source_tree_overlay)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Heatmap(
+            x=xg[0, :],
+            y=zg[:, 0],
+            z=heatmap_values(values, geometry),
+            colorscale="Viridis",
+            colorbar={"title": "log10 |hierarchical|"},
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=geom_x0,
+            y=geom_z0,
+            mode="lines",
+            line={"color": "white", "width": 2, "dash": "dash"},
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=geom_x1,
+            y=geom_z1,
+            mode="markers" if geometry_layout == "distributed" else "lines",
+            line={"color": "black", "width": 2},
+            marker={"color": "black", "size": 3} if geometry_layout == "distributed" else None,
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    if link_x:
+        fig.add_trace(
+            go.Scatter(
+                x=link_x,
+                y=link_z,
+                mode="lines",
+                line={"color": "white", "width": 2},
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+    if aabb_x:
+        fig.add_trace(
+            go.Scatter(
+                x=aabb_x,
+                y=aabb_z,
+                mode="lines",
+                line={"color": "black", "width": 2},
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+    if node_x:
+        fig.add_trace(
+            go.Scatter(
+                x=node_x,
+                y=node_z,
+                mode="markers",
+                marker={
+                    "symbol": "circle",
+                    "size": 5,
+                    "color": "white",
+                    "line": {"color": "black", "width": 1},
+                },
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    fig.update_xaxes(title="x [m]")
+    fig.update_yaxes(title="z [m]", scaleanchor="x", scaleratio=1.0)
+    fig.update_layout(
+        template="plotly_white",
+        height=620,
+        margin={"l": 50, "r": 55, "t": 54, "b": 45},
+        title=f"Standalone hierarchical {'B-field' if field == 'b' else 'A-field'} on the centerline plane",
     )
     return fig
 
@@ -1206,6 +1386,7 @@ def make_app():
                             {"label": "Show relative error", "value": "relative-error"},
                             {"label": "Calculate self-field", "value": "self-field"},
                             {"label": "Overlay source AABBs", "value": "aabbs"},
+                            {"label": "Overlay AABB child links", "value": "aabb-links"},
                         ],
                     ),
                 ],
@@ -1231,6 +1412,11 @@ def make_app():
                         config={"responsive": True},
                         style={"height": "190px", "marginTop": "0"},
                     ),
+                    dcc.Graph(
+                        id="hierarchical-detail-figure",
+                        config={"responsive": True},
+                        style={"height": "620px", "marginTop": "8px"},
+                    ),
                 ],
                 style=content_style,
             ),
@@ -1245,6 +1431,7 @@ def make_app():
     @app.callback(
         Output("field-figure", "figure"),
         Output("self-field-figure", "figure"),
+        Output("hierarchical-detail-figure", "figure"),
         Output("timing", "children"),
         Input("source-geometry", "value"),
         Input("geometry-layout", "value"),
@@ -1291,9 +1478,24 @@ def make_app():
             par="parallel" in opts,
             calc_self_field="self-field" in opts,
             overlay_aabbs="aabbs" in opts,
+            overlay_tree_links="aabb-links" in opts,
         )
-        fig = make_figure(geometry, results, field, "relative-error" in opts, "aabbs" in opts)
+        fig = make_figure(
+            geometry,
+            results,
+            field,
+            "relative-error" in opts,
+            "aabbs" in opts,
+            "aabb-links" in opts,
+        )
         self_fig = make_self_field_figure(results, field)
+        detail_fig = make_hierarchical_detail_figure(
+            geometry,
+            results,
+            field,
+            "aabbs" in opts,
+            "aabb-links" in opts,
+        )
         self_field = results.get("self_field")
         self_text = ""
         if isinstance(self_field, dict):
@@ -1334,7 +1536,7 @@ def make_app():
             f"speedup={speedup_text(direct_time, eval_time)}"
             f"{self_text}"
         )
-        return fig, self_fig, timing
+        return fig, self_fig, detail_fig, timing
 
     return app
 

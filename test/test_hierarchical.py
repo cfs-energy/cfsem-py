@@ -36,7 +36,10 @@ def _assert_diagnostics(result, nsource, ntarget):
     assert result.diagnostics.source_count == nsource
     assert result.diagnostics.target_count == ntarget
     assert result.diagnostics.source_tree is not None
+    assert len(result.diagnostics.source_tree) == 9
     assert result.diagnostics.source_tree[0].size > 0
+    assert result.diagnostics.source_tree[7].shape == result.diagnostics.source_tree[0].shape
+    assert result.diagnostics.source_tree[8].shape == result.diagnostics.source_tree[0].shape
     assert result.diagnostics.accepted_levels is not None
     assert result.diagnostics.accepted_levels.shape == (ntarget,)
 

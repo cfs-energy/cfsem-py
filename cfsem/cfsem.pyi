@@ -18,10 +18,18 @@ ArrayPair: TypeAlias = tuple[FloatArray, FloatArray]
 SparseF64: TypeAlias = tuple[FloatArray, UIntArray, UIntArray, int, int]
 SparseF32: TypeAlias = tuple[Float32Array, UIntArray, UIntArray, int, int]
 SourceTreeDiagnostics: TypeAlias = tuple[
-    FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray
+    FloatArray,
+    FloatArray,
+    FloatArray,
+    FloatArray,
+    FloatArray,
+    FloatArray,
+    FloatArray,
+    UIntArray,
+    UIntArray,
 ]
 # Source tree diagnostic tuple order:
-# min_x, min_y, min_z, max_x, max_y, max_z, level.
+# min_x, min_y, min_z, max_x, max_y, max_z, level, left_child, right_child.
 
 class HierarchicalDiagnostics:
     """Timing, size, and optional tree diagnostics from a hierarchical solve."""

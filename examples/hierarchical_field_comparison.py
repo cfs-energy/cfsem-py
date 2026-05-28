@@ -924,17 +924,18 @@ def make_figure(
     right_title = "log10 relative error" if show_error else "log10 magnitude difference"
     accepted_levels = results.get(f"accepted_levels_{field}")
     show_level_diagnostic = isinstance(accepted_levels, np.ndarray)
-    col_count = 4 if show_level_diagnostic else 3
+    subplot_titles = (
+        ("Direct", "Hierarchical", right_title, "Accepted Source Level")
+        if show_level_diagnostic
+        else ("Direct", "Hierarchical", right_title, "")
+    )
 
     fig = make_subplots(
-        rows=1,
-        cols=col_count,
-        subplot_titles=(
-            ("Direct", "Hierarchical", right_title, "Accepted Source Level")
-            if show_level_diagnostic
-            else ("Direct", "Hierarchical", right_title)
-        ),
-        horizontal_spacing=0.055,
+        rows=2,
+        cols=2,
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.13,
     )
     xg, zg = geometry.obs_grid
     geometry_layout = str(results.get("geometry_layout", "helical"))
@@ -957,22 +958,24 @@ def make_figure(
     ]
     if show_level_diagnostic:
         traces.append((accepted_levels, "accepted levels"))
-    for col, (values, title) in enumerate(traces, start=1):
+    for trace_index, (values, title) in enumerate(traces):
+        row = trace_index // 2 + 1
+        col = trace_index % 2 + 1
         colorscale = "Viridis"
-        if col == 3:
+        if trace_index == 2:
             colorscale = [[0.0, "#2c7bb6"], [0.5, "#ffffbf"], [1.0, "#d7191c"]] if show_error else "RdBu"
-        if col == 4:
+        if trace_index == 3:
             colorscale = "Cividis"
         fig.add_trace(
             go.Heatmap(
                 x=xg[0, :],
                 y=zg[:, 0],
                 z=heatmap_values(values, geometry),
-                showscale=col == 3,
-                colorbar={"title": title} if col == 3 else None,
+                showscale=trace_index == 2,
+                colorbar={"title": title} if trace_index == 2 else None,
                 colorscale=colorscale,
             ),
-            row=1,
+            row=row,
             col=col,
         )
         fig.add_trace(
@@ -984,7 +987,7 @@ def make_figure(
                 showlegend=False,
                 hoverinfo="skip",
             ),
-            row=1,
+            row=row,
             col=col,
         )
         fig.add_trace(
@@ -997,7 +1000,7 @@ def make_figure(
                 showlegend=False,
                 hoverinfo="skip",
             ),
-            row=1,
+            row=row,
             col=col,
         )
         if link_x:
@@ -1010,7 +1013,7 @@ def make_figure(
                     showlegend=False,
                     hoverinfo="skip",
                 ),
-                row=1,
+                row=row,
                 col=col,
             )
         if aabb_x:
@@ -1023,18 +1026,32 @@ def make_figure(
                     showlegend=False,
                     hoverinfo="skip",
                 ),
-                row=1,
+                row=row,
                 col=col,
             )
 
-    for axis in fig.select_xaxes():
-        axis.update(title="x [m]")
-    for axis in fig.select_yaxes():
-        axis.update(title="z [m]")
+    for row in range(1, 3):
+        for col in range(1, 3):
+            axis_index = (row - 1) * 2 + col
+            x_axis_name = "x" if axis_index == 1 else f"x{axis_index}"
+            fig.update_xaxes(
+                title="x [m]" if row == 2 else "",
+                showgrid=False,
+                row=row,
+                col=col,
+            )
+            fig.update_yaxes(
+                title="z [m]" if row == 1 and col == 1 else "",
+                scaleanchor=x_axis_name,
+                scaleratio=1.0,
+                showgrid=False,
+                row=row,
+                col=col,
+            )
     fig.update_layout(
         template="plotly_white",
-        height=360,
-        margin={"l": 40, "r": 40, "t": 54, "b": 8},
+        height=620,
+        margin={"l": 50, "r": 50, "t": 68, "b": 42},
         title=f"{'B-field' if field == 'b' else 'A-field'} comparison on the centerline plane",
     )
     return fig
@@ -1405,7 +1422,7 @@ def make_app():
                     dcc.Graph(
                         id="field-figure",
                         config={"responsive": True},
-                        style={"height": "360px", "marginBottom": "0"},
+                        style={"height": "620px", "marginBottom": "0"},
                     ),
                     dcc.Graph(
                         id="self-field-figure",

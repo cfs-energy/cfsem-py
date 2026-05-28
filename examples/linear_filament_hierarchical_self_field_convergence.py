@@ -787,7 +787,7 @@ def plot_near_field_domain_axis(ax: plt.Axes) -> None:
         label = "sources" if i == 0 else None
         ax.plot([start_x[i], end_x[i]], [start_y[i], end_y[i]], color="black", linewidth=2.5, label=label)
 
-    min_x, min_y, _min_z, max_x, max_y, _max_z, levels = source_tree_aabbs(discretization)
+    min_x, min_y, _min_z, max_x, max_y, _max_z, levels = source_tree_aabbs(discretization)[:7]
     for i in range(len(min_x)):
         if levels[i] > MAX_AABB_PLOT_LEVELS:
             continue
@@ -823,7 +823,7 @@ def plot_domain_axis(ax: plt.Axes, discretization: LoopDiscretization) -> None:
     for i in range(discretization.segment_count):
         ax.plot([start_x[i], end_x[i]], [start_y[i], end_y[i]], color="black", linewidth=3.0)
 
-    min_x, min_y, _min_z, max_x, max_y, _max_z, levels = source_tree_aabbs(discretization)
+    min_x, min_y, _min_z, max_x, max_y, _max_z, levels = source_tree_aabbs(discretization)[:7]
     for i in range(len(min_x)):
         if levels[i] > MAX_AABB_PLOT_LEVELS:
             continue

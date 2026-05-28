@@ -8,8 +8,6 @@ use crate::physics::hierarchical::{
 const CLOSED_SUMMARY_CLOSURE_RATIO_MAX: f64 = 0.2;
 /// Upper closure-ratio bound for source summaries that can be represented as segments.
 const OPEN_SUMMARY_CLOSURE_RATIO_MIN: f64 = 0.8;
-/// Linear filament opening-angle scale factor for stricter geometric acceptance.
-const LINEAR_FILAMENT_THETA_SCALE: f64 = 0.5;
 
 /// Finite linear filament source geometry.
 #[derive(Clone, Copy, Debug, Default)]
@@ -248,11 +246,7 @@ pub(super) fn linear_filament_accept_far<T: Scalar>(
             return false;
         }
     }
-    geometric_accept_far(
-        target_aabb,
-        source_aabb,
-        theta * T::from_f64(LINEAR_FILAMENT_THETA_SCALE),
-    )
+    geometric_accept_far(target_aabb, source_aabb, theta)
 }
 
 /// Accumulate one exact linear filament source into an unfinalized summary.

@@ -2,8 +2,13 @@ use crate::math::{add3_in_place, cross3, norm3, scale3, sub3};
 use crate::physics::boundary_element::{calc_tri_area, triangle_current_density};
 use crate::physics::hierarchical::{
     Aabb, BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
-    Scalar, SourceCollection, SourceMomentCollection,
+    Scalar, SourceCollection, SourceMomentCollection, geometric_accept_far,
 };
+
+/// Lower closure-ratio bound for source summaries that can be represented as loops.
+const CLOSED_SUMMARY_CLOSURE_RATIO_MAX: f64 = 0.2;
+/// Upper closure-ratio bound for source summaries that can be represented as open current patches.
+const OPEN_SUMMARY_CLOSURE_RATIO_MIN: f64 = 0.8;
 
 /// Triangular boundary-element source geometry.
 #[derive(Clone, Copy, Debug, Default)]
@@ -318,6 +323,25 @@ fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<
 #[inline]
 pub(super) fn has_current<T: Scalar>(summary: &BoundaryElementSummary<T>) -> bool {
     norm3(summary.current_element) > T::ZERO
+}
+
+/// Apply the BEM current-closure guard and geometric acceptance test.
+#[inline]
+pub(super) fn boundary_element_accept_far<T: Scalar>(
+    target_aabb: Aabb<T>,
+    source_aabb: Aabb<T>,
+    source: &BoundaryElementSummary<T>,
+    theta: T,
+) -> bool {
+    if source.weight > T::ZERO {
+        let closure_ratio = norm3(source.current_element) / source.weight;
+        if closure_ratio >= T::from_f64(CLOSED_SUMMARY_CLOSURE_RATIO_MAX)
+            && closure_ratio <= T::from_f64(OPEN_SUMMARY_CLOSURE_RATIO_MIN)
+        {
+            return false;
+        }
+    }
+    geometric_accept_far(target_aabb, source_aabb, theta)
 }
 
 #[inline]

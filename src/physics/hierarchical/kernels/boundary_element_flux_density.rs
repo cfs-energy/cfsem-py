@@ -1,14 +1,14 @@
 use core::marker::PhantomData;
 
 use super::boundary_element::{
-    BoundaryElementSummary, BoundaryElementTriangle, combine_source_summaries, has_current,
-    summarize_leaf_sources,
+    BoundaryElementSummary, BoundaryElementTriangle, boundary_element_accept_far,
+    combine_source_summaries, has_current, summarize_leaf_sources,
 };
 use super::dipole::{DipoleTarget, DipoleTargetSummary, dipole_field, summarize_target_leaf};
 use crate::math::add3_in_place;
 use crate::physics::boundary_element::{QuadratureKind, flux_density_triangle};
 use crate::physics::hierarchical::{
-    HierarchicalError, HierarchicalKernel, Scalar, SourceCollection, SourceMomentCollection,
+    Aabb, HierarchicalError, HierarchicalKernel, Scalar, SourceCollection, SourceMomentCollection,
 };
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
@@ -132,6 +132,17 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
             &mut dipole_out,
         );
         add3_in_place(out, dipole_out);
+    }
+
+    #[inline]
+    fn accept_far(
+        &self,
+        target_aabb: Aabb<Self::Scalar>,
+        source_aabb: Aabb<Self::Scalar>,
+        source: &Self::SourceSummary,
+        theta: Self::Scalar,
+    ) -> bool {
+        boundary_element_accept_far(target_aabb, source_aabb, source, theta)
     }
 
     #[inline]

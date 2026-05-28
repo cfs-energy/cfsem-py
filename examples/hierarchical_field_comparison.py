@@ -12,9 +12,11 @@ GRID_N = 124 if os.getenv("CFSEM_TESTING") else 228
 DEFAULT_SOURCE_COUNT = 63 if os.getenv("CFSEM_TESTING") else 159
 MIN_SOURCE_COUNT = 8
 MAX_SOURCE_COUNT = 255 if os.getenv("CFSEM_TESTING") else 100_000
-MAX_DIRECT_SELF_INTERACTIONS = 1_000_000_000
+MAX_DIRECT_SELF_DIPOLE_SOURCES = 100_000
+MAX_DIRECT_SELF_FILAMENT_SOURCES = 100_000
+MAX_DIRECT_SELF_BOUNDARY_SOURCES = 10_000
 CURRENT = 1.0
-WIRE_RADIUS = 0.015
+DEFAULT_SOURCE_RADIUS = 0.02
 HELICAL_WIRE_RADIUS = 0.055
 TRIANGLE_STRIP_WIDTH = 0.08
 SOURCE_SPAN = 1.4
@@ -115,7 +117,9 @@ def build_geometry(
     helix_width: float,
     bend_curvature: float,
     loop_fraction: float,
+    source_radius: float,
 ) -> Geometry:
+    source_radius = max(0.0, float(source_radius))
     centerline = fixed_span_arc_centerline(SOURCE_SPAN, bend_curvature, loop_fraction, n_centerline)
     helix = np.asarray(
         cfsem.filament_helix_path(
@@ -135,8 +139,13 @@ def build_geometry(
     xyzfil = contiguous_triple(starts[:, 0], starts[:, 1], starts[:, 2])
     dlxyzfil = contiguous_triple(dl[:, 0], dl[:, 1], dl[:, 2])
     current = np.full(starts.shape[0], CURRENT)
-    wire_radius = np.full(starts.shape[0], WIRE_RADIUS)
-    dipole_loc, dipole_moment, dipole_outer_radius = build_segment_dipoles(starts, dl, current)
+    wire_radius = np.full(starts.shape[0], source_radius)
+    dipole_loc, dipole_moment, dipole_outer_radius = build_segment_dipoles(
+        starts,
+        dl,
+        current,
+        source_radius,
+    )
     (
         volume_dipole_loc,
         volume_dipole_moment,
@@ -151,6 +160,7 @@ def build_geometry(
     ) = build_volume_sources(
         max(1, starts.shape[0]),
         DISTRIBUTED_SOURCE_RADIUS,
+        source_radius,
     )
     strip_nodes, strip_triangles, strip_stream_function = build_triangle_strip(
         helix,
@@ -191,6 +201,7 @@ def build_geometry(
 def build_volume_sources(
     n: int,
     radius: float,
+    source_radius: float,
 ) -> tuple[
     tuple[np.ndarray, np.ndarray, np.ndarray],
     tuple[np.ndarray, np.ndarray, np.ndarray],
@@ -240,11 +251,11 @@ def build_volume_sources(
     return (
         contiguous_triple(loc[:, 0], loc[:, 1], loc[:, 2]),
         contiguous_triple(moments[:, 0], moments[:, 1], moments[:, 2]),
-        np.zeros(n),
+        np.full(n, source_radius),
         contiguous_triple(starts[:, 0], starts[:, 1], starts[:, 2]),
         contiguous_triple(dl[:, 0], dl[:, 1], dl[:, 2]),
         np.full(n, CURRENT),
-        np.full(n, WIRE_RADIUS),
+        np.full(n, source_radius),
         strip_nodes,
         strip_triangles,
         strip_stream_function,
@@ -292,6 +303,7 @@ def build_segment_dipoles(
     starts: np.ndarray,
     dl: np.ndarray,
     current: np.ndarray,
+    source_radius: float,
 ) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]:
     centers = starts + 0.5 * dl
     # This is a compact source distribution for comparing direct and hierarchical dipole kernels.
@@ -299,7 +311,7 @@ def build_segment_dipoles(
     return (
         contiguous_triple(centers[:, 0], centers[:, 1], centers[:, 2]),
         contiguous_triple(moments[:, 0], moments[:, 1], moments[:, 2]),
-        np.zeros(starts.shape[0]),
+        np.full(starts.shape[0], source_radius),
     )
 
 
@@ -426,6 +438,14 @@ def boundary_source_arrays(
     )
 
 
+def max_direct_self_sources(source_geometry: str) -> int:
+    if source_geometry == "dipole":
+        return MAX_DIRECT_SELF_DIPOLE_SOURCES
+    if source_geometry == "boundary":
+        return MAX_DIRECT_SELF_BOUNDARY_SOURCES
+    return MAX_DIRECT_SELF_FILAMENT_SOURCES
+
+
 def solve_self_fields(
     geometry: Geometry,
     geometry_layout: str,
@@ -453,7 +473,7 @@ def solve_self_fields(
     direct_time: float | None = None
     direct_b = None
     direct_a = None
-    if interactions <= MAX_DIRECT_SELF_INTERACTIONS:
+    if source_count <= max_direct_self_sources(source_geometry):
         t0 = time.perf_counter()
         if source_geometry == "dipole":
             dipole_loc, dipole_moment, dipole_outer_radius = dipole_source_arrays(geometry, geometry_layout)
@@ -1356,6 +1376,15 @@ def make_app():
                         value=DEFAULT_LOOP_FRACTION,
                         marks={0.0: "0", 0.25: "0.25", 0.5: "0.5", 0.75: "0.75", 1.0: "1"},
                     ),
+                    html.Label("Source radius"),
+                    dcc.Slider(
+                        id="source-radius",
+                        min=0.0,
+                        max=0.08,
+                        step=0.001,
+                        value=DEFAULT_SOURCE_RADIUS,
+                        marks={0.0: "0", 0.02: "0.02", 0.05: "0.05", 0.08: "0.08"},
+                    ),
                     html.Label("Construction"),
                     dcc.Dropdown(
                         id="construction",
@@ -1459,6 +1488,7 @@ def make_app():
         Input("helix-width", "value"),
         Input("bend-curvature", "value"),
         Input("loop-fraction", "value"),
+        Input("source-radius", "value"),
         Input("construction", "value"),
         Input("field", "value"),
         Input("theta", "value"),
@@ -1472,6 +1502,7 @@ def make_app():
         helix_width,
         bend_curvature,
         loop_fraction,
+        source_radius,
         construction,
         field,
         theta,
@@ -1487,6 +1518,7 @@ def make_app():
             float(helix_width),
             float(bend_curvature),
             float(loop_fraction),
+            float(source_radius),
         )
         opts = set(options or [])
         results = solve_fields(
@@ -1547,7 +1579,8 @@ def make_app():
             f"theta={float(theta):.2f}\n"
             f"geometry={geometry_layout}, kernel={source_geometry}, construction={construction}\n"
             f"twist_pitch={float(twist_pitch):.3f}, helix_width={float(helix_width):.3f}, "
-            f"bend_curvature={float(bend_curvature):.3f}, loop_fraction={float(loop_fraction):.2f}\n"
+            f"bend_curvature={float(bend_curvature):.3f}, loop_fraction={float(loop_fraction):.2f}, "
+            f"source_radius={float(source_radius):.3f}\n"
             f"original source-target interactions={results['source_target_interactions']:.1E}\n"
             f"direct:       construction={direct_build_time:.3f}s, "
             f"evaluation={direct_time:.3f}s\n"

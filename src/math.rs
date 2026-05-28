@@ -307,7 +307,7 @@ fn min_scalar<T: Scalar>(a: T, b: T) -> T {
 }
 
 #[inline]
-fn max_scalar<T: Scalar>(a: T, b: T) -> T {
+pub(crate) fn max_scalar<T: Scalar>(a: T, b: T) -> T {
     if a > b { a } else { b }
 }
 

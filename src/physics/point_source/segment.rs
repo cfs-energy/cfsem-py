@@ -112,6 +112,21 @@ pub fn flux_density_point_segment(
     Ok(())
 }
 
+/// Return the midpoint point-current element representation of one finite segment.
+#[inline]
+fn decompose_filament_segment<T: Scalar>(xyzifil: ((T, T, T), (T, T, T), T)) -> ([T; 3], [T; 3]) {
+    let (xyz0, xyz1, ifil) = xyzifil;
+    let half = T::from_f64(0.5);
+    let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
+    let src = [
+        half.mul_add(dl.0, xyz0.0),
+        half.mul_add(dl.1, xyz0.1),
+        half.mul_add(dl.2, xyz0.2),
+    ];
+    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
+    (src, moment)
+}
+
 /// Biot-Savart calculation for B-field contribution one filament
 /// to one observation point.
 ///
@@ -130,18 +145,8 @@ pub fn flux_density_point_segment_scalar<T: Scalar>(
     xyzifil: ((T, T, T), (T, T, T), T),
     xyzobs: (T, T, T),
 ) -> (T, T, T) {
-    // Unpack
-    let (xyz0, xyz1, ifil) = xyzifil;
-    let (xp, yp, zp) = xyzobs;
-
-    // Get filament midpoint and length vector
-    let half = T::from_f64(0.5);
-    let xmid = half.mul_add(xyz1.0 - xyz0.0, xyz0.0);
-    let ymid = half.mul_add(xyz1.1 - xyz0.1, xyz0.1);
-    let zmid = half.mul_add(xyz1.2 - xyz0.2, xyz0.2);
-    let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
-    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
-    let b = flux_density_current_element_scalar([xmid, ymid, zmid], moment, [xp, yp, zp]);
+    let (src, moment) = decompose_filament_segment(xyzifil);
+    let b = flux_density_current_element_scalar(src, moment, [xyzobs.0, xyzobs.1, xyzobs.2]);
     (b[0], b[1], b[2])
 }
 
@@ -262,21 +267,8 @@ pub fn vector_potential_point_segment_scalar<T: Scalar>(
     xyzifil: ((T, T, T), (T, T, T), T),
     xyzobs: (T, T, T),
 ) -> (T, T, T) {
-    // Unpack
-    let (xyz0, xyz1, ifil) = xyzifil;
-
-    // Get filament midpoint and length vector
-    let half = T::from_f64(0.5);
-    let xmid = half.mul_add(xyz1.0 - xyz0.0, xyz0.0);
-    let ymid = half.mul_add(xyz1.1 - xyz0.1, xyz0.1);
-    let zmid = half.mul_add(xyz1.2 - xyz0.2, xyz0.2);
-    let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
-    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
-    let a = vector_potential_current_element_scalar(
-        [xmid, ymid, zmid],
-        moment,
-        [xyzobs.0, xyzobs.1, xyzobs.2],
-    );
+    let (src, moment) = decompose_filament_segment(xyzifil);
+    let a = vector_potential_current_element_scalar(src, moment, [xyzobs.0, xyzobs.1, xyzobs.2]);
     (a[0], a[1], a[2])
 }
 

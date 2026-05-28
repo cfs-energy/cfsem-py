@@ -348,6 +348,43 @@ fn component_vecs_to_py_tuple(
     )
 }
 
+type PyVec3Output<'py> = (
+    PyReadwriteArray1<'py, f64>,
+    PyReadwriteArray1<'py, f64>,
+    PyReadwriteArray1<'py, f64>,
+);
+
+type PyVec3Field = (Py<PyAny>, Py<PyAny>, Py<PyAny>);
+
+fn evaluate_hierarchical_vec3<'py, D, F>(
+    py: Python<'_>,
+    out: Option<PyVec3Output<'py>>,
+    n: usize,
+    name: &str,
+    evaluate: F,
+) -> PyResult<(PyVec3Field, D)>
+where
+    F: FnOnce((&mut [f64], &mut [f64], &mut [f64])) -> PyResult<D>,
+{
+    match out {
+        Some(out) => {
+            let mut out = read_output_arrays(out, n, name)?;
+            let result = {
+                let (outx, outy, outz) = output_slices_mut(&mut out, name)?;
+                evaluate((outx, outy, outz))?
+            };
+            Ok((output_arrays_to_py_tuple(&out), result))
+        }
+        None => {
+            let mut outx = vec![0.0; n];
+            let mut outy = vec![0.0; n];
+            let mut outz = vec![0.0; n];
+            let result = evaluate((&mut outx, &mut outy, &mut outz))?;
+            Ok((component_vecs_to_py_tuple(py, (outx, outy, outz)), result))
+        }
+    }
+}
+
 fn output_slices_mut<'a, 'py, T>(
     out: &'a mut (
         PyReadwriteArray1<'py, T>,
@@ -593,30 +630,9 @@ fn flux_density_dipole_hierarchical(
     let outer_radius = read_float_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
     let construction_method = parse_build_method(construction_method)?;
-    let (field, diagnostics) = match out {
-        Some(out) => {
-            let mut out = read_output_arrays(out, obs.len(), "flux_density")?;
-            let diagnostics = {
-                let (outx, outy, outz) = output_slices_mut(&mut out, "flux_density")?;
-                physics::hierarchical::flux_density_dipole_hierarchical(
-                    loc.as_tuple(),
-                    moment.as_tuple(),
-                    outer_radius.as_slice(),
-                    obs.as_tuple(),
-                    construction_method,
-                    theta,
-                    par,
-                    (outx, outy, outz),
-                )
-                .map_err(|err| py_hierarchical_error("hierarchical dipole flux density", err))?
-            };
-            (output_arrays_to_py_tuple(&out), diagnostics)
-        }
-        None => {
-            let mut bx = vec![0.0; obs.len()];
-            let mut by = vec![0.0; obs.len()];
-            let mut bz = vec![0.0; obs.len()];
-            let diagnostics = physics::hierarchical::flux_density_dipole_hierarchical(
+    let (field, diagnostics) =
+        evaluate_hierarchical_vec3(py, out, obs.len(), "flux_density", |out| {
+            physics::hierarchical::flux_density_dipole_hierarchical(
                 loc.as_tuple(),
                 moment.as_tuple(),
                 outer_radius.as_slice(),
@@ -624,12 +640,10 @@ fn flux_density_dipole_hierarchical(
                 construction_method,
                 theta,
                 par,
-                (&mut bx, &mut by, &mut bz),
+                out,
             )
-            .map_err(|err| py_hierarchical_error("hierarchical dipole flux density", err))?;
-            (component_vecs_to_py_tuple(py, (bx, by, bz)), diagnostics)
-        }
-    };
+            .map_err(|err| py_hierarchical_error("hierarchical dipole flux density", err))
+        })?;
     let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::DipoleSources::new(
             loc.as_tuple().0,
@@ -711,30 +725,9 @@ fn vector_potential_dipole_hierarchical(
     let outer_radius = read_float_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
     let construction_method = parse_build_method(construction_method)?;
-    let (field, diagnostics) = match out {
-        Some(out) => {
-            let mut out = read_output_arrays(out, obs.len(), "vector_potential")?;
-            let diagnostics = {
-                let (outx, outy, outz) = output_slices_mut(&mut out, "vector_potential")?;
-                physics::hierarchical::vector_potential_dipole_hierarchical(
-                    loc.as_tuple(),
-                    moment.as_tuple(),
-                    outer_radius.as_slice(),
-                    obs.as_tuple(),
-                    construction_method,
-                    theta,
-                    par,
-                    (outx, outy, outz),
-                )
-                .map_err(|err| py_hierarchical_error("hierarchical dipole vector potential", err))?
-            };
-            (output_arrays_to_py_tuple(&out), diagnostics)
-        }
-        None => {
-            let mut ax = vec![0.0; obs.len()];
-            let mut ay = vec![0.0; obs.len()];
-            let mut az = vec![0.0; obs.len()];
-            let diagnostics = physics::hierarchical::vector_potential_dipole_hierarchical(
+    let (field, diagnostics) =
+        evaluate_hierarchical_vec3(py, out, obs.len(), "vector_potential", |out| {
+            physics::hierarchical::vector_potential_dipole_hierarchical(
                 loc.as_tuple(),
                 moment.as_tuple(),
                 outer_radius.as_slice(),
@@ -742,12 +735,10 @@ fn vector_potential_dipole_hierarchical(
                 construction_method,
                 theta,
                 par,
-                (&mut ax, &mut ay, &mut az),
+                out,
             )
-            .map_err(|err| py_hierarchical_error("hierarchical dipole vector potential", err))?;
-            (component_vecs_to_py_tuple(py, (ax, ay, az)), diagnostics)
-        }
-    };
+            .map_err(|err| py_hierarchical_error("hierarchical dipole vector potential", err))
+        })?;
     let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::DipoleSources::new(
             loc.as_tuple().0,
@@ -831,33 +822,9 @@ fn flux_density_linear_filament_hierarchical(
     let ifil = read_float_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
     let construction_method = parse_build_method(construction_method)?;
-    let (field, diagnostics) = match out {
-        Some(out) => {
-            let mut out = read_output_arrays(out, xyzp.len(), "flux_density")?;
-            let diagnostics = {
-                let (outx, outy, outz) = output_slices_mut(&mut out, "flux_density")?;
-                physics::hierarchical::flux_density_linear_filament_hierarchical(
-                    xyzp.as_tuple(),
-                    xyzfil.as_tuple(),
-                    dlxyzfil.as_tuple(),
-                    ifil.as_slice(),
-                    wire_radius.as_slice(),
-                    construction_method,
-                    theta,
-                    par,
-                    (outx, outy, outz),
-                )
-                .map_err(|err| {
-                    py_hierarchical_error("hierarchical linear-filament flux density", err)
-                })?
-            };
-            (output_arrays_to_py_tuple(&out), diagnostics)
-        }
-        None => {
-            let mut bx = vec![0.0; xyzp.len()];
-            let mut by = vec![0.0; xyzp.len()];
-            let mut bz = vec![0.0; xyzp.len()];
-            let diagnostics = physics::hierarchical::flux_density_linear_filament_hierarchical(
+    let (field, diagnostics) =
+        evaluate_hierarchical_vec3(py, out, xyzp.len(), "flux_density", |out| {
+            physics::hierarchical::flux_density_linear_filament_hierarchical(
                 xyzp.as_tuple(),
                 xyzfil.as_tuple(),
                 dlxyzfil.as_tuple(),
@@ -866,14 +833,10 @@ fn flux_density_linear_filament_hierarchical(
                 construction_method,
                 theta,
                 par,
-                (&mut bx, &mut by, &mut bz),
+                out,
             )
-            .map_err(|err| {
-                py_hierarchical_error("hierarchical linear-filament flux density", err)
-            })?;
-            (component_vecs_to_py_tuple(py, (bx, by, bz)), diagnostics)
-        }
-    };
+            .map_err(|err| py_hierarchical_error("hierarchical linear-filament flux density", err))
+        })?;
     let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
             xyzfil.as_tuple(),
@@ -951,33 +914,9 @@ fn vector_potential_linear_filament_hierarchical(
     let ifil = read_float_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
     let construction_method = parse_build_method(construction_method)?;
-    let (field, diagnostics) = match out {
-        Some(out) => {
-            let mut out = read_output_arrays(out, xyzp.len(), "vector_potential")?;
-            let diagnostics = {
-                let (outx, outy, outz) = output_slices_mut(&mut out, "vector_potential")?;
-                physics::hierarchical::vector_potential_linear_filament_hierarchical(
-                    xyzp.as_tuple(),
-                    xyzfil.as_tuple(),
-                    dlxyzfil.as_tuple(),
-                    ifil.as_slice(),
-                    wire_radius.as_slice(),
-                    construction_method,
-                    theta,
-                    par,
-                    (outx, outy, outz),
-                )
-                .map_err(|err| {
-                    py_hierarchical_error("hierarchical linear-filament vector potential", err)
-                })?
-            };
-            (output_arrays_to_py_tuple(&out), diagnostics)
-        }
-        None => {
-            let mut ax = vec![0.0; xyzp.len()];
-            let mut ay = vec![0.0; xyzp.len()];
-            let mut az = vec![0.0; xyzp.len()];
-            let diagnostics = physics::hierarchical::vector_potential_linear_filament_hierarchical(
+    let (field, diagnostics) =
+        evaluate_hierarchical_vec3(py, out, xyzp.len(), "vector_potential", |out| {
+            physics::hierarchical::vector_potential_linear_filament_hierarchical(
                 xyzp.as_tuple(),
                 xyzfil.as_tuple(),
                 dlxyzfil.as_tuple(),
@@ -986,14 +925,12 @@ fn vector_potential_linear_filament_hierarchical(
                 construction_method,
                 theta,
                 par,
-                (&mut ax, &mut ay, &mut az),
+                out,
             )
             .map_err(|err| {
                 py_hierarchical_error("hierarchical linear-filament vector potential", err)
-            })?;
-            (component_vecs_to_py_tuple(py, (ax, ay, az)), diagnostics)
-        }
-    };
+            })
+        })?;
     let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
             xyzfil.as_tuple(),
@@ -1063,32 +1000,9 @@ fn flux_density_triangle_mesh_hierarchical(
     let s = read_float_input_array1(py, &s, "s")?;
     let quad = parse_triangle_quadrature(quad)?;
     let construction_method = parse_build_method(construction_method)?;
-    let (field, diagnostics) = match out {
-        Some(out) => {
-            let mut out = read_output_arrays(out, obs.0.len(), "flux_density")?;
-            let diagnostics = {
-                let (outx, outy, outz) = output_slices_mut(&mut out, "flux_density")?;
-                physics::hierarchical::flux_density_triangle_mesh_hierarchical(
-                    (&obs.0, &obs.1, &obs.2),
-                    &mesh,
-                    s.as_slice(),
-                    quad,
-                    construction_method,
-                    theta,
-                    par,
-                    (outx, outy, outz),
-                )
-                .map_err(|err| {
-                    py_hierarchical_error("hierarchical triangle-mesh flux density", err)
-                })?
-            };
-            (output_arrays_to_py_tuple(&out), diagnostics)
-        }
-        None => {
-            let mut bx = vec![0.0; obs.0.len()];
-            let mut by = vec![0.0; obs.0.len()];
-            let mut bz = vec![0.0; obs.0.len()];
-            let diagnostics = physics::hierarchical::flux_density_triangle_mesh_hierarchical(
+    let (field, diagnostics) =
+        evaluate_hierarchical_vec3(py, out, obs.0.len(), "flux_density", |out| {
+            physics::hierarchical::flux_density_triangle_mesh_hierarchical(
                 (&obs.0, &obs.1, &obs.2),
                 &mesh,
                 s.as_slice(),
@@ -1096,12 +1010,10 @@ fn flux_density_triangle_mesh_hierarchical(
                 construction_method,
                 theta,
                 par,
-                (&mut bx, &mut by, &mut bz),
+                out,
             )
-            .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh flux density", err))?;
-            (component_vecs_to_py_tuple(py, (bx, by, bz)), diagnostics)
-        }
-    };
+            .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh flux density", err))
+        })?;
     let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(
             (&nodes.0, &nodes.1, &nodes.2),
@@ -1168,32 +1080,9 @@ fn vector_potential_triangle_mesh_hierarchical(
     let s = read_float_input_array1(py, &s, "s")?;
     let quad = parse_triangle_quadrature(quad)?;
     let construction_method = parse_build_method(construction_method)?;
-    let (field, diagnostics) = match out {
-        Some(out) => {
-            let mut out = read_output_arrays(out, obs.0.len(), "vector_potential")?;
-            let diagnostics = {
-                let (outx, outy, outz) = output_slices_mut(&mut out, "vector_potential")?;
-                physics::hierarchical::vector_potential_triangle_mesh_hierarchical(
-                    (&obs.0, &obs.1, &obs.2),
-                    &mesh,
-                    s.as_slice(),
-                    quad,
-                    construction_method,
-                    theta,
-                    par,
-                    (outx, outy, outz),
-                )
-                .map_err(|err| {
-                    py_hierarchical_error("hierarchical triangle-mesh vector potential", err)
-                })?
-            };
-            (output_arrays_to_py_tuple(&out), diagnostics)
-        }
-        None => {
-            let mut ax = vec![0.0; obs.0.len()];
-            let mut ay = vec![0.0; obs.0.len()];
-            let mut az = vec![0.0; obs.0.len()];
-            let diagnostics = physics::hierarchical::vector_potential_triangle_mesh_hierarchical(
+    let (field, diagnostics) =
+        evaluate_hierarchical_vec3(py, out, obs.0.len(), "vector_potential", |out| {
+            physics::hierarchical::vector_potential_triangle_mesh_hierarchical(
                 (&obs.0, &obs.1, &obs.2),
                 &mesh,
                 s.as_slice(),
@@ -1201,14 +1090,12 @@ fn vector_potential_triangle_mesh_hierarchical(
                 construction_method,
                 theta,
                 par,
-                (&mut ax, &mut ay, &mut az),
+                out,
             )
             .map_err(|err| {
                 py_hierarchical_error("hierarchical triangle-mesh vector potential", err)
-            })?;
-            (component_vecs_to_py_tuple(py, (ax, ay, az)), diagnostics)
-        }
-    };
+            })
+        })?;
     let (source_tree, accepted_levels) = if extra_diagnostics {
         let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(
             (&nodes.0, &nodes.1, &nodes.2),

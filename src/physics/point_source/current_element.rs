@@ -2,7 +2,7 @@
 //! boundary-element quadrature implementations.
 
 use crate::MU0_OVER_4PI;
-use crate::math::{cross3, dot3};
+use crate::math::{cross3, dot3, max_scalar};
 use crate::physics::hierarchical::Scalar;
 
 /// Minimum observation-point distance below which point-current-element kernels
@@ -58,9 +58,4 @@ pub(crate) fn vector_potential_current_element_scalar<T: Scalar>(
         c * moment[2] / rmag, // [V*s/m]
     ];
     if near { [T::ZERO; 3] } else { out }
-}
-
-#[inline]
-fn max_scalar<T: Scalar>(a: T, b: T) -> T {
-    if a > b { a } else { b }
 }

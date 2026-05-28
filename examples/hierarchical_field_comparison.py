@@ -860,7 +860,10 @@ def aabb_center_marker_points(
     indices = selected_aabb_indices(levels, max_boxes)
     center_x = 0.5 * (min_x + max_x)
     center_z = 0.5 * (min_z + max_z)
-    return [float(center_x[int(index)]) for index in indices], [float(center_z[int(index)]) for index in indices]
+    return (
+        [float(center_x[int(index)]) for index in indices],
+        [float(center_z[int(index)]) for index in indices],
+    )
 
 
 def source_geometry_overlay_path(

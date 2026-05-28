@@ -967,7 +967,7 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
     wire_radius: T,
     xyzobs: (T, T, T),
 ) -> (T, T, T) {
-    use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
+    use crate::math::{PointLineDistance, max_scalar, point_line_distance_with_endpoints};
 
     // Unpack
     let (start, end, ifil) = xyzifil;
@@ -986,14 +986,13 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
         para_a,
         para_b,
         ab_norm: dlhat,
-        perp_hat,
+        perp_hat: _,
     } = point_line_distance_with_endpoints(
         [start.0, start.1, start.2],
         [end.0, end.1, end.2],
         [xyzobs.0, xyzobs.1, xyzobs.2],
         core_radius,
     );
-    let _ = perp_hat;
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
@@ -1088,11 +1087,6 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
 
     // Return continuous vector potential; avoid hard clipping at small radius.
     (ax, ay, az)
-}
-
-#[inline]
-fn max_scalar<T: Scalar>(a: T, b: T) -> T {
-    if a > b { a } else { b }
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current

@@ -535,8 +535,8 @@ def solve_self_fields(
         result_b = cfsem.flux_density_dipole_hierarchical(
             dipole_loc,
             dipole_moment,
-            dipole_outer_radius,
             self_obs,
+            dipole_outer_radius,
             theta=theta,
             construction_method=construction_method,
             par=par,
@@ -544,8 +544,8 @@ def solve_self_fields(
         result_a = cfsem.vector_potential_dipole_hierarchical(
             dipole_loc,
             dipole_moment,
-            dipole_outer_radius,
             self_obs,
+            dipole_outer_radius,
             theta=theta,
             construction_method=construction_method,
             par=par,
@@ -556,19 +556,19 @@ def solve_self_fields(
         )
         self_obs_array = np.column_stack(self_obs)
         result_b = cfsem.flux_density_triangle_mesh_hierarchical(
+            self_obs_array,
             strip_nodes,
             strip_triangles,
             strip_stream_function,
-            self_obs_array,
             theta=theta,
             construction_method=construction_method,
             par=par,
         )
         result_a = cfsem.vector_potential_triangle_mesh_hierarchical(
+            self_obs_array,
             strip_nodes,
             strip_triangles,
             strip_stream_function,
-            self_obs_array,
             theta=theta,
             construction_method=construction_method,
             par=par,
@@ -576,21 +576,21 @@ def solve_self_fields(
     else:
         xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
         result_b = cfsem.flux_density_linear_filament_hierarchical(
+            self_obs,
             xyzfil,
             dlxyzfil,
             current,
             wire_radius,
-            self_obs,
             theta=theta,
             construction_method=construction_method,
             par=par,
         )
         result_a = cfsem.vector_potential_linear_filament_hierarchical(
+            self_obs,
             xyzfil,
             dlxyzfil,
             current,
             wire_radius,
-            self_obs,
             theta=theta,
             construction_method=construction_method,
             par=par,
@@ -688,8 +688,8 @@ def solve_fields(
         result_b = cfsem.flux_density_dipole_hierarchical(
             dipole_loc,
             dipole_moment,
-            dipole_outer_radius,
             geometry.obs,
+            dipole_outer_radius,
             theta=theta,
             construction_method=construction_method,
             par=par,
@@ -698,8 +698,8 @@ def solve_fields(
         result_a = cfsem.vector_potential_dipole_hierarchical(
             dipole_loc,
             dipole_moment,
-            dipole_outer_radius,
             geometry.obs,
+            dipole_outer_radius,
             theta=theta,
             construction_method=construction_method,
             par=par,
@@ -712,20 +712,20 @@ def solve_fields(
         source_count = strip_triangles.shape[0]
         obs_array = np.column_stack(geometry.obs)
         result_b = cfsem.flux_density_triangle_mesh_hierarchical(
+            obs_array,
             strip_nodes,
             strip_triangles,
             strip_stream_function,
-            obs_array,
             theta=theta,
             construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
         result_a = cfsem.vector_potential_triangle_mesh_hierarchical(
+            obs_array,
             strip_nodes,
             strip_triangles,
             strip_stream_function,
-            obs_array,
             theta=theta,
             construction_method=construction_method,
             par=par,
@@ -735,22 +735,22 @@ def solve_fields(
         xyzfil, dlxyzfil, current, wire_radius = filament_source_arrays(geometry, geometry_layout)
         source_count = current.size
         result_b = cfsem.flux_density_linear_filament_hierarchical(
+            geometry.obs,
             xyzfil,
             dlxyzfil,
             current,
             wire_radius,
-            geometry.obs,
             theta=theta,
             construction_method=construction_method,
             par=par,
             extra_diagnostics=True,
         )
         result_a = cfsem.vector_potential_linear_filament_hierarchical(
+            geometry.obs,
             xyzfil,
             dlxyzfil,
             current,
             wire_radius,
-            geometry.obs,
             theta=theta,
             construction_method=construction_method,
             par=par,

@@ -108,8 +108,8 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                             flux_density_dipole_hierarchical(
                                 (&locx, &locy, &locz),
                                 (&momx, &momy, &momz),
-                                &outer_radius,
                                 (&obsx, &obsy, &obsz),
+                                &outer_radius,
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 false,
@@ -135,8 +135,8 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                             flux_density_dipole_hierarchical(
                                 (&locx, &locy, &locz),
                                 (&momx, &momy, &momz),
-                                &outer_radius,
                                 (&obsx, &obsy, &obsz),
+                                &outer_radius,
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 true,
@@ -246,8 +246,8 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                             vector_potential_dipole_hierarchical(
                                 (&locx, &locy, &locz),
                                 (&momx, &momy, &momz),
-                                &outer_radius,
                                 (&obsx, &obsy, &obsz),
+                                &outer_radius,
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 false,
@@ -273,8 +273,8 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                             vector_potential_dipole_hierarchical(
                                 (&locx, &locy, &locz),
                                 (&momx, &momy, &momz),
-                                &outer_radius,
                                 (&obsx, &obsy, &obsz),
+                                &outer_radius,
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 true,

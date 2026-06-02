@@ -274,8 +274,8 @@ def vector_potential_dipole(
 def flux_density_dipole_hierarchical(
     loc: ArrayTriple,
     moment: ArrayTriple,
-    outer_radius: FloatArray,
     obs: ArrayTriple,
+    outer_radius: FloatArray,
     theta: float = 0.01,
     construction_method: str = "longest_axis",
     par: bool = True,
@@ -293,8 +293,8 @@ def flux_density_dipole_hierarchical(
     Args:
         loc: Dipole source coordinates as component arrays.
         moment: Dipole magnetic moment components.
-        outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
         obs: Target point coordinates as component arrays.
+        outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
@@ -311,8 +311,8 @@ def flux_density_dipole_hierarchical(
 def vector_potential_dipole_hierarchical(
     loc: ArrayTriple,
     moment: ArrayTriple,
-    outer_radius: FloatArray,
     obs: ArrayTriple,
+    outer_radius: FloatArray,
     theta: float = 0.01,
     construction_method: str = "longest_axis",
     par: bool = True,
@@ -330,8 +330,8 @@ def vector_potential_dipole_hierarchical(
     Args:
         loc: Dipole source coordinates as component arrays.
         moment: Dipole magnetic moment components.
-        outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
         obs: Target point coordinates as component arrays.
+        outer_radius: Magnetized-sphere radius for each source. Use zeros for point dipoles.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
@@ -354,11 +354,11 @@ def flux_density_linear_filament(
     par: bool = True,
 ) -> ArrayTriple: ...
 def flux_density_linear_filament_hierarchical(
+    xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
     dlxyzfil: ArrayTriple,
     ifil: FloatArray,
     wire_radius: FloatArray,
-    xyzp: ArrayTriple,
     theta: float = 0.05,
     construction_method: str = "longest_axis",
     par: bool = True,
@@ -374,11 +374,11 @@ def flux_density_linear_filament_hierarchical(
     useful, and should not be used to calculate safety-related field limits.
 
     Args:
+        xyzp: Target point coordinates as component arrays.
         xyzfil: Filament segment start coordinates as component arrays.
         dlxyzfil: Filament segment start-to-end displacement components.
         ifil: Current in each filament segment.
         wire_radius: Wire radius for each filament segment. Use zeros for thin wires.
-        xyzp: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
@@ -416,11 +416,11 @@ def vector_potential_linear_filament(
     par: bool = True,
 ) -> ArrayTriple: ...
 def vector_potential_linear_filament_hierarchical(
+    xyzp: ArrayTriple,
     xyzfil: ArrayTriple,
     dlxyzfil: ArrayTriple,
     ifil: FloatArray,
     wire_radius: FloatArray,
-    xyzp: ArrayTriple,
     theta: float = 0.05,
     construction_method: str = "longest_axis",
     par: bool = True,
@@ -436,11 +436,11 @@ def vector_potential_linear_filament_hierarchical(
     useful, and should not be used to calculate safety-related field limits.
 
     Args:
+        xyzp: Target point coordinates as component arrays.
         xyzfil: Filament segment start coordinates as component arrays.
         dlxyzfil: Filament segment start-to-end displacement components.
         ifil: Current in each filament segment.
         wire_radius: Wire radius for each filament segment. Use zeros for thin wires.
-        xyzp: Target point coordinates as component arrays.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
@@ -510,10 +510,10 @@ def vector_potential_triangle_mesh(
     quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def flux_density_triangle_mesh_hierarchical(
+    obs: FloatMatrix,
     nodes: FloatMatrix,
     triangles: IntMatrix,
     s: FloatArray,
-    obs: FloatMatrix,
     theta: float = 0.05,
     quad: str = "dunavant3",
     construction_method: str = "longest_axis",
@@ -530,10 +530,10 @@ def flux_density_triangle_mesh_hierarchical(
     useful, and should not be used to calculate safety-related field limits.
 
     Args:
+        obs: Target point coordinates with one point per row.
         nodes: Mesh node coordinates with one node per row.
         triangles: Triangle node indices with one triangle per row.
         s: Nodal stream-function values.
-        obs: Target point coordinates with one point per row.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         quad: Triangle quadrature rule.
         construction_method: Source-tree construction method, either `"longest_axis"` or
@@ -549,10 +549,10 @@ def flux_density_triangle_mesh_hierarchical(
     ...
 
 def vector_potential_triangle_mesh_hierarchical(
+    obs: FloatMatrix,
     nodes: FloatMatrix,
     triangles: IntMatrix,
     s: FloatArray,
-    obs: FloatMatrix,
     theta: float = 0.05,
     quad: str = "dunavant3",
     construction_method: str = "longest_axis",
@@ -569,10 +569,10 @@ def vector_potential_triangle_mesh_hierarchical(
     useful, and should not be used to calculate safety-related field limits.
 
     Args:
+        obs: Target point coordinates with one point per row.
         nodes: Mesh node coordinates with one node per row.
         triangles: Triangle node indices with one triangle per row.
         s: Nodal stream-function values.
-        obs: Target point coordinates with one point per row.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
         quad: Triangle quadrature rule.
         construction_method: Source-tree construction method, either `"longest_axis"` or

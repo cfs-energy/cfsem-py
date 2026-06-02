@@ -293,11 +293,11 @@ def hierarchical_self_field(
     """Build and evaluate the hierarchical linear-filament self-field solve."""
 
     result = cfsem.flux_density_linear_filament_hierarchical(
+        discretization.centers,
         discretization.starts,
         discretization.deltas,
         discretization.current,
         discretization.wire_radius,
-        discretization.centers,
         theta=theta,
         par=par,
     )
@@ -356,11 +356,11 @@ def near_field_hierarchical_field(
     while True:
         start = perf_counter()
         result = cfsem.flux_density_linear_filament_hierarchical(
+            targets,
             discretization.starts,
             discretization.deltas,
             discretization.current,
             discretization.wire_radius,
-            targets,
             theta=float(theta),
             par=par,
         )
@@ -625,11 +625,11 @@ def source_tree_aabbs(discretization: LoopDiscretization) -> tuple[NDArray[np.fl
     """Build the coarse source tree and return its AABB arrays for plotting."""
 
     result = cfsem.flux_density_linear_filament_hierarchical(
+        discretization.centers,
         discretization.starts,
         discretization.deltas,
         discretization.current,
         discretization.wire_radius,
-        discretization.centers,
         theta=float(THETA_SWEEP[0]),
         par=False,
         extra_diagnostics=True,

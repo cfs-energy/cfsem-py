@@ -676,7 +676,7 @@ where
     ))
 }
 
-#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -689,12 +689,12 @@ fn flux_density_dipole_hierarchical(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ),
-    outer_radius: PyReadonlyArray1<f64>,
     obs: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ),
+    outer_radius: PyReadonlyArray1<f64>,
     theta: f64,
     construction_method: &str,
     par: bool,
@@ -715,8 +715,8 @@ fn flux_density_dipole_hierarchical(
             physics::hierarchical::flux_density_dipole_hierarchical(
                 loc.as_tuple(),
                 moment.as_tuple(),
-                outer_radius.as_slice(),
                 obs.as_tuple(),
+                outer_radius.as_slice(),
                 construction_method,
                 theta,
                 par,
@@ -764,7 +764,7 @@ fn flux_density_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (loc, moment, outer_radius, obs, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -777,12 +777,12 @@ fn vector_potential_dipole_hierarchical(
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ),
-    outer_radius: PyReadonlyArray1<f64>,
     obs: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ),
+    outer_radius: PyReadonlyArray1<f64>,
     theta: f64,
     construction_method: &str,
     par: bool,
@@ -803,8 +803,8 @@ fn vector_potential_dipole_hierarchical(
             physics::hierarchical::vector_potential_dipole_hierarchical(
                 loc.as_tuple(),
                 moment.as_tuple(),
-                outer_radius.as_slice(),
                 obs.as_tuple(),
+                outer_radius.as_slice(),
                 construction_method,
                 theta,
                 par,
@@ -852,9 +852,14 @@ fn vector_potential_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_linear_filament_hierarchical(
     py: Python<'_>,
+    xyzp: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
     xyzfil: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -867,11 +872,6 @@ fn flux_density_linear_filament_hierarchical(
     ),
     ifil: PyReadonlyArray1<f64>,
     wire_radius: PyReadonlyArray1<f64>,
-    xyzp: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ),
     theta: f64,
     construction_method: &str,
     par: bool,
@@ -937,9 +937,14 @@ fn flux_density_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzfil, dlxyzfil, ifil, wire_radius, xyzp, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_linear_filament_hierarchical(
     py: Python<'_>,
+    xyzp: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
     xyzfil: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -952,11 +957,6 @@ fn vector_potential_linear_filament_hierarchical(
     ),
     ifil: PyReadonlyArray1<f64>,
     wire_radius: PyReadonlyArray1<f64>,
-    xyzp: (
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-        PyReadonlyArray1<f64>,
-    ),
     theta: f64,
     construction_method: &str,
     par: bool,
@@ -1025,13 +1025,13 @@ fn vector_potential_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn flux_density_triangle_mesh_hierarchical(
     py: Python<'_>,
+    obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
     s: PyReadonlyArray1<f64>,
-    obs: PyReadonlyArray2<f64>,
     theta: f64,
     quad: &str,
     construction_method: &str,
@@ -1094,13 +1094,13 @@ fn flux_density_triangle_mesh_hierarchical(
     )
 }
 
-#[pyfunction(signature = (nodes, triangles, s, obs, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 fn vector_potential_triangle_mesh_hierarchical(
     py: Python<'_>,
+    obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
     s: PyReadonlyArray1<f64>,
-    obs: PyReadonlyArray2<f64>,
     theta: f64,
     quad: &str,
     construction_method: &str,

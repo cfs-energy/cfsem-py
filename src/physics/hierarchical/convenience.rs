@@ -57,8 +57,8 @@ impl<K: HierarchicalKernel> Diagnostics<K> {
 /// Args:
 ///     loc: Dipole source coordinates.
 ///     moment: Dipole magnetic moment components.
-///     outer_radius: Radius for the magnetized-sphere near-field treatment.
 ///     obs: Observation point coordinates.
+///     outer_radius: Radius for the magnetized-sphere near-field treatment.
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
@@ -73,8 +73,8 @@ impl<K: HierarchicalKernel> Diagnostics<K> {
 pub fn flux_density_dipole_hierarchical<T: Scalar>(
     loc: (&[T], &[T], &[T]),
     moment: (&[T], &[T], &[T]),
-    outer_radius: &[T],
     obs: (&[T], &[T], &[T]),
+    outer_radius: &[T],
     construction_method: BuildMethod,
     theta: T,
     par: bool,
@@ -109,8 +109,8 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
 /// Args:
 ///     loc: Dipole source coordinates.
 ///     moment: Dipole magnetic moment components.
-///     outer_radius: Radius for the magnetized-sphere near-field treatment.
 ///     obs: Observation point coordinates.
+///     outer_radius: Radius for the magnetized-sphere near-field treatment.
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
@@ -125,8 +125,8 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
 pub fn vector_potential_dipole_hierarchical<T: Scalar>(
     loc: (&[T], &[T], &[T]),
     moment: (&[T], &[T], &[T]),
-    outer_radius: &[T],
     obs: (&[T], &[T], &[T]),
+    outer_radius: &[T],
     construction_method: BuildMethod,
     theta: T,
     par: bool,

@@ -2,7 +2,7 @@
 /// These are context-heavy and require some care to apply
 /// in a way that is consistent with assumptions,
 /// so they are kept out of the public API.
-use crate::{MU0_OVER_4PI, physics::hierarchical::Scalar};
+use crate::{MU0_OVER_4PI, math::Scalar};
 
 /// Magnetic flux density inside a uniformly magnetized sphere
 /// with some radius and total magnetic moment.

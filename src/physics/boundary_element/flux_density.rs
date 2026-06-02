@@ -10,6 +10,7 @@ use super::{
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
+use crate::math::Scalar;
 use crate::math::{add_scaled3, cross3, norm3, sub3};
 use crate::mesh::TriangleMeshView;
 use crate::mesh::elements::tri::tri3::{
@@ -17,7 +18,6 @@ use crate::mesh::elements::tri::tri3::{
     max_edge_length_squared as triangle_max_edge_length_squared,
     subdivide_about_point as triangle_subdivide_about_point,
 };
-use crate::physics::hierarchical::Scalar;
 use crate::physics::point_source::current_element::flux_density_current_element_scalar;
 
 /// Midpoint-rule samples for the Duffy-style transverse edge integral in

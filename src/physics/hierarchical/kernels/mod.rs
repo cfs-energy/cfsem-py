@@ -17,8 +17,8 @@ pub use boundary_element::{
 pub use boundary_element_flux_density::BoundaryElementFluxDensityKernel;
 pub use boundary_element_vector_potential::BoundaryElementVectorPotentialKernel;
 pub use dipole::{
-    DipoleMoments, DipoleSource, DipoleSources, DipoleSummary, DipoleTarget, DipoleTargetSummary,
-    DipoleTargets,
+    DipoleMoments, DipoleSource, DipoleSources, DipoleSummary, DipoleTarget, DipoleTargetRows,
+    DipoleTargetSummary, DipoleTargets,
 };
 pub use dipole_flux_density::{DipoleFluxDensityKernel, DipoleFluxDensitySummary};
 pub use dipole_vector_potential::{DipoleVectorPotentialKernel, DipoleVectorPotentialSummary};

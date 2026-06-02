@@ -9,7 +9,10 @@ use rayon::{
 use crate::physics::point_source::current_element::{
     flux_density_current_element_scalar, vector_potential_current_element_scalar,
 };
-use crate::{chunksize, math::cross3, physics::hierarchical::Scalar};
+use crate::{
+    chunksize,
+    math::{Scalar, cross3},
+};
 
 use crate::macros::*;
 

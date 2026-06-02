@@ -292,7 +292,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
 ) -> Result<Diagnostics<BoundaryElementFluxDensityKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
         .map_err(|_| HierarchicalError::LengthMismatch)?;
-    let sources = BoundaryElementTriangles::new(mesh.node_columns(), mesh.triangle_columns());
+    let sources = BoundaryElementTriangles::new(mesh);
     let moments = BoundaryElementNodalValues::new(sources, s);
     let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
     one_shot_vec3(
@@ -346,7 +346,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
 ) -> Result<Diagnostics<BoundaryElementVectorPotentialKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
         .map_err(|_| HierarchicalError::LengthMismatch)?;
-    let sources = BoundaryElementTriangles::new(mesh.node_columns(), mesh.triangle_columns());
+    let sources = BoundaryElementTriangles::new(mesh);
     let moments = BoundaryElementNodalValues::new(sources, s);
     let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
     one_shot_vec3(
@@ -361,7 +361,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     )
 }
 
-fn one_shot_vec3<K, T, S, M, C>(
+pub(crate) fn one_shot_vec3<K, T, S, M, C>(
     kernel: K,
     sources: S,
     moments: M,

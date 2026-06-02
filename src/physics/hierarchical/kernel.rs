@@ -129,32 +129,6 @@ where
     }
 }
 
-impl<T, G> BoundedGeometryCollection<T> for &Vec<G>
-where
-    T: Scalar,
-    G: BoundedGeometry<Scalar = T> + Sync,
-{
-    #[inline]
-    fn len(self) -> usize {
-        self.as_slice().len()
-    }
-
-    #[inline]
-    fn valid_lengths(self) -> bool {
-        true
-    }
-
-    #[inline]
-    fn aabb(self, index: usize) -> Aabb<T> {
-        self[index].aabb()
-    }
-
-    #[inline]
-    fn representative_point(self, index: usize) -> [T; 3] {
-        self[index].representative_point()
-    }
-}
-
 /// Borrowed source storage that can produce scalar source geometry values.
 pub trait SourceCollection<K: HierarchicalKernel>: BoundedGeometryCollection<K::Scalar> {
     /// Return one scalar source geometry value.
@@ -173,17 +147,6 @@ where
 }
 
 impl<K, const N: usize> SourceCollection<K> for &[K::SourceGeometry; N]
-where
-    K: HierarchicalKernel,
-    K::SourceGeometry: Copy,
-{
-    #[inline]
-    fn source(self, index: usize) -> K::SourceGeometry {
-        self[index]
-    }
-}
-
-impl<K> SourceCollection<K> for &Vec<K::SourceGeometry>
 where
     K: HierarchicalKernel,
     K::SourceGeometry: Copy,
@@ -241,27 +204,6 @@ where
     #[inline]
     fn len(self) -> usize {
         N
-    }
-
-    #[inline]
-    fn valid_lengths(self) -> bool {
-        true
-    }
-
-    #[inline]
-    fn moment(self, index: usize) -> K::SourceMoment {
-        self[index]
-    }
-}
-
-impl<K> SourceMomentCollection<K> for &Vec<K::SourceMoment>
-where
-    K: HierarchicalKernel,
-    K::SourceMoment: Copy,
-{
-    #[inline]
-    fn len(self) -> usize {
-        self.as_slice().len()
     }
 
     #[inline]

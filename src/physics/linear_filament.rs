@@ -11,7 +11,7 @@ use crate::{
     math::{PointLineDistance, cross3, point_line_distance_with_endpoints},
 };
 
-use crate::physics::hierarchical::Scalar;
+use crate::math::Scalar;
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.

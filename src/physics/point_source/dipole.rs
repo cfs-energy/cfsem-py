@@ -8,13 +8,9 @@ use rayon::{
 use crate::{
     MU0_OVER_4PI, chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{cross3, dot3},
-    physics::{
-        hierarchical::Scalar,
-        volumetric::{
-            flux_density_inside_magnetized_sphere,
-            vector_potential_inside_magnetized_sphere_generic,
-        },
+    math::{Scalar, cross3, dot3},
+    physics::volumetric::{
+        flux_density_inside_magnetized_sphere, vector_potential_inside_magnetized_sphere_generic,
     },
 };
 

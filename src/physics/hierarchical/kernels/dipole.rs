@@ -59,6 +59,12 @@ pub struct DipoleTargets<'a, T: Scalar> {
     pub z: &'a [T],
 }
 
+/// Borrowed row-major target points for 3D target kernels.
+#[derive(Clone, Copy, Debug)]
+pub struct DipoleTargetRows<'a, T: Scalar> {
+    pub xyz: &'a [T],
+}
+
 /// Borrowed component-column dipole magnetic moments.
 #[derive(Clone, Copy, Debug)]
 pub struct DipoleMoments<'a, T: Scalar> {
@@ -80,6 +86,14 @@ impl<'a, T: Scalar> DipoleTargets<'a, T> {
     #[inline]
     pub fn new(x: &'a [T], y: &'a [T], z: &'a [T]) -> Self {
         Self { x, y, z }
+    }
+}
+
+impl<'a, T: Scalar> DipoleTargetRows<'a, T> {
+    /// Create borrowed row-major target coordinates with shape `(n, 3)`.
+    #[inline]
+    pub fn new(xyz: &'a [T]) -> Self {
+        Self { xyz }
     }
 }
 
@@ -111,6 +125,37 @@ where
             x: &self.x[start..end],
             y: &self.y[start..end],
             z: &self.z[start..end],
+        }
+    }
+}
+
+impl<'a, K, T> TargetCollection<K> for DipoleTargetRows<'a, T>
+where
+    K: HierarchicalKernel<Scalar = T, TargetGeometry = DipoleTarget<T>>,
+    T: Scalar,
+{
+    #[inline]
+    fn len(self) -> usize {
+        self.xyz.len() / 3
+    }
+
+    #[inline]
+    fn valid_lengths(self) -> bool {
+        self.xyz.len().is_multiple_of(3)
+    }
+
+    #[inline]
+    fn target(self, index: usize) -> DipoleTarget<T> {
+        let start = 3 * index;
+        DipoleTarget {
+            position: [self.xyz[start], self.xyz[start + 1], self.xyz[start + 2]],
+        }
+    }
+
+    #[inline]
+    fn slice(self, start: usize, end: usize) -> Self {
+        Self {
+            xyz: &self.xyz[3 * start..3 * end],
         }
     }
 }

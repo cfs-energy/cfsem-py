@@ -1,7 +1,7 @@
 //! Physical-space mapping helpers for 3-node triangles in 3D.
 
+use crate::math::Scalar;
 use crate::math::{cross3, norm3};
-use crate::physics::hierarchical::Scalar;
 
 /// Map one reference-triangle point `(u, v)` into a physical triangle in 3D.
 #[inline]

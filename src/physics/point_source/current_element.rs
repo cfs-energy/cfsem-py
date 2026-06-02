@@ -2,8 +2,8 @@
 //! boundary-element quadrature implementations.
 
 use crate::MU0_OVER_4PI;
+use crate::math::Scalar;
 use crate::math::{cross3, dot3, max_scalar};
-use crate::physics::hierarchical::Scalar;
 
 /// Minimum observation-point distance below which point-current-element kernels
 /// return zero to avoid singular self-evaluation.

@@ -3,9 +3,9 @@
 //! This is the 3-node triangle interpolation listed in Bower's *Applied Mechanics of Solids*,
 //! Section 8.1, Table 8.3.
 
+use crate::math::Scalar;
 use crate::math::{add_scaled3, dot3, sub3};
 use crate::mesh::Scalar as MeshScalar;
-use crate::physics::hierarchical::Scalar;
 
 /// Number of nodes in the linear triangular element.
 pub const NODES_PER_ELEMENT: usize = 3;

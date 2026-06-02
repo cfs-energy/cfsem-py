@@ -18,7 +18,6 @@ pub mod convenience;
 pub mod evaluator;
 pub mod kernel;
 pub mod kernels;
-pub mod scalar;
 pub mod tree;
 
 pub use convenience::{
@@ -27,6 +26,7 @@ pub use convenience::{
     vector_potential_linear_filament_hierarchical, vector_potential_triangle_mesh_hierarchical,
 };
 
+pub(crate) use crate::math::Scalar;
 pub(crate) use aabb::Aabb;
 #[cfg(test)]
 pub(crate) use evaluator::eval_dense;
@@ -38,7 +38,6 @@ pub(crate) use kernel::{
     BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
     SourceCollection, SourceMomentCollection, TargetCollection, geometric_accept_far,
 };
-pub(crate) use scalar::Scalar;
 pub(crate) use tree::{BuildMethod, ClusterTree, ClusterTreeView};
 
 #[cfg(test)]

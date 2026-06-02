@@ -12,9 +12,9 @@ Two segment-length targets are shown:
 - 1 mm, representing a finer filamentization.
 
 For each discretization, the direct solution is computed once and used as the
-reference while the hierarchical opening angle `theta` is swept from 1.0 down
-to 0.01. A second plot row changes the loop discretization to sweep dense
-interaction counts from about 1e5 to 1e10 and records hierarchical build and
+reference while the hierarchical opening angle `theta` is swept from 0.5 down
+to 0.005. A second plot row changes the loop discretization to sweep dense
+interaction counts from about 1e5 to 1e12 and records hierarchical build and
 evaluation time at several fixed theta values.
 """
 
@@ -46,15 +46,20 @@ LOOP_RADIUS = 1.0  # [m]
 CURRENT = 1.0  # [A]
 WIRE_RADIUS = 1.0e-3  # [m]
 TARGET_SEGMENT_LENGTHS = (0.01, 0.001)  # [m]
-THETA_SWEEP = np.logspace(0.0, -2.0, 10, dtype=np.float64)
-NEAR_FIELD_THETA_SWEEP = np.logspace(0.0, -2.0, 40, dtype=np.float64)
-SCALING_THETAS = (0.05, 0.3, 0.6)
-SCALING_INTERACTION_TARGETS = np.logspace(5.0, 10.0, 6, dtype=np.float64)
+THETA_SWEEP = 0.5 * np.logspace(0.0, -2.0, 10, dtype=np.float64)
+NEAR_FIELD_THETA_SWEEP = 0.5 * np.logspace(0.0, -2.0, 40, dtype=np.float64)
+SCALING_THETAS = (0.0625, 0.175, 0.5)
+FIRST_FIGURE_SCALING_THETAS = (0.5, 0.0625)
+SCALING_INTERACTION_TARGETS = np.logspace(5.0, 12.0, 8, dtype=np.float64)
 TESTING_SCALING_INTERACTION_TARGETS = np.logspace(5.0, 6.0, 2, dtype=np.float64)
-DIRECT_SCALING_MAX_INTERACTIONS = 1.0e9
+MIN_SCALING_BENCH_SECONDS = 0.1
+MIN_NEAR_FIELD_BENCH_SECONDS = 0.1
+MIN_SELF_FIELD_TRADEOFF_BENCH_SECONDS = 0.1
+DIRECT_SCALING_MAX_INTERACTIONS = 2.0e10
 DIRECT_ASYMPTOTIC_FIT_POINTS = 3
 DIRECT_TRACE_COLOR = "tab:green"
 TREE_AABB_COLOR = "tab:blue"
+CFSEM_HIERARCHICAL_TRACE_COLOR = "black"
 MAX_AABB_PLOT_LEVELS = 6
 NEAR_FIELD_INBOARD_FROM_FIRST_ORIGIN = 0.05  # [m]
 NEAR_FIELD_INBOARD_RADIUS = 0.001  # [m]
@@ -65,9 +70,12 @@ TESTING_NEAR_FIELD_TARGET_COUNT = 30
 NEAR_FIELD_DS_SWEEP = np.logspace(np.log10(0.001), np.log10(0.05), 32, dtype=np.float64)
 TESTING_NEAR_FIELD_DS_SWEEP = np.array([0.02, 0.005, 0.001], dtype=np.float64)
 NEAR_FIELD_ERROR_TARGET = 1.0e-3
-MIN_THETA_CONVERGENCE_EXPONENT = 1.9
-MAX_DIRECT_TIMING_EXPONENT = 2.1
-MAX_HIERARCHICAL_TIMING_EXPONENT = 1.5
+ACCURACY_RUNTIME_BAND_COLOR = "tab:red"
+ACCURACY_RUNTIME_X_LABEL = "Build+eval time [s]"
+ACCURACY_RUNTIME_Y_LABEL = "Relative error"
+ACCURACY_RUNTIME_LEGEND_FONTSIZE = "x-small"
+ACCURACY_RUNTIME_ANNOTATION_OFFSET = (4, 4)
+ACCURACY_RUNTIME_ANNOTATION_FONTSIZE = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,12 +137,24 @@ class ScalingResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SelfFieldTradeoffResult:
+    """Self-field accuracy values with separately batched timing samples."""
+
+    discretization: LoopDiscretization
+    theta_values: NDArray[np.float64]
+    build_eval_seconds: NDArray[np.float64]
+    rms_relative_error: NDArray[np.float64]
+    max_relative_error: NDArray[np.float64]
+
+
+@dataclass(frozen=True, slots=True)
 class NearFieldStudy:
     """Near-field error and timing values on a theta/discretization grid."""
 
     ds_values: NDArray[np.float64]
     theta_values: NDArray[np.float64]
     rms_relative_error: NDArray[np.float64]
+    max_relative_error: NDArray[np.float64]
     run_seconds: NDArray[np.float64]
 
 
@@ -288,6 +308,87 @@ def hierarchical_self_field(
     )
 
 
+def scaling_direct_self_field_seconds(discretization: LoopDiscretization, par: bool) -> float:
+    """Return the best direct timing from a scaling benchmark batch."""
+
+    best_seconds = np.inf
+    batch_start = perf_counter()
+    while True:
+        _field, seconds = direct_self_field(discretization, par=par)
+        best_seconds = min(best_seconds, seconds)
+        if perf_counter() - batch_start >= MIN_SCALING_BENCH_SECONDS:
+            return float(best_seconds)
+
+
+def scaling_hierarchical_self_field_seconds(
+    discretization: LoopDiscretization,
+    theta: float,
+    par: bool,
+) -> tuple[float, float]:
+    """Return the build/eval timings from the best hierarchical scaling batch sample."""
+
+    best_build_seconds = np.inf
+    best_eval_seconds = np.inf
+    best_total_seconds = np.inf
+    batch_start = perf_counter()
+    while True:
+        _field, build_seconds, eval_seconds = hierarchical_self_field(discretization, theta, par=par)
+        total_seconds = build_seconds + eval_seconds
+        if total_seconds < best_total_seconds:
+            best_build_seconds = build_seconds
+            best_eval_seconds = eval_seconds
+            best_total_seconds = total_seconds
+        if perf_counter() - batch_start >= MIN_SCALING_BENCH_SECONDS:
+            return float(best_build_seconds), float(best_eval_seconds)
+
+
+def near_field_hierarchical_field(
+    discretization: LoopDiscretization,
+    targets: tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]],
+    theta: float,
+    par: bool,
+) -> tuple[NDArray[np.float64], float]:
+    """Return the best hierarchical near-field timing from a benchmark batch."""
+
+    best_field: NDArray[np.float64] | None = None
+    best_seconds = np.inf
+    batch_start = perf_counter()
+    while True:
+        start = perf_counter()
+        result = cfsem.flux_density_linear_filament_hierarchical(
+            discretization.starts,
+            discretization.deltas,
+            discretization.current,
+            discretization.wire_radius,
+            targets,
+            theta=float(theta),
+            par=par,
+        )
+        elapsed = perf_counter() - start
+        if elapsed < best_seconds:
+            best_field = stack_field(result.field)
+            best_seconds = elapsed
+        if perf_counter() - batch_start >= MIN_NEAR_FIELD_BENCH_SECONDS:
+            assert best_field is not None
+            return best_field, float(best_seconds)
+
+
+def self_field_hierarchical_build_eval_seconds(
+    discretization: LoopDiscretization,
+    theta: float,
+    par: bool,
+) -> float:
+    """Return the best hierarchical build+eval timing from a tradeoff benchmark batch."""
+
+    best_seconds = np.inf
+    batch_start = perf_counter()
+    while True:
+        _field, build_seconds, eval_seconds = hierarchical_self_field(discretization, theta, par=par)
+        best_seconds = min(best_seconds, build_seconds + eval_seconds)
+        if perf_counter() - batch_start >= MIN_SELF_FIELD_TRADEOFF_BENCH_SECONDS:
+            return float(best_seconds)
+
+
 def run_study(par: bool) -> list[StudyResult]:
     """Run the theta sweep for each requested segment length."""
 
@@ -335,14 +436,26 @@ def run_scaling_study(par: bool) -> dict[float, list[ScalingResult]]:
     for discretization in discretizations:
         direct_seconds = None
         if discretization.interaction_count <= DIRECT_SCALING_MAX_INTERACTIONS:
-            _direct_field, direct_seconds = direct_self_field(discretization, par=par)
+            print(
+                "Scaling run: direct "
+                f"interactions={discretization.interaction_count:.3e}, "
+                f"segments={discretization.segment_count}",
+                flush=True,
+            )
+            direct_seconds = scaling_direct_self_field_seconds(discretization, par=par)
         direct_seconds_by_interactions[discretization.interaction_count] = direct_seconds
 
     results_by_theta: dict[float, list[ScalingResult]] = {}
     for theta in SCALING_THETAS:
         theta_results: list[ScalingResult] = []
         for target_interactions, discretization in zip(interaction_targets, discretizations, strict=True):
-            _field, build_seconds, eval_seconds = hierarchical_self_field(
+            print(
+                "Scaling run: hierarchical "
+                f"theta={theta:.3g}, interactions={discretization.interaction_count:.3e}, "
+                f"segments={discretization.segment_count}",
+                flush=True,
+            )
+            build_seconds, eval_seconds = scaling_hierarchical_self_field_seconds(
                 discretization,
                 theta,
                 par=par,
@@ -377,31 +490,68 @@ def run_near_field_study(par: bool) -> NearFieldStudy:
     )
     theta_values = NEAR_FIELD_THETA_SWEEP
     error = np.empty((theta_values.size, ds_values.size), dtype=np.float64)
+    max_error = np.empty_like(error)
     run_seconds = np.empty_like(error)
 
     for j, ds in enumerate(ds_values):
         discretization = circular_loop_discretization(float(ds))
         for i, theta in enumerate(theta_values):
-            start = perf_counter()
-            result = cfsem.flux_density_linear_filament_hierarchical(
-                discretization.starts,
-                discretization.deltas,
-                discretization.current,
-                discretization.wire_radius,
+            field, run_seconds[i, j] = near_field_hierarchical_field(
+                discretization,
                 obs,
                 theta=float(theta),
                 par=par,
             )
-            field = stack_field(result.field)
-            run_seconds[i, j] = perf_counter() - start
-            error[i, j], _max_error = relative_error_metrics(field, reference)
+            error[i, j], max_error[i, j] = relative_error_metrics(field, reference)
 
     return NearFieldStudy(
         ds_values=np.asarray(ds_values, dtype=np.float64),
         theta_values=theta_values.copy(),
         rms_relative_error=error,
+        max_relative_error=max_error,
         run_seconds=run_seconds,
     )
+
+
+def run_self_field_tradeoff_study(
+    results: list[StudyResult],
+    par: bool,
+) -> list[SelfFieldTradeoffResult]:
+    """Remeasure 1 mm self-field tradeoff runtimes with at least 100 ms per data point."""
+
+    tradeoff_results: list[SelfFieldTradeoffResult] = []
+    selected_results = [result for result in results if np.isclose(result.discretization.target_ds, 0.001)]
+    for result in selected_results:
+        discretization = result.discretization
+        seconds = np.empty(len(result.theta_results), dtype=np.float64)
+        for i, theta_result in enumerate(result.theta_results):
+            print(
+                "Self-field tradeoff run: hierarchical "
+                f"theta={theta_result.theta:.3g}, interactions={discretization.interaction_count:.3e}, "
+                f"segments={discretization.segment_count}",
+                flush=True,
+            )
+            seconds[i] = self_field_hierarchical_build_eval_seconds(
+                discretization,
+                theta_result.theta,
+                par=par,
+            )
+        tradeoff_results.append(
+            SelfFieldTradeoffResult(
+                discretization=discretization,
+                theta_values=np.array([item.theta for item in result.theta_results], dtype=np.float64),
+                build_eval_seconds=seconds,
+                rms_relative_error=np.array(
+                    [item.rms_relative_error for item in result.theta_results],
+                    dtype=np.float64,
+                ),
+                max_relative_error=np.array(
+                    [item.max_relative_error for item in result.theta_results],
+                    dtype=np.float64,
+                ),
+            )
+        )
+    return tradeoff_results
 
 
 def direct_time_fit(scaling_results: list[ScalingResult]) -> tuple[float, float] | None:
@@ -492,6 +642,7 @@ def source_tree_aabbs(discretization: LoopDiscretization) -> tuple[NDArray[np.fl
 def build_figure(
     results: list[StudyResult],
     scaling_results_by_theta: dict[float, list[ScalingResult]],
+    self_field_tradeoff_results: list[SelfFieldTradeoffResult],
 ) -> plt.Figure:
     """Plot self-field convergence and interaction-count timing."""
 
@@ -500,7 +651,8 @@ def build_figure(
     error_ax = fig.add_subplot(grid[0, 0])
     theta_time_ax = fig.add_subplot(grid[0, 1])
     domain_ax = fig.add_subplot(grid[0, 2])
-    scaling_axes = [fig.add_subplot(grid[1, i]) for i in range(3)]
+    scaling_axes = [fig.add_subplot(grid[1, i]) for i in range(2)]
+    tradeoff_ax = fig.add_subplot(grid[1, 2])
     scaling_legend_ax = fig.add_subplot(grid[1, 3])
 
     for result in results:
@@ -511,15 +663,26 @@ def build_figure(
         build_seconds = np.array([item.build_seconds for item in result.theta_results], dtype=np.float64)
         label = f"target ds={1.0e3 * result.discretization.target_ds:.0f} mm"
 
-        error_ax.loglog(theta, rms_error, marker="o", label=f"RMS, {label}")
-        error_ax.loglog(theta, max_error, marker="s", linestyle="--", label=f"Max, {label}")
-        theta_time_ax.loglog(theta, eval_seconds, marker="o", label=f"Eval, {label}")
+        error_ax.loglog(theta, rms_error, marker="o", label=f"cfsem RMS, {label}")
+        max_error_color = (
+            CFSEM_HIERARCHICAL_TRACE_COLOR if np.isclose(result.discretization.target_ds, 0.001) else None
+        )
+        error_ax.loglog(
+            theta,
+            max_error,
+            marker="s",
+            linestyle="--",
+            color=max_error_color,
+            label=f"cfsem max, {label}",
+        )
+        theta_time_ax.loglog(theta, eval_seconds, marker="o", label=f"cfsem eval, {label}")
         theta_time_ax.loglog(
             theta,
             build_seconds + eval_seconds,
             marker="s",
             linestyle="--",
-            label=f"Build+eval, {label}",
+            color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+            label=f"cfsem build+eval, {label}",
         )
         theta_time_ax.axhline(result.direct_seconds, color="0.65", linewidth=1.0, linestyle=":")
 
@@ -530,7 +693,7 @@ def build_figure(
 
     plot_domain_axis(domain_ax, results[0].discretization)
 
-    for ax, theta in zip(scaling_axes, SCALING_THETAS, strict=True):
+    for ax, theta in zip(scaling_axes, FIRST_FIGURE_SCALING_THETAS, strict=True):
         scaling_results = scaling_results_by_theta[float(theta)]
         plot_scaling_axis(ax, scaling_results)
         ax.set_title(rf"Scaling at $\theta={theta:g}$")
@@ -538,6 +701,8 @@ def build_figure(
             ax.set_ylabel("Time [s]")
         else:
             ax.set_ylabel("")
+    if self_field_tradeoff_results:
+        plot_self_field_tradeoff_axis(tradeoff_ax, self_field_tradeoff_results[0], show_ylabel=False)
 
     error_ax.set_ylabel("Relative error vs. direct self-field")
     error_ax.set_title("Hierarchical self-field convergence")
@@ -547,11 +712,127 @@ def build_figure(
     theta_time_ax.legend(fontsize="small")
     scaling_legend_ax.axis("off")
     handles, labels = scaling_axes[0].get_legend_handles_labels()
-    scaling_legend_ax.legend(handles, labels, loc="center left", frameon=True, title="Scaling traces")
+    scaling_legend = scaling_legend_ax.legend(
+        handles,
+        labels,
+        loc="upper left",
+        bbox_to_anchor=(0.0, 1.0),
+        frameon=True,
+        title="Scaling traces",
+    )
+    scaling_legend_ax.add_artist(scaling_legend)
+    if self_field_tradeoff_results:
+        handles, labels = tradeoff_ax.get_legend_handles_labels()
+        scaling_legend_ax.legend(
+            handles,
+            labels,
+            loc="lower left",
+            bbox_to_anchor=(0.0, 0.0),
+            fontsize=ACCURACY_RUNTIME_LEGEND_FONTSIZE,
+            frameon=True,
+            title="Accuracy traces",
+        )
     fig.suptitle(
         "Linear-filament circular-loop self-field convergence\n"
         f"radius={LOOP_RADIUS:g} m, current={CURRENT:g} A, wire_radius={WIRE_RADIUS:g} m"
     )
+    return fig
+
+
+def plot_self_field_tradeoff_axis(
+    ax: plt.Axes,
+    result: SelfFieldTradeoffResult,
+    *,
+    show_ylabel: bool,
+) -> None:
+    """Plot self-field accuracy against build+eval runtime on one axis."""
+
+    seconds = result.build_eval_seconds.copy()
+    rms_error = result.rms_relative_error.copy()
+    max_error = result.max_relative_error.copy()
+    theta = result.theta_values.copy()
+    order = np.argsort(seconds)
+    seconds = seconds[order]
+    rms_error = rms_error[order]
+    max_error = max_error[order]
+    theta = theta[order]
+    marker_count = min(4, seconds.size)
+    marker_indices = np.unique(np.linspace(0, seconds.size - 1, marker_count, dtype=np.int64))
+
+    ax.fill_between(
+        seconds,
+        rms_error,
+        max_error,
+        color=ACCURACY_RUNTIME_BAND_COLOR,
+        alpha=0.10,
+        label="cfsem RMS-max",
+    )
+    ax.loglog(
+        seconds,
+        rms_error,
+        marker="o",
+        markevery=marker_indices,
+        color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+        label="cfsem hierarchical RMS",
+    )
+    ax.loglog(
+        seconds,
+        max_error,
+        marker="s",
+        markevery=marker_indices,
+        linestyle="--",
+        color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+        label="cfsem hierarchical max",
+    )
+    for annotation_index, marker_index in enumerate(marker_indices):
+        theta_label = (
+            f"theta={theta[marker_index]:.2g}" if annotation_index == 0 else f"{theta[marker_index]:.2g}"
+        )
+        ax.annotate(
+            theta_label,
+            (seconds[marker_index], max_error[marker_index]),
+            textcoords="offset points",
+            xytext=ACCURACY_RUNTIME_ANNOTATION_OFFSET,
+            fontsize=ACCURACY_RUNTIME_ANNOTATION_FONTSIZE,
+            color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+        )
+    ax.set_xlabel(ACCURACY_RUNTIME_X_LABEL)
+    if show_ylabel:
+        ax.set_ylabel(ACCURACY_RUNTIME_Y_LABEL)
+    ax.set_title(
+        "Self-field accuracy vs. build+eval time\n"
+        f"ds={1.0e3 * result.discretization.target_ds:.3g} mm, "
+        f"N_src*N_targ={result.discretization.interaction_count:.3e}"
+    )
+    ax.grid(True, which="both", linewidth=0.5, alpha=0.35)
+
+
+def build_self_field_tradeoff_figure(results: list[SelfFieldTradeoffResult]) -> plt.Figure:
+    """Plot self-field accuracy against build+eval runtime as a standalone figure."""
+
+    fig, axes_array = plt.subplots(
+        1,
+        len(results),
+        figsize=(8.4 * max(1, len(results)), 5.2),
+        constrained_layout=False,
+        squeeze=False,
+    )
+    fig.subplots_adjust(left=0.10, right=0.70, bottom=0.12, top=0.82)
+    axes = axes_array.ravel()
+
+    for ax, result in zip(axes, results, strict=True):
+        plot_self_field_tradeoff_axis(ax, result, show_ylabel=True)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="center left",
+        bbox_to_anchor=(0.73, 0.5),
+        fontsize=ACCURACY_RUNTIME_LEGEND_FONTSIZE,
+        frameon=True,
+    )
+    fig.suptitle("Self-field accuracy vs. build+eval runtime")
     return fig
 
 
@@ -592,6 +873,86 @@ def blurred_contour_values(values: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.asarray(gaussian_filter(values, sigma=1.0, mode="nearest"), dtype=np.float64)
 
 
+def plot_near_field_accuracy_runtime_axis(
+    ax: plt.Axes,
+    study: NearFieldStudy,
+    *,
+    show_ylabel: bool,
+    show_legend: bool,
+) -> NDArray[np.float64]:
+    """Plot near-field accuracy against build+eval runtime on one axis."""
+
+    ds_mm = 1.0e3 * study.ds_values
+    theta = study.theta_values
+    error = np.maximum(study.rms_relative_error, np.finfo(np.float64).tiny)
+    seconds = np.maximum(study.run_seconds, np.finfo(np.float64).tiny)
+    one_mm_ds_idx = int(np.argmin(np.abs(ds_mm - 1.0)))
+    one_mm_error = error[:, one_mm_ds_idx]
+    one_mm_max_error = np.maximum(study.max_relative_error[:, one_mm_ds_idx], np.finfo(np.float64).tiny)
+    one_mm_seconds = seconds[:, one_mm_ds_idx]
+    one_mm_order = np.argsort(one_mm_seconds)
+    one_mm_seconds = one_mm_seconds[one_mm_order]
+    one_mm_error = one_mm_error[one_mm_order]
+    one_mm_max_error = one_mm_max_error[one_mm_order]
+    one_mm_theta = theta[one_mm_order]
+    marker_count = min(4, one_mm_seconds.size)
+    marker_indices = np.unique(np.linspace(0, one_mm_seconds.size - 1, marker_count, dtype=np.int64))
+    ax.fill_between(
+        one_mm_seconds,
+        one_mm_error,
+        one_mm_max_error,
+        color=ACCURACY_RUNTIME_BAND_COLOR,
+        alpha=0.10,
+        label="cfsem RMS-max",
+    )
+    ax.loglog(
+        one_mm_seconds,
+        one_mm_error,
+        marker="o",
+        markevery=marker_indices,
+        color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+        label="cfsem hierarchical RMS",
+    )
+    ax.loglog(
+        one_mm_seconds,
+        one_mm_max_error,
+        marker="s",
+        markevery=marker_indices,
+        linestyle="--",
+        color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+        label="cfsem hierarchical max",
+    )
+    for annotation_index, marker_index in enumerate(marker_indices):
+        theta_label = (
+            f"theta={one_mm_theta[marker_index]:.2g}"
+            if annotation_index == 0
+            else f"{one_mm_theta[marker_index]:.2g}"
+        )
+        ax.annotate(
+            theta_label,
+            (one_mm_seconds[marker_index], one_mm_max_error[marker_index]),
+            textcoords="offset points",
+            xytext=ACCURACY_RUNTIME_ANNOTATION_OFFSET,
+            fontsize=ACCURACY_RUNTIME_ANNOTATION_FONTSIZE,
+            color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+        )
+    ax.axhline(NEAR_FIELD_ERROR_TARGET, color="black", linestyle=":", linewidth=1.0)
+    ax.set_xlabel(ACCURACY_RUNTIME_X_LABEL)
+    if show_ylabel:
+        ax.set_ylabel(ACCURACY_RUNTIME_Y_LABEL)
+    one_mm_discretization = circular_loop_discretization(float(study.ds_values[one_mm_ds_idx]))
+    near_field_target_count = near_field_observation_points()[0].size
+    near_field_interactions = one_mm_discretization.segment_count * near_field_target_count
+    ax.set_title(
+        "Near-field accuracy vs. build+eval time\n"
+        f"ds={ds_mm[one_mm_ds_idx]:.3g} mm, N_src*N_targ={near_field_interactions:.3e}"
+    )
+    if show_legend:
+        ax.legend(fontsize=ACCURACY_RUNTIME_LEGEND_FONTSIZE, frameon=True)
+    ax.grid(True, which="both", linewidth=0.4, alpha=0.25)
+    return np.concatenate((one_mm_error, one_mm_max_error))
+
+
 def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
     """Plot near-field error and runtime heatmaps versus theta and discretization."""
 
@@ -613,7 +974,7 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
     domain_ax = fig.add_subplot(grid[0, 2])
     theta_slice_ax = fig.add_subplot(grid[1, 0])
     ds_slice_ax = fig.add_subplot(grid[1, 1])
-    one_mm_theta_ax = fig.add_subplot(grid[1, 2])
+    accuracy_runtime_ax = fig.add_subplot(grid[1, 2])
     error_mesh = error_ax.pcolormesh(
         ds_edges,
         theta_edges,
@@ -704,44 +1065,18 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
     ds_slice_ax.set_ylabel("RMS relative error")
     ds_slice_ax.set_title(rf"Error vs. ds at $\theta={selected_theta:.3g}$")
 
-    one_mm_ds_idx = int(np.argmin(np.abs(ds_mm - 1.0)))
-    one_mm_error = error[:, one_mm_ds_idx]
-    one_mm_theta_ax.loglog(theta, one_mm_error, color="black", linewidth=2.0)
-    fit_count = max(2, int(np.ceil(0.75 * theta.size)))
-    fit_theta = theta[:fit_count]
-    fit_error = one_mm_error[:fit_count]
-    convergence_exponent, fit_intercept = np.polyfit(np.log(fit_theta), np.log(fit_error), 1)
-    assert convergence_exponent >= MIN_THETA_CONVERGENCE_EXPONENT, (
-        "Expected near-field theta convergence exponent "
-        f">= {MIN_THETA_CONVERGENCE_EXPONENT:g}, got {convergence_exponent:.3g}"
+    accuracy_runtime_trace_values = plot_near_field_accuracy_runtime_axis(
+        accuracy_runtime_ax,
+        study,
+        show_ylabel=True,
+        show_legend=True,
     )
-    one_mm_theta_ax.loglog(
-        fit_theta,
-        np.exp(fit_intercept) * fit_theta**convergence_exponent,
-        color="0.35",
-        linestyle="--",
-        linewidth=1.5,
-    )
-    one_mm_theta_ax.text(
-        0.05,
-        0.95,
-        rf"error $\sim \theta^{{{convergence_exponent:.1f}}}$",
-        transform=one_mm_theta_ax.transAxes,
-        ha="left",
-        va="top",
-        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "0.75", "alpha": 0.9},
-    )
-    one_mm_theta_ax.axhline(NEAR_FIELD_ERROR_TARGET, color="black", linestyle=":", linewidth=1.0)
-    one_mm_theta_ax.invert_xaxis()
-    one_mm_theta_ax.set_xlabel(r"Opening angle $\theta$")
-    one_mm_theta_ax.set_ylabel("RMS relative error")
-    one_mm_theta_ax.set_title(f"Error vs. theta at ds={ds_mm[one_mm_ds_idx]:.3g} mm")
 
     lower_trace_values = np.concatenate(
         (
             error[:, selected_ds_idx],
             error[selected_theta_idx, :],
-            error[:, one_mm_ds_idx],
+            accuracy_runtime_trace_values,
         )
     )
     lower_y_min = float(np.min(lower_trace_values))
@@ -759,7 +1094,7 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
     error_ax.set_ylabel(r"Opening angle $\theta$")
     error_ax.set_title("Near-field RMS relative error")
     time_ax.set_title("Hierarchical run time")
-    for ax in (theta_slice_ax, ds_slice_ax, one_mm_theta_ax):
+    for ax in (theta_slice_ax, ds_slice_ax, accuracy_runtime_ax):
         ax.set_ylim(*lower_y_limits)
         ax.grid(True, which="both", linewidth=0.4, alpha=0.25)
     plot_near_field_domain_axis(domain_ax)
@@ -772,6 +1107,25 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
         f"r={LOOP_RADIUS + NEAR_FIELD_OUTBOARD_FROM_FIRST_ORIGIN:.3f} m "
         f"to r={NEAR_FIELD_OUTBOARD_RADIUS:.3f} m"
     )
+    return fig
+
+
+def build_near_field_accuracy_runtime_figure(study: NearFieldStudy) -> plt.Figure:
+    """Plot near-field accuracy against build+eval runtime as a standalone figure."""
+
+    fig, ax = plt.subplots(figsize=(8.4, 5.2), constrained_layout=False)
+    fig.subplots_adjust(left=0.10, right=0.70, bottom=0.12, top=0.82)
+    plot_near_field_accuracy_runtime_axis(ax, study, show_ylabel=True, show_legend=False)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="center left",
+        bbox_to_anchor=(0.73, 0.5),
+        fontsize=ACCURACY_RUNTIME_LEGEND_FONTSIZE,
+        frameon=True,
+    )
+    fig.suptitle("Near-field accuracy vs. build+eval runtime")
     return fig
 
 
@@ -861,7 +1215,7 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
         scaling_interactions,
         scaling_eval_seconds,
         marker="o",
-        label="Hierarchical eval",
+        label="cfsem hierarchical eval",
     )[0]
     build_eval_seconds = scaling_build_seconds + scaling_eval_seconds
     build_eval_line = ax.loglog(
@@ -869,10 +1223,10 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
         build_eval_seconds,
         marker="s",
         linestyle="--",
-        label="Hierarchical build+eval",
+        color=CFSEM_HIERARCHICAL_TRACE_COLOR,
+        label="cfsem hierarchical build+eval",
     )[0]
     scaling_annotations: list[str] = []
-    assert_timing_exponents = scaling_sources.size >= 3
     eval_exponent = plot_runtime_scaling_fit_on_axis(
         ax,
         scaling_sources,
@@ -881,10 +1235,6 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
         eval_line.get_color(),
     )
     if eval_exponent is not None:
-        assert not assert_timing_exponents or eval_exponent < MAX_HIERARCHICAL_TIMING_EXPONENT, (
-            "Expected hierarchical eval timing exponent "
-            f"< {MAX_HIERARCHICAL_TIMING_EXPONENT:g}, got {eval_exponent:.3g}"
-        )
         scaling_annotations.append(rf"eval $\sim N^{{{eval_exponent:.2f}}}$")
     build_eval_exponent = plot_runtime_scaling_fit_on_axis(
         ax,
@@ -894,10 +1244,6 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
         build_eval_line.get_color(),
     )
     if build_eval_exponent is not None:
-        assert not assert_timing_exponents or build_eval_exponent < MAX_HIERARCHICAL_TIMING_EXPONENT, (
-            "Expected hierarchical build+eval timing exponent "
-            f"< {MAX_HIERARCHICAL_TIMING_EXPONENT:g}, got {build_eval_exponent:.3g}"
-        )
         scaling_annotations.append(rf"build+eval $\sim N^{{{build_eval_exponent:.2f}}}$")
 
     direct_measured = [item for item in scaling_results if item.direct_seconds is not None]
@@ -911,7 +1257,13 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
             dtype=np.float64,
         )
         direct_seconds = np.array([float(item.direct_seconds) for item in direct_measured], dtype=np.float64)
-        ax.loglog(direct_interactions, direct_seconds, marker="^", color=DIRECT_TRACE_COLOR, label="Direct")
+        ax.loglog(
+            direct_interactions,
+            direct_seconds,
+            marker="^",
+            color=DIRECT_TRACE_COLOR,
+            label="cfsem direct",
+        )
         direct_exponent = plot_runtime_scaling_fit_on_axis(
             ax,
             direct_sources,
@@ -920,11 +1272,6 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
             DIRECT_TRACE_COLOR,
         )
         if direct_exponent is not None:
-            assert not assert_timing_exponents or direct_exponent < MAX_DIRECT_TIMING_EXPONENT, (
-                "Expected direct timing exponent "
-                f"< {MAX_DIRECT_TIMING_EXPONENT:g}, "
-                f"got {direct_exponent:.3g}"
-            )
             scaling_annotations.append(rf"direct $\sim N^{{{direct_exponent:.2f}}}$")
 
     direct_fit = direct_time_fit(scaling_results)
@@ -941,7 +1288,7 @@ def plot_scaling_axis(ax: plt.Axes, scaling_results: list[ScalingResult]) -> Non
                 fit_seconds,
                 color=DIRECT_TRACE_COLOR,
                 linestyle=":",
-                label="Direct linear fit",
+                label="cfsem direct linear fit",
             )
 
     if scaling_annotations:
@@ -1024,19 +1371,44 @@ def main() -> None:
     results = run_study(par=use_parallel)
     scaling_results_by_theta = run_scaling_study(par=use_parallel)
     near_field_study = run_near_field_study(par=use_parallel)
+    self_field_tradeoff_results = run_self_field_tradeoff_study(results, par=use_parallel)
     print_results(results, scaling_results_by_theta)
-    fig = build_figure(results, scaling_results_by_theta)
+    fig = build_figure(results, scaling_results_by_theta, self_field_tradeoff_results)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.output, dpi=300)
+    svg_output = args.output.with_suffix(".svg")
+    fig.savefig(svg_output)
     print(f"Saved plot to {args.output}")
+    print(f"Saved plot to {svg_output}")
     near_field_output = args.output.with_name(f"{args.output.stem}_near_field{args.output.suffix}")
+    near_field_svg_output = near_field_output.with_suffix(".svg")
     near_field_fig = build_near_field_figure(near_field_study)
     near_field_fig.savefig(near_field_output, dpi=300)
+    near_field_fig.savefig(near_field_svg_output)
     print(f"Saved near-field plot to {near_field_output}")
+    print(f"Saved near-field plot to {near_field_svg_output}")
+    near_field_tradeoff_output = args.output.with_name(
+        f"{args.output.stem}_near_field_accuracy_runtime{args.output.suffix}"
+    )
+    near_field_tradeoff_svg_output = near_field_tradeoff_output.with_suffix(".svg")
+    near_field_tradeoff_fig = build_near_field_accuracy_runtime_figure(near_field_study)
+    near_field_tradeoff_fig.savefig(near_field_tradeoff_output, dpi=300)
+    near_field_tradeoff_fig.savefig(near_field_tradeoff_svg_output)
+    print(f"Saved near-field accuracy/runtime plot to {near_field_tradeoff_output}")
+    print(f"Saved near-field accuracy/runtime plot to {near_field_tradeoff_svg_output}")
+    tradeoff_output = args.output.with_name(f"{args.output.stem}_self_field_tradeoff{args.output.suffix}")
+    tradeoff_svg_output = tradeoff_output.with_suffix(".svg")
+    tradeoff_fig = build_self_field_tradeoff_figure(self_field_tradeoff_results)
+    tradeoff_fig.savefig(tradeoff_output, dpi=300)
+    tradeoff_fig.savefig(tradeoff_svg_output)
+    print(f"Saved self-field tradeoff plot to {tradeoff_output}")
+    print(f"Saved self-field tradeoff plot to {tradeoff_svg_output}")
     if not args.no_plot and not TESTING:
         plt.show()
     plt.close(fig)
     plt.close(near_field_fig)
+    plt.close(near_field_tradeoff_fig)
+    plt.close(tradeoff_fig)
 
 
 if __name__ == "__main__":

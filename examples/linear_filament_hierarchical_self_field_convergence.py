@@ -687,7 +687,7 @@ def build_figure(
         theta_time_ax.axhline(result.direct_seconds, color="0.65", linewidth=1.0, linestyle=":")
 
     for ax in (error_ax, theta_time_ax):
-        ax.set_xlabel(r"Opening angle $\theta$ (rad)")
+        ax.set_xlabel(r"Opening angle $\theta$ [rad]")
         ax.invert_xaxis()
         ax.grid(True, which="both", linewidth=0.5, alpha=0.35)
 
@@ -1052,7 +1052,7 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
     theta_slice_ax.axvline(selected_theta, color="black", linestyle="--", linewidth=1.0)
     theta_slice_ax.plot(selected_theta, error[selected_theta_idx, selected_ds_idx], marker="o", color="black")
     theta_slice_ax.invert_xaxis()
-    theta_slice_ax.set_xlabel(r"Opening angle $\theta$ (rad)")
+    theta_slice_ax.set_xlabel(r"Opening angle $\theta$ [rad]")
     theta_slice_ax.set_ylabel("RMS relative error")
     theta_slice_ax.set_title(f"Error vs. theta at ds={selected_ds_mm:.3g} mm")
 
@@ -1091,9 +1091,9 @@ def build_near_field_figure(study: NearFieldStudy) -> plt.Figure:
         ax.set_xlabel("Segment length target [mm]")
         ax.grid(True, which="both", linewidth=0.4, alpha=0.25)
 
-    error_ax.set_ylabel(r"Opening angle $\theta$ (rad)")
+    error_ax.set_ylabel(r"Opening angle $\theta$ [rad]")
     error_ax.set_title("Near-field RMS relative error")
-    time_ax.set_ylabel(r"Opening angle $\theta$ (rad)")
+    time_ax.set_ylabel(r"Opening angle $\theta$ [rad]")
     time_ax.set_title("Hierarchical run time")
     for ax in (theta_slice_ax, ds_slice_ax, accuracy_runtime_ax):
         ax.set_ylim(*lower_y_limits)

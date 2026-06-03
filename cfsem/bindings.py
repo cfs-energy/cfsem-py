@@ -1207,7 +1207,7 @@ def flux_density_circular_filament_cartesian(
     xyzp = _3tup_contig(xyzp)
     bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, xyzp, par)  # [T]
 
-    return bx, by, bz  # type: ignore
+    return bx, by, bz
 
 
 def mutual_inductance_circular_to_linear(
@@ -1271,7 +1271,7 @@ def flux_density_dipole(
 
     bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
-    return bx, by, bz  # type: ignore
+    return bx, by, bz
 
 
 def vector_potential_dipole(
@@ -1302,7 +1302,7 @@ def vector_potential_dipole(
 
     ax, ay, az = em_vector_potential_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
-    return ax, ay, az  # type: ignore
+    return ax, ay, az
 
 
 def body_force_density_circular_filament_cartesian(
@@ -1335,7 +1335,7 @@ def body_force_density_circular_filament_cartesian(
         ifil, rfil, zfil, obs, j, par
     )  # [N/m^3]
 
-    return jxbx, jxby, jxbz  # type: ignore
+    return jxbx, jxby, jxbz
 
 
 def body_force_density_linear_filament(
@@ -1375,7 +1375,7 @@ def body_force_density_linear_filament(
         xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par
     )  # [N/m^3]
 
-    return jxbx, jxby, jxbz  # type: ignore
+    return jxbx, jxby, jxbz
 
 
 def _3tup_contig(

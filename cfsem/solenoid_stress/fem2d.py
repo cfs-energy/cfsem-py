@@ -96,13 +96,13 @@ _QUAD_FACE_NODE_PAIRS: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 3), (3
 def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:
     """Normalize sparse results to the matrix API expected by this module."""
 
-    return cast(sp.csr_matrix, sp.csr_matrix(matrix))
+    return sp.csr_matrix(matrix)
 
 
 def _to_csc_matrix(matrix: Any) -> sp.csc_matrix:
     """Normalize sparse results to CSC matrices."""
 
-    return cast(sp.csc_matrix, sp.csc_matrix(matrix))
+    return sp.csc_matrix(matrix)
 
 
 def _sparse_shape(matrix: Any) -> tuple[int, int]:

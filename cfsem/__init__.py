@@ -160,17 +160,15 @@ def self_inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar self-inductance
     """
-    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
-    # erroneously in the pyright output as of pyright 1.1.393.
-    x, y, z = xyzp  # type: ignore
-    xyzfil = (x[:-1], y[:-1], z[:-1])  # type: ignore
-    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])  # type: ignore
+    x, y, z = xyzp
+    xyzfil = (x[:-1], y[:-1], z[:-1])
+    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])
 
     self_inductance = inductance_piecewise_linear_filaments(
-        xyzfil,  # type: ignore
-        dlxyzfil,  # type: ignore
-        xyzfil,  # type: ignore
-        dlxyzfil,  # type: ignore
+        xyzfil,
+        dlxyzfil,
+        xyzfil,
+        dlxyzfil,
         wire_radius=wire_radius,
     )
 
@@ -205,21 +203,19 @@ def mutual_inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar mutual inductance between the two filaments
     """
-    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
-    # erroneously in the pyright output as of pyright 1.1.393.
-    x0, y0, z0 = xyz0  # type: ignore
-    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])  # type: ignore
-    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])  # type: ignore
+    x0, y0, z0 = xyz0
+    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])
+    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])
 
-    x1, y1, z1 = xyz1  # type: ignore
-    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])  # type: ignore
-    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])  # type: ignore
+    x1, y1, z1 = xyz1
+    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])
+    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])
 
     inductance = inductance_piecewise_linear_filaments(
-        xyzfil0,  # type: ignore
-        dlxyzfil0,  # type: ignore
-        xyzfil1,  # type: ignore
-        dlxyzfil1,  # type: ignore
+        xyzfil0,
+        dlxyzfil0,
+        xyzfil1,
+        dlxyzfil1,
         wire_radius=wire_radius,
     )
 

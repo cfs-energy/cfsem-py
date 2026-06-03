@@ -40,7 +40,7 @@ jobs:
         # Python lint, test, and coverage
         uv run --locked ruff check ./cfsem
         uv run --locked ruff format ./cfsem --check
-        uv run --locked pyright ./cfsem --pythonversion 3.10
+        uv run --locked ty check ./cfsem
         uv run --locked pytest ./test/
 
         # Build docs

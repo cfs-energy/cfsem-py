@@ -26,6 +26,7 @@
     * Add hierarchical functions and diagnostics result types to public exports
     * Add `MU_0` and `inductance_matrix_axisymmetric_coaxial_rectangular_coils` to public exports
     * Correct wrapper type hints for sparse triplets and circular-to-linear mutual inductance
+    * Use ty instead of pyright
 
 ## 8.3.0 2026-05-04
 

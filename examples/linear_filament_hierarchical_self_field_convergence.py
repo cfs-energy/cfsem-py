@@ -646,8 +646,8 @@ def build_figure(
 ) -> plt.Figure:
     """Plot self-field convergence and interaction-count timing."""
 
-    fig = plt.figure(figsize=(18.5, 9.0), constrained_layout=True)
-    grid = fig.add_gridspec(2, 4, width_ratios=[1.0, 1.0, 1.0, 0.34])
+    fig = plt.figure(figsize=(19.0, 9.0), constrained_layout=True)
+    grid = fig.add_gridspec(2, 4, width_ratios=[1.0, 1.0, 1.0, 1.0])
     error_ax = fig.add_subplot(grid[0, 0])
     theta_time_ax = fig.add_subplot(grid[0, 1])
     domain_ax = fig.add_subplot(grid[0, 2])
@@ -751,7 +751,7 @@ def plot_self_field_tradeoff_axis(
     rms_error = result.rms_relative_error.copy()
     max_error = result.max_relative_error.copy()
     theta = result.theta_values.copy()
-    order = np.argsort(seconds)
+    order = np.argsort(theta)[::-1]
     seconds = seconds[order]
     rms_error = rms_error[order]
     max_error = max_error[order]
@@ -890,7 +890,7 @@ def plot_near_field_accuracy_runtime_axis(
     one_mm_error = error[:, one_mm_ds_idx]
     one_mm_max_error = np.maximum(study.max_relative_error[:, one_mm_ds_idx], np.finfo(np.float64).tiny)
     one_mm_seconds = seconds[:, one_mm_ds_idx]
-    one_mm_order = np.argsort(one_mm_seconds)
+    one_mm_order = np.argsort(theta)[::-1]
     one_mm_seconds = one_mm_seconds[one_mm_order]
     one_mm_error = one_mm_error[one_mm_order]
     one_mm_max_error = one_mm_max_error[one_mm_order]

@@ -65,10 +65,10 @@ def test_hierarchical_dipoles_match_direct():
     direct_b = cfsem.flux_density_dipole(loc, moment, obs, par=False, outer_radius=outer_radius)
     direct_a = cfsem.vector_potential_dipole(loc, moment, obs, par=False, outer_radius=outer_radius)
     result_b = cfsem.flux_density_dipole_hierarchical(
-        loc, moment, outer_radius, obs, theta=0.0, par=False, extra_diagnostics=True
+        loc, moment, obs, outer_radius, theta=0.0, par=False, extra_diagnostics=True
     )
     result_a = cfsem.vector_potential_dipole_hierarchical(
-        loc, moment, outer_radius, obs, theta=0.0, par=True, extra_diagnostics=True
+        loc, moment, obs, outer_radius, theta=0.0, par=True, extra_diagnostics=True
     )
     _assert_vec_close(result_b, direct_b)
     _assert_vec_close(result_a, direct_a)
@@ -77,7 +77,7 @@ def test_hierarchical_dipoles_match_direct():
 
     out = (np.empty_like(obs[0]), np.empty_like(obs[0]), np.empty_like(obs[0]))
     returned = cfsem.flux_density_dipole_hierarchical(
-        loc, moment, outer_radius, obs, theta=0.0, par=False, out=out
+        loc, moment, obs, outer_radius, theta=0.0, par=False, out=out
     )
     _assert_returns_output_views(returned, out)
     _assert_vec_close(out, direct_b)
@@ -105,10 +105,10 @@ def test_hierarchical_linear_filaments_match_direct():
     direct_b = cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
     direct_a = cfsem.vector_potential_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
     result_b = cfsem.flux_density_linear_filament_hierarchical(
-        xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=False, extra_diagnostics=True
+        obs, xyzfil, dlxyzfil, current, wire_radius, theta=0.0, par=False, extra_diagnostics=True
     )
     result_a = cfsem.vector_potential_linear_filament_hierarchical(
-        xyzfil, dlxyzfil, current, wire_radius, obs, theta=0.0, par=True, extra_diagnostics=True
+        obs, xyzfil, dlxyzfil, current, wire_radius, theta=0.0, par=True, extra_diagnostics=True
     )
     _assert_vec_close(result_b, direct_b)
     _assert_vec_close(result_a, direct_a)
@@ -137,11 +137,11 @@ def test_hierarchical_construction_method_is_exposed():
 
     direct = cfsem.flux_density_linear_filament(obs, xyzfil, dlxyzfil, current, wire_radius, par=False)
     result = cfsem.flux_density_linear_filament_hierarchical(
+        obs,
         xyzfil,
         dlxyzfil,
         current,
         wire_radius,
-        obs,
         theta=0.0,
         construction_method="morton_lbvh",
         par=False,
@@ -152,11 +152,11 @@ def test_hierarchical_construction_method_is_exposed():
 
     with pytest.raises(ValueError, match="Unsupported hierarchical construction method"):
         cfsem.flux_density_linear_filament_hierarchical(
+            obs,
             xyzfil,
             dlxyzfil,
             current,
             wire_radius,
-            obs,
             construction_method="not-a-method",
             par=False,
         )
@@ -172,11 +172,11 @@ def test_hierarchical_rejects_noncontiguous_output():
 
     with pytest.raises(ValueError, match="output arrays must be contiguous"):
         cfsem.flux_density_linear_filament_hierarchical(
+            obs,
             xyzfil,
             dlxyzfil,
             current,
             wire_radius,
-            obs,
             theta=0.0,
             par=False,
             out=out,
@@ -203,20 +203,20 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
         obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
     )
     result_b = cfsem.flux_density_triangle_mesh_hierarchical(
+        obs,
         nodes,
         triangles,
         stream_function,
-        obs,
         theta=0.0,
         quad="dunavant3",
         par=False,
         extra_diagnostics=True,
     )
     result_a = cfsem.vector_potential_triangle_mesh_hierarchical(
+        obs,
         nodes,
         triangles,
         stream_function,
-        obs,
         theta=0.0,
         quad="dunavant3",
         par=True,
@@ -242,8 +242,8 @@ def test_hierarchical_accepts_tuple_columns_from_2d_inputs():
     result = cfsem.vector_potential_dipole_hierarchical(
         _tuple_columns(loc),
         moment,
-        outer_radius,
         _tuple_columns(obs),
+        outer_radius,
         theta=0.0,
         par=False,
     )
@@ -258,7 +258,7 @@ def test_coordinate_tuple_conversion_rejects_invalid_shape():
 
     with pytest.raises(ValueError, match="component arrays must have matching lengths"):
         cfsem.flux_density_dipole_hierarchical(
-            loc, bad_moment, outer_radius, obs, theta=0.0, par=False
+            loc, bad_moment, obs, outer_radius, theta=0.0, par=False
         )
 
 

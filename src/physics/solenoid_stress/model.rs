@@ -729,18 +729,24 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                         max_iterations,
                         false,
                     )?,
-                    BicgstabPreconditioner::Diagonal => solve_bicgstab_with_precond(
-                        self.stiffness.as_ref(),
-                        self.diagonal_preconditioner
+                    BicgstabPreconditioner::Diagonal => {
+                        let preconditioner = self
+                            .diagonal_preconditioner
                             .as_ref()
-                            .expect("diagonal preconditioner should be initialized")
-                            .clone(),
-                        &initial_guess,
-                        &rhs_work,
-                        tolerance,
-                        max_iterations,
-                        false,
-                    )?,
+                            .ok_or_else(|| {
+                                "diagonal preconditioner was not initialized".to_string()
+                            })?
+                            .clone();
+                        solve_bicgstab_with_precond(
+                            self.stiffness.as_ref(),
+                            preconditioner,
+                            &initial_guess,
+                            &rhs_work,
+                            tolerance,
+                            max_iterations,
+                            false,
+                        )?
+                    }
                 };
                 self.previous_bicgstab_solution = Some(reduced_solution.clone());
                 Ok((reduced_solution, diagnostics))
@@ -753,37 +759,42 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                 let equilibration = self
                     .equilibration
                     .as_ref()
-                    .expect("equilibration should be initialized");
+                    .ok_or_else(|| "equilibration was not initialized".to_string())?;
+                let equilibrated_stiffness = self
+                    .equilibrated_stiffness
+                    .as_ref()
+                    .ok_or_else(|| "equilibrated stiffness was not initialized".to_string())?;
                 let solver_tolerance = tolerance * min_value(equilibration.row_scale())?;
                 equilibration.scale_rhs_in_place(&mut rhs_work);
                 equilibration.scale_initial_guess_in_place(&mut initial_guess);
                 let (mut reduced_solution, mut diagnostics) = match options.preconditioner {
                     BicgstabPreconditioner::None => solve_bicgstab_no_precond(
-                        self.equilibrated_stiffness
-                            .as_ref()
-                            .expect("equilibrated stiffness should be initialized")
-                            .as_ref(),
+                        equilibrated_stiffness.as_ref(),
                         &initial_guess,
                         &rhs_work,
                         solver_tolerance,
                         max_iterations,
                         true,
                     )?,
-                    BicgstabPreconditioner::Diagonal => solve_bicgstab_with_precond(
-                        self.equilibrated_stiffness
+                    BicgstabPreconditioner::Diagonal => {
+                        let preconditioner = self
+                            .equilibrated_diagonal_preconditioner
                             .as_ref()
-                            .expect("equilibrated stiffness should be initialized")
-                            .as_ref(),
-                        self.equilibrated_diagonal_preconditioner
-                            .as_ref()
-                            .expect("equilibrated diagonal preconditioner should be initialized")
-                            .clone(),
-                        &initial_guess,
-                        &rhs_work,
-                        solver_tolerance,
-                        max_iterations,
-                        true,
-                    )?,
+                            .ok_or_else(|| {
+                                "equilibrated diagonal preconditioner was not initialized"
+                                    .to_string()
+                            })?
+                            .clone();
+                        solve_bicgstab_with_precond(
+                            equilibrated_stiffness.as_ref(),
+                            preconditioner,
+                            &initial_guess,
+                            &rhs_work,
+                            solver_tolerance,
+                            max_iterations,
+                            true,
+                        )?
+                    }
                 };
                 equilibration.unscale_solution_in_place(&mut reduced_solution);
                 diagnostics.residual_norm =
@@ -850,7 +861,7 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
             let stiffness = self
                 .equilibrated_stiffness
                 .as_ref()
-                .expect("equilibrated stiffness should be initialized");
+                .ok_or_else(|| "equilibrated stiffness was not initialized".to_string())?;
             self.equilibrated_diagonal_preconditioner = Some(
                 DiagonalPrecond::try_from(stiffness.as_ref()).map_err(|err| {
                     format!("failed to build equilibrated diagonal preconditioner: {err:?}")

@@ -128,7 +128,7 @@ checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
 name = "cfsem"
-version = "9.0.0"
+version = "10.0.0"
 dependencies = [
  "criterion",
  "deimos_numerics",

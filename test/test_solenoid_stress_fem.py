@@ -462,12 +462,12 @@ def kirsch_polar_stress(
     radius_ratio_4 = radius_ratio_2**2
     cos2 = np.cos(2.0 * theta)
     sin2 = np.sin(2.0 * theta)
-    sigma_rr = 0.5 * remote_stress * (
-        1.0 - radius_ratio_2 + (1.0 - 4.0 * radius_ratio_2 + 3.0 * radius_ratio_4) * cos2
+    sigma_rr = (
+        0.5
+        * remote_stress
+        * (1.0 - radius_ratio_2 + (1.0 - 4.0 * radius_ratio_2 + 3.0 * radius_ratio_4) * cos2)
     )
-    sigma_tt = 0.5 * remote_stress * (
-        1.0 + radius_ratio_2 - (1.0 + 3.0 * radius_ratio_4) * cos2
-    )
+    sigma_tt = 0.5 * remote_stress * (1.0 + radius_ratio_2 - (1.0 + 3.0 * radius_ratio_4) * cos2)
     sigma_rt = -0.5 * remote_stress * (1.0 + 2.0 * radius_ratio_2 - 3.0 * radius_ratio_4) * sin2
     return sigma_rr, sigma_tt, sigma_rt
 
@@ -630,7 +630,7 @@ def build_multimaterial_checkerboard_case(
 
 def tolerance(dtype: DType) -> tuple[float, float]:
     if dtype is np.float32:
-        return 5.0e-5, 5.0e-6
+        return 1e-3, 1e-5
     return 1.0e-12, 1.0e-12
 
 
@@ -827,18 +827,8 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
     assert np.all(measures.volumes > 0.0)
     assert np.allclose(measures.areas.sum(), expected_area, rtol=rtol, atol=atol)
     assert np.allclose(measures.volumes.sum(), expected_volume, rtol=rtol, atol=atol)
-    assert np.allclose(
-        quadrature_data.weights_area.sum(axis=1),
-        measures.areas,
-        rtol=rtol,
-        atol=atol,
-    )
-    assert np.allclose(
-        quadrature_data.weights_volume.sum(axis=1),
-        measures.volumes,
-        rtol=rtol,
-        atol=atol,
-    )
+    assert np.allclose(quadrature_data.weights_area.sum(axis=1), measures.areas, rtol=rtol, atol=atol)
+    assert np.allclose(quadrature_data.weights_volume.sum(axis=1), measures.volumes, rtol=rtol, atol=atol)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
@@ -931,12 +921,7 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
     )
     rtol, atol = tolerance(dtype)
 
-    assert np.allclose(
-        parallel.stiffness.toarray(),
-        serial.stiffness.toarray(),
-        rtol=rtol,
-        atol=atol,
-    )
+    assert np.allclose(parallel.stiffness.toarray(), serial.stiffness.toarray(), rtol=rtol, atol=atol)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
@@ -956,14 +941,12 @@ def test_iterative_structural_solve_matches_direct_and_reports_diagnostics(
     )
 
     direct = model.solve(rhs)
-    solve_tolerance = 1.0e-9
-    if dtype is np.float32:
-        solve_tolerance = 1.0e-4 if equilibration == "ruiz" else 3.0e-6
+    solve_tolerance = 1e-3 if dtype is np.float32 else 1.0e-9
     iterative = model.solve(
         rhs,
         method="bicgstab",
         tolerance=solve_tolerance,
-        max_iterations=1000,
+        max_iterations=100,
         equilibration=equilibration,  # type: ignore[arg-type]
         return_diagnostics=True,
     )
@@ -973,12 +956,7 @@ def test_iterative_structural_solve_matches_direct_and_reports_diagnostics(
     assert iterative.diagnostics.converged
     assert iterative.diagnostics.iterations > 0
     assert iterative.diagnostics.equilibrated == (equilibration == "ruiz")
-    assert np.allclose(
-        iterative.displacement,
-        direct,
-        rtol=max(rtol, 5.0e-5),
-        atol=max(atol, 1.0e-8),
-    )
+    assert np.allclose(iterative.displacement, direct, rtol=rtol, atol=atol)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)

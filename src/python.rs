@@ -335,6 +335,82 @@ fn parse_solenoid_fem_quadrature(
         .map_err(|msg| PyInteropError::ValueError { msg }.into())
 }
 
+fn parse_solenoid_fem_solve_method<F: physics::solenoid_stress::Real>(
+    method: u8,
+    tolerance: Option<F>,
+    max_iterations: Option<usize>,
+    preconditioner: u8,
+    equilibration: u8,
+    equilibration_max_iterations: Option<usize>,
+    equilibration_tolerance: Option<F>,
+    equilibration_norm_floor: Option<F>,
+    equilibration_norm_ceil: Option<F>,
+    initial_guess: u8,
+) -> PyResult<physics::solenoid_stress::Structural2dSolveMethod<F>> {
+    match method {
+        0 => Ok(physics::solenoid_stress::Structural2dSolveMethod::Direct),
+        1 => {
+            let preconditioner = match preconditioner {
+                0 => physics::solenoid_stress::BicgstabPreconditioner::None,
+                1 => physics::solenoid_stress::BicgstabPreconditioner::Diagonal,
+                _ => {
+                    return Err(PyInteropError::ValueError {
+                        msg: "unsupported BiCGSTAB preconditioner code".to_string(),
+                    }
+                    .into());
+                }
+            };
+            let mut equilibration_options =
+                physics::solenoid_stress::EquilibrationSolveOptions::<F>::default();
+            if let Some(max_iterations) = equilibration_max_iterations {
+                equilibration_options.max_iterations = max_iterations;
+            }
+            if let Some(tolerance) = equilibration_tolerance {
+                equilibration_options.tolerance = tolerance;
+            }
+            if let Some(norm_floor) = equilibration_norm_floor {
+                equilibration_options.norm_floor = norm_floor;
+            }
+            if let Some(norm_ceil) = equilibration_norm_ceil {
+                equilibration_options.norm_ceil = norm_ceil;
+            }
+            let equilibration = match equilibration {
+                0 => physics::solenoid_stress::BicgstabEquilibration::None,
+                1 => physics::solenoid_stress::BicgstabEquilibration::Ruiz(equilibration_options),
+                _ => {
+                    return Err(PyInteropError::ValueError {
+                        msg: "unsupported BiCGSTAB equilibration code".to_string(),
+                    }
+                    .into());
+                }
+            };
+            let initial_guess = match initial_guess {
+                0 => physics::solenoid_stress::BicgstabInitialGuess::Zero,
+                1 => physics::solenoid_stress::BicgstabInitialGuess::Previous,
+                _ => {
+                    return Err(PyInteropError::ValueError {
+                        msg: "unsupported BiCGSTAB initial guess code".to_string(),
+                    }
+                    .into());
+                }
+            };
+            Ok(physics::solenoid_stress::Structural2dSolveMethod::Bicgstab(
+                physics::solenoid_stress::BicgstabSolveOptions {
+                    tolerance,
+                    max_iterations,
+                    preconditioner,
+                    equilibration,
+                    initial_guess,
+                },
+            ))
+        }
+        _ => Err(PyInteropError::ValueError {
+            msg: "unsupported structural solve method code".to_string(),
+        }
+        .into()),
+    }
+}
+
 fn flatten_points<F: Copy>(points: Vec<[F; 2]>) -> Vec<F> {
     let mut points_flat = Vec::with_capacity(points.len() * 2);
     for point in points {
@@ -728,17 +804,59 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 Ok(PyArray1::from_vec(py, rhs).unbind())
             }
 
+            #[pyo3(signature = (
+                rhs,
+                method=0,
+                tolerance=None,
+                max_iterations=None,
+                preconditioner=1,
+                equilibration=1,
+                equilibration_max_iterations=None,
+                equilibration_tolerance=None,
+                equilibration_norm_floor=None,
+                equilibration_norm_ceil=None,
+                initial_guess=0
+            ))]
             fn solve<'py>(
                 &mut self,
                 py: Python<'py>,
                 rhs: PyReadonlyArray1<'_, $ty>,
-            ) -> PyResult<Py<PyArray1<$ty>>> {
+                method: u8,
+                tolerance: Option<$ty>,
+                max_iterations: Option<usize>,
+                preconditioner: u8,
+                equilibration: u8,
+                equilibration_max_iterations: Option<usize>,
+                equilibration_tolerance: Option<$ty>,
+                equilibration_norm_floor: Option<$ty>,
+                equilibration_norm_ceil: Option<$ty>,
+                initial_guess: u8,
+            ) -> PyResult<(Py<PyArray1<$ty>>, u8, bool, usize, $ty, bool)> {
                 let rhs = rhs.as_slice()?;
-                let solution = self
+                let method = parse_solenoid_fem_solve_method(
+                    method,
+                    tolerance,
+                    max_iterations,
+                    preconditioner,
+                    equilibration,
+                    equilibration_max_iterations,
+                    equilibration_tolerance,
+                    equilibration_norm_floor,
+                    equilibration_norm_ceil,
+                    initial_guess,
+                )?;
+                let output = self
                     .inner
-                    .solve(rhs)
+                    .solve_with_method(rhs, method)
                     .map_err(|msg| PyInteropError::ValueError { msg })?;
-                Ok(PyArray1::from_vec(py, solution).unbind())
+                Ok((
+                    PyArray1::from_vec(py, output.displacement).unbind(),
+                    output.diagnostics.method.code(),
+                    output.diagnostics.converged,
+                    output.diagnostics.iterations,
+                    output.diagnostics.residual_norm,
+                    output.diagnostics.equilibrated,
+                ))
             }
 
             fn element_quadrature<'py>(

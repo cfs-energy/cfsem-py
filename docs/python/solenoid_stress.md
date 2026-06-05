@@ -3,7 +3,7 @@
 This package includes three complementary layers:
 
 - a 1D finite-difference radial stress solver for winding-pack models with zero `rz` shear,
-- a 2D quadrilateral FEM solver with axisymmetric and plane-strain formulations, reusable sparse load operators, and a cached Rust-side LU solve,
+- a 2D quadrilateral FEM solver with axisymmetric and plane-strain formulations, reusable sparse load operators, cached Rust-side LU solves, and optional BiCGSTAB iterative solves,
 - analytic reference formulas used for validation and convergence studies.
 
 ## 1D Finite-Difference Solver
@@ -27,14 +27,25 @@ The FEM path supports:
 - optional threaded stiffness assembly with `par=True`,
 - reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,
 - reduced quadrature-point recovery operators for strain and stress,
+- direct sparse-LU or BiCGSTAB reduced-system solves,
 - model-owned Dirichlet constraints applied during assembly.
 
 The intended workflow is:
 
 1. call `assemble_structural_2d(...)` once with mesh, materials, load topology, and prescribed Dirichlet values,
 2. build each reduced load vector with `model.build_rhs(...)` or the exposed sparse operators,
-3. solve with `model.solve(rhs)`, which reuses a cached LU factorization,
+3. solve with `model.solve(rhs)`, using the default cached LU factorization or
+   `model.solve(rhs, method="bicgstab", ...)` for an iterative solve,
 4. recover quadrature strain and stress with `model.evaluate_quadrature(...)`.
+
+By default, `model.solve(rhs)` uses the direct sparse-LU path and returns the full displacement
+array. Passing `method="bicgstab"` selects the iterative solver; this path supports diagonal
+preconditioning, Ruiz-style row/column equilibration, optional reuse of the previous converged
+iterative solution as the initial guess, and optional diagnostics via `return_diagnostics=True`.
+Equilibration scales and the scaled stiffness matrix are cached on the model for repeated
+right-hand sides. The BiCGSTAB tolerance is passed unchanged to the system being solved. With
+equilibration enabled, this means the tolerance applies to the equilibrated residual rather than
+being rescaled to original reduced-RHS units.
 
 ### Formulation Notes
 

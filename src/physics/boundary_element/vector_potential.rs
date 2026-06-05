@@ -33,7 +33,11 @@ fn triangle_vector_potential_inner<T: Scalar>(
     let mut a = [T::ZERO; 3]; // [V*s/(A*m)]
 
     for qp in quad_points {
-        let (c, u, v) = (T::from_f64(qp[0]), T::from_f64(qp[1]), T::from_f64(qp[2]));
+        let (c, u, v) = (
+            crate::math::cast::<T>(qp[0]),
+            crate::math::cast::<T>(qp[1]),
+            crate::math::cast::<T>(qp[2]),
+        );
         let src = map_tri_uv(n0, n1, n2, [u, v]); // [m]
         let moment = [
             current_density[0] * c * tri_area, // [m]
@@ -96,7 +100,7 @@ pub fn triangle_vector_potential_basis<T: Scalar>(
     let dy = obs[1] - closest[1]; // [m]
     let dz = obs[2] - closest[2]; // [m]
     let dist_sq = dx.mul_add(dx, dy.mul_add(dy, dz * dz)); // [m^2]
-    let subdiv_factor = T::from_f64(TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR);
+    let subdiv_factor = crate::math::cast::<T>(TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR);
     let subdiv_threshold_sq = subdiv_factor * subdiv_factor * max_edge_sq; // [m^2]
 
     if dist_sq > subdiv_threshold_sq {
@@ -106,7 +110,7 @@ pub fn triangle_vector_potential_basis<T: Scalar>(
     // Single-level triangle subdivision for near-field calcs
     // to ensure that quad point singularities are separated from the target point.
     let mut a = [T::ZERO; 3]; // [V*s/(A*m)]
-    let min_sub_area = max_edge_sq * T::from_f64(1e-14); // [m^2]
+    let min_sub_area = max_edge_sq * crate::math::cast::<T>(1e-14); // [m^2]
     for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
         let [a0, b0, c0] = tri;
         if calc_tri_area(a0, b0, c0) <= min_sub_area {

@@ -650,7 +650,8 @@ pub fn flux_density_linear_filament_scalar<T: Scalar>(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let kappa = (T::ZERO - T::from_f64(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
+    let kappa =
+        (T::ZERO - crate::math::cast::<T>(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
 
     // This factor is constant across all x, y, and z components.
     let c = frac * kappa / perp; // (A/m)
@@ -664,7 +665,9 @@ pub fn flux_density_linear_filament_scalar<T: Scalar>(
     let bz = c * cxyz[2]; // [T]
 
     // Finally, determine whether we are clipping to zero.
-    if frac > T::from_f64(1e6 * f64::EPSILON) && perp > T::from_f64(MIN_WIRE_THICKNESS) {
+    if frac > crate::math::cast::<T>(1e6 * f64::EPSILON)
+        && perp > crate::math::cast::<T>(MIN_WIRE_THICKNESS)
+    {
         (bx, by, bz)
     } else {
         (T::ZERO, T::ZERO, T::ZERO)
@@ -973,7 +976,7 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
     let (start, end, ifil) = xyzifil;
 
     // Regularize the line-filament singularity with a minimum core radius.
-    let core_radius = max_scalar(wire_radius, T::from_f64(MIN_WIRE_THICKNESS));
+    let core_radius = max_scalar(wire_radius, crate::math::cast::<T>(MIN_WIRE_THICKNESS));
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing finite-thickness blending:
@@ -1001,7 +1004,8 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let kappa = (T::ZERO - T::from_f64(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
+    let kappa =
+        (T::ZERO - crate::math::cast::<T>(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
 
     // NOTE: up to this point, this has been the same as the B-field calculation.
 
@@ -1052,9 +1056,9 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
     } else {
         dist_a - para_a
     }; // (m)
-    let a_edge = T::from_f64(MU0_OVER_4PI)
+    let a_edge = crate::math::cast::<T>(MU0_OVER_4PI)
         * ifil
-        * T::from_f64(libm::log(max_scalar(k1 / k2, T::ZERO).to_f64())); // (V-s/m)
+        * crate::math::cast::<T>(libm::log(max_scalar(k1 / k2, T::ZERO).to_f64())); // (V-s/m)
 
     // Finite-thickness effect for points inside the conductor or near the endpoints.
     //
@@ -1077,7 +1081,7 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
     // both inside and outside the conductor.
 
     // (dimensionless) Quadratic fall-off (vs. linear for B-field)
-    let blend = T::from_f64(0.5) * frac.mul_add(T::ZERO - frac, T::ONE); //  1/2 (1 - frac^2)
+    let blend = crate::math::cast::<T>(0.5) * frac.mul_add(T::ZERO - frac, T::ONE); //  1/2 (1 - frac^2)
     // (V-s/m) a_mag = a_edge + 0.5 * kappa * (1 - frac^2), reworked for mul_add
     let a_mag = kappa.mul_add(blend, a_edge); // (V-s/m) Gauge-shifted magnitude
 

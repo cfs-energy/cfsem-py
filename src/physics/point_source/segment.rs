@@ -119,7 +119,7 @@ pub fn flux_density_point_segment(
 #[inline]
 fn decompose_filament_segment<T: Scalar>(xyzifil: ((T, T, T), (T, T, T), T)) -> ([T; 3], [T; 3]) {
     let (xyz0, xyz1, ifil) = xyzifil;
-    let half = T::from_f64(0.5);
+    let half = crate::math::cast::<T>(0.5);
     let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
     let src = [
         half.mul_add(dl.0, xyz0.0),
@@ -431,10 +431,10 @@ mod test {
 
     #[test]
     fn test_point_segment_scalars_match_current_element_midpoint_mapping() {
-        let xyz0 = (-0.4, 0.2, 0.7);
-        let xyz1 = (0.8, -0.3, 1.1);
-        let ifil = -2.3;
-        let obs = (1.4, -0.9, 0.6);
+        let xyz0 = (-0.4_f64, 0.2_f64, 0.7_f64);
+        let xyz1 = (0.8_f64, -0.3_f64, 1.1_f64);
+        let ifil = -2.3_f64;
+        let obs = (1.4_f64, -0.9_f64, 0.6_f64);
 
         let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
         let xmid = dl.0.mul_add(0.5, xyz0.0);

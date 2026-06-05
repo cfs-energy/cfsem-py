@@ -11,8 +11,8 @@ impl<T: Scalar> Aabb<T> {
     /// Empty bounding box.
     #[inline]
     pub fn empty() -> Self {
-        let inf = T::from_f64(f64::INFINITY);
-        let neg_inf = T::from_f64(f64::NEG_INFINITY);
+        let inf = crate::math::cast::<T>(f64::INFINITY);
+        let neg_inf = crate::math::cast::<T>(f64::NEG_INFINITY);
         Self {
             min: [inf; 3],
             max: [neg_inf; 3],
@@ -74,7 +74,7 @@ impl<T: Scalar> Aabb<T> {
     /// Center of the AABB.
     #[inline]
     pub fn centroid(&self) -> [T; 3] {
-        let half = T::from_f64(0.5);
+        let half = crate::math::cast::<T>(0.5);
         [
             (self.min[0] + self.max[0]) * half,
             (self.min[1] + self.max[1]) * half,

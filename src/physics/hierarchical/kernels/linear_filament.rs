@@ -132,7 +132,7 @@ impl<T: Scalar> BoundedGeometry for LinearFilamentSource<T> {
 
     #[inline]
     fn representative_point(&self) -> [Self::Scalar; 3] {
-        let half = T::from_f64(0.5);
+        let half = crate::math::cast::<T>(0.5);
         [
             half.mul_add(self.start[0] + self.end[0], T::ZERO),
             half.mul_add(self.start[1] + self.end[1], T::ZERO),
@@ -240,8 +240,8 @@ pub(super) fn linear_filament_accept_far<T: Scalar>(
 ) -> bool {
     if source.weight > T::ZERO {
         let closure_ratio = source.magnitude / source.weight;
-        if closure_ratio >= T::from_f64(CLOSED_SUMMARY_CLOSURE_RATIO_MAX)
-            && closure_ratio <= T::from_f64(OPEN_SUMMARY_CLOSURE_RATIO_MIN)
+        if closure_ratio >= crate::math::cast::<T>(CLOSED_SUMMARY_CLOSURE_RATIO_MAX)
+            && closure_ratio <= crate::math::cast::<T>(OPEN_SUMMARY_CLOSURE_RATIO_MIN)
         {
             return false;
         }
@@ -317,7 +317,7 @@ fn finalize_current_element<T: Scalar>(summary: &mut LinearFilamentSummary<T>) {
 /// Return one half in the kernel scalar type.
 #[inline]
 pub(super) fn half<T: Scalar>() -> T {
-    T::from_f64(0.5)
+    crate::math::cast::<T>(0.5)
 }
 
 /// Convert a fixed-size coordinate array to the tuple interface used upstream.

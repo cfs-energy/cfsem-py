@@ -139,7 +139,7 @@ impl<T: Scalar> BoundedGeometry for BoundaryElementTriangle<T> {
 
     #[inline]
     fn representative_point(&self) -> [Self::Scalar; 3] {
-        let third = T::ONE / T::from_f64(3.0);
+        let third = T::ONE / crate::math::cast::<T>(3.0);
         [
             (self.n0[0] + self.n1[0] + self.n2[0]) * third,
             (self.n0[1] + self.n1[1] + self.n2[1]) * third,
@@ -243,7 +243,7 @@ fn add_source_to_summary<T: Scalar>(
     // The upstream triangle kernels multiply physical area by Dunavant
     // reference-triangle weights that sum to 0.5. Use the same effective area
     // here so accepted far-field summaries stay normalized to the direct path.
-    let area = physical_area * T::from_f64(0.5);
+    let area = physical_area * crate::math::cast::<T>(0.5);
     let centroid = source.representative_point();
     let current_density = triangle_current_density(source.n0, source.n1, source.n2, moment);
     let current_element = scale3(current_density, area);
@@ -297,8 +297,8 @@ pub(super) fn boundary_element_accept_far<T: Scalar>(
 ) -> bool {
     if source.weight > T::ZERO {
         let closure_ratio = norm3(source.current_element) / source.weight;
-        if closure_ratio >= T::from_f64(CLOSED_SUMMARY_CLOSURE_RATIO_MAX)
-            && closure_ratio <= T::from_f64(OPEN_SUMMARY_CLOSURE_RATIO_MIN)
+        if closure_ratio >= crate::math::cast::<T>(CLOSED_SUMMARY_CLOSURE_RATIO_MAX)
+            && closure_ratio <= crate::math::cast::<T>(OPEN_SUMMARY_CLOSURE_RATIO_MIN)
         {
             return false;
         }
@@ -308,5 +308,5 @@ pub(super) fn boundary_element_accept_far<T: Scalar>(
 
 #[inline]
 fn half<T: Scalar>() -> T {
-    T::from_f64(0.5)
+    crate::math::cast::<T>(0.5)
 }

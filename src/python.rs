@@ -1300,7 +1300,7 @@ fn flatten_quad_points<F: Copy>(points: Vec<[F; 2]>) -> Vec<F> {
     flatten_points(points)
 }
 
-fn flatten_sparse_operator<F: mesh::Scalar>(
+fn flatten_sparse_operator<F: math::Scalar>(
     operator: mesh::quad2d::QuadMeshSparseOperator<F>,
 ) -> (Vec<F>, Vec<u64>, Vec<u64>, u64, u64) {
     (
@@ -1331,7 +1331,7 @@ fn sparse_operator_to_py<'py, F>(
     u64,
 )>
 where
-    F: mesh::Scalar + NumpyElement,
+    F: math::Scalar + NumpyElement,
 {
     let (vals, rows, cols, nrow, ncol) = flatten_sparse_operator(operator);
     Ok((
@@ -2498,7 +2498,7 @@ fn quad_mesh_query_to_py<'py, F>(
     query: mesh::quad2d::QuadMeshQueryResult<F>,
 ) -> PyResult<Py<PyDict>>
 where
-    F: mesh::Scalar + NumpyElement,
+    F: math::Scalar + NumpyElement,
 {
     let dict = PyDict::new(py);
     dict.set_item(

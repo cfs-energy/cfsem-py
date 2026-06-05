@@ -5,7 +5,6 @@ use core::f64::consts::PI;
 
 use nalgebra::Vector3;
 use nalgebra::geometry::Rotation3;
-use num_traits::{Float, FromPrimitive};
 
 pub mod elements;
 pub mod quad2d;
@@ -19,14 +18,8 @@ pub use quadrature::GaussLegendreRule;
 pub use sampling::{FaceSample, VolumeSample};
 pub use triangle3d::TriangleMeshView;
 
-/// Floating-point trait bound shared by the reusable mesh/element helpers.
-pub trait Scalar: Float + FromPrimitive + Copy + std::fmt::Debug + Send + Sync + 'static {}
-
-impl<T> Scalar for T where T: Float + FromPrimitive + Copy + std::fmt::Debug + Send + Sync + 'static {}
-
-pub(crate) fn cast<F: Scalar>(value: f64) -> F {
-    F::from_f64(value).expect("finite f64 literal should cast to target float")
-}
+pub use crate::math::Scalar;
+pub(crate) use crate::math::cast;
 
 /// Filamentize a helix about an arbitrary piecewise-linear path.
 ///

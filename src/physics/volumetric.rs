@@ -43,7 +43,7 @@ pub(crate) fn flux_density_inside_magnetized_sphere<T: Scalar>(
     outer_radius: T,
 ) -> [T; 3] {
     let r3 = outer_radius * outer_radius * outer_radius;
-    let c = T::from_f64(2.0 * MU0_OVER_4PI) / r3;
+    let c = crate::math::cast::<T>(2.0 * MU0_OVER_4PI) / r3;
     [moment[0] * c, moment[1] * c, moment[2] * c]
 }
 
@@ -91,7 +91,7 @@ pub(crate) fn vector_potential_inside_magnetized_sphere_generic<T: Scalar>(
     outer_radius: T,
 ) -> [T; 3] {
     let r3 = outer_radius * outer_radius * outer_radius;
-    let c = T::from_f64(MU0_OVER_4PI) * mmag * rmag / r3;
+    let c = crate::math::cast::<T>(MU0_OVER_4PI) * mmag * rmag / r3;
     [
         mhat_cross_rhat[0] * c,
         mhat_cross_rhat[1] * c,

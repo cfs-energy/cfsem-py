@@ -1,12 +1,16 @@
 //! Pure-math functions supporting physics calculations.
 
 use core::ops::{Add, Div, Mul, Sub};
+use num_traits::{Float, FromPrimitive};
 
-/// Scalar type supported by generic math and hierarchical field infrastructure.
+/// Scalar type shared by generic math, mesh, field, and FEM infrastructure.
 pub trait Scalar:
-    Copy
+    Float
+    + FromPrimitive
+    + Copy
     + Clone
     + Default
+    + std::fmt::Debug
     + PartialOrd
     + Add<Output = Self>
     + Sub<Output = Self>
@@ -20,14 +24,13 @@ pub trait Scalar:
     const ONE: Self;
 
     fn min_positive() -> Self;
-    fn from_f64(value: f64) -> Self;
     fn to_f64(self) -> f64;
-    fn is_nan(self) -> bool;
-    fn sqrt(self) -> Self;
-    fn powf(self, n: f64) -> Self;
-    fn ln(self) -> Self;
-    fn abs(self) -> Self;
-    fn mul_add(self, a: Self, b: Self) -> Self;
+}
+
+/// Cast a finite `f64` literal into the active scalar type.
+#[inline]
+pub(crate) fn cast<T: Scalar>(value: f64) -> T {
+    T::from_f64(value).expect("finite f64 literal should cast to target scalar")
 }
 
 impl Scalar for f32 {
@@ -40,43 +43,8 @@ impl Scalar for f32 {
     }
 
     #[inline]
-    fn from_f64(value: f64) -> Self {
-        value as f32
-    }
-
-    #[inline]
     fn to_f64(self) -> f64 {
         self as f64
-    }
-
-    #[inline]
-    fn is_nan(self) -> bool {
-        self.is_nan()
-    }
-
-    #[inline]
-    fn sqrt(self) -> Self {
-        self.sqrt()
-    }
-
-    #[inline]
-    fn powf(self, n: f64) -> Self {
-        self.powf(n as f32)
-    }
-
-    #[inline]
-    fn ln(self) -> Self {
-        self.ln()
-    }
-
-    #[inline]
-    fn abs(self) -> Self {
-        self.abs()
-    }
-
-    #[inline]
-    fn mul_add(self, a: Self, b: Self) -> Self {
-        self.mul_add(a, b)
     }
 }
 
@@ -90,43 +58,8 @@ impl Scalar for f64 {
     }
 
     #[inline]
-    fn from_f64(value: f64) -> Self {
-        value
-    }
-
-    #[inline]
     fn to_f64(self) -> f64 {
         self
-    }
-
-    #[inline]
-    fn is_nan(self) -> bool {
-        self.is_nan()
-    }
-
-    #[inline]
-    fn sqrt(self) -> Self {
-        self.sqrt()
-    }
-
-    #[inline]
-    fn powf(self, n: f64) -> Self {
-        self.powf(n)
-    }
-
-    #[inline]
-    fn ln(self) -> Self {
-        self.ln()
-    }
-
-    #[inline]
-    fn abs(self) -> Self {
-        self.abs()
-    }
-
-    #[inline]
-    fn mul_add(self, a: Self, b: Self) -> Self {
-        self.mul_add(a, b)
     }
 }
 

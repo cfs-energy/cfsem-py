@@ -24,11 +24,11 @@ pub(crate) fn flux_density_current_element_scalar<T: Scalar>(
 ) -> [T; 3] {
     let r = [obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]]; // [m]
     let r_sq = dot3(r, r); // [m^2]
-    let min_distance_sq = T::from_f64(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
+    let min_distance_sq = crate::math::cast::<T>(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
     let near = r_sq < min_distance_sq; // [-]
-    let rnorm3_inv = max_scalar(r_sq, min_distance_sq).powf(-1.5); // [m^-3]
+    let rnorm3_inv = max_scalar(r_sq, min_distance_sq).powf(crate::math::cast::<T>(-1.5)); // [m^-3]
     let m_cross_r = cross3(moment, r); // [A*m^2]
-    let c = T::from_f64(MU0_OVER_4PI);
+    let c = crate::math::cast::<T>(MU0_OVER_4PI);
     let out = [
         c * m_cross_r[0] * rnorm3_inv, // [T]
         c * m_cross_r[1] * rnorm3_inv, // [T]
@@ -47,11 +47,11 @@ pub(crate) fn vector_potential_current_element_scalar<T: Scalar>(
 ) -> [T; 3] {
     let r = [obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]]; // [m]
     let r_sq = dot3(r, r); // [m^2]
-    let min_distance = T::from_f64(CURRENT_ELEMENT_MIN_DISTANCE);
-    let min_distance_sq = T::from_f64(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
+    let min_distance = crate::math::cast::<T>(CURRENT_ELEMENT_MIN_DISTANCE);
+    let min_distance_sq = crate::math::cast::<T>(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
     let near = r_sq < min_distance_sq; // [-]
     let rmag = max_scalar(r_sq.sqrt(), min_distance); // [m]
-    let c = T::from_f64(MU0_OVER_4PI);
+    let c = crate::math::cast::<T>(MU0_OVER_4PI);
     let out = [
         c * moment[0] / rmag, // [V*s/m]
         c * moment[1] / rmag, // [V*s/m]

@@ -1,25 +1,19 @@
 //! Shared numeric traits and constants for the solenoid-stress backend.
 
+use crate::math::Scalar;
 use faer_traits::RealField;
-use num_traits::{Float, FromPrimitive};
 
 /// Floating-point trait bound used throughout the solenoid-stress backend.
 ///
 /// Keeping the bound in one place makes it easier to support both `f32` and `f64` entry points
 /// without duplicating generic constraints everywhere else.
-pub trait Real:
-    Float + FromPrimitive + RealField + Copy + std::fmt::Debug + Send + Sync + 'static
-{
-}
+pub trait Real: Scalar + RealField {}
 
-impl<T> Real for T where
-    T: Float + FromPrimitive + RealField + Copy + std::fmt::Debug + Send + Sync + 'static
-{
-}
+impl<T> Real for T where T: Scalar + RealField {}
 
 /// Cast a literal `f64` constant into the active floating-point type.
 pub fn cast<F: Real>(value: f64) -> F {
-    F::from_f64(value).expect("finite f64 literal should cast to target float")
+    crate::math::cast(value)
 }
 
 /// Return the constant `2*pi` in the active floating-point type.

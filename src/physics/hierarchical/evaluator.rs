@@ -493,21 +493,22 @@ where
         active.push((0_u32, 0_u32));
         while let Some((source_node, source_level)) = active.pop() {
             let source_node_index = source_node as usize;
-            let source_count =
-                K::Scalar::from_f64(source_tree.node_range_count[source_node_index] as f64);
+            let source_count = crate::math::cast::<K::Scalar>(
+                source_tree.node_range_count[source_node_index] as f64,
+            );
             let source_summary = &source_summaries[source_node_index];
             let source_aabb = source_tree.node_aabb[source_node_index];
             if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
-                weighted_level =
-                    weighted_level + K::Scalar::from_f64(f64::from(source_level)) * source_count;
+                weighted_level = weighted_level
+                    + crate::math::cast::<K::Scalar>(f64::from(source_level)) * source_count;
                 represented_sources = represented_sources + source_count;
                 continue;
             }
 
             let leaf_count = source_tree.leaf_count[source_node_index];
             if leaf_count > 0 {
-                weighted_level =
-                    weighted_level + K::Scalar::from_f64(f64::from(source_level)) * source_count;
+                weighted_level = weighted_level
+                    + crate::math::cast::<K::Scalar>(f64::from(source_level)) * source_count;
                 represented_sources = represented_sources + source_count;
             } else {
                 let next_level = source_level + 1;
@@ -519,7 +520,7 @@ where
         out[target_id] = if represented_sources > K::Scalar::ZERO {
             weighted_level / represented_sources
         } else {
-            K::Scalar::from_f64(f64::NAN)
+            crate::math::cast::<K::Scalar>(f64::NAN)
         };
     }
 

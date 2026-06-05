@@ -65,8 +65,8 @@ pub fn flux_density_dipole_scalar_generic<T: Scalar>(
     let m_dot_rhat = dot3(moment, rhat);
 
     // Assemble components
-    let c = T::from_f64(MU0_OVER_4PI) / r3; // [H/m^4]
-    let c1 = T::from_f64(3.0) * m_dot_rhat; // [A-m^2]
+    let c = crate::math::cast::<T>(MU0_OVER_4PI) / r3; // [H/m^4]
+    let c1 = crate::math::cast::<T>(3.0) * m_dot_rhat; // [A-m^2]
     let tsum = [
         rhat[0].mul_add(c1, T::ZERO - moment[0]),
         rhat[1].mul_add(c1, T::ZERO - moment[1]),
@@ -247,7 +247,7 @@ pub fn vector_potential_dipole_scalar_generic<T: Scalar>(
         ),
         // Dipole field
         false => {
-            let c = T::from_f64(MU0_OVER_4PI) * mmag / r2; // [V-s/m] Shared factor
+            let c = crate::math::cast::<T>(MU0_OVER_4PI) * mmag / r2; // [V-s/m] Shared factor
             [
                 mhat_cross_rhat[0] * c,
                 mhat_cross_rhat[1] * c,

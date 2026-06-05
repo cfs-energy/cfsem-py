@@ -20,7 +20,7 @@ pub fn area<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> T {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]];
     let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]];
     let cross = cross3(v01, v02);
-    T::from_f64(0.5) * norm3(cross)
+    crate::math::cast::<T>(0.5) * norm3(cross)
 }
 
 /// Unit normal of a 3D triangle.

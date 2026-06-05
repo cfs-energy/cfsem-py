@@ -5,19 +5,18 @@
 
 use crate::math::Scalar;
 use crate::math::{add_scaled3, dot3, sub3};
-use crate::mesh::Scalar as MeshScalar;
 
 /// Number of nodes in the linear triangular element.
 pub const NODES_PER_ELEMENT: usize = 3;
 
 /// Linear triangle shape functions on the reference simplex with vertices
 /// `(u, v) = (0, 0), (1, 0), (0, 1)`.
-pub fn shape<F: MeshScalar>(u: F, v: F) -> [F; NODES_PER_ELEMENT] {
+pub fn shape<F: Scalar>(u: F, v: F) -> [F; NODES_PER_ELEMENT] {
     [F::one() - u - v, u, v]
 }
 
 /// Shape-function gradients with respect to the reference coordinates `(u, v)`.
-pub fn grad_ref<F: MeshScalar>() -> [[F; 2]; NODES_PER_ELEMENT] {
+pub fn grad_ref<F: Scalar>() -> [[F; 2]; NODES_PER_ELEMENT] {
     [
         [-F::one(), -F::one()],
         [F::one(), F::zero()],

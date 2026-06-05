@@ -1,5 +1,12 @@
 # Changelog
 
+## 8.4.0 2026-06-05
+
+* Rust
+    * Add thread-parallel stiffness matrix assembly for 2D FEM solver
+* Python
+    * Plumb parallel option into 2D FEM interface
+
 ## 8.3.0 2026-05-04
 
 * Rust

@@ -24,6 +24,7 @@ The FEM path supports:
 - `quad4`, inferred `quad9`, and explicit `quad9` elements,
 - `gl3` and `gl4` quadrature,
 - optional per-element in-plane material orientation angles,
+- optional threaded stiffness assembly with `par=True`,
 - reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,
 - reduced quadrature-point recovery operators for strain and stress,
 - model-owned Dirichlet constraints applied during assembly.

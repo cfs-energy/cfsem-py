@@ -908,6 +908,38 @@ def test_model_dtype_resolution_includes_material_tables() -> None:
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
+@pytest.mark.parametrize("element_type", ELEMENT_TYPES)
+def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type: str) -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
+    material = np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)])
+    material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
+    serial = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material,
+        element_type=element_type,
+        par=False,
+    )
+    parallel = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material,
+        element_type=element_type,
+        par=True,
+    )
+    rtol, atol = tolerance(dtype)
+
+    assert np.allclose(
+        parallel.stiffness.toarray(),
+        serial.stiffness.toarray(),
+        rtol=rtol,
+        atol=atol,
+    )
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType, quadrature: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=4, nz=2, dtype=dtype)

@@ -7,7 +7,9 @@ use faer::sparse::{SparseColMat, SparseRowMat, Triplet};
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
-use crate::physics::solenoid_stress::assembly::assemble_stiffness_for_family;
+use crate::physics::solenoid_stress::assembly::{
+    assemble_stiffness_for_family, assemble_stiffness_for_family_par,
+};
 use crate::physics::solenoid_stress::convenience::{
     QuadratureFieldSamples, Structural2dElementMeasures, Structural2dElementQuadrature,
 };
@@ -490,6 +492,7 @@ pub fn assemble_structural_2d<F: Real>(
     prescribed: &[(usize, F)],
     formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
+    par: bool,
 ) -> Result<Structural2dModel<F>, String> {
     match elements {
         Structural2dElements::Quad4(elements) => build_model_for_family::<
@@ -509,6 +512,7 @@ pub fn assemble_structural_2d<F: Real>(
             prescribed,
             formulation,
             quadrature,
+            par,
         ),
         Structural2dElements::Quad9(elements) => build_model_for_family::<
             F,
@@ -527,6 +531,7 @@ pub fn assemble_structural_2d<F: Real>(
             prescribed,
             formulation,
             quadrature,
+            par,
         ),
     }
 }
@@ -564,6 +569,7 @@ fn build_model_for_family<
     prescribed: &[(usize, F)],
     formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
+    par: bool,
 ) -> Result<Structural2dModel<F>, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
@@ -581,7 +587,16 @@ where
     // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
     // This keeps the element kernels simple and pushes all constraint handling into the common
     // reduction helpers below.
-    let stiffness_full =
+    let stiffness_full = if par {
+        assemble_stiffness_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            material_ids,
+            material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+        )?
+    } else {
         assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             material_ids,
@@ -589,7 +604,8 @@ where
             material_orientation_angles,
             formulation,
             quadrature,
-        )?;
+        )?
+    };
     let mut constant_rhs = vec![F::zero(); ndof_reduced];
     let stiffness_reduced = reduce_square_triplets(
         &stiffness_full.rows,

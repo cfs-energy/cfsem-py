@@ -830,6 +830,7 @@ fn assemble_structural_2d_model_low_level<F: physics::solenoid_stress::Real + Nu
     formulation: u8,
     thickness: F,
     quadrature: u8,
+    par: bool,
 ) -> PyResult<physics::solenoid_stress::Structural2dModel<F>> {
     let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
     let element_type = physics::solenoid_stress::Structural2dElementType::from_code(element_type)
@@ -868,6 +869,7 @@ fn assemble_structural_2d_model_low_level<F: physics::solenoid_stress::Real + Nu
                 &prescribed,
                 formulation,
                 quadrature,
+                par,
             )
             .map_err(|msg| PyInteropError::ValueError { msg }.into())
         }
@@ -885,6 +887,7 @@ fn assemble_structural_2d_model_low_level<F: physics::solenoid_stress::Real + Nu
                 &prescribed,
                 formulation,
                 quadrature,
+                par,
             )
             .map_err(|msg| PyInteropError::ValueError { msg }.into())
         }
@@ -908,6 +911,7 @@ fn solenoid_stress_fem_assemble_model_2d_f64(
     formulation: u8,
     thickness: f64,
     quadrature: u8,
+    par: bool,
 ) -> PyResult<SolenoidStress2dModelF64> {
     Ok(SolenoidStress2dModelF64 {
         inner: assemble_structural_2d_model_low_level::<f64>(
@@ -925,6 +929,7 @@ fn solenoid_stress_fem_assemble_model_2d_f64(
             formulation,
             thickness,
             quadrature,
+            par,
         )?,
     })
 }
@@ -946,6 +951,7 @@ fn solenoid_stress_fem_assemble_model_2d_f32(
     formulation: u8,
     thickness: f32,
     quadrature: u8,
+    par: bool,
 ) -> PyResult<SolenoidStress2dModelF32> {
     Ok(SolenoidStress2dModelF32 {
         inner: assemble_structural_2d_model_low_level::<f32>(
@@ -963,6 +969,7 @@ fn solenoid_stress_fem_assemble_model_2d_f32(
             formulation,
             thickness,
             quadrature,
+            par,
         )?,
     })
 }

@@ -1,19 +1,14 @@
 # Changelog
 
-## 8.5.0 2026-06-05
+## 9.0.0 2026-06-05
 
 * Rust
+    * !Add thread-parallel stiffness matrix assembly for 2D FEM solver
+    * Add direct/iterative solve selection for 2D FEM using BiCGSTAB with optional equilibration
     * Add optional iterative solve, equilibration, and preconditioning for 2D FEM solver
     * Run cargo-semver-checks during testing
 * Python
     * Add bindings plumbing for iterative solver
-
-## 8.4.0 2026-06-05
-
-* Rust
-    * Add thread-parallel stiffness matrix assembly for 2D FEM solver
-    * Add direct/iterative solve selection for 2D FEM using BiCGSTAB with optional equilibration
-* Python
     * Plumb parallel option into 2D FEM interface
     * Add 2D FEM solve diagnostics and BiCGSTAB options
 

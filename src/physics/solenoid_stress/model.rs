@@ -4,10 +4,11 @@ use deimos_numerics::sparse::{
     BiCGSTAB, BiCGSTABSolveError, CompensatedField, DiagonalPrecond, Equilibration,
     EquilibrationParams, Precond, SparseMatVec,
 };
-use faer::Col;
 use faer::linalg::solvers::Solve;
+use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::linalg::solvers::Lu;
 use faer::sparse::{SparseColMat, SparseColMatRef, SparseRowMat, Triplet};
+use faer::{Accum, Col, Par};
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
@@ -753,9 +754,10 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                     .equilibration
                     .as_ref()
                     .expect("equilibration should be initialized");
+                let solver_tolerance = tolerance * min_value(equilibration.row_scale())?;
                 equilibration.scale_rhs_in_place(&mut rhs_work);
                 equilibration.scale_initial_guess_in_place(&mut initial_guess);
-                let (mut reduced_solution, diagnostics) = match options.preconditioner {
+                let (mut reduced_solution, mut diagnostics) = match options.preconditioner {
                     BicgstabPreconditioner::None => solve_bicgstab_no_precond(
                         self.equilibrated_stiffness
                             .as_ref()
@@ -763,7 +765,7 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                             .as_ref(),
                         &initial_guess,
                         &rhs_work,
-                        tolerance,
+                        solver_tolerance,
                         max_iterations,
                         true,
                     )?,
@@ -778,12 +780,14 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                             .clone(),
                         &initial_guess,
                         &rhs_work,
-                        tolerance,
+                        solver_tolerance,
                         max_iterations,
                         true,
                     )?,
                 };
                 equilibration.unscale_solution_in_place(&mut reduced_solution);
+                diagnostics.residual_norm =
+                    csc_residual_norm(self.stiffness.as_ref(), &reduced_solution, rhs)?;
                 self.previous_bicgstab_solution = Some(reduced_solution.clone());
                 Ok((reduced_solution, diagnostics))
             }
@@ -922,6 +926,58 @@ fn resolve_bicgstab_tolerance<F: Real>(rhs: &[F], tolerance: Option<F>) -> F {
         F::one()
     };
     scale * F::epsilon().sqrt()
+}
+
+/// Return the minimum scalar in a non-empty slice.
+fn min_value<F: Real>(values: &[F]) -> Result<F, String> {
+    if values.is_empty() {
+        return Err("cannot compute minimum of an empty slice".to_string());
+    }
+    let mut minimum = values[0];
+    for &value in &values[1..] {
+        if value < minimum {
+            minimum = value;
+        }
+    }
+    Ok(minimum)
+}
+
+/// Compute `||A x - b||_2` for one CSC matrix-vector product.
+fn csc_residual_norm<F: Real>(
+    matrix: SparseColMatRef<'_, usize, F>,
+    solution: &[F],
+    rhs: &[F],
+) -> Result<F, String> {
+    if solution.len() != matrix.ncols() {
+        return Err(format!(
+            "solution has length {}, but CSC matrix has {} columns",
+            solution.len(),
+            matrix.ncols()
+        ));
+    }
+    if rhs.len() != matrix.nrows() {
+        return Err(format!(
+            "rhs has length {}, but CSC matrix has {} rows",
+            rhs.len(),
+            matrix.nrows()
+        ));
+    }
+    let solution = Col::from_fn(matrix.ncols(), |index| solution[index]);
+    let mut residual = Col::<F>::zeros(matrix.nrows());
+    sparse_dense_matmul(
+        residual.as_mat_mut(),
+        Accum::Replace,
+        matrix,
+        solution.as_mat(),
+        F::one(),
+        Par::Seq,
+    );
+    let mut norm_sq = F::zero();
+    for row in 0..rhs.len() {
+        let value = residual[row] - rhs[row];
+        norm_sq = value.mul_add(value, norm_sq);
+    }
+    Ok(norm_sq.sqrt())
 }
 
 /// Solve a reduced system with unpreconditioned BiCGSTAB.
@@ -1701,6 +1757,14 @@ mod tests {
 
         assert!(iterative.diagnostics.converged);
         assert!(iterative.diagnostics.iterations > 0);
+        let reduced_solution = model
+            .free_dofs
+            .iter()
+            .map(|&dof| iterative.displacement[dof])
+            .collect::<Vec<_>>();
+        let residual_norm =
+            csc_residual_norm(model.stiffness.as_ref(), &reduced_solution, &rhs).unwrap();
+        assert!((iterative.diagnostics.residual_norm - residual_norm).abs() < 1.0e-12);
         for (actual, expected) in iterative.displacement.iter().zip(&direct) {
             assert!((actual - expected).abs() < 1.0e-10);
         }

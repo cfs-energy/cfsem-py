@@ -941,7 +941,7 @@ def test_iterative_structural_solve_matches_direct_and_reports_diagnostics(
     )
 
     direct = model.solve(rhs)
-    solve_tolerance = 1e-3 if dtype is np.float32 else 1.0e-9
+    solve_tolerance = 1e-4 if dtype is np.float32 else 1.0e-9
     iterative = model.solve(
         rhs,
         method="bicgstab",

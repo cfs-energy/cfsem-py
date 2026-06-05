@@ -43,7 +43,9 @@ array. Passing `method="bicgstab"` selects the iterative solver; this path suppo
 preconditioning, Ruiz-style row/column equilibration, optional reuse of the previous converged
 iterative solution as the initial guess, and optional diagnostics via `return_diagnostics=True`.
 Equilibration scales and the scaled stiffness matrix are cached on the model for repeated
-right-hand sides.
+right-hand sides. The BiCGSTAB tolerance is passed unchanged to the system being solved. With
+equilibration enabled, this means the tolerance applies to the equilibrated residual rather than
+being rescaled to original reduced-RHS units.
 
 ### Formulation Notes
 

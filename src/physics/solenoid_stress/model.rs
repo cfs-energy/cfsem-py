@@ -83,7 +83,11 @@ impl Structural2dSolveMethodName {
 /// Options for the BiCGSTAB reduced-system solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BicgstabSolveOptions<F: Real> {
-    /// Absolute residual tolerance in RHS units. If `None`, the solve uses a RHS-scaled default.
+    /// Absolute BiCGSTAB residual tolerance in the units of the solved system.
+    ///
+    /// With equilibration disabled, this is in reduced-RHS units. With equilibration enabled, the
+    /// same value is passed to the equilibrated linear system rather than being rescaled back to
+    /// original RHS units.
     pub tolerance: Option<F>,
     /// Maximum number of BiCGSTAB iterations. If `None`, a size-based default is used.
     pub max_iterations: Option<usize>,
@@ -764,7 +768,6 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                     .equilibrated_stiffness
                     .as_ref()
                     .ok_or_else(|| "equilibrated stiffness was not initialized".to_string())?;
-                let solver_tolerance = tolerance * min_value(equilibration.row_scale())?;
                 equilibration.scale_rhs_in_place(&mut rhs_work);
                 equilibration.scale_initial_guess_in_place(&mut initial_guess);
                 let (mut reduced_solution, mut diagnostics) = match options.preconditioner {
@@ -772,7 +775,7 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                         equilibrated_stiffness.as_ref(),
                         &initial_guess,
                         &rhs_work,
-                        solver_tolerance,
+                        tolerance,
                         max_iterations,
                         true,
                     )?,
@@ -790,7 +793,7 @@ impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
                             preconditioner,
                             &initial_guess,
                             &rhs_work,
-                            solver_tolerance,
+                            tolerance,
                             max_iterations,
                             true,
                         )?
@@ -937,20 +940,6 @@ fn resolve_bicgstab_tolerance<F: Real>(rhs: &[F], tolerance: Option<F>) -> F {
         F::one()
     };
     scale * F::epsilon().sqrt()
-}
-
-/// Return the minimum scalar in a non-empty slice.
-fn min_value<F: Real>(values: &[F]) -> Result<F, String> {
-    if values.is_empty() {
-        return Err("cannot compute minimum of an empty slice".to_string());
-    }
-    let mut minimum = values[0];
-    for &value in &values[1..] {
-        if value < minimum {
-            minimum = value;
-        }
-    }
-    Ok(minimum)
 }
 
 /// Compute `||A x - b||_2` for one CSC matrix-vector product.

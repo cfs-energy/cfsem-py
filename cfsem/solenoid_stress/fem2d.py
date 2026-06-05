@@ -591,8 +591,10 @@ class Structural2DFEMModel:
                 `[generalized force] = [energy / distance]`.
             method: Linear solve method, either `"direct"` for cached sparse LU or `"bicgstab"`
                 for an iterative solve.
-            tolerance: Optional absolute BiCGSTAB residual tolerance in reduced-RHS units. If
-                omitted, Rust chooses an RHS-scaled default.
+            tolerance: Optional absolute BiCGSTAB residual tolerance for the solved system. If
+                omitted, Rust chooses an RHS-scaled default. When Ruiz equilibration is enabled,
+                this same value is applied to the equilibrated system rather than rescaled to
+                original reduced-RHS units.
             max_iterations: Optional maximum number of BiCGSTAB iterations.
             preconditioner: BiCGSTAB preconditioner, either `"diagonal"` or `"none"`.
             equilibration: BiCGSTAB equilibration mode, either `"ruiz"` or `"none"`.

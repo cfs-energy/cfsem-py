@@ -616,8 +616,9 @@ class Structural2DFEMModel:
         ), f"rhs must have length {self.ndof_reduced}; got {rhs_arr.shape}"
         norm_floor = _positive_float_or_none("equilibration_norm_floor", equilibration_norm_floor)
         norm_ceil = _positive_float_or_none("equilibration_norm_ceil", equilibration_norm_ceil)
-        if norm_floor is not None and norm_ceil is not None and norm_ceil <= norm_floor:
-            raise ValueError("equilibration_norm_ceil must be greater than equilibration_norm_floor")
+        assert (
+            norm_floor is None or norm_ceil is None or norm_ceil > norm_floor
+        ), "equilibration_norm_ceil must be greater than equilibration_norm_floor"
         (
             displacement_raw,
             method_code,
@@ -1499,67 +1500,48 @@ def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
 
 
 def _solve_method_code(method: str) -> int:
-    if method == "direct":
-        return 0
-    if method == "bicgstab":
-        return 1
-    raise ValueError('method must be "direct" or "bicgstab"')
+    code_by_method = {"direct": 0, "bicgstab": 1}
+    assert method in code_by_method, 'method must be "direct" or "bicgstab"'
+    return code_by_method[method]
 
 
 def _solve_method_name(code: int) -> Literal["direct", "bicgstab"]:
-    if code == 0:
-        return "direct"
-    if code == 1:
-        return "bicgstab"
-    raise ValueError(f"unexpected solve method code {code}")
+    name_by_code: tuple[Literal["direct"], Literal["bicgstab"]] = ("direct", "bicgstab")
+    assert 0 <= code < len(name_by_code), f"unexpected solve method code {code}"
+    return name_by_code[code]
 
 
 def _bicgstab_preconditioner_code(preconditioner: str) -> int:
-    if preconditioner == "none":
-        return 0
-    if preconditioner == "diagonal":
-        return 1
-    raise ValueError('preconditioner must be "none" or "diagonal"')
+    code_by_preconditioner = {"none": 0, "diagonal": 1}
+    assert preconditioner in code_by_preconditioner, 'preconditioner must be "none" or "diagonal"'
+    return code_by_preconditioner[preconditioner]
 
 
 def _bicgstab_equilibration_code(equilibration: str) -> int:
-    if equilibration == "none":
-        return 0
-    if equilibration == "ruiz":
-        return 1
-    raise ValueError('equilibration must be "none" or "ruiz"')
+    code_by_equilibration = {"none": 0, "ruiz": 1}
+    assert equilibration in code_by_equilibration, 'equilibration must be "none" or "ruiz"'
+    return code_by_equilibration[equilibration]
 
 
 def _bicgstab_initial_guess_code(initial_guess: str) -> int:
-    if initial_guess == "zero":
-        return 0
-    if initial_guess == "previous":
-        return 1
-    raise ValueError('initial_guess must be "zero" or "previous"')
+    code_by_initial_guess = {"zero": 0, "previous": 1}
+    assert initial_guess in code_by_initial_guess, 'initial_guess must be "zero" or "previous"'
+    return code_by_initial_guess[initial_guess]
 
 
 def _positive_float_or_none(name: str, value: float | None) -> float | None:
-    if value is None:
-        return None
-    if not np.isfinite(value) or value <= 0.0:
-        raise ValueError(f"{name} must be finite and positive")
-    return float(value)
+    assert value is None or (np.isfinite(value) and value > 0.0), f"{name} must be finite and positive"
+    return None if value is None else float(value)
 
 
 def _nonnegative_float_or_none(name: str, value: float | None) -> float | None:
-    if value is None:
-        return None
-    if not np.isfinite(value) or value < 0.0:
-        raise ValueError(f"{name} must be finite and nonnegative")
-    return float(value)
+    assert value is None or (np.isfinite(value) and value >= 0.0), f"{name} must be finite and nonnegative"
+    return None if value is None else float(value)
 
 
 def _positive_int_or_none(name: str, value: int | None) -> int | None:
-    if value is None:
-        return None
-    if value < 1:
-        raise ValueError(f"{name} must be at least 1")
-    return int(value)
+    assert value is None or value >= 1, f"{name} must be at least 1"
+    return None if value is None else int(value)
 
 
 def assemble_structural_2d(

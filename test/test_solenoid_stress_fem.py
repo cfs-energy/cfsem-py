@@ -958,7 +958,7 @@ def test_iterative_structural_solve_matches_direct_and_reports_diagnostics(
     direct = model.solve(rhs)
     solve_tolerance = 1.0e-9
     if dtype is np.float32:
-        solve_tolerance = 1.0e-4
+        solve_tolerance = 1.0e-4 if equilibration == "ruiz" else 3.0e-6
     iterative = model.solve(
         rhs,
         method="bicgstab",

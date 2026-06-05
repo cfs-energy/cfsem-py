@@ -1379,6 +1379,7 @@ def assemble_structural_2d(
     prescribed: Mapping[int, float] | None = None,
     quadrature: str | int = "gl3",
     element_type: str = "quad4",
+    par: bool = True,
 ) -> Structural2DFEMModel:
     """Assemble the reusable 2D structural FEM model.
 
@@ -1410,6 +1411,7 @@ def assemble_structural_2d(
             value. Displacement units are `[length]`.
         quadrature: Quadrature rule selector, either `gl3`, `gl4`, `3`, or `4`.
         element_type: Analysis element family, either `quad4` or `quad9`.
+        par: Whether to assemble the stiffness matrix using threaded element batches.
 
     Returns:
         Structural2DFEMModel: Reusable model storing the reduced stiffness matrix, sparse load
@@ -1462,7 +1464,11 @@ def assemble_structural_2d(
         material_table_arr,
         pressure_faces_arr,
         traction_faces_arr,
-        np.zeros((0, 5), dtype=dtype) if thermal_material_table_arr is None else thermal_material_table_arr,
+        (
+            thermal_material_table_arr
+            if thermal_material_table_arr is not None
+            else np.zeros((0, 5), dtype=dtype)
+        ),
         material_orientation_angles_arr,
         prescribed_dofs,
         prescribed_values,
@@ -1470,6 +1476,7 @@ def assemble_structural_2d(
         _formulation_code(normalized_formulation),
         thickness_value,
         quadrature_code,
+        par,
     )
 
     stiffness = _csc_matrix_from_binding(backend.stiffness_csc(), dtype)

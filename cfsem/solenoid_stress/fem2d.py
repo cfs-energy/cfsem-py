@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, overload, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -177,6 +177,38 @@ class ElementQuadrature:
     weights_area: npt.NDArray[np.floating[Any]]
     weights_volume: npt.NDArray[np.floating[Any]]
     nq_per_element: int
+
+
+@dataclass(frozen=True, slots=True)
+class Structural2DSolveDiagnostics:
+    """Diagnostics from one 2D FEM linear solve.
+
+    Args:
+        method: Solver method used for the reduced structural system.
+        converged: Whether the selected solver converged.
+        iterations: Number of BiCGSTAB iterations, or zero for direct solves.
+        residual_norm: Final residual norm in reduced-RHS units, or zero for direct solves.
+        equilibrated: Whether row/column equilibration was applied before the solve.
+    """
+
+    method: Literal["direct", "bicgstab"]
+    converged: bool
+    iterations: int
+    residual_norm: float
+    equilibrated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Structural2DSolveResult:
+    """Full displacement solution plus linear-solver diagnostics.
+
+    Args:
+        displacement: Full displacement vector with shape `(ndof_full,)`.
+        diagnostics: Solver diagnostics for the reduced structural solve.
+    """
+
+    displacement: npt.NDArray[np.floating[Any]]
+    diagnostics: Structural2DSolveDiagnostics
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,23 +532,128 @@ class Structural2DFEMModel:
         )
         return np.asarray(rhs, dtype=self.dtype)
 
-    def solve(self, rhs: ArrayLike) -> npt.NDArray[np.floating[Any]]:
+    @overload
+    def solve(
+        self,
+        rhs: ArrayLike,
+        *,
+        method: Literal["direct", "bicgstab"] = "direct",
+        tolerance: float | None = None,
+        max_iterations: int | None = None,
+        preconditioner: Literal["none", "diagonal"] = "diagonal",
+        equilibration: Literal["none", "ruiz"] = "ruiz",
+        equilibration_max_iterations: int | None = None,
+        equilibration_tolerance: float | None = None,
+        equilibration_norm_floor: float | None = None,
+        equilibration_norm_ceil: float | None = None,
+        initial_guess: Literal["zero", "previous"] = "zero",
+        return_diagnostics: Literal[False] = False,
+    ) -> npt.NDArray[np.floating[Any]]: ...
+
+    @overload
+    def solve(
+        self,
+        rhs: ArrayLike,
+        *,
+        method: Literal["direct", "bicgstab"] = "direct",
+        tolerance: float | None = None,
+        max_iterations: int | None = None,
+        preconditioner: Literal["none", "diagonal"] = "diagonal",
+        equilibration: Literal["none", "ruiz"] = "ruiz",
+        equilibration_max_iterations: int | None = None,
+        equilibration_tolerance: float | None = None,
+        equilibration_norm_floor: float | None = None,
+        equilibration_norm_ceil: float | None = None,
+        initial_guess: Literal["zero", "previous"] = "zero",
+        return_diagnostics: Literal[True],
+    ) -> Structural2DSolveResult: ...
+
+    def solve(
+        self,
+        rhs: ArrayLike,
+        *,
+        method: Literal["direct", "bicgstab"] = "direct",
+        tolerance: float | None = None,
+        max_iterations: int | None = None,
+        preconditioner: Literal["none", "diagonal"] = "diagonal",
+        equilibration: Literal["none", "ruiz"] = "ruiz",
+        equilibration_max_iterations: int | None = None,
+        equilibration_tolerance: float | None = None,
+        equilibration_norm_floor: float | None = None,
+        equilibration_norm_ceil: float | None = None,
+        initial_guess: Literal["zero", "previous"] = "zero",
+        return_diagnostics: bool = False,
+    ) -> npt.NDArray[np.floating[Any]] | Structural2DSolveResult:
         """Solve the reduced system and recover the full displacement field.
 
         Args:
             rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
                 `[generalized force] = [energy / distance]`.
+            method: Linear solve method, either `"direct"` for cached sparse LU or `"bicgstab"`
+                for an iterative solve.
+            tolerance: Optional absolute BiCGSTAB residual tolerance for the solved system. If
+                omitted, Rust chooses an RHS-scaled default. When Ruiz equilibration is enabled,
+                this same value is applied to the equilibrated system rather than rescaled to
+                original reduced-RHS units.
+            max_iterations: Optional maximum number of BiCGSTAB iterations.
+            preconditioner: BiCGSTAB preconditioner, either `"diagonal"` or `"none"`.
+            equilibration: BiCGSTAB equilibration mode, either `"ruiz"` or `"none"`.
+            equilibration_max_iterations: Optional maximum number of equilibration iterations.
+            equilibration_tolerance: Optional dimensionless equilibration tolerance.
+            equilibration_norm_floor: Optional lower clamp for measured equilibration norms.
+            equilibration_norm_ceil: Optional upper clamp for measured equilibration norms.
+            initial_guess: BiCGSTAB initial guess, either `"zero"` or `"previous"`.
+            return_diagnostics: If true, return `Structural2DSolveResult` with displacement and
+                diagnostics. If false, return the displacement array directly.
 
         Returns:
-            NDArray: Full displacement vector with shape `(ndof_full,)` and component ordering
-            `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
+            NDArray | Structural2DSolveResult: Full displacement vector with shape
+            `(ndof_full,)` and component ordering `[u_r0, u_z0, u_r1, u_z1, ...]`, or the same
+            displacement packaged with solver diagnostics. Units are `[length]`.
         """
 
-        rhs_arr = np.asarray(rhs, dtype=self.dtype).reshape(-1)
+        rhs_arr = np.ascontiguousarray(np.asarray(rhs, dtype=self.dtype).reshape(-1))
         assert (
             rhs_arr.shape[0] == self.ndof_reduced
         ), f"rhs must have length {self.ndof_reduced}; got {rhs_arr.shape}"
-        return np.asarray(self._backend.solve(rhs_arr), dtype=self.dtype)
+        norm_floor = _positive_float_or_none("equilibration_norm_floor", equilibration_norm_floor)
+        norm_ceil = _positive_float_or_none("equilibration_norm_ceil", equilibration_norm_ceil)
+        assert (
+            norm_floor is None or norm_ceil is None or norm_ceil > norm_floor
+        ), "equilibration_norm_ceil must be greater than equilibration_norm_floor"
+        (
+            displacement_raw,
+            method_code,
+            converged,
+            iterations,
+            residual_norm,
+            equilibrated,
+        ) = self._backend.solve(
+            rhs_arr,
+            _solve_method_code(method),
+            _positive_float_or_none("tolerance", tolerance),
+            _positive_int_or_none("max_iterations", max_iterations),
+            _bicgstab_preconditioner_code(preconditioner),
+            _bicgstab_equilibration_code(equilibration),
+            _positive_int_or_none("equilibration_max_iterations", equilibration_max_iterations),
+            _nonnegative_float_or_none("equilibration_tolerance", equilibration_tolerance),
+            norm_floor,
+            norm_ceil,
+            _bicgstab_initial_guess_code(initial_guess),
+        )
+        displacement = np.asarray(displacement_raw, dtype=self.dtype)
+        if not return_diagnostics:
+            return displacement
+        return Structural2DSolveResult(
+            displacement=displacement,
+            diagnostics=Structural2DSolveDiagnostics(
+                method=_solve_method_name(int(method_code)),
+                converged=bool(converged),
+                iterations=int(iterations),
+                residual_norm=float(residual_norm),
+                equilibrated=bool(equilibrated),
+            ),
+        )
 
     def recover_full(self, reduced_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
         """Reinsert prescribed Dirichlet values into a reduced displacement vector.
@@ -1364,6 +1501,51 @@ def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
     return f64
 
 
+def _solve_method_code(method: str) -> int:
+    code_by_method = {"direct": 0, "bicgstab": 1}
+    assert method in code_by_method, 'method must be "direct" or "bicgstab"'
+    return code_by_method[method]
+
+
+def _solve_method_name(code: int) -> Literal["direct", "bicgstab"]:
+    name_by_code: tuple[Literal["direct"], Literal["bicgstab"]] = ("direct", "bicgstab")
+    assert 0 <= code < len(name_by_code), f"unexpected solve method code {code}"
+    return name_by_code[code]
+
+
+def _bicgstab_preconditioner_code(preconditioner: str) -> int:
+    code_by_preconditioner = {"none": 0, "diagonal": 1}
+    assert preconditioner in code_by_preconditioner, 'preconditioner must be "none" or "diagonal"'
+    return code_by_preconditioner[preconditioner]
+
+
+def _bicgstab_equilibration_code(equilibration: str) -> int:
+    code_by_equilibration = {"none": 0, "ruiz": 1}
+    assert equilibration in code_by_equilibration, 'equilibration must be "none" or "ruiz"'
+    return code_by_equilibration[equilibration]
+
+
+def _bicgstab_initial_guess_code(initial_guess: str) -> int:
+    code_by_initial_guess = {"zero": 0, "previous": 1}
+    assert initial_guess in code_by_initial_guess, 'initial_guess must be "zero" or "previous"'
+    return code_by_initial_guess[initial_guess]
+
+
+def _positive_float_or_none(name: str, value: float | None) -> float | None:
+    assert value is None or (np.isfinite(value) and value > 0.0), f"{name} must be finite and positive"
+    return None if value is None else float(value)
+
+
+def _nonnegative_float_or_none(name: str, value: float | None) -> float | None:
+    assert value is None or (np.isfinite(value) and value >= 0.0), f"{name} must be finite and nonnegative"
+    return None if value is None else float(value)
+
+
+def _positive_int_or_none(name: str, value: int | None) -> int | None:
+    assert value is None or value >= 1, f"{name} must be at least 1"
+    return None if value is None else int(value)
+
+
 def assemble_structural_2d(
     nodes: ArrayLike,
     elements: ArrayLike,
@@ -1379,6 +1561,7 @@ def assemble_structural_2d(
     prescribed: Mapping[int, float] | None = None,
     quadrature: str | int = "gl3",
     element_type: str = "quad4",
+    par: bool = True,
 ) -> Structural2DFEMModel:
     """Assemble the reusable 2D structural FEM model.
 
@@ -1410,6 +1593,7 @@ def assemble_structural_2d(
             value. Displacement units are `[length]`.
         quadrature: Quadrature rule selector, either `gl3`, `gl4`, `3`, or `4`.
         element_type: Analysis element family, either `quad4` or `quad9`.
+        par: Whether to assemble the stiffness matrix using threaded element batches.
 
     Returns:
         Structural2DFEMModel: Reusable model storing the reduced stiffness matrix, sparse load
@@ -1462,7 +1646,11 @@ def assemble_structural_2d(
         material_table_arr,
         pressure_faces_arr,
         traction_faces_arr,
-        np.zeros((0, 5), dtype=dtype) if thermal_material_table_arr is None else thermal_material_table_arr,
+        (
+            thermal_material_table_arr
+            if thermal_material_table_arr is not None
+            else np.zeros((0, 5), dtype=dtype)
+        ),
         material_orientation_angles_arr,
         prescribed_dofs,
         prescribed_values,
@@ -1470,6 +1658,7 @@ def assemble_structural_2d(
         _formulation_code(normalized_formulation),
         thickness_value,
         quadrature_code,
+        par,
     )
 
     stiffness = _csc_matrix_from_binding(backend.stiffness_csc(), dtype)
@@ -1741,6 +1930,8 @@ __all__ = [
     "QuadMeshQuery",
     "QuadratureFieldSamples",
     "assemble_structural_2d",
+    "Structural2DSolveDiagnostics",
+    "Structural2DSolveResult",
     "cfsem_radial_material",
     "interpolate_quad_mesh_values",
     "infer_quad9_mesh",

@@ -5,7 +5,7 @@ This subpackage includes three complementary toolsets:
 - a 1D finite-difference radial stress solver for deck-of-cards winding-pack models,
 - a 2D quadrilateral FEM implementation centered on reusable sparse load and
   recovery operators, with convenience methods for `build_rhs(...)`, `solve(...)`, and
-  quadrature-field recovery,
+  quadrature-field recovery, including direct and iterative linear solve options,
 - analytic reference formulas used for validation and convergence studies.
 """
 
@@ -29,6 +29,8 @@ from .fem2d import (
     QuadMeshQuery,
     QuadratureFieldSamples,
     Structural2DFEMModel,
+    Structural2DSolveDiagnostics,
+    Structural2DSolveResult,
     assemble_structural_2d,
     cfsem_radial_material,
     interpolate_quad_mesh_values,
@@ -56,6 +58,8 @@ __all__ = [
     "SolenoidStress1D",
     "SolenoidStress1DOperators",
     "Structural2DFEMModel",
+    "Structural2DSolveDiagnostics",
+    "Structural2DSolveResult",
     "assemble_structural_2d",
     "cfsem_radial_material",
     "interpolate_quad_mesh_values",

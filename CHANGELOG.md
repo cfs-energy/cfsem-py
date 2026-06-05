@@ -1,6 +1,6 @@
 # Changelog
 
-## 9.0.0 2026-05-22
+## 10.0.0 2026-06-05
 
 * Rust
     * !Consolidate math helper functions and use consistent array argument format
@@ -27,6 +27,18 @@
     * Add `MU_0` and `inductance_matrix_axisymmetric_coaxial_rectangular_coils` to public exports
     * Correct wrapper type hints for sparse triplets and circular-to-linear mutual inductance
     * Use ty instead of pyright
+
+## 9.0.0 2026-06-05
+
+* Rust
+    * !Add thread-parallel stiffness matrix assembly for 2D FEM solver
+    * Add direct/iterative solve selection for 2D FEM using BiCGSTAB with optional equilibration
+    * Add optional iterative solve, equilibration, and preconditioning for 2D FEM solver
+    * Run cargo-semver-checks during testing
+* Python
+    * Add bindings plumbing for iterative solver
+    * Plumb parallel option into 2D FEM interface
+    * Add 2D FEM solve diagnostics and BiCGSTAB options
 
 ## 8.3.0 2026-05-04
 

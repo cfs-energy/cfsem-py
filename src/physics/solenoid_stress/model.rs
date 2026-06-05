@@ -1,8 +1,8 @@
 //! Reduced-model assembly and solve wrapper for the 2D structural FEM.
 
 use deimos_numerics::sparse::{
-    BiCGSTAB, BiCGSTABSolveError, DiagonalPrecond, Equilibration, EquilibrationParams, Precond,
-    SparseMatVec,
+    BiCGSTAB, BiCGSTABSolveError, CompensatedField, DiagonalPrecond, Equilibration,
+    EquilibrationParams, Precond, SparseMatVec,
 };
 use faer::Col;
 use faer::linalg::solvers::Solve;
@@ -26,6 +26,21 @@ use crate::physics::solenoid_stress::recovery::quadrature_field_operators_for_fa
 use crate::physics::solenoid_stress::types::{
     PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad, dof_per_element,
 };
+
+mod private {
+    use super::{CompensatedField, Real};
+
+    pub trait IterativeScalarSealed: Real + CompensatedField {}
+
+    impl<T> IterativeScalarSealed for T where T: Real + CompensatedField {}
+}
+
+/// Scalar types supported by the iterative 2D structural FEM solve path.
+///
+/// This trait is sealed and implemented by the floating-point types supported by the backend.
+pub trait Structural2dIterativeScalar: Real + private::IterativeScalarSealed {}
+
+impl<T> Structural2dIterativeScalar for T where T: Real + private::IterativeScalarSealed {}
 
 /// Public element-family selector for the 2D structural solver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -441,34 +456,6 @@ impl<F: Real> Structural2dModel<F> {
         Ok(self.recover_full(&reduced_solution))
     }
 
-    /// Solve the reduced structural system with an explicit solver method.
-    ///
-    /// Args:
-    ///     rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
-    ///         `[generalized force] = [energy / distance]`.
-    ///     method: Solver method and method-specific options.
-    ///
-    /// Returns:
-    ///     Full displacement vector and solve diagnostics.
-    pub fn solve_with_method(
-        &mut self,
-        rhs: &[F],
-        method: Structural2dSolveMethod<F>,
-    ) -> Result<Structural2dSolveOutput<F>, String> {
-        let (reduced_solution, diagnostics) = match method {
-            Structural2dSolveMethod::Direct => {
-                (self.solve_direct_reduced(rhs)?, direct_diagnostics())
-            }
-            Structural2dSolveMethod::Bicgstab(options) => {
-                self.solve_bicgstab_reduced(rhs, options)?
-            }
-        };
-        Ok(Structural2dSolveOutput {
-            displacement: self.recover_full(&reduced_solution),
-            diagnostics,
-        })
-    }
-
     /// Solve the reduced structural system with the cached sparse LU factorization.
     fn solve_direct_reduced(&mut self, rhs: &[F]) -> Result<Vec<F>, String> {
         if rhs.len() != self.ndof_reduced {
@@ -498,6 +485,199 @@ impl<F: Real> Structural2dModel<F> {
             .map(|index| reduced_solution[index])
             .collect::<Vec<_>>();
         Ok(reduced_solution)
+    }
+
+    /// Reinsert prescribed Dirichlet values into a reduced displacement vector.
+    ///
+    /// Args:
+    ///     reduced_solution: Reduced displacement vector with shape `(ndof_reduced,)`.
+    ///         Units are `[length]`.
+    ///
+    /// Returns:
+    ///     Full displacement vector with shape `(ndof_full,)` and component ordering
+    ///     `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
+    pub fn recover_full(&self, reduced_solution: &[F]) -> Vec<F> {
+        assert!(
+            reduced_solution.len() == self.ndof_reduced,
+            "reduced_solution has length {}, but reduced system has {} rows",
+            reduced_solution.len(),
+            self.ndof_reduced
+        );
+        let mut full = vec![F::zero(); self.ndof_full];
+        for (&dof, &value) in self.fixed_dofs.iter().zip(&self.fixed_values) {
+            full[dof] = value;
+        }
+        for (&dof, &value) in self.free_dofs.iter().zip(reduced_solution) {
+            full[dof] = value;
+        }
+        full
+    }
+
+    /// Recompute the physical quadrature points and mapped weights for the stored analysis mesh.
+    ///
+    /// Returns:
+    ///     Element-major quadrature data with:
+    ///     - `points` length `nelem * nq_per_element`, each entry `(r, z)` with units `[length]`
+    ///     - `weights_area` length `nelem * nq_per_element` with units `[area]`
+    ///     - `weights_volume` length `nelem * nq_per_element` with units `[volume]`
+    ///     - `nq_per_element` giving the number of consecutive quadrature entries per element
+    pub fn element_quadrature(&self) -> Result<Structural2dElementQuadrature<F>, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => {
+                element_quadrature_for_family::<F, Quad4Family, { quad4::NODES_PER_ELEMENT }>(
+                    &self.analysis_nodes,
+                    &self.analysis_elements_flat,
+                    self.nelem,
+                    self.formulation,
+                    self.quadrature,
+                )
+            }
+            Structural2dElementType::Quad9 => {
+                element_quadrature_for_family::<F, Quad9Family, { quad9::NODES_PER_ELEMENT }>(
+                    &self.analysis_nodes,
+                    &self.analysis_elements_flat,
+                    self.nelem,
+                    self.formulation,
+                    self.quadrature,
+                )
+            }
+        }
+    }
+
+    /// Return per-element analysis-plane area and represented volume from the model quadrature data.
+    ///
+    /// Returns:
+    ///     Per-element measures with:
+    ///     - `areas` shape `(nelem,)` and units `[area]`
+    ///     - `volumes` shape `(nelem,)` and units `[volume]`
+    pub fn element_measures(&self) -> Result<Structural2dElementMeasures<F>, String> {
+        let quadrature = self.element_quadrature()?;
+        let mut areas = vec![F::zero(); self.nelem];
+        let mut volumes = vec![F::zero(); self.nelem];
+        for element in 0..self.nelem {
+            let start = element * quadrature.nq_per_element;
+            let end = start + quadrature.nq_per_element;
+            for &weight in &quadrature.weights_area[start..end] {
+                areas[element] = areas[element] + weight;
+            }
+            for &weight in &quadrature.weights_volume[start..end] {
+                volumes[element] = volumes[element] + weight;
+            }
+        }
+        Ok(Structural2dElementMeasures { areas, volumes })
+    }
+
+    /// Recover quadrature-point strain and stress fields.
+    ///
+    /// Args:
+    ///     displacements_full: Full displacement vector with shape `(ndof_full,)` and component
+    ///         ordering `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
+    ///     nodal_temperature: Optional nodal temperatures with shape `(n_temperature_nodes,)`.
+    ///         Units are `[temperature]`. Required only when the model includes thermal materials.
+    ///
+    /// Returns:
+    ///     Recovered quadrature fields where:
+    ///     - `points` has length `nelem * nq_per_element` and units `[length]`
+    ///     - `strain`, `thermal_strain`, and `elastic_strain` each have length
+    ///       `nelem * nq_per_element`, with component order `[rr, zz, tt, rz]` and units `[strain]`
+    ///     - `stress` has length `nelem * nq_per_element`, with component order
+    ///       `[rr, zz, tt, rz]` and units `[stress]`
+    ///     - `nq_per_element` gives the number of consecutive samples per element
+    pub fn evaluate_quadrature(
+        &self,
+        displacements_full: &[F],
+        nodal_temperature: Option<&[F]>,
+    ) -> Result<QuadratureFieldSamples<F>, String> {
+        if displacements_full.len() != self.ndof_full {
+            return Err(format!(
+                "displacements_full has length {}, but full system has {} DOFs",
+                displacements_full.len(),
+                self.ndof_full
+            ));
+        }
+
+        let reduced = self
+            .free_dofs
+            .iter()
+            .map(|&dof| displacements_full[dof])
+            .collect::<Vec<_>>();
+        let temperature = normalize_temperature(
+            nodal_temperature,
+            self.recovery.n_temperature_nodes,
+            "nodal_temperature",
+        )?;
+
+        let strain = add_constant(
+            csr_matvec(&self.recovery.strain_operator, &reduced),
+            &self.recovery.strain_constant,
+        );
+        let stress_from_displacement = add_constant(
+            csr_matvec(&self.recovery.stress_operator, &reduced),
+            &self.recovery.stress_constant,
+        );
+        let thermal_strain = add_constant(
+            csr_matvec(&self.recovery.thermal_strain_operator, temperature),
+            &self.recovery.thermal_strain_constant,
+        );
+        let thermal_stress = add_constant(
+            csr_matvec(&self.recovery.thermal_stress_operator, temperature),
+            &self.recovery.thermal_stress_constant,
+        );
+        let stress = subtract_vectors(&stress_from_displacement, &thermal_stress)?;
+        let strain = pack_rank4_field(strain)?;
+        let thermal_strain = pack_rank4_field(thermal_strain)?;
+        let stress = pack_rank4_field(stress)?;
+        let elastic_strain = strain
+            .iter()
+            .zip(&thermal_strain)
+            .map(|(total, thermal)| {
+                [
+                    total[0] - thermal[0],
+                    total[1] - thermal[1],
+                    total[2] - thermal[2],
+                    total[3] - thermal[3],
+                ]
+            })
+            .collect();
+
+        Ok(QuadratureFieldSamples {
+            points: self.recovery.points.clone(),
+            strain,
+            thermal_strain,
+            elastic_strain,
+            stress,
+            nq_per_element: self.recovery.nq_per_element,
+        })
+    }
+}
+
+impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
+    /// Solve the reduced structural system with an explicit solver method.
+    ///
+    /// Args:
+    ///     rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
+    ///         `[generalized force] = [energy / distance]`.
+    ///     method: Solver method and method-specific options.
+    ///
+    /// Returns:
+    ///     Full displacement vector and solve diagnostics.
+    pub fn solve_with_method(
+        &mut self,
+        rhs: &[F],
+        method: Structural2dSolveMethod<F>,
+    ) -> Result<Structural2dSolveOutput<F>, String> {
+        let (reduced_solution, diagnostics) = match method {
+            Structural2dSolveMethod::Direct => {
+                (self.solve_direct_reduced(rhs)?, direct_diagnostics())
+            }
+            Structural2dSolveMethod::Bicgstab(options) => {
+                self.solve_bicgstab_reduced(rhs, options)?
+            }
+        };
+        Ok(Structural2dSolveOutput {
+            displacement: self.recover_full(&reduced_solution),
+            diagnostics,
+        })
     }
 
     /// Solve the reduced structural system with BiCGSTAB.
@@ -675,169 +855,6 @@ impl<F: Real> Structural2dModel<F> {
         }
         Ok(())
     }
-
-    /// Reinsert prescribed Dirichlet values into a reduced displacement vector.
-    ///
-    /// Args:
-    ///     reduced_solution: Reduced displacement vector with shape `(ndof_reduced,)`.
-    ///         Units are `[length]`.
-    ///
-    /// Returns:
-    ///     Full displacement vector with shape `(ndof_full,)` and component ordering
-    ///     `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
-    pub fn recover_full(&self, reduced_solution: &[F]) -> Vec<F> {
-        assert!(
-            reduced_solution.len() == self.ndof_reduced,
-            "reduced_solution has length {}, but reduced system has {} rows",
-            reduced_solution.len(),
-            self.ndof_reduced
-        );
-        let mut full = vec![F::zero(); self.ndof_full];
-        for (&dof, &value) in self.fixed_dofs.iter().zip(&self.fixed_values) {
-            full[dof] = value;
-        }
-        for (&dof, &value) in self.free_dofs.iter().zip(reduced_solution) {
-            full[dof] = value;
-        }
-        full
-    }
-
-    /// Recompute the physical quadrature points and mapped weights for the stored analysis mesh.
-    ///
-    /// Returns:
-    ///     Element-major quadrature data with:
-    ///     - `points` length `nelem * nq_per_element`, each entry `(r, z)` with units `[length]`
-    ///     - `weights_area` length `nelem * nq_per_element` with units `[area]`
-    ///     - `weights_volume` length `nelem * nq_per_element` with units `[volume]`
-    ///     - `nq_per_element` giving the number of consecutive quadrature entries per element
-    pub fn element_quadrature(&self) -> Result<Structural2dElementQuadrature<F>, String> {
-        match self.element_type {
-            Structural2dElementType::Quad4 => {
-                element_quadrature_for_family::<F, Quad4Family, { quad4::NODES_PER_ELEMENT }>(
-                    &self.analysis_nodes,
-                    &self.analysis_elements_flat,
-                    self.nelem,
-                    self.formulation,
-                    self.quadrature,
-                )
-            }
-            Structural2dElementType::Quad9 => {
-                element_quadrature_for_family::<F, Quad9Family, { quad9::NODES_PER_ELEMENT }>(
-                    &self.analysis_nodes,
-                    &self.analysis_elements_flat,
-                    self.nelem,
-                    self.formulation,
-                    self.quadrature,
-                )
-            }
-        }
-    }
-
-    /// Return per-element analysis-plane area and represented volume from the model quadrature data.
-    ///
-    /// Returns:
-    ///     Per-element measures with:
-    ///     - `areas` shape `(nelem,)` and units `[area]`
-    ///     - `volumes` shape `(nelem,)` and units `[volume]`
-    pub fn element_measures(&self) -> Result<Structural2dElementMeasures<F>, String> {
-        let quadrature = self.element_quadrature()?;
-        let mut areas = vec![F::zero(); self.nelem];
-        let mut volumes = vec![F::zero(); self.nelem];
-        for element in 0..self.nelem {
-            let start = element * quadrature.nq_per_element;
-            let end = start + quadrature.nq_per_element;
-            for &weight in &quadrature.weights_area[start..end] {
-                areas[element] = areas[element] + weight;
-            }
-            for &weight in &quadrature.weights_volume[start..end] {
-                volumes[element] = volumes[element] + weight;
-            }
-        }
-        Ok(Structural2dElementMeasures { areas, volumes })
-    }
-
-    /// Recover quadrature-point strain and stress fields.
-    ///
-    /// Args:
-    ///     displacements_full: Full displacement vector with shape `(ndof_full,)` and component
-    ///         ordering `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
-    ///     nodal_temperature: Optional nodal temperatures with shape `(n_temperature_nodes,)`.
-    ///         Units are `[temperature]`. Required only when the model includes thermal materials.
-    ///
-    /// Returns:
-    ///     Recovered quadrature fields where:
-    ///     - `points` has length `nelem * nq_per_element` and units `[length]`
-    ///     - `strain`, `thermal_strain`, and `elastic_strain` each have length
-    ///       `nelem * nq_per_element`, with component order `[rr, zz, tt, rz]` and units `[strain]`
-    ///     - `stress` has length `nelem * nq_per_element`, with component order
-    ///       `[rr, zz, tt, rz]` and units `[stress]`
-    ///     - `nq_per_element` gives the number of consecutive samples per element
-    pub fn evaluate_quadrature(
-        &self,
-        displacements_full: &[F],
-        nodal_temperature: Option<&[F]>,
-    ) -> Result<QuadratureFieldSamples<F>, String> {
-        if displacements_full.len() != self.ndof_full {
-            return Err(format!(
-                "displacements_full has length {}, but full system has {} DOFs",
-                displacements_full.len(),
-                self.ndof_full
-            ));
-        }
-
-        let reduced = self
-            .free_dofs
-            .iter()
-            .map(|&dof| displacements_full[dof])
-            .collect::<Vec<_>>();
-        let temperature = normalize_temperature(
-            nodal_temperature,
-            self.recovery.n_temperature_nodes,
-            "nodal_temperature",
-        )?;
-
-        let strain = add_constant(
-            csr_matvec(&self.recovery.strain_operator, &reduced),
-            &self.recovery.strain_constant,
-        );
-        let stress_from_displacement = add_constant(
-            csr_matvec(&self.recovery.stress_operator, &reduced),
-            &self.recovery.stress_constant,
-        );
-        let thermal_strain = add_constant(
-            csr_matvec(&self.recovery.thermal_strain_operator, temperature),
-            &self.recovery.thermal_strain_constant,
-        );
-        let thermal_stress = add_constant(
-            csr_matvec(&self.recovery.thermal_stress_operator, temperature),
-            &self.recovery.thermal_stress_constant,
-        );
-        let stress = subtract_vectors(&stress_from_displacement, &thermal_stress)?;
-        let strain = pack_rank4_field(strain)?;
-        let thermal_strain = pack_rank4_field(thermal_strain)?;
-        let stress = pack_rank4_field(stress)?;
-        let elastic_strain = strain
-            .iter()
-            .zip(&thermal_strain)
-            .map(|(total, thermal)| {
-                [
-                    total[0] - thermal[0],
-                    total[1] - thermal[1],
-                    total[2] - thermal[2],
-                    total[3] - thermal[3],
-                ]
-            })
-            .collect();
-
-        Ok(QuadratureFieldSamples {
-            points: self.recovery.points.clone(),
-            strain,
-            thermal_strain,
-            elastic_strain,
-            stress,
-            nq_per_element: self.recovery.nq_per_element,
-        })
-    }
 }
 
 /// Diagnostics for the sparse LU path.
@@ -908,7 +925,7 @@ fn resolve_bicgstab_tolerance<F: Real>(rhs: &[F], tolerance: Option<F>) -> F {
 }
 
 /// Solve a reduced system with unpreconditioned BiCGSTAB.
-fn solve_bicgstab_no_precond<F: Real>(
+fn solve_bicgstab_no_precond<F: Structural2dIterativeScalar>(
     matrix: SparseColMatRef<'_, usize, F>,
     initial_guess: &[F],
     rhs: &[F],
@@ -928,7 +945,7 @@ fn solve_bicgstab_no_precond<F: Real>(
 }
 
 /// Solve a reduced system with diagonally preconditioned BiCGSTAB.
-fn solve_bicgstab_with_precond<F: Real>(
+fn solve_bicgstab_with_precond<F: Structural2dIterativeScalar>(
     matrix: SparseColMatRef<'_, usize, F>,
     preconditioner: DiagonalPrecond<F>,
     initial_guess: &[F],
@@ -956,7 +973,7 @@ fn solve_bicgstab_with_precond<F: Real>(
 }
 
 /// Convert a converged BiCGSTAB solver state into a reduced solution and diagnostics.
-fn bicgstab_success<F: Real, A, P>(
+fn bicgstab_success<F: Structural2dIterativeScalar, A, P>(
     solver: BiCGSTAB<F, A, P>,
     equilibrated: bool,
 ) -> (Vec<F>, Structural2dSolveDiagnostics<F>)

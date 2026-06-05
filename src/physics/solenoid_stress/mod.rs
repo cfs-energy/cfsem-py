@@ -508,8 +508,9 @@ pub use convenience::{
 pub use model::{
     BicgstabEquilibration, BicgstabInitialGuess, BicgstabPreconditioner, BicgstabSolveOptions,
     EquilibrationSolveOptions, ReducedRecoveryOperators, Structural2dElementType,
-    Structural2dElements, Structural2dModel, Structural2dSolveDiagnostics, Structural2dSolveMethod,
-    Structural2dSolveMethodName, Structural2dSolveOutput, assemble_structural_2d,
+    Structural2dElements, Structural2dIterativeScalar, Structural2dModel,
+    Structural2dSolveDiagnostics, Structural2dSolveMethod, Structural2dSolveMethodName,
+    Structural2dSolveOutput, assemble_structural_2d,
 };
 pub(crate) use types::validate_element_material_inputs;
 pub use types::{

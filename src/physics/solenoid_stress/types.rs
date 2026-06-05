@@ -1,6 +1,5 @@
 //! Shared numeric traits and constants for the solenoid-stress backend.
 
-use deimos_numerics::sparse::CompensatedField;
 use faer_traits::RealField;
 use num_traits::{Float, FromPrimitive};
 
@@ -9,28 +8,12 @@ use num_traits::{Float, FromPrimitive};
 /// Keeping the bound in one place makes it easier to support both `f32` and `f64` entry points
 /// without duplicating generic constraints everywhere else.
 pub trait Real:
-    Float
-    + FromPrimitive
-    + RealField
-    + CompensatedField
-    + Copy
-    + std::fmt::Debug
-    + Send
-    + Sync
-    + 'static
+    Float + FromPrimitive + RealField + Copy + std::fmt::Debug + Send + Sync + 'static
 {
 }
 
 impl<T> Real for T where
-    T: Float
-        + FromPrimitive
-        + RealField
-        + CompensatedField
-        + Copy
-        + std::fmt::Debug
-        + Send
-        + Sync
-        + 'static
+    T: Float + FromPrimitive + RealField + Copy + std::fmt::Debug + Send + Sync + 'static
 {
 }
 

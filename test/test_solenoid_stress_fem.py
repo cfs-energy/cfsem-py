@@ -940,6 +940,48 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
+@pytest.mark.parametrize("equilibration", ["ruiz", "none"])
+def test_iterative_structural_solve_matches_direct_and_reports_diagnostics(
+    dtype: DType,
+    equilibration: str,
+) -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
+    model, rhs = assemble_model_and_rhs(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0, 0.27, dtype=dtype)]),
+        body_force=np.array([2.0, -1.0], dtype=dtype),
+        prescribed=prescribed_z_dofs(nodes.shape[0]),
+    )
+
+    direct = model.solve(rhs)
+    solve_tolerance = 1.0e-9
+    if dtype is np.float32:
+        solve_tolerance = 1.0e-4
+    iterative = model.solve(
+        rhs,
+        method="bicgstab",
+        tolerance=solve_tolerance,
+        max_iterations=1000,
+        equilibration=equilibration,  # type: ignore[arg-type]
+        return_diagnostics=True,
+    )
+    rtol, atol = tolerance(dtype)
+
+    assert iterative.diagnostics.method == "bicgstab"
+    assert iterative.diagnostics.converged
+    assert iterative.diagnostics.iterations > 0
+    assert iterative.diagnostics.equilibrated == (equilibration == "ruiz")
+    assert np.allclose(
+        iterative.displacement,
+        direct,
+        rtol=max(rtol, 5.0e-5),
+        atol=max(atol, 1.0e-8),
+    )
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType, quadrature: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=4, nz=2, dtype=dtype)

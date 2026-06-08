@@ -1,6 +1,3 @@
-use rayon::prelude::*;
-
-use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
@@ -8,7 +5,7 @@ use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, Structural2dFormulation, local_dofs, scatter_local_matrix,
 };
 
-use super::{SparseOperator, concat_sparse_operators, ranges_for_len};
+use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operators};
 
 /// Build the local dense body-force operator for one element.
 ///
@@ -104,19 +101,15 @@ where
     }
     validate_structural_2d_mesh(mesh, formulation)?;
     let nelem = mesh.num_elements();
-    let ranges = ranges_for_len(nelem, chunksize(nelem));
-    let chunks = ranges
-        .into_par_iter()
-        .map(|(start, end)| {
-            body_force_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                formulation,
-                quadrature,
-                start,
-                end,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let chunks = collect_sparse_operator_chunks(nelem, |start, end| {
+        body_force_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            formulation,
+            quadrature,
+            start,
+            end,
+        )
+    })?;
 
     Ok(concat_sparse_operators(
         chunks,

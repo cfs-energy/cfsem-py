@@ -5,7 +5,6 @@
 
 use rayon::prelude::*;
 
-use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
 use crate::physics::solenoid_stress::convenience::rotate_material_in_plane;
@@ -15,6 +14,7 @@ use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, StiffnessTriplets, Structural2dFormulation, local_dofs,
     validate_element_material_inputs,
 };
+use crate::{chunksize, ranges_for_len};
 
 /// Assemble the full unconstrained stiffness matrix for one quadrilateral family.
 ///
@@ -117,16 +117,8 @@ where
         formulation,
     )?;
     let nelem = mesh.num_elements();
-    let chunk = chunksize(nelem);
-    let mut ranges = Vec::with_capacity(nelem.div_ceil(chunk));
-    let mut start = 0;
-    while start < nelem {
-        let end = (start + chunk).min(nelem);
-        ranges.push((start, end));
-        start = end;
-    }
 
-    ranges
+    ranges_for_len(nelem, chunksize(nelem))
         .into_par_iter()
         .map(|(start, end)| {
             assemble_stiffness_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(

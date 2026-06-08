@@ -9,7 +9,10 @@
 //! each stored coefficient has units
 //! `[output units / input units]`.
 
+use rayon::prelude::*;
+
 use crate::physics::solenoid_stress::types::Real;
+use crate::{chunksize, ranges_for_len};
 
 mod body_force;
 mod pressure;
@@ -107,15 +110,24 @@ fn concat_thermal_load_operators<F: Real>(
     }
 }
 
-fn ranges_for_len(len: usize, chunk: usize) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::with_capacity(len.div_ceil(chunk));
-    let mut start = 0;
-    while start < len {
-        let end = (start + chunk).min(len);
-        ranges.push((start, end));
-        start = end;
-    }
-    ranges
+fn collect_sparse_operator_chunks<F: Real>(
+    len: usize,
+    build: impl Fn(usize, usize) -> Result<SparseOperator<F>, String> + Sync,
+) -> Result<Vec<SparseOperator<F>>, String> {
+    ranges_for_len(len, chunksize(len))
+        .into_par_iter()
+        .map(|(start, end)| build(start, end))
+        .collect()
+}
+
+fn collect_thermal_load_operator_chunks<F: Real>(
+    len: usize,
+    build: impl Fn(usize, usize) -> Result<ThermalLoadOperator<F>, String> + Sync,
+) -> Result<Vec<ThermalLoadOperator<F>>, String> {
+    ranges_for_len(len, chunksize(len))
+        .into_par_iter()
+        .map(|(start, end)| build(start, end))
+        .collect()
 }
 
 pub(crate) use body_force::{body_force_operator_for_family, body_force_operator_for_family_par};

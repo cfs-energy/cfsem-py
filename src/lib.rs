@@ -38,6 +38,18 @@ pub(crate) fn chunksize(nelem: usize) -> usize {
     (nelem / ncores).max(1)
 }
 
+/// Contiguous half-open ranges covering `0..len`.
+pub(crate) fn ranges_for_len(len: usize, chunk: usize) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::with_capacity(len.div_ceil(chunk));
+    let mut start = 0;
+    while start < len {
+        let end = (start + chunk).min(len);
+        ranges.push((start, end));
+        start = end;
+    }
+    ranges
+}
+
 #[macro_use]
 pub(crate) mod macros {
 

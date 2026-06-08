@@ -1,6 +1,3 @@
-use rayon::prelude::*;
-
-use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     accumulate_b_transpose_vector, build_b_matrix, constitutive_times_strain,
@@ -15,7 +12,10 @@ use crate::physics::solenoid_stress::types::{
     validate_element_material_inputs,
 };
 
-use super::{SparseOperator, ThermalLoadOperator, concat_thermal_load_operators, ranges_for_len};
+use super::{
+    SparseOperator, ThermalLoadOperator, collect_thermal_load_operator_chunks,
+    concat_thermal_load_operators,
+};
 
 /// Local thermal operator data for one element.
 ///
@@ -169,23 +169,19 @@ where
         material_orientation_angles,
     )?;
     let nelem = mesh.num_elements();
-    let ranges = ranges_for_len(nelem, chunksize(nelem));
-    let chunks = ranges
-        .into_par_iter()
-        .map(|(start, end)| {
-            temperature_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                material_ids,
-                material_table,
-                thermal_material_table,
-                material_orientation_angles,
-                formulation,
-                quadrature,
-                start,
-                end,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let chunks = collect_thermal_load_operator_chunks(nelem, |start, end| {
+        temperature_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            material_ids,
+            material_table,
+            thermal_material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+            start,
+            end,
+        )
+    })?;
 
     Ok(concat_thermal_load_operators(
         chunks,

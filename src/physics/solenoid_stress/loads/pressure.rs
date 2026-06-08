@@ -1,6 +1,3 @@
-use rayon::prelude::*;
-
-use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{FaceSample, validate_structural_2d_mesh};
@@ -8,7 +5,7 @@ use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, local_dofs, scatter_local_vector,
 };
 
-use super::{SparseOperator, concat_sparse_operators, ranges_for_len};
+use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operators};
 
 /// Build the local dense pressure-load vector for one loaded face.
 ///
@@ -101,20 +98,16 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    let ranges = ranges_for_len(pressure_faces.len(), chunksize(pressure_faces.len()));
-    let chunks = ranges
-        .into_par_iter()
-        .map(|(start, end)| {
-            pressure_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                pressure_faces,
-                formulation,
-                quadrature,
-                start,
-                end,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let chunks = collect_sparse_operator_chunks(pressure_faces.len(), |start, end| {
+        pressure_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            pressure_faces,
+            formulation,
+            quadrature,
+            start,
+            end,
+        )
+    })?;
 
     Ok(concat_sparse_operators(
         chunks,

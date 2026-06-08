@@ -1483,11 +1483,6 @@ fn reduce_square_triplets<F: Real>(
     triplets
 }
 
-struct ReducedStiffnessChunk<F: Real> {
-    triplets: Vec<Triplet<usize, usize, F>>,
-    constant_rhs: Vec<F>,
-}
-
 /// Reduce, sort, and coalesce each stiffness chunk independently.
 fn reduce_sort_stiffness_chunks<F: Real>(
     chunks: Vec<StiffnessTriplets<F>>,
@@ -1508,19 +1503,16 @@ fn reduce_sort_stiffness_chunks<F: Real>(
                 fixed_lookup,
                 &mut local_rhs,
             );
-            ReducedStiffnessChunk {
-                triplets: sort_coalesce_triplets(triplets),
-                constant_rhs: local_rhs,
-            }
+            (sort_coalesce_triplets(triplets), local_rhs)
         })
         .collect::<Vec<_>>();
 
     let mut sorted_chunks = Vec::with_capacity(reduced_chunks.len());
-    for chunk in reduced_chunks {
-        for (dst, src) in constant_rhs.iter_mut().zip(chunk.constant_rhs) {
+    for (triplets, local_rhs) in reduced_chunks {
+        for (dst, src) in constant_rhs.iter_mut().zip(local_rhs) {
             *dst = *dst + src;
         }
-        sorted_chunks.push(chunk.triplets);
+        sorted_chunks.push(triplets);
     }
     sorted_chunks
 }
@@ -1674,6 +1666,74 @@ impl PartialOrd for TripletCursor {
     }
 }
 
+struct CscPartsBuilder<F: Real> {
+    nrow: usize,
+    ncol: usize,
+    col_ptr: Vec<usize>,
+    row_idx: Vec<usize>,
+    vals: Vec<F>,
+    next_col: usize,
+    pending: Option<Triplet<usize, usize, F>>,
+}
+
+impl<F: Real> CscPartsBuilder<F> {
+    fn new(nrow: usize, ncol: usize, capacity: usize) -> Self {
+        let mut col_ptr = Vec::with_capacity(ncol + 1);
+        col_ptr.push(0);
+        Self {
+            nrow,
+            ncol,
+            col_ptr,
+            row_idx: Vec::with_capacity(capacity),
+            vals: Vec::with_capacity(capacity),
+            next_col: 0,
+            pending: None,
+        }
+    }
+
+    fn push_sorted(&mut self, triplet: Triplet<usize, usize, F>) {
+        debug_assert!(triplet.row < self.nrow);
+        debug_assert!(triplet.col < self.ncol);
+        if triplet.val == F::zero() {
+            return;
+        }
+        match self.pending {
+            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
+                current.val = current.val + triplet.val;
+                self.pending = Some(current);
+            }
+            Some(current) => {
+                self.push_entry(current);
+                self.pending = Some(triplet);
+            }
+            None => self.pending = Some(triplet),
+        }
+    }
+
+    fn finish(mut self) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+        if let Some(current) = self.pending.take() {
+            self.push_entry(current);
+        }
+        while self.next_col < self.ncol {
+            self.col_ptr.push(self.row_idx.len());
+            self.next_col += 1;
+        }
+        debug_assert_eq!(self.col_ptr.len(), self.ncol + 1);
+        (self.col_ptr, self.row_idx, self.vals)
+    }
+
+    fn push_entry(&mut self, entry: Triplet<usize, usize, F>) {
+        while self.next_col < entry.col {
+            self.col_ptr.push(self.row_idx.len());
+            self.next_col += 1;
+        }
+        if entry.val != F::zero() {
+            self.row_idx.push(entry.row);
+            self.vals.push(entry.val);
+        }
+    }
+}
+
 /// Merge already sorted/coalesced triplet chunks into the CSC format used by sparse LU.
 fn csc_from_sorted_triplet_chunks<F: Real>(
     nrow: usize,
@@ -1691,6 +1751,7 @@ fn merge_sorted_triplet_chunks_to_csc<F: Real>(
     chunks: &[Vec<Triplet<usize, usize, F>>],
 ) -> (Vec<usize>, Vec<usize>, Vec<F>) {
     let capacity = chunks.iter().map(Vec::len).sum::<usize>();
+    let mut builder = CscPartsBuilder::new(nrow, ncol, capacity);
     let mut heap = BinaryHeap::with_capacity(chunks.len());
     for (chunk_index, chunk) in chunks.iter().enumerate() {
         if let Some(first) = chunk.first() {
@@ -1703,35 +1764,9 @@ fn merge_sorted_triplet_chunks_to_csc<F: Real>(
         }
     }
 
-    let mut col_ptr = Vec::with_capacity(ncol + 1);
-    let mut row_idx = Vec::with_capacity(capacity);
-    let mut vals = Vec::with_capacity(capacity);
-    let mut next_col = 0usize;
-    let mut pending: Option<Triplet<usize, usize, F>> = None;
-    col_ptr.push(0);
-
     while let Some(cursor) = heap.pop() {
         let triplet = chunks[cursor.chunk][cursor.index];
-        debug_assert!(triplet.row < nrow);
-        debug_assert!(triplet.col < ncol);
-
-        match pending {
-            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
-                current.val = current.val + triplet.val;
-                pending = Some(current);
-            }
-            Some(current) => {
-                push_csc_entry(
-                    current,
-                    &mut next_col,
-                    &mut col_ptr,
-                    &mut row_idx,
-                    &mut vals,
-                );
-                pending = Some(triplet);
-            }
-            None => pending = Some(triplet),
-        }
+        builder.push_sorted(triplet);
 
         let next_index = cursor.index + 1;
         if next_index < chunks[cursor.chunk].len() {
@@ -1745,21 +1780,7 @@ fn merge_sorted_triplet_chunks_to_csc<F: Real>(
         }
     }
 
-    if let Some(current) = pending {
-        push_csc_entry(
-            current,
-            &mut next_col,
-            &mut col_ptr,
-            &mut row_idx,
-            &mut vals,
-        );
-    }
-    while next_col < ncol {
-        col_ptr.push(row_idx.len());
-        next_col += 1;
-    }
-    debug_assert_eq!(col_ptr.len(), ncol + 1);
-    (col_ptr, row_idx, vals)
+    builder.finish()
 }
 
 /// Pack triplets sorted by `(column, row)` into canonical CSC arrays.
@@ -1768,69 +1789,11 @@ fn pack_sorted_triplets_to_csc<F: Real>(
     ncol: usize,
     triplets: Vec<Triplet<usize, usize, F>>,
 ) -> (Vec<usize>, Vec<usize>, Vec<F>) {
-    let mut col_ptr = Vec::with_capacity(ncol + 1);
-    let mut row_idx = Vec::with_capacity(triplets.len());
-    let mut vals = Vec::with_capacity(triplets.len());
-    let mut next_col = 0usize;
-    col_ptr.push(0);
-
-    let mut pending: Option<Triplet<usize, usize, F>> = None;
+    let mut builder = CscPartsBuilder::new(nrow, ncol, triplets.len());
     for triplet in triplets {
-        debug_assert!(triplet.row < nrow);
-        debug_assert!(triplet.col < ncol);
-        if triplet.val == F::zero() {
-            continue;
-        }
-        match pending {
-            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
-                current.val = current.val + triplet.val;
-                pending = Some(current);
-            }
-            Some(current) => {
-                push_csc_entry(
-                    current,
-                    &mut next_col,
-                    &mut col_ptr,
-                    &mut row_idx,
-                    &mut vals,
-                );
-                pending = Some(triplet);
-            }
-            None => pending = Some(triplet),
-        }
+        builder.push_sorted(triplet);
     }
-    if let Some(current) = pending {
-        push_csc_entry(
-            current,
-            &mut next_col,
-            &mut col_ptr,
-            &mut row_idx,
-            &mut vals,
-        );
-    }
-    while next_col < ncol {
-        col_ptr.push(row_idx.len());
-        next_col += 1;
-    }
-    debug_assert_eq!(col_ptr.len(), ncol + 1);
-    (col_ptr, row_idx, vals)
-}
-
-fn push_csc_entry<F: Real>(
-    entry: Triplet<usize, usize, F>,
-    next_col: &mut usize,
-    col_ptr: &mut Vec<usize>,
-    row_idx: &mut Vec<usize>,
-    vals: &mut Vec<F>,
-) {
-    while *next_col < entry.col {
-        col_ptr.push(row_idx.len());
-        *next_col += 1;
-    }
-    if entry.val != F::zero() {
-        row_idx.push(entry.row);
-        vals.push(entry.val);
-    }
+    builder.finish()
 }
 
 /// Apply one reduced CSR load operator to a dense load-amplitude vector and accumulate the result.

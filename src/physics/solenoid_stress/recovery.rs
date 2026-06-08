@@ -38,7 +38,6 @@
 
 use rayon::prelude::*;
 
-use crate::chunksize;
 #[cfg(test)]
 use crate::mesh::elements::quad2d::quadrature::gauss_volume;
 #[cfg(test)]
@@ -55,6 +54,7 @@ use crate::physics::solenoid_stress::types::scatter_local_matrix;
 use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, validate_element_material_inputs,
 };
+use crate::{chunksize, ranges_for_len};
 
 /// Sparse quadrature-point recovery operators before reduction into the model-owned CSR form.
 ///
@@ -130,6 +130,73 @@ pub struct CsrOperatorParts<F: Real> {
     pub row_ptr: Vec<usize>,
     pub col_idx: Vec<usize>,
     pub vals: Vec<F>,
+}
+
+struct CsrPartsBuilder<F: Real> {
+    nrow: usize,
+    ncol: usize,
+    row_ptr: Vec<usize>,
+    col_idx: Vec<usize>,
+    vals: Vec<F>,
+}
+
+impl<F: Real> CsrPartsBuilder<F> {
+    fn new(nrow: usize, ncol: usize) -> Self {
+        let mut row_ptr = Vec::with_capacity(nrow + 1);
+        row_ptr.push(0);
+        Self {
+            nrow,
+            ncol,
+            row_ptr,
+            col_idx: Vec::new(),
+            vals: Vec::new(),
+        }
+    }
+
+    fn push_canonical_row(&mut self, entries: &mut Vec<(usize, F)>) {
+        entries.sort_unstable_by_key(|(col, _)| *col);
+        let mut pending: Option<(usize, F)> = None;
+        for (col, value) in entries.drain(..) {
+            if value == F::zero() {
+                continue;
+            }
+            match pending {
+                Some((pending_col, pending_value)) if pending_col == col => {
+                    pending = Some((pending_col, pending_value + value));
+                }
+                Some((pending_col, pending_value)) => {
+                    if pending_value != F::zero() {
+                        self.col_idx.push(pending_col);
+                        self.vals.push(pending_value);
+                    }
+                    pending = Some((col, value));
+                }
+                None => pending = Some((col, value)),
+            }
+        }
+        if let Some((col, value)) = pending
+            && value != F::zero()
+        {
+            self.col_idx.push(col);
+            self.vals.push(value);
+        }
+        self.push_empty_row();
+    }
+
+    fn push_empty_row(&mut self) {
+        self.row_ptr.push(self.col_idx.len());
+    }
+
+    fn finish(self) -> CsrOperatorParts<F> {
+        debug_assert_eq!(self.row_ptr.len(), self.nrow + 1);
+        CsrOperatorParts {
+            nrow: self.nrow,
+            ncol: self.ncol,
+            row_ptr: self.row_ptr,
+            col_idx: self.col_idx,
+            vals: self.vals,
+        }
+    }
 }
 
 /// Reduced-space quadrature recovery operators in direct CSR form.
@@ -218,41 +285,6 @@ fn element_major_reference_points_range<F: Real>(
         }
     }
     (element_indices, reference_points)
-}
-
-fn push_canonical_row<F: Real>(
-    entries: &mut Vec<(usize, F)>,
-    row_ptr: &mut Vec<usize>,
-    col_idx: &mut Vec<usize>,
-    vals: &mut Vec<F>,
-) {
-    entries.sort_unstable_by_key(|(col, _)| *col);
-    let mut pending: Option<(usize, F)> = None;
-    for (col, value) in entries.drain(..) {
-        if value == F::zero() {
-            continue;
-        }
-        match pending {
-            Some((pending_col, pending_value)) if pending_col == col => {
-                pending = Some((pending_col, pending_value + value));
-            }
-            Some((pending_col, pending_value)) => {
-                if pending_value != F::zero() {
-                    col_idx.push(pending_col);
-                    vals.push(pending_value);
-                }
-                pending = Some((col, value));
-            }
-            None => pending = Some((col, value)),
-        }
-    }
-    if let Some((col, value)) = pending
-        && value != F::zero()
-    {
-        col_idx.push(col);
-        vals.push(value);
-    }
-    row_ptr.push(col_idx.len());
 }
 
 fn append_reduced_displacement_entry<F: Real>(
@@ -505,16 +537,7 @@ where
     } else {
         0
     };
-    let chunk = chunksize(nelem);
-    let mut ranges = Vec::with_capacity(nelem.div_ceil(chunk));
-    let mut start = 0;
-    while start < nelem {
-        let end = (start + chunk).min(nelem);
-        ranges.push((start, end));
-        start = end;
-    }
-
-    let chunks = ranges
+    let chunks = ranges_for_len(nelem, chunksize(nelem))
         .into_par_iter()
         .map(|(start, end)| {
             reduced_quadrature_field_operators_range_for_family::<
@@ -580,28 +603,15 @@ where
         0
     };
     let mut points = Vec::with_capacity(n_elements * nq_per_element);
-    let mut strain_row_ptr = Vec::with_capacity(nrows + 1);
-    let mut strain_col_idx = Vec::new();
-    let mut strain_vals = Vec::new();
-    let mut stress_row_ptr = Vec::with_capacity(nrows + 1);
-    let mut stress_col_idx = Vec::new();
-    let mut stress_vals = Vec::new();
-    let mut thermal_strain_row_ptr = Vec::with_capacity(nrows + 1);
-    let mut thermal_strain_col_idx = Vec::new();
-    let mut thermal_strain_vals = Vec::new();
-    let mut thermal_stress_row_ptr = Vec::with_capacity(nrows + 1);
-    let mut thermal_stress_col_idx = Vec::new();
-    let mut thermal_stress_vals = Vec::new();
+    let mut strain_operator = CsrPartsBuilder::new(nrows, ndof_reduced);
+    let mut stress_operator = CsrPartsBuilder::new(nrows, ndof_reduced);
+    let mut thermal_strain_operator = CsrPartsBuilder::new(nrows, n_temperature_nodes);
+    let mut thermal_stress_operator = CsrPartsBuilder::new(nrows, n_temperature_nodes);
     let mut strain_constant = vec![F::zero(); nrows];
     let mut stress_constant = vec![F::zero(); nrows];
     let mut thermal_strain_constant = vec![F::zero(); nrows];
     let mut thermal_stress_constant = vec![F::zero(); nrows];
     let mut row_entries = Vec::with_capacity(DOF_PER_ELEMENT);
-
-    strain_row_ptr.push(0);
-    stress_row_ptr.push(0);
-    thermal_strain_row_ptr.push(0);
-    thermal_stress_row_ptr.push(0);
 
     for element_index in element_start..element_end {
         let coords = mesh.element_coords(element_index)?;
@@ -663,12 +673,7 @@ where
                         );
                     }
                 }
-                push_canonical_row(
-                    &mut row_entries,
-                    &mut strain_row_ptr,
-                    &mut strain_col_idx,
-                    &mut strain_vals,
-                );
+                strain_operator.push_canonical_row(&mut row_entries);
 
                 row_entries.clear();
                 for local_node in 0..NODES_PER_ELEMENT {
@@ -692,12 +697,7 @@ where
                         );
                     }
                 }
-                push_canonical_row(
-                    &mut row_entries,
-                    &mut stress_row_ptr,
-                    &mut stress_col_idx,
-                    &mut stress_vals,
-                );
+                stress_operator.push_canonical_row(&mut row_entries);
             }
 
             if let (Some(thermal_material), Some(thermal_stress_unit)) =
@@ -717,12 +717,7 @@ where
                             local.thermal_strain[component][local_temp_node],
                         );
                     }
-                    push_canonical_row(
-                        &mut row_entries,
-                        &mut thermal_strain_row_ptr,
-                        &mut thermal_strain_col_idx,
-                        &mut thermal_strain_vals,
-                    );
+                    thermal_strain_operator.push_canonical_row(&mut row_entries);
 
                     row_entries.clear();
                     for local_temp_node in 0..NODES_PER_ELEMENT {
@@ -732,17 +727,12 @@ where
                             local.thermal_stress[component][local_temp_node],
                         );
                     }
-                    push_canonical_row(
-                        &mut row_entries,
-                        &mut thermal_stress_row_ptr,
-                        &mut thermal_stress_col_idx,
-                        &mut thermal_stress_vals,
-                    );
+                    thermal_stress_operator.push_canonical_row(&mut row_entries);
                 }
             } else {
                 for _ in 0..4 {
-                    thermal_strain_row_ptr.push(thermal_strain_col_idx.len());
-                    thermal_stress_row_ptr.push(thermal_stress_col_idx.len());
+                    thermal_strain_operator.push_empty_row();
+                    thermal_stress_operator.push_empty_row();
                 }
             }
         }
@@ -750,34 +740,10 @@ where
 
     Ok(ReducedQuadratureFieldOperators {
         points,
-        strain_operator: CsrOperatorParts {
-            nrow: nrows,
-            ncol: ndof_reduced,
-            row_ptr: strain_row_ptr,
-            col_idx: strain_col_idx,
-            vals: strain_vals,
-        },
-        stress_operator: CsrOperatorParts {
-            nrow: nrows,
-            ncol: ndof_reduced,
-            row_ptr: stress_row_ptr,
-            col_idx: stress_col_idx,
-            vals: stress_vals,
-        },
-        thermal_strain_operator: CsrOperatorParts {
-            nrow: nrows,
-            ncol: n_temperature_nodes,
-            row_ptr: thermal_strain_row_ptr,
-            col_idx: thermal_strain_col_idx,
-            vals: thermal_strain_vals,
-        },
-        thermal_stress_operator: CsrOperatorParts {
-            nrow: nrows,
-            ncol: n_temperature_nodes,
-            row_ptr: thermal_stress_row_ptr,
-            col_idx: thermal_stress_col_idx,
-            vals: thermal_stress_vals,
-        },
+        strain_operator: strain_operator.finish(),
+        stress_operator: stress_operator.finish(),
+        thermal_strain_operator: thermal_strain_operator.finish(),
+        thermal_stress_operator: thermal_stress_operator.finish(),
         strain_constant,
         stress_constant,
         thermal_strain_constant,

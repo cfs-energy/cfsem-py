@@ -41,23 +41,6 @@ use crate::physics::solenoid_stress::types::{
     dof_per_element,
 };
 
-macro_rules! timed_stage {
-    ($enabled:expr, $label:expr, $body:block) => {{
-        if $enabled {
-            let start = std::time::Instant::now();
-            let result = (|| $body)();
-            eprintln!(
-                "[cfsem timing] {}: {:.6} s",
-                $label,
-                start.elapsed().as_secs_f64()
-            );
-            result
-        } else {
-            (|| $body)()
-        }
-    }};
-}
-
 mod private {
     use super::{CompensatedField, Real};
 
@@ -1174,16 +1157,6 @@ fn build_model_for_family<
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
-    let timing_enabled = std::env::var_os("CFSEM_TIMING").is_some();
-    let total_start = std::time::Instant::now();
-    if timing_enabled {
-        eprintln!(
-            "[cfsem timing] rust.build_model.start: nnode={} nelem={} par={}",
-            nodes_rz.len(),
-            elements.len(),
-            par
-        );
-    }
     let mesh = QuadMeshView2d { nodes_rz, elements };
     let ndof_full = nodes_rz.len() * 2;
     let nelem = elements.len();
@@ -1191,9 +1164,7 @@ where
     // live in the constrained reduced system, while `fixed_lookup` carries the prescribed values
     // needed to fold eliminated DOFs back into constant RHS terms.
     let (free_dofs, fixed_dofs, fixed_values, global_to_reduced, fixed_lookup) =
-        timed_stage!(timing_enabled, "rust.build_model.reduce_layout", {
-            reduce_layout(ndof_full, prescribed)
-        })?;
+        reduce_layout(ndof_full, prescribed)?;
     let ndof_reduced = free_dofs.len();
 
     let mut constant_rhs = vec![F::zero(); ndof_reduced];
@@ -1201,274 +1172,193 @@ where
     // The parallel path keeps worker chunks separate so each chunk can be reduced and sorted
     // independently before a k-way merge builds the canonical CSC structure.
     let stiffness = if par {
-        let stiffness_chunks =
-            timed_stage!(timing_enabled, "rust.build_model.stiffness_triplets", {
-                assemble_stiffness_chunks_for_family_par::<
-                    F,
-                    Family,
-                    NODES_PER_ELEMENT,
-                    DOF_PER_ELEMENT,
-                >(
-                    mesh,
-                    material_ids,
-                    material_table,
-                    material_orientation_angles,
-                    formulation,
-                    quadrature,
-                )
-            })?;
-        let sorted_chunks = timed_stage!(
-            timing_enabled,
-            "rust.build_model.reduce_stiffness_chunk_sort",
-            {
-                reduce_sort_stiffness_chunks(
-                    stiffness_chunks,
-                    &global_to_reduced,
-                    &fixed_lookup,
-                    &mut constant_rhs,
-                    ndof_reduced,
-                )
-            }
+        let stiffness_chunks = assemble_stiffness_chunks_for_family_par::<
+            F,
+            Family,
+            NODES_PER_ELEMENT,
+            DOF_PER_ELEMENT,
+        >(
+            mesh,
+            material_ids,
+            material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+        )?;
+        let sorted_chunks = reduce_sort_stiffness_chunks(
+            stiffness_chunks,
+            &global_to_reduced,
+            &fixed_lookup,
+            &mut constant_rhs,
+            ndof_reduced,
         );
-        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc", {
-            csc_from_sorted_triplet_chunks(
-                ndof_reduced,
-                ndof_reduced,
-                sorted_chunks,
-                timing_enabled,
-            )
-        })
+        csc_from_sorted_triplet_chunks(ndof_reduced, ndof_reduced, sorted_chunks)
     } else {
         let stiffness_full =
-            timed_stage!(timing_enabled, "rust.build_model.stiffness_triplets", {
-                assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                    mesh,
-                    material_ids,
-                    material_table,
-                    material_orientation_angles,
-                    formulation,
-                    quadrature,
-                )
-            })?;
-        let stiffness_reduced =
-            timed_stage!(timing_enabled, "rust.build_model.reduce_stiffness", {
-                reduce_square_triplets(
-                    &stiffness_full.rows,
-                    &stiffness_full.cols,
-                    &stiffness_full.vals,
-                    &global_to_reduced,
-                    &fixed_lookup,
-                    &mut constant_rhs,
-                )
-            });
-        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc", {
-            csc_from_triplets(
-                ndof_reduced,
-                ndof_reduced,
-                stiffness_reduced,
-                timing_enabled,
-            )
-        })
-    };
-    if timing_enabled {
-        eprintln!(
-            "[cfsem timing] rust.build_model.stiffness_csc.nnz: {}",
-            stiffness.val().len()
+            assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
+            )?;
+        let stiffness_reduced = reduce_square_triplets(
+            &stiffness_full.rows,
+            &stiffness_full.cols,
+            &stiffness_full.vals,
+            &global_to_reduced,
+            &fixed_lookup,
+            &mut constant_rhs,
         );
-    }
+        csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)
+    };
     // Most load operators are naturally assembled in full nodal space and then reduced by
     // dropping rows associated with prescribed displacement DOFs.
     let reduce_operator =
         |operator| reduce_row_operator_to_csr(operator, &global_to_reduced, ndof_reduced);
 
-    let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) =
-        if let Some(thermal_material_table) = thermal_material_table {
-            // Thermal loading has both a temperature-dependent operator and a constant offset from
-            // per-material reference temperature, so keep those two pieces separate until the end.
-            let thermal_full =
-                timed_stage!(timing_enabled, "rust.build_model.thermal_operator", {
-                    if par {
-                        temperature_operator_for_family_par::<
-                            F,
-                            Family,
-                            NODES_PER_ELEMENT,
-                            DOF_PER_ELEMENT,
-                        >(
-                            mesh,
-                            material_ids,
-                            material_table,
-                            thermal_material_table,
-                            material_orientation_angles,
-                            formulation,
-                            quadrature,
-                        )
-                    } else {
-                        temperature_operator_for_family::<
-                            F,
-                            Family,
-                            NODES_PER_ELEMENT,
-                            DOF_PER_ELEMENT,
-                        >(
-                            mesh,
-                            material_ids,
-                            material_table,
-                            thermal_material_table,
-                            material_orientation_angles,
-                            formulation,
-                            quadrature,
-                        )
-                    }
-                })?;
-            let reduced_reference_rhs = timed_stage!(
-                timing_enabled,
-                "rust.build_model.thermal_reference_reduce",
-                {
-                    free_dofs
-                        .iter()
-                        .map(|&dof| thermal_full.reference_rhs[dof])
-                        .collect::<Vec<_>>()
-                }
-            );
-            (
-                timed_stage!(timing_enabled, "rust.build_model.thermal_reduce_csr", {
-                    reduce_operator(thermal_full.temperature_to_rhs)
-                })?,
-                reduced_reference_rhs,
-                nodes_rz.len(),
+    let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) = if let Some(
+        thermal_material_table,
+    ) =
+        thermal_material_table
+    {
+        // Thermal loading has both a temperature-dependent operator and a constant offset from
+        // per-material reference temperature, so keep those two pieces separate until the end.
+        let thermal_full = if par {
+            temperature_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                thermal_material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
             )
         } else {
-            (
-                timed_stage!(timing_enabled, "rust.build_model.empty_temperature_csr", {
-                    csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())
-                })?,
-                vec![F::zero(); ndof_reduced],
-                0,
+            temperature_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                thermal_material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
             )
-        };
+        }?;
+        let reduced_reference_rhs = free_dofs
+            .iter()
+            .map(|&dof| thermal_full.reference_rhs[dof])
+            .collect::<Vec<_>>();
+        (
+            reduce_operator(thermal_full.temperature_to_rhs)?,
+            reduced_reference_rhs,
+            nodes_rz.len(),
+        )
+    } else {
+        (
+            csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
+            vec![F::zero(); ndof_reduced],
+            0,
+        )
+    };
     // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
     // reference-temperature contribution so all load-independent terms live in one vector.
-    timed_stage!(timing_enabled, "rust.build_model.constant_rhs_merge", {
-        for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
-            *dst = *dst + *src;
-        }
-    });
+    for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
+        *dst = *dst + *src;
+    }
 
     // These operators are stored directly in reduced row space because `build_rhs(...)` and
     // `solve(...)` work only with the constrained system.
-    let body_force_to_rhs =
-        timed_stage!(timing_enabled, "rust.build_model.body_force_operator", {
-            let operator = if par {
-                body_force_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                    mesh,
-                    formulation,
-                    quadrature,
-                )?
-            } else {
-                body_force_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                    mesh,
-                    formulation,
-                    quadrature,
-                )?
-            };
-            reduce_operator(operator)
-        })?;
-    let pressure_to_rhs = timed_stage!(timing_enabled, "rust.build_model.pressure_operator", {
-        let operator = if par {
-            pressure_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                pressure_faces,
-                formulation,
-                quadrature,
-            )?
-        } else {
-            pressure_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                pressure_faces,
-                formulation,
-                quadrature,
-            )?
-        };
-        reduce_operator(operator)
-    })?;
-    let traction_to_rhs = timed_stage!(timing_enabled, "rust.build_model.traction_operator", {
-        let operator = if par {
-            traction_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                traction_faces,
-                formulation,
-                quadrature,
-            )?
-        } else {
-            traction_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                traction_faces,
-                formulation,
-                quadrature,
-            )?
-        };
-        reduce_operator(operator)
-    })?;
+    let body_force_operator = if par {
+        body_force_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            formulation,
+            quadrature,
+        )?
+    } else {
+        body_force_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            formulation,
+            quadrature,
+        )?
+    };
+    let body_force_to_rhs = reduce_operator(body_force_operator)?;
+    let pressure_operator = if par {
+        pressure_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            pressure_faces,
+            formulation,
+            quadrature,
+        )?
+    } else {
+        pressure_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            pressure_faces,
+            formulation,
+            quadrature,
+        )?
+    };
+    let pressure_to_rhs = reduce_operator(pressure_operator)?;
+    let traction_operator = if par {
+        traction_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            traction_faces,
+            formulation,
+            quadrature,
+        )?
+    } else {
+        traction_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            traction_faces,
+            formulation,
+            quadrature,
+        )?
+    };
+    let traction_to_rhs = reduce_operator(traction_operator)?;
 
     // Recovery rows are disjoint by quadrature point, so assemble directly in reduced CSR form
     // instead of building full-space triplets and reducing them afterwards.
-    let recovery_reduced =
-        timed_stage!(timing_enabled, "rust.build_model.recovery_reduced_csr", {
-            if par {
-                reduced_quadrature_field_operators_for_family_par::<
-                    F,
-                    Family,
-                    NODES_PER_ELEMENT,
-                    DOF_PER_ELEMENT,
-                >(
-                    mesh,
-                    material_ids,
-                    material_table,
-                    thermal_material_table,
-                    material_orientation_angles,
-                    formulation,
-                    quadrature,
-                    &global_to_reduced,
-                    &fixed_lookup,
-                    ndof_reduced,
-                )
-            } else {
-                reduced_quadrature_field_operators_for_family::<
-                    F,
-                    Family,
-                    NODES_PER_ELEMENT,
-                    DOF_PER_ELEMENT,
-                >(
-                    mesh,
-                    material_ids,
-                    material_table,
-                    thermal_material_table,
-                    material_orientation_angles,
-                    formulation,
-                    quadrature,
-                    &global_to_reduced,
-                    &fixed_lookup,
-                    ndof_reduced,
-                )
-            }
-        })?;
-    let strain_operator = timed_stage!(timing_enabled, "rust.build_model.strain_csr_wrap", {
-        csr_from_canonical_parts(recovery_reduced.strain_operator)
-    });
-    let stress_operator = timed_stage!(timing_enabled, "rust.build_model.stress_csr_wrap", {
-        csr_from_canonical_parts(recovery_reduced.stress_operator)
-    });
-    let thermal_strain_operator = timed_stage!(
-        timing_enabled,
-        "rust.build_model.thermal_strain_csr_wrap",
-        { csr_from_canonical_parts(recovery_reduced.thermal_strain_operator) }
-    );
-    let thermal_stress_operator = timed_stage!(
-        timing_enabled,
-        "rust.build_model.thermal_stress_csr_wrap",
-        { csr_from_canonical_parts(recovery_reduced.thermal_stress_operator) }
-    );
+    let recovery_reduced = if par {
+        reduced_quadrature_field_operators_for_family_par::<
+            F,
+            Family,
+            NODES_PER_ELEMENT,
+            DOF_PER_ELEMENT,
+        >(
+            mesh,
+            material_ids,
+            material_table,
+            thermal_material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+            &global_to_reduced,
+            &fixed_lookup,
+            ndof_reduced,
+        )
+    } else {
+        reduced_quadrature_field_operators_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            material_ids,
+            material_table,
+            thermal_material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+            &global_to_reduced,
+            &fixed_lookup,
+            ndof_reduced,
+        )
+    }?;
+    let strain_operator = csr_from_canonical_parts(recovery_reduced.strain_operator);
+    let stress_operator = csr_from_canonical_parts(recovery_reduced.stress_operator);
+    let thermal_strain_operator =
+        csr_from_canonical_parts(recovery_reduced.thermal_strain_operator);
+    let thermal_stress_operator =
+        csr_from_canonical_parts(recovery_reduced.thermal_stress_operator);
 
-    let model = Structural2dModel {
+    Ok(Structural2dModel {
         stiffness,
         body_force_to_rhs,
         pressure_to_rhs,
@@ -1515,14 +1405,7 @@ where
         equilibrated_stiffness: None,
         equilibrated_diagonal_preconditioner: None,
         previous_bicgstab_solution: None,
-    };
-    if timing_enabled {
-        eprintln!(
-            "[cfsem timing] rust.build_model.total: {:.6} s",
-            total_start.elapsed().as_secs_f64()
-        );
-    }
-    Ok(model)
+    })
 }
 
 /// Partition full-system displacement DOFs into free and fixed sets for Dirichlet reduction.
@@ -1758,20 +1641,12 @@ fn csc_from_triplets<F: Real>(
     nrow: usize,
     ncol: usize,
     mut triplets: Vec<Triplet<usize, usize, F>>,
-    timing_enabled: bool,
 ) -> SparseColMat<usize, F> {
-    timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.sort", {
-        triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
-    });
+    triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
 
-    let (col_ptr, row_idx, vals) =
-        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.pack", {
-            pack_sorted_triplets_to_csc(nrow, ncol, triplets)
-        });
-    timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.wrap", {
-        let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
-        SparseColMat::new(symbolic, vals)
-    })
+    let (col_ptr, row_idx, vals) = pack_sorted_triplets_to_csc(nrow, ncol, triplets);
+    let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
+    SparseColMat::new(symbolic, vals)
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -1804,16 +1679,10 @@ fn csc_from_sorted_triplet_chunks<F: Real>(
     nrow: usize,
     ncol: usize,
     chunks: Vec<Vec<Triplet<usize, usize, F>>>,
-    timing_enabled: bool,
 ) -> SparseColMat<usize, F> {
-    let (col_ptr, row_idx, vals) =
-        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.merge", {
-            merge_sorted_triplet_chunks_to_csc(nrow, ncol, &chunks)
-        });
-    timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.wrap", {
-        let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
-        SparseColMat::new(symbolic, vals)
-    })
+    let (col_ptr, row_idx, vals) = merge_sorted_triplet_chunks_to_csc(nrow, ncol, &chunks);
+    let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
+    SparseColMat::new(symbolic, vals)
 }
 
 fn merge_sorted_triplet_chunks_to_csc<F: Real>(

@@ -38,8 +38,6 @@ References:
 
 from __future__ import annotations
 
-import os
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, overload, cast
@@ -93,17 +91,6 @@ _orthotropic_axisymmetric_thermal_material_f64 = (
 
 ArrayLike = npt.ArrayLike
 _QUAD_FACE_NODE_PAIRS: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 3), (3, 0))
-
-
-def _timing_enabled() -> bool:
-    return os.environ.get("CFSEM_TIMING", "").lower() not in {"", "0", "false", "no", "off"}
-
-
-def _timing_log(label: str, elapsed_s: float, **metadata: int | str) -> None:
-    if not _timing_enabled():
-        return
-    suffix = " ".join(f"{key}={value}" for key, value in metadata.items())
-    print(f"[cfsem timing] {label}: {elapsed_s:.6f} s {suffix}".rstrip(), flush=True)
 
 
 def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:
@@ -537,18 +524,11 @@ class Structural2DFEMModel:
             self.dtype,
         )
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
-        start = time.perf_counter()
         rhs = self._backend.build_rhs(
             body_force_arr.reshape(-1),
             pressure_arr if pressure_arr.size else None,
             traction_arr.reshape(-1) if traction_arr.size else None,
             temperature_arr,
-        )
-        _timing_log(
-            "Structural2DFEMModel.build_rhs",
-            time.perf_counter() - start,
-            nelem=self.nelem,
-            ndof_reduced=self.ndof_reduced,
         )
         return np.asarray(rhs, dtype=self.dtype)
 
@@ -641,7 +621,6 @@ class Structural2DFEMModel:
         assert (
             norm_floor is None or norm_ceil is None or norm_ceil > norm_floor
         ), "equilibration_norm_ceil must be greater than equilibration_norm_floor"
-        start = time.perf_counter()
         (
             displacement_raw,
             method_code,
@@ -661,12 +640,6 @@ class Structural2DFEMModel:
             norm_floor,
             norm_ceil,
             _bicgstab_initial_guess_code(initial_guess),
-        )
-        _timing_log(
-            "Structural2DFEMModel.solve",
-            time.perf_counter() - start,
-            method=method,
-            ndof_reduced=self.ndof_reduced,
         )
         displacement = np.asarray(displacement_raw, dtype=self.dtype)
         if not return_diagnostics:
@@ -737,7 +710,6 @@ class Structural2DFEMModel:
                 displacements, self.analysis_nodes.shape[0], self.dtype
             ).reshape(-1)
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
-        start = time.perf_counter()
         (
             points_flat,
             strain_flat,
@@ -746,12 +718,6 @@ class Structural2DFEMModel:
             stress_flat,
             nq,
         ) = self._backend.evaluate_quadrature(displacements_full, temperature_arr)
-        _timing_log(
-            "Structural2DFEMModel.evaluate_quadrature",
-            time.perf_counter() - start,
-            nelem=self.nelem,
-            ndof_full=self.ndof_full,
-        )
         nelem = self.analysis_elements.shape[0]
         nq = int(nq)
         return QuadratureFieldSamples(
@@ -993,7 +959,6 @@ def query_quad_mesh(
         and index arrays are unitless.
     """
 
-    total_start = time.perf_counter()
     dtype = _resolve_float_dtype(nodes, points)
     normalized_element_type = _normalize_element_type(element_type)
     nodes_arr = _normalize_nodes(nodes, dtype)
@@ -1003,7 +968,6 @@ def query_quad_mesh(
     )
     points_arr = _normalize_query_points(points, dtype)
     binding = _dispatch_pair(dtype, _quad_mesh_query_f32, _quad_mesh_query_f64)
-    binding_start = time.perf_counter()
     data = binding(
         nodes_arr,
         elements_arr,
@@ -1011,16 +975,8 @@ def query_quad_mesh(
         normalized_element_type,
         int(max_iterations),
     )
-    _timing_log(
-        "query_quad_mesh.low_level",
-        time.perf_counter() - binding_start,
-        nnode=nodes_arr.shape[0],
-        nelem=elements_arr.shape[0],
-        npoint=points_arr.shape[0],
-        element_type=normalized_element_type,
-    )
 
-    result = QuadMeshQuery(
+    return QuadMeshQuery(
         nodes=nodes_arr,
         elements=elements_arr,
         points=points_arr,
@@ -1044,15 +1000,6 @@ def query_quad_mesh(
         nearest_face_points=np.asarray(data["nearest_face_points"], dtype=dtype).reshape(-1, 2),
         nearest_face_distances=np.asarray(data["nearest_face_distances"], dtype=dtype),
     )
-    _timing_log(
-        "query_quad_mesh.total",
-        time.perf_counter() - total_start,
-        nnode=nodes_arr.shape[0],
-        nelem=elements_arr.shape[0],
-        npoint=points_arr.shape[0],
-        element_type=normalized_element_type,
-    )
-    return result
 
 
 def quad_mesh_interpolation_operator(
@@ -1658,8 +1605,6 @@ def assemble_structural_2d(
             instead of dense arrays.
     """
 
-    total_start = time.perf_counter()
-    normalize_start = time.perf_counter()
     dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
     nodes_arr = _normalize_nodes(nodes, dtype)
     material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
@@ -1689,19 +1634,11 @@ def assemble_structural_2d(
         int(analysis_elements.shape[0]),
         dtype,
     )
-    _timing_log(
-        "assemble_structural_2d.normalize_inputs",
-        time.perf_counter() - normalize_start,
-        nnode=analysis_nodes.shape[0],
-        nelem=analysis_elements.shape[0],
-        element_type=normalized_element_type,
-    )
     low_level = _dispatch_pair(
         dtype,
         _assemble_model_2d_f32,
         _assemble_model_2d_f64,
     )
-    low_level_start = time.perf_counter()
     backend = low_level(
         analysis_nodes,
         analysis_elements,
@@ -1723,82 +1660,20 @@ def assemble_structural_2d(
         quadrature_code,
         par,
     )
-    _timing_log(
-        "assemble_structural_2d.low_level_rust",
-        time.perf_counter() - low_level_start,
-        nnode=analysis_nodes.shape[0],
-        nelem=analysis_elements.shape[0],
-        par=str(par),
-    )
-
-    convert_start = time.perf_counter()
     stiffness = _csc_matrix_from_binding(backend.stiffness_csc(), dtype)
-    _timing_log(
-        "assemble_structural_2d.export_stiffness_csc",
-        time.perf_counter() - convert_start,
-        nnz=stiffness.nnz,
-    )
-    convert_start = time.perf_counter()
     body_force_to_rhs = _csr_matrix_from_binding(backend.body_force_to_rhs_csr(), dtype)
-    _timing_log(
-        "assemble_structural_2d.export_body_force_to_rhs",
-        time.perf_counter() - convert_start,
-        nnz=body_force_to_rhs.nnz,
-    )
-    convert_start = time.perf_counter()
     pressure_to_rhs = _csr_matrix_from_binding(backend.pressure_to_rhs_csr(), dtype)
-    _timing_log(
-        "assemble_structural_2d.export_pressure_to_rhs",
-        time.perf_counter() - convert_start,
-        nnz=pressure_to_rhs.nnz,
-    )
-    convert_start = time.perf_counter()
     traction_to_rhs = _csr_matrix_from_binding(backend.traction_to_rhs_csr(), dtype)
-    _timing_log(
-        "assemble_structural_2d.export_traction_to_rhs",
-        time.perf_counter() - convert_start,
-        nnz=traction_to_rhs.nnz,
-    )
-    convert_start = time.perf_counter()
     analysis_temperature_to_rhs = _csr_matrix_from_binding(backend.temperature_to_rhs_csr(), dtype)
-    _timing_log(
-        "assemble_structural_2d.export_temperature_to_rhs",
-        time.perf_counter() - convert_start,
-        nnz=analysis_temperature_to_rhs.nnz,
-    )
-    convert_start = time.perf_counter()
     strain_operator = _csr_matrix_from_binding(backend.strain_operator_csr(), dtype)
-    _timing_log(
-        "assemble_structural_2d.export_strain_operator",
-        time.perf_counter() - convert_start,
-        nnz=strain_operator.nnz,
-    )
-    convert_start = time.perf_counter()
     stress_operator = _csr_matrix_from_binding(backend.stress_operator_csr(), dtype)
-    _timing_log(
-        "assemble_structural_2d.export_stress_operator",
-        time.perf_counter() - convert_start,
-        nnz=stress_operator.nnz,
-    )
-    convert_start = time.perf_counter()
     analysis_thermal_strain_operator = _csr_matrix_from_binding(
         backend.thermal_strain_operator_csr(),
         dtype,
     )
-    _timing_log(
-        "assemble_structural_2d.export_thermal_strain_operator",
-        time.perf_counter() - convert_start,
-        nnz=analysis_thermal_strain_operator.nnz,
-    )
-    convert_start = time.perf_counter()
     analysis_thermal_stress_operator = _csr_matrix_from_binding(
         backend.thermal_stress_operator_csr(),
         dtype,
-    )
-    _timing_log(
-        "assemble_structural_2d.export_thermal_stress_operator",
-        time.perf_counter() - convert_start,
-        nnz=analysis_thermal_stress_operator.nnz,
     )
     if thermal_material_table_arr is None:
         temperature_to_rhs = sp.csr_matrix((int(backend.ndof_reduced), 0), dtype=dtype)
@@ -1856,13 +1731,6 @@ def assemble_structural_2d(
         nelem=elements_arr.shape[0],
         nq_per_element=int(backend.nq_per_element),
         n_temperature_nodes=n_temperature_nodes,
-    )
-    _timing_log(
-        "assemble_structural_2d.total",
-        time.perf_counter() - total_start,
-        nnode=analysis_nodes.shape[0],
-        nelem=analysis_elements.shape[0],
-        ndof_reduced=int(backend.ndof_reduced),
     )
     return model
 

@@ -644,6 +644,25 @@ def assert_sparse_allclose(
     np.testing.assert_allclose(actual.toarray(), expected.toarray(), rtol=rtol, atol=atol)
 
 
+def assert_reduction_array_allclose(
+    actual: Any,
+    expected: Any,
+    *,
+    dtype: DType,
+    rtol: float,
+    atol: float,
+) -> None:
+    actual_array = np.asarray(actual)
+    expected_array = np.asarray(expected)
+    scale = max(
+        float(np.max(np.abs(actual_array), initial=0.0)),
+        float(np.max(np.abs(expected_array), initial=0.0)),
+        1.0,
+    )
+    scaled_atol = max(atol, float(np.finfo(dtype).eps) * scale)
+    np.testing.assert_allclose(actual_array, expected_array, rtol=rtol, atol=scaled_atol)
+
+
 def solve_with_factorized_model(
     model: fem.Structural2DFEMModel,
     rhs: np.ndarray,
@@ -963,17 +982,18 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
             atol=atol,
         )
 
+    np.testing.assert_allclose(parallel.quadrature_points, serial.quadrature_points, rtol=rtol, atol=atol)
     for array_name in (
         "constant_rhs",
-        "quadrature_points",
         "strain_constant",
         "stress_constant",
         "thermal_strain_constant",
         "thermal_stress_constant",
     ):
-        np.testing.assert_allclose(
+        assert_reduction_array_allclose(
             getattr(parallel, array_name),
             getattr(serial, array_name),
+            dtype=dtype,
             rtol=rtol,
             atol=atol,
         )

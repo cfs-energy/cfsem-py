@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import pytest
@@ -634,6 +634,16 @@ def tolerance(dtype: DType) -> tuple[float, float]:
     return 1.0e-12, 1.0e-12
 
 
+def assert_sparse_allclose(
+    actual: Any,
+    expected: Any,
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    np.testing.assert_allclose(actual.toarray(), expected.toarray(), rtol=rtol, atol=atol)
+
+
 def solve_with_factorized_model(
     model: fem.Structural2DFEMModel,
     rhs: np.ndarray,
@@ -902,12 +912,22 @@ def test_model_dtype_resolution_includes_material_tables() -> None:
 def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
     material = np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)])
+    thermal = np.asarray(
+        [fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15, dtype=dtype)]
+    )
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
+    _inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=3, nz=2)
+    prescribed = {0: 1.0e-6, 1: -2.0e-6}
     serial = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=material_ids,
         material_table=material,
+        pressure_faces=outer_faces,
+        traction_faces=top_faces,
+        thermal_material_table=thermal,
+        prescribed=prescribed,
         element_type=element_type,
         par=False,
     )
@@ -916,12 +936,50 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
         elements=elements,
         material_ids=material_ids,
         material_table=material,
+        pressure_faces=outer_faces,
+        traction_faces=top_faces,
+        thermal_material_table=thermal,
+        prescribed=prescribed,
         element_type=element_type,
         par=True,
     )
     rtol, atol = tolerance(dtype)
 
-    assert np.allclose(parallel.stiffness.toarray(), serial.stiffness.toarray(), rtol=rtol, atol=atol)
+    for operator_name in (
+        "stiffness",
+        "body_force_to_rhs",
+        "pressure_to_rhs",
+        "traction_to_rhs",
+        "temperature_to_rhs",
+        "strain_operator",
+        "stress_operator",
+        "thermal_strain_operator",
+        "thermal_stress_operator",
+    ):
+        assert_sparse_allclose(
+            getattr(parallel, operator_name),
+            getattr(serial, operator_name),
+            rtol=rtol,
+            atol=atol,
+        )
+
+    for array_name in (
+        "constant_rhs",
+        "quadrature_points",
+        "strain_constant",
+        "stress_constant",
+        "thermal_strain_constant",
+        "thermal_stress_constant",
+    ):
+        np.testing.assert_allclose(
+            getattr(parallel, array_name),
+            getattr(serial, array_name),
+            rtol=rtol,
+            atol=atol,
+        )
+    np.testing.assert_array_equal(parallel.free_dofs, serial.free_dofs)
+    np.testing.assert_array_equal(parallel.fixed_dofs, serial.fixed_dofs)
+    np.testing.assert_allclose(parallel.fixed_values, serial.fixed_values, rtol=rtol, atol=atol)
 
 
 def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:

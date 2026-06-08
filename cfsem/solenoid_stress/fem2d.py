@@ -1752,7 +1752,8 @@ def assemble_structural_2d(
             value. Displacement units are `[length]`.
         quadrature: Quadrature rule selector, either `gl3`, `gl4`, `3`, or `4`.
         element_type: Analysis element family, either `quad4` or `quad9`.
-        par: Whether to assemble the stiffness matrix using threaded element batches.
+        par: Whether to assemble stiffness, load, and recovery operators using threaded
+            element batches.
 
     Returns:
         Structural2DFEMModel: Reusable model with backend solve state and lazy Python sparse

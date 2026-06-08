@@ -1,5 +1,8 @@
 //! Reduced-model assembly and solve wrapper for the 2D structural FEM.
 
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+
 use deimos_numerics::sparse::{
     BiCGSTAB, BiCGSTABSolveError, CompensatedField, DiagonalPrecond, Equilibration,
     EquilibrationParams, Precond, SparseMatVec,
@@ -7,13 +10,17 @@ use deimos_numerics::sparse::{
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::linalg::solvers::Lu;
-use faer::sparse::{SparseColMat, SparseColMatRef, SparseRowMat, SymbolicSparseRowMat, Triplet};
+use faer::sparse::{
+    SparseColMat, SparseColMatRef, SparseRowMat, SymbolicSparseColMat, SymbolicSparseRowMat,
+    Triplet,
+};
 use faer::{Accum, Col, Par};
+use rayon::prelude::*;
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::{
-    assemble_stiffness_for_family, assemble_stiffness_for_family_par,
+    assemble_stiffness_chunks_for_family_par, assemble_stiffness_for_family,
 };
 use crate::physics::solenoid_stress::convenience::{
     QuadratureFieldSamples, Structural2dElementMeasures, Structural2dElementQuadrature,
@@ -30,7 +37,8 @@ use crate::physics::solenoid_stress::recovery::{
     reduced_quadrature_field_operators_for_family_par,
 };
 use crate::physics::solenoid_stress::types::{
-    PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad, dof_per_element,
+    PressureLoad, Real, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
+    dof_per_element,
 };
 
 macro_rules! timed_stage {
@@ -1188,44 +1196,80 @@ where
         })?;
     let ndof_reduced = free_dofs.len();
 
-    // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
-    // This keeps the element kernels simple and pushes all constraint handling into the common
-    // reduction helpers below.
-    let stiffness_full = timed_stage!(timing_enabled, "rust.build_model.stiffness_triplets", {
-        if par {
-            assemble_stiffness_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                material_ids,
-                material_table,
-                material_orientation_angles,
-                formulation,
-                quadrature,
-            )
-        } else {
-            assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                material_ids,
-                material_table,
-                material_orientation_angles,
-                formulation,
-                quadrature,
-            )
-        }
-    })?;
     let mut constant_rhs = vec![F::zero(); ndof_reduced];
-    let stiffness_reduced = timed_stage!(timing_enabled, "rust.build_model.reduce_stiffness", {
-        reduce_square_triplets(
-            &stiffness_full.rows,
-            &stiffness_full.cols,
-            &stiffness_full.vals,
-            &global_to_reduced,
-            &fixed_lookup,
-            &mut constant_rhs,
-        )
-    });
-    let stiffness = timed_stage!(timing_enabled, "rust.build_model.stiffness_csc", {
-        csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)
-    })?;
+    // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
+    // The parallel path keeps worker chunks separate so each chunk can be reduced and sorted
+    // independently before a k-way merge builds the canonical CSC structure.
+    let stiffness = if par {
+        let stiffness_chunks =
+            timed_stage!(timing_enabled, "rust.build_model.stiffness_triplets", {
+                assemble_stiffness_chunks_for_family_par::<
+                    F,
+                    Family,
+                    NODES_PER_ELEMENT,
+                    DOF_PER_ELEMENT,
+                >(
+                    mesh,
+                    material_ids,
+                    material_table,
+                    material_orientation_angles,
+                    formulation,
+                    quadrature,
+                )
+            })?;
+        let sorted_chunks = timed_stage!(
+            timing_enabled,
+            "rust.build_model.reduce_stiffness_chunk_sort",
+            {
+                reduce_sort_stiffness_chunks(
+                    stiffness_chunks,
+                    &global_to_reduced,
+                    &fixed_lookup,
+                    &mut constant_rhs,
+                    ndof_reduced,
+                )
+            }
+        );
+        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc", {
+            csc_from_sorted_triplet_chunks(
+                ndof_reduced,
+                ndof_reduced,
+                sorted_chunks,
+                timing_enabled,
+            )
+        })
+    } else {
+        let stiffness_full =
+            timed_stage!(timing_enabled, "rust.build_model.stiffness_triplets", {
+                assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    mesh,
+                    material_ids,
+                    material_table,
+                    material_orientation_angles,
+                    formulation,
+                    quadrature,
+                )
+            })?;
+        let stiffness_reduced =
+            timed_stage!(timing_enabled, "rust.build_model.reduce_stiffness", {
+                reduce_square_triplets(
+                    &stiffness_full.rows,
+                    &stiffness_full.cols,
+                    &stiffness_full.vals,
+                    &global_to_reduced,
+                    &fixed_lookup,
+                    &mut constant_rhs,
+                )
+            });
+        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc", {
+            csc_from_triplets(
+                ndof_reduced,
+                ndof_reduced,
+                stiffness_reduced,
+                timing_enabled,
+            )
+        })
+    };
     if timing_enabled {
         eprintln!(
             "[cfsem timing] rust.build_model.stiffness_csc.nnz: {}",
@@ -1556,6 +1600,82 @@ fn reduce_square_triplets<F: Real>(
     triplets
 }
 
+struct ReducedStiffnessChunk<F: Real> {
+    triplets: Vec<Triplet<usize, usize, F>>,
+    constant_rhs: Vec<F>,
+}
+
+/// Reduce, sort, and coalesce each stiffness chunk independently.
+fn reduce_sort_stiffness_chunks<F: Real>(
+    chunks: Vec<StiffnessTriplets<F>>,
+    global_to_reduced: &[usize],
+    fixed_lookup: &[Option<F>],
+    constant_rhs: &mut [F],
+    ndof_reduced: usize,
+) -> Vec<Vec<Triplet<usize, usize, F>>> {
+    let reduced_chunks = chunks
+        .into_par_iter()
+        .map(|chunk| {
+            let mut local_rhs = vec![F::zero(); ndof_reduced];
+            let triplets = reduce_square_triplets(
+                &chunk.rows,
+                &chunk.cols,
+                &chunk.vals,
+                global_to_reduced,
+                fixed_lookup,
+                &mut local_rhs,
+            );
+            ReducedStiffnessChunk {
+                triplets: sort_coalesce_triplets(triplets),
+                constant_rhs: local_rhs,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut sorted_chunks = Vec::with_capacity(reduced_chunks.len());
+    for chunk in reduced_chunks {
+        for (dst, src) in constant_rhs.iter_mut().zip(chunk.constant_rhs) {
+            *dst = *dst + src;
+        }
+        sorted_chunks.push(chunk.triplets);
+    }
+    sorted_chunks
+}
+
+/// Return triplets in canonical CSC order with duplicate `(column, row)` entries coalesced.
+fn sort_coalesce_triplets<F: Real>(
+    mut triplets: Vec<Triplet<usize, usize, F>>,
+) -> Vec<Triplet<usize, usize, F>> {
+    triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
+
+    let mut coalesced = Vec::with_capacity(triplets.len());
+    let mut pending: Option<Triplet<usize, usize, F>> = None;
+    for triplet in triplets {
+        if triplet.val == F::zero() {
+            continue;
+        }
+        match pending {
+            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
+                current.val = current.val + triplet.val;
+                pending = Some(current);
+            }
+            Some(current) => {
+                if current.val != F::zero() {
+                    coalesced.push(current);
+                }
+                pending = Some(triplet);
+            }
+            None => pending = Some(triplet),
+        }
+    }
+    if let Some(current) = pending
+        && current.val != F::zero()
+    {
+        coalesced.push(current);
+    }
+    coalesced
+}
+
 /// Drop rows belonging to fixed displacement DOFs from one full-system load operator.
 fn reduce_row_operator<F: Real>(
     operator: SparseOperator<F>,
@@ -1637,10 +1757,211 @@ fn csr_from_canonical_parts<F: Real>(parts: CsrOperatorParts<F>) -> SparseRowMat
 fn csc_from_triplets<F: Real>(
     nrow: usize,
     ncol: usize,
+    mut triplets: Vec<Triplet<usize, usize, F>>,
+    timing_enabled: bool,
+) -> SparseColMat<usize, F> {
+    timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.sort", {
+        triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
+    });
+
+    let (col_ptr, row_idx, vals) =
+        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.pack", {
+            pack_sorted_triplets_to_csc(nrow, ncol, triplets)
+        });
+    timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.wrap", {
+        let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
+        SparseColMat::new(symbolic, vals)
+    })
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct TripletCursor {
+    col: usize,
+    row: usize,
+    chunk: usize,
+    index: usize,
+}
+
+impl Ord for TripletCursor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .col
+            .cmp(&self.col)
+            .then_with(|| other.row.cmp(&self.row))
+            .then_with(|| other.chunk.cmp(&self.chunk))
+            .then_with(|| other.index.cmp(&self.index))
+    }
+}
+
+impl PartialOrd for TripletCursor {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Merge already sorted/coalesced triplet chunks into the CSC format used by sparse LU.
+fn csc_from_sorted_triplet_chunks<F: Real>(
+    nrow: usize,
+    ncol: usize,
+    chunks: Vec<Vec<Triplet<usize, usize, F>>>,
+    timing_enabled: bool,
+) -> SparseColMat<usize, F> {
+    let (col_ptr, row_idx, vals) =
+        timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.merge", {
+            merge_sorted_triplet_chunks_to_csc(nrow, ncol, &chunks)
+        });
+    timed_stage!(timing_enabled, "rust.build_model.stiffness_csc.wrap", {
+        let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
+        SparseColMat::new(symbolic, vals)
+    })
+}
+
+fn merge_sorted_triplet_chunks_to_csc<F: Real>(
+    nrow: usize,
+    ncol: usize,
+    chunks: &[Vec<Triplet<usize, usize, F>>],
+) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+    let capacity = chunks.iter().map(Vec::len).sum::<usize>();
+    let mut heap = BinaryHeap::with_capacity(chunks.len());
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        if let Some(first) = chunk.first() {
+            heap.push(TripletCursor {
+                col: first.col,
+                row: first.row,
+                chunk: chunk_index,
+                index: 0,
+            });
+        }
+    }
+
+    let mut col_ptr = Vec::with_capacity(ncol + 1);
+    let mut row_idx = Vec::with_capacity(capacity);
+    let mut vals = Vec::with_capacity(capacity);
+    let mut next_col = 0usize;
+    let mut pending: Option<Triplet<usize, usize, F>> = None;
+    col_ptr.push(0);
+
+    while let Some(cursor) = heap.pop() {
+        let triplet = chunks[cursor.chunk][cursor.index];
+        debug_assert!(triplet.row < nrow);
+        debug_assert!(triplet.col < ncol);
+
+        match pending {
+            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
+                current.val = current.val + triplet.val;
+                pending = Some(current);
+            }
+            Some(current) => {
+                push_csc_entry(
+                    current,
+                    &mut next_col,
+                    &mut col_ptr,
+                    &mut row_idx,
+                    &mut vals,
+                );
+                pending = Some(triplet);
+            }
+            None => pending = Some(triplet),
+        }
+
+        let next_index = cursor.index + 1;
+        if next_index < chunks[cursor.chunk].len() {
+            let next = chunks[cursor.chunk][next_index];
+            heap.push(TripletCursor {
+                col: next.col,
+                row: next.row,
+                chunk: cursor.chunk,
+                index: next_index,
+            });
+        }
+    }
+
+    if let Some(current) = pending {
+        push_csc_entry(
+            current,
+            &mut next_col,
+            &mut col_ptr,
+            &mut row_idx,
+            &mut vals,
+        );
+    }
+    while next_col < ncol {
+        col_ptr.push(row_idx.len());
+        next_col += 1;
+    }
+    debug_assert_eq!(col_ptr.len(), ncol + 1);
+    (col_ptr, row_idx, vals)
+}
+
+/// Pack triplets sorted by `(column, row)` into canonical CSC arrays.
+fn pack_sorted_triplets_to_csc<F: Real>(
+    nrow: usize,
+    ncol: usize,
     triplets: Vec<Triplet<usize, usize, F>>,
-) -> Result<SparseColMat<usize, F>, String> {
-    SparseColMat::try_new_from_triplets(nrow, ncol, &triplets)
-        .map_err(|err| format!("failed to build CSC operator: {err:?}"))
+) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+    let mut col_ptr = Vec::with_capacity(ncol + 1);
+    let mut row_idx = Vec::with_capacity(triplets.len());
+    let mut vals = Vec::with_capacity(triplets.len());
+    let mut next_col = 0usize;
+    col_ptr.push(0);
+
+    let mut pending: Option<Triplet<usize, usize, F>> = None;
+    for triplet in triplets {
+        debug_assert!(triplet.row < nrow);
+        debug_assert!(triplet.col < ncol);
+        if triplet.val == F::zero() {
+            continue;
+        }
+        match pending {
+            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
+                current.val = current.val + triplet.val;
+                pending = Some(current);
+            }
+            Some(current) => {
+                push_csc_entry(
+                    current,
+                    &mut next_col,
+                    &mut col_ptr,
+                    &mut row_idx,
+                    &mut vals,
+                );
+                pending = Some(triplet);
+            }
+            None => pending = Some(triplet),
+        }
+    }
+    if let Some(current) = pending {
+        push_csc_entry(
+            current,
+            &mut next_col,
+            &mut col_ptr,
+            &mut row_idx,
+            &mut vals,
+        );
+    }
+    while next_col < ncol {
+        col_ptr.push(row_idx.len());
+        next_col += 1;
+    }
+    debug_assert_eq!(col_ptr.len(), ncol + 1);
+    (col_ptr, row_idx, vals)
+}
+
+fn push_csc_entry<F: Real>(
+    entry: Triplet<usize, usize, F>,
+    next_col: &mut usize,
+    col_ptr: &mut Vec<usize>,
+    row_idx: &mut Vec<usize>,
+    vals: &mut Vec<F>,
+) {
+    while *next_col < entry.col {
+        col_ptr.push(row_idx.len());
+        *next_col += 1;
+    }
+    if entry.val != F::zero() {
+        row_idx.push(entry.row);
+        vals.push(entry.val);
+    }
 }
 
 /// Apply one reduced CSR load operator to a dense load-amplitude vector and accumulate the result.

@@ -924,6 +924,63 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
     assert np.allclose(parallel.stiffness.toarray(), serial.stiffness.toarray(), rtol=rtol, atol=atol)
 
 
+def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
+    _inner_faces, outer_faces = pressure_faces_for_strip(nr=2, nz=1)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=2, nz=1)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    thermal = fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15, dtype=dtype)
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        pressure_faces=outer_faces,
+        traction_faces=top_faces,
+        thermal_material_table=np.asarray([thermal]),
+        element_type="quad9",
+    )
+    cache_names = (
+        "_stiffness_cache",
+        "_body_force_to_rhs_cache",
+        "_pressure_to_rhs_cache",
+        "_traction_to_rhs_cache",
+        "_temperature_to_rhs_cache",
+        "_strain_operator_cache",
+        "_stress_operator_cache",
+        "_thermal_strain_operator_cache",
+        "_thermal_stress_operator_cache",
+    )
+    for name in cache_names:
+        assert getattr(model, name) is None
+
+    _rhs = model.build_rhs(
+        body_force=np.array([1.0e3, -2.0e3], dtype=dtype),
+        pressure_values=np.full(outer_faces.shape[0], 2.5e5, dtype=dtype),
+        traction_values=np.full((top_faces.shape[0], 2), [1.0e4, -3.0e4], dtype=dtype),
+        nodal_temperature=np.full(nodes.shape[0], 300.0, dtype=dtype),
+    )
+    for name in cache_names:
+        assert getattr(model, name) is None
+
+    for public_name, cache_name in (
+        ("stiffness", "_stiffness_cache"),
+        ("body_force_to_rhs", "_body_force_to_rhs_cache"),
+        ("pressure_to_rhs", "_pressure_to_rhs_cache"),
+        ("traction_to_rhs", "_traction_to_rhs_cache"),
+        ("temperature_to_rhs", "_temperature_to_rhs_cache"),
+        ("strain_operator", "_strain_operator_cache"),
+        ("stress_operator", "_stress_operator_cache"),
+        ("thermal_strain_operator", "_thermal_strain_operator_cache"),
+        ("thermal_stress_operator", "_thermal_stress_operator_cache"),
+    ):
+        first = getattr(model, public_name)
+        second = getattr(model, public_name)
+        assert first is second
+        assert getattr(model, cache_name) is first
+
+
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("equilibration", ["ruiz", "none"])
 def test_iterative_structural_solve_matches_direct_and_reports_diagnostics(

@@ -38,7 +38,7 @@ References:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, overload, cast
 
@@ -278,7 +278,7 @@ class QuadMeshQuery:
 class Structural2DFEMModel:
     """Reusable 2D structural FEM model with sparse operators and reduced solve state.
 
-    The stored sparse operators are the primary reusable objects:
+    The sparse operators are exported from the Rust backend lazily:
     - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
       map load amplitudes to the reduced structural right-hand side,
     - `strain_operator`, `stress_operator`, `thermal_strain_operator`, and
@@ -286,8 +286,8 @@ class Structural2DFEMModel:
       fields.
 
     `build_rhs(...)`, `solve(...)`, `element_quadrature()`, `element_measures()`, and
-    `evaluate_quadrature(...)` are convenience methods layered on top of those stored operators
-    and the reduced stiffness matrix.
+    `evaluate_quadrature(...)` call the Rust backend directly and do not require these Python
+    sparse matrices to be materialized.
 
     Key public array shapes and units:
     - `stiffness` has shape `(ndof_reduced, ndof_reduced)` with entry units
@@ -318,17 +318,8 @@ class Structural2DFEMModel:
         formulation: str,
         thickness: float,
         element_type: str,
-        stiffness: sp.csc_matrix,
-        body_force_to_rhs: sp.csr_matrix,
-        pressure_to_rhs: sp.csr_matrix,
-        traction_to_rhs: sp.csr_matrix,
-        temperature_to_rhs: sp.csr_matrix,
         constant_rhs: npt.NDArray[np.floating[Any]],
         quadrature_points: npt.NDArray[np.floating[Any]],
-        strain_operator: sp.csr_matrix,
-        stress_operator: sp.csr_matrix,
-        thermal_strain_operator: sp.csr_matrix,
-        thermal_stress_operator: sp.csr_matrix,
         strain_constant: npt.NDArray[np.floating[Any]],
         stress_constant: npt.NDArray[np.floating[Any]],
         thermal_strain_constant: npt.NDArray[np.floating[Any]],
@@ -347,21 +338,12 @@ class Structural2DFEMModel:
         self._input_nodes = input_nodes
         self._input_elements = input_elements
         self._elevated = elevated
-        self.stiffness = stiffness
-        self.body_force_to_rhs = body_force_to_rhs
-        self.pressure_to_rhs = pressure_to_rhs
-        self.traction_to_rhs = traction_to_rhs
-        self.temperature_to_rhs = temperature_to_rhs
         self.constant_rhs = constant_rhs
         self.pressure_faces = pressure_faces
         self.traction_faces = traction_faces
         self.analysis_nodes = analysis_nodes
         self.analysis_elements = analysis_elements
         self.quadrature_points = quadrature_points
-        self.strain_operator = strain_operator
-        self.stress_operator = stress_operator
-        self.thermal_strain_operator = thermal_strain_operator
-        self.thermal_stress_operator = thermal_stress_operator
         self.strain_constant = strain_constant
         self.stress_constant = stress_constant
         self.thermal_strain_constant = thermal_strain_constant
@@ -389,10 +371,20 @@ class Structural2DFEMModel:
         self.n_temperature_nodes = int(n_temperature_nodes)
         self._element_quadrature_cache: ElementQuadrature | None = None
         self._element_measures_cache: ElementMeasures | None = None
+        self._temperature_elevation_cache: sp.csr_matrix | None = None
+        self._stiffness_cache: sp.csc_matrix | None = None
+        self._body_force_to_rhs_cache: sp.csr_matrix | None = None
+        self._pressure_to_rhs_cache: sp.csr_matrix | None = None
+        self._traction_to_rhs_cache: sp.csr_matrix | None = None
+        self._temperature_to_rhs_cache: sp.csr_matrix | None = None
+        self._strain_operator_cache: sp.csr_matrix | None = None
+        self._stress_operator_cache: sp.csr_matrix | None = None
+        self._thermal_strain_operator_cache: sp.csr_matrix | None = None
+        self._thermal_stress_operator_cache: sp.csr_matrix | None = None
 
     @property
     def dtype(self) -> np.dtype[Any]:
-        """Floating dtype used by all stored operators, arrays, and convenience-method outputs."""
+        """Floating dtype used by all exported operators, arrays, and convenience-method outputs."""
 
         return self._dtype
 
@@ -413,6 +405,151 @@ class Structural2DFEMModel:
         """Input mesh connectivity with shape `(nelem, 4)`."""
 
         return self._input_elements
+
+    def _temperature_elevation(self) -> sp.csr_matrix:
+        elevated = self._elevated
+        assert elevated is not None, "temperature elevation is available only for inferred quad9 meshes"
+        cache = self._temperature_elevation_cache
+        if cache is None:
+            cache = _temperature_elevation_operator(elevated, self.dtype)
+            self._temperature_elevation_cache = cache
+        return cache
+
+    def _cached_csc_export(self, attr: str, export: Callable[[], Any]) -> sp.csc_matrix:
+        cache = getattr(self, attr)
+        if cache is None:
+            cache = _csc_matrix_from_binding(export(), self.dtype)
+            setattr(self, attr, cache)
+        return cast(sp.csc_matrix, cache)
+
+    def _cached_csr_export(self, attr: str, export: Callable[[], Any]) -> sp.csr_matrix:
+        cache = getattr(self, attr)
+        if cache is None:
+            cache = _csr_matrix_from_binding(export(), self.dtype)
+            setattr(self, attr, cache)
+        return cast(sp.csr_matrix, cache)
+
+    def _cached_temperature_csr_export(
+        self,
+        attr: str,
+        nrow: int,
+        export: Callable[[], Any],
+    ) -> sp.csr_matrix:
+        cache = getattr(self, attr)
+        if cache is not None:
+            return cast(sp.csr_matrix, cache)
+        if self.n_temperature_nodes == 0:
+            cache = sp.csr_matrix((nrow, 0), dtype=self.dtype)
+        else:
+            analysis_operator = _csr_matrix_from_binding(export(), self.dtype)
+            cache = (
+                analysis_operator
+                if self._elevated is None
+                else _to_csr_matrix(analysis_operator @ self._temperature_elevation())
+            )
+        setattr(self, attr, cache)
+        return cache
+
+    @property
+    def stiffness(self) -> sp.csc_matrix:
+        """Reduced stiffness matrix with shape `(ndof_reduced, ndof_reduced)`.
+
+        Entries have units `[generalized force / displacement] = [energy / distance^2]`.
+        The SciPy matrix is exported from the Rust backend on first access and then cached.
+        """
+
+        return self._cached_csc_export("_stiffness_cache", self._backend.stiffness_csc)
+
+    @property
+    def body_force_to_rhs(self) -> sp.csr_matrix:
+        """Operator mapping per-element body-force density to the reduced RHS.
+
+        Shape is `(ndof_reduced, 2 * nelem)`. Entries have units `[volume]`.
+        """
+
+        return self._cached_csr_export("_body_force_to_rhs_cache", self._backend.body_force_to_rhs_csr)
+
+    @property
+    def pressure_to_rhs(self) -> sp.csr_matrix:
+        """Operator mapping scalar pressure amplitudes to the reduced RHS.
+
+        Shape is `(ndof_reduced, n_pressure_faces)`. Entries have units `[area]`.
+        """
+
+        return self._cached_csr_export("_pressure_to_rhs_cache", self._backend.pressure_to_rhs_csr)
+
+    @property
+    def traction_to_rhs(self) -> sp.csr_matrix:
+        """Operator mapping vector traction amplitudes to the reduced RHS.
+
+        Shape is `(ndof_reduced, 2 * n_traction_faces)`. Entries have units `[area]`.
+        """
+
+        return self._cached_csr_export("_traction_to_rhs_cache", self._backend.traction_to_rhs_csr)
+
+    @property
+    def temperature_to_rhs(self) -> sp.csr_matrix:
+        """Operator mapping input-node temperatures to the reduced RHS.
+
+        Shape is `(ndof_reduced, n_temperature_nodes)`. Entries have units
+        `[generalized force / temperature] = [energy / (distance * temperature)]`.
+        """
+
+        return self._cached_temperature_csr_export(
+            "_temperature_to_rhs_cache",
+            self.ndof_reduced,
+            self._backend.temperature_to_rhs_csr,
+        )
+
+    @property
+    def strain_operator(self) -> sp.csr_matrix:
+        """Operator mapping reduced displacement to quadrature-point total strain.
+
+        Shape is `(4 * nelem * nq_per_element, ndof_reduced)`. Entries have units
+        `[strain / displacement] = [1 / length]`.
+        """
+
+        return self._cached_csr_export("_strain_operator_cache", self._backend.strain_operator_csr)
+
+    @property
+    def stress_operator(self) -> sp.csr_matrix:
+        """Operator mapping reduced displacement to quadrature-point stress.
+
+        Shape is `(4 * nelem * nq_per_element, ndof_reduced)`. Entries have units
+        `[stress / displacement] = [pressure / length]`.
+        """
+
+        return self._cached_csr_export("_stress_operator_cache", self._backend.stress_operator_csr)
+
+    @property
+    def thermal_strain_operator(self) -> sp.csr_matrix:
+        """Operator mapping input-node temperatures to quadrature-point thermal strain.
+
+        Shape is `(4 * nelem * nq_per_element, n_temperature_nodes)`. Entries have units
+        `[strain / temperature]`.
+        """
+
+        nrow = self.nelem * self.nq_per_element * 4
+        return self._cached_temperature_csr_export(
+            "_thermal_strain_operator_cache",
+            nrow,
+            self._backend.thermal_strain_operator_csr,
+        )
+
+    @property
+    def thermal_stress_operator(self) -> sp.csr_matrix:
+        """Operator mapping input-node temperatures to quadrature-point thermal stress.
+
+        Shape is `(4 * nelem * nq_per_element, n_temperature_nodes)`. Entries have units
+        `[stress / temperature]`.
+        """
+
+        nrow = self.nelem * self.nq_per_element * 4
+        return self._cached_temperature_csr_export(
+            "_thermal_stress_operator_cache",
+            nrow,
+            self._backend.thermal_stress_operator_csr,
+        )
 
     def element_quadrature(self) -> ElementQuadrature:
         """Return physical quadrature points and mapped weights for each element.
@@ -515,12 +652,11 @@ class Structural2DFEMModel:
             if body_force is None
             else _normalize_body_force(body_force, self.nelem, self.dtype)
         )
-        _, nload = _sparse_shape(self.pressure_to_rhs)
-        pressure_arr = _normalize_pressure_values(pressure_values, nload, self.dtype)
-        _, ntraction_cols = _sparse_shape(self.traction_to_rhs)
+        npressure = int(self.pressure_faces.shape[0])
+        pressure_arr = _normalize_pressure_values(pressure_values, npressure, self.dtype)
         traction_arr = _normalize_traction_values(
             traction_values,
-            ntraction_cols // 2,
+            int(self.traction_faces.shape[0]),
             self.dtype,
         )
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
@@ -1596,8 +1732,8 @@ def assemble_structural_2d(
         par: Whether to assemble the stiffness matrix using threaded element batches.
 
     Returns:
-        Structural2DFEMModel: Reusable model storing the reduced stiffness matrix, sparse load
-        operators, sparse quadrature-recovery operators, and cached solve state.
+        Structural2DFEMModel: Reusable model with backend solve state and lazy Python sparse
+        operator exports.
 
     Raises:
         ValueError: If `quadrature` is unsupported.
@@ -1660,37 +1796,7 @@ def assemble_structural_2d(
         quadrature_code,
         par,
     )
-    stiffness = _csc_matrix_from_binding(backend.stiffness_csc(), dtype)
-    body_force_to_rhs = _csr_matrix_from_binding(backend.body_force_to_rhs_csr(), dtype)
-    pressure_to_rhs = _csr_matrix_from_binding(backend.pressure_to_rhs_csr(), dtype)
-    traction_to_rhs = _csr_matrix_from_binding(backend.traction_to_rhs_csr(), dtype)
-    analysis_temperature_to_rhs = _csr_matrix_from_binding(backend.temperature_to_rhs_csr(), dtype)
-    strain_operator = _csr_matrix_from_binding(backend.strain_operator_csr(), dtype)
-    stress_operator = _csr_matrix_from_binding(backend.stress_operator_csr(), dtype)
-    analysis_thermal_strain_operator = _csr_matrix_from_binding(
-        backend.thermal_strain_operator_csr(),
-        dtype,
-    )
-    analysis_thermal_stress_operator = _csr_matrix_from_binding(
-        backend.thermal_stress_operator_csr(),
-        dtype,
-    )
-    if thermal_material_table_arr is None:
-        temperature_to_rhs = sp.csr_matrix((int(backend.ndof_reduced), 0), dtype=dtype)
-        thermal_strain_operator = sp.csr_matrix((_sparse_shape(strain_operator)[0], 0), dtype=dtype)
-        thermal_stress_operator = sp.csr_matrix((_sparse_shape(stress_operator)[0], 0), dtype=dtype)
-        n_temperature_nodes = 0
-    else:
-        if elevated is None:
-            temperature_to_rhs = analysis_temperature_to_rhs
-            thermal_strain_operator = analysis_thermal_strain_operator
-            thermal_stress_operator = analysis_thermal_stress_operator
-        else:
-            temperature_elevation = _temperature_elevation_operator(elevated, dtype)
-            temperature_to_rhs = _to_csr_matrix(analysis_temperature_to_rhs @ temperature_elevation)
-            thermal_strain_operator = _to_csr_matrix(analysis_thermal_strain_operator @ temperature_elevation)
-            thermal_stress_operator = _to_csr_matrix(analysis_thermal_stress_operator @ temperature_elevation)
-        n_temperature_nodes = nodes_arr.shape[0]
+    n_temperature_nodes = 0 if thermal_material_table_arr is None else nodes_arr.shape[0]
 
     model = Structural2DFEMModel(
         backend=backend,
@@ -1705,20 +1811,11 @@ def assemble_structural_2d(
         formulation=normalized_formulation,
         thickness=thickness_value,
         element_type=normalized_element_type,
-        stiffness=stiffness,
-        body_force_to_rhs=body_force_to_rhs,
-        pressure_to_rhs=pressure_to_rhs,
-        traction_to_rhs=traction_to_rhs,
-        temperature_to_rhs=_to_csr_matrix(temperature_to_rhs),
         constant_rhs=np.asarray(backend.constant_rhs(), dtype=dtype),
         quadrature_points=np.asarray(
             backend.quadrature_points_flat(),
             dtype=dtype,
         ).reshape(analysis_elements.shape[0], int(backend.nq_per_element), 2),
-        strain_operator=strain_operator,
-        stress_operator=stress_operator,
-        thermal_strain_operator=_to_csr_matrix(thermal_strain_operator),
-        thermal_stress_operator=_to_csr_matrix(thermal_stress_operator),
         strain_constant=np.asarray(backend.strain_constant(), dtype=dtype),
         stress_constant=np.asarray(backend.stress_constant(), dtype=dtype),
         thermal_strain_constant=np.asarray(backend.thermal_strain_constant(), dtype=dtype),

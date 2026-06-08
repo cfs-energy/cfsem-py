@@ -125,10 +125,15 @@ pub struct QuadratureFieldOperators<F: Real> {
 /// Canonical CSR operator parts with strictly increasing column indices in each row.
 #[derive(Debug, Clone)]
 pub struct CsrOperatorParts<F: Real> {
+    /// Number of matrix rows.
     pub nrow: usize,
+    /// Number of matrix columns.
     pub ncol: usize,
+    /// CSR row offsets with length `nrow + 1`.
     pub row_ptr: Vec<usize>,
+    /// Column index for each stored value.
     pub col_idx: Vec<usize>,
+    /// Nonzero values in row-major CSR order.
     pub vals: Vec<F>,
 }
 
@@ -141,6 +146,7 @@ struct CsrPartsBuilder<F: Real> {
 }
 
 impl<F: Real> CsrPartsBuilder<F> {
+    /// Start a CSR builder whose rows must be appended in increasing row order.
     fn new(nrow: usize, ncol: usize) -> Self {
         let mut row_ptr = Vec::with_capacity(nrow + 1);
         row_ptr.push(0);
@@ -153,6 +159,11 @@ impl<F: Real> CsrPartsBuilder<F> {
         }
     }
 
+    /// Sort, coalesce, and append one row of `(column, value)` entries.
+    ///
+    /// Recovery assembly naturally emits a small unsorted row from local shape-function
+    /// contributions.  Canonicalizing one row at a time avoids a global triplet sort and makes the
+    /// finished parts directly suitable for faer's CSR constructor.
     fn push_canonical_row(&mut self, entries: &mut Vec<(usize, F)>) {
         entries.sort_unstable_by_key(|(col, _)| *col);
         let mut pending: Option<(usize, F)> = None;
@@ -183,10 +194,12 @@ impl<F: Real> CsrPartsBuilder<F> {
         self.push_empty_row();
     }
 
+    /// Append a row with no stored entries.
     fn push_empty_row(&mut self) {
         self.row_ptr.push(self.col_idx.len());
     }
 
+    /// Finish the builder after exactly `nrow` rows have been appended.
     fn finish(self) -> CsrOperatorParts<F> {
         debug_assert_eq!(self.row_ptr.len(), self.nrow + 1);
         CsrOperatorParts {
@@ -202,16 +215,27 @@ impl<F: Real> CsrPartsBuilder<F> {
 /// Reduced-space quadrature recovery operators in direct CSR form.
 #[derive(Debug, Clone)]
 pub struct ReducedQuadratureFieldOperators<F: Real> {
+    /// Quadrature-point coordinates `(r, z)` in element-major order.
     pub points: Vec<[F; 2]>,
+    /// Reduced displacement-to-strain operator.
     pub strain_operator: CsrOperatorParts<F>,
+    /// Reduced displacement-to-stress operator.
     pub stress_operator: CsrOperatorParts<F>,
+    /// Input-temperature-to-thermal-strain operator.
     pub thermal_strain_operator: CsrOperatorParts<F>,
+    /// Input-temperature-to-thermal-stress operator.
     pub thermal_stress_operator: CsrOperatorParts<F>,
+    /// Strain contribution from prescribed displacement DOFs.
     pub strain_constant: Vec<F>,
+    /// Stress contribution from prescribed displacement DOFs.
     pub stress_constant: Vec<F>,
+    /// Thermal strain contribution from material reference temperatures.
     pub thermal_strain_constant: Vec<F>,
+    /// Thermal stress contribution from material reference temperatures.
     pub thermal_stress_constant: Vec<F>,
+    /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
+    /// Number of nodal temperature inputs, or zero when no thermal material table is present.
     pub ntemp: usize,
 }
 
@@ -296,6 +320,8 @@ fn append_reduced_displacement_entry<F: Real>(
     global_to_reduced: &[usize],
     fixed_lookup: &[Option<F>],
 ) {
+    // Fixed displacement columns are eliminated from the operator and folded into the additive
+    // recovery constant. Free columns are remapped into reduced-system column indices.
     if value == F::zero() {
         return;
     }
@@ -308,6 +334,8 @@ fn append_reduced_displacement_entry<F: Real>(
 }
 
 fn append_temperature_entry<F: Real>(entries: &mut Vec<(usize, F)>, col: usize, value: F) {
+    // Temperature is not part of the structural Dirichlet reduction, so thermal recovery columns
+    // remain indexed by the input temperature node.
     if value != F::zero() {
         entries.push((col, value));
     }
@@ -318,6 +346,9 @@ fn concat_csr_chunks<F: Real>(
     nrow: usize,
     ncol: usize,
 ) -> CsrOperatorParts<F> {
+    // Each chunk covers a contiguous element range and therefore a contiguous row range.  The
+    // per-row column order is already canonical, so concatenation only needs to offset row
+    // pointers by the number of stored entries seen so far.
     let nnz = chunks.iter().map(|chunk| chunk.vals.len()).sum::<usize>();
     let mut row_ptr = Vec::with_capacity(nrow + 1);
     let mut col_idx = Vec::with_capacity(nnz);
@@ -347,6 +378,8 @@ fn concat_reduced_quadrature_chunks<F: Real>(
     ndof_reduced: usize,
     n_temperature_nodes: usize,
 ) -> ReducedQuadratureFieldOperators<F> {
+    // Reduced recovery chunks are independent by quadrature row.  Constants and points concatenate
+    // in the same row order as the CSR chunks, preserving element-major quadrature ordering.
     let total_points = chunks.iter().map(|chunk| chunk.points.len()).sum::<usize>();
     let nrow = total_points * 4;
 

@@ -27,7 +27,10 @@ pub const MU_0: f64 = 0.999_999_999_87 * core::f64::consts::PI * 4e-7; // [H/m]
 /// (H/m) Recurring constant multiple of `mu_0`
 pub const MU0_OVER_4PI: f64 = MU_0 / (4.0 * core::f64::consts::PI);
 
-/// Chunk size for parallelism
+/// Chunk size for Rayon-parallel FEM assembly loops.
+///
+/// The heuristic aims for one chunk per physical core.  It intentionally returns at least one so
+/// small meshes keep the same code path without special-case empty chunk handling.
 pub(crate) fn chunksize(nelem: usize) -> usize {
     let ncores = std::thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
@@ -39,6 +42,9 @@ pub(crate) fn chunksize(nelem: usize) -> usize {
 }
 
 /// Contiguous half-open ranges covering `0..len`.
+///
+/// The returned ranges preserve source ordering, which lets callers concatenate independently
+/// assembled chunks without reindexing rows or columns.
 pub(crate) fn ranges_for_len(len: usize, chunk: usize) -> Vec<(usize, usize)> {
     let mut ranges = Vec::with_capacity(len.div_ceil(chunk));
     let mut start = 0;

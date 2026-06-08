@@ -407,6 +407,14 @@ class Structural2DFEMModel:
         return self._input_elements
 
     def _temperature_elevation(self) -> sp.csr_matrix:
+        """Return the cached input-to-analysis temperature elevation operator.
+
+        Corner-node quad9 inputs are elevated inside the Rust backend before assembly, while the
+        Python API still accepts temperatures on the original input nodes.  This operator bridges
+        those two spaces for exported scipy operators.  It is cached because the input mesh and
+        inferred analysis mesh are immutable for the lifetime of the model.
+        """
+
         elevated = self._elevated
         assert elevated is not None, "temperature elevation is available only for inferred quad9 meshes"
         cache = self._temperature_elevation_cache
@@ -416,6 +424,12 @@ class Structural2DFEMModel:
         return cache
 
     def _cached_csc_export(self, attr: str, export: Callable[[], Any]) -> sp.csc_matrix:
+        """Export one Rust-owned CSC operator to scipy on first access.
+
+        The model is treated as immutable after assembly, so the cached scipy matrix remains valid
+        for every later access to the corresponding read-only property.
+        """
+
         cache = getattr(self, attr)
         if cache is None:
             cache = _csc_matrix_from_binding(export(), self.dtype)
@@ -423,6 +437,8 @@ class Structural2DFEMModel:
         return cast(sp.csc_matrix, cache)
 
     def _cached_csr_export(self, attr: str, export: Callable[[], Any]) -> sp.csr_matrix:
+        """Export one Rust-owned CSR operator to scipy on first access."""
+
         cache = getattr(self, attr)
         if cache is None:
             cache = _csr_matrix_from_binding(export(), self.dtype)
@@ -435,6 +451,13 @@ class Structural2DFEMModel:
         nrow: int,
         export: Callable[[], Any],
     ) -> sp.csr_matrix:
+        """Export a temperature-indexed CSR operator, including empty and elevated cases.
+
+        Models without thermal materials expose zero-column operators for shape consistency.
+        Inferred quad9 meshes export analysis-node operators from Rust, then postmultiply by the
+        cached elevation operator so the public scipy matrix acts on the original input nodes.
+        """
+
         cache = getattr(self, attr)
         if cache is not None:
             return cast(sp.csr_matrix, cache)

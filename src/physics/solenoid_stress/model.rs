@@ -1484,6 +1484,11 @@ fn reduce_square_triplets<F: Real>(
 }
 
 /// Reduce, sort, and coalesce each stiffness chunk independently.
+///
+/// Each Rayon worker returns full-system triplets for a disjoint element range.  Reduction can
+/// still create duplicate `(row, col)` entries inside a chunk, so this function canonicalizes each
+/// chunk before the final k-way merge.  The Dirichlet RHS offsets are accumulated per chunk to
+/// avoid shared mutable state during the parallel pass.
 fn reduce_sort_stiffness_chunks<F: Real>(
     chunks: Vec<StiffnessTriplets<F>>,
     global_to_reduced: &[usize],
@@ -1643,14 +1648,20 @@ fn csc_from_triplets<F: Real>(
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct TripletCursor {
+    /// Current triplet column in a sorted chunk.
     col: usize,
+    /// Current triplet row in a sorted chunk.
     row: usize,
+    /// Index of the source chunk in the outer chunk slice.
     chunk: usize,
+    /// Index of the current triplet inside that source chunk.
     index: usize,
 }
 
 impl Ord for TripletCursor {
     fn cmp(&self, other: &Self) -> Ordering {
+        // `BinaryHeap` is a max-heap, so reverse the ordering to pop the smallest `(col, row)`
+        // cursor first during the k-way merge.
         other
             .col
             .cmp(&self.col)
@@ -1667,16 +1678,24 @@ impl PartialOrd for TripletCursor {
 }
 
 struct CscPartsBuilder<F: Real> {
+    /// Number of matrix rows.
     nrow: usize,
+    /// Number of matrix columns.
     ncol: usize,
+    /// CSC column offsets under construction.
     col_ptr: Vec<usize>,
+    /// Row index for each stored value.
     row_idx: Vec<usize>,
+    /// Nonzero values in column-major CSC order.
     vals: Vec<F>,
+    /// First column whose pointer has not yet been finalized.
     next_col: usize,
+    /// Most recent sorted entry, held back so duplicates can be coalesced before writing.
     pending: Option<Triplet<usize, usize, F>>,
 }
 
 impl<F: Real> CscPartsBuilder<F> {
+    /// Start a CSC builder that accepts triplets sorted by `(column, row)`.
     fn new(nrow: usize, ncol: usize, capacity: usize) -> Self {
         let mut col_ptr = Vec::with_capacity(ncol + 1);
         col_ptr.push(0);
@@ -1691,6 +1710,7 @@ impl<F: Real> CscPartsBuilder<F> {
         }
     }
 
+    /// Append one sorted triplet, coalescing duplicates and skipping exact zeros.
     fn push_sorted(&mut self, triplet: Triplet<usize, usize, F>) {
         debug_assert!(triplet.row < self.nrow);
         debug_assert!(triplet.col < self.ncol);
@@ -1710,6 +1730,7 @@ impl<F: Real> CscPartsBuilder<F> {
         }
     }
 
+    /// Finalize pending entries and close all remaining column pointers.
     fn finish(mut self) -> (Vec<usize>, Vec<usize>, Vec<F>) {
         if let Some(current) = self.pending.take() {
             self.push_entry(current);
@@ -1722,6 +1743,7 @@ impl<F: Real> CscPartsBuilder<F> {
         (self.col_ptr, self.row_idx, self.vals)
     }
 
+    /// Write one already coalesced CSC entry and fill empty-column pointers before it.
     fn push_entry(&mut self, entry: Triplet<usize, usize, F>) {
         while self.next_col < entry.col {
             self.col_ptr.push(self.row_idx.len());
@@ -1753,6 +1775,8 @@ fn merge_sorted_triplet_chunks_to_csc<F: Real>(
     let capacity = chunks.iter().map(Vec::len).sum::<usize>();
     let mut builder = CscPartsBuilder::new(nrow, ncol, capacity);
     let mut heap = BinaryHeap::with_capacity(chunks.len());
+    // Seed the heap with the first triplet from each sorted chunk.  Every pop advances only that
+    // source chunk, giving a k-way merge without flattening and sorting all triplets again.
     for (chunk_index, chunk) in chunks.iter().enumerate() {
         if let Some(first) = chunk.first() {
             heap.push(TripletCursor {

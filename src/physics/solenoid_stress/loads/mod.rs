@@ -66,6 +66,9 @@ fn concat_sparse_operators<F: Real>(
     ncol: usize,
     capacity: usize,
 ) -> SparseOperator<F> {
+    // Worker chunks are emitted in the same order as `ranges_for_len`, so appending their triplet
+    // buffers preserves the serial load ordering.  Any duplicate structural rows are handled later
+    // by the CSR reduction/compression code.
     let mut rows = Vec::with_capacity(capacity);
     let mut cols = Vec::with_capacity(capacity);
     let mut vals = Vec::with_capacity(capacity);
@@ -93,6 +96,9 @@ fn concat_thermal_load_operators<F: Real>(
     ncol: usize,
     capacity: usize,
 ) -> ThermalLoadOperator<F> {
+    // Thermal loads have one sparse temperature operator plus a dense reference-temperature RHS.
+    // The sparse part can be concatenated like other loads; the dense offsets must be summed over
+    // all worker chunks because every element contributes to the same global RHS vector.
     let mut reference_rhs = vec![F::zero(); ndof];
     let sparse_chunks = chunks
         .into_iter()
@@ -114,6 +120,8 @@ fn collect_sparse_operator_chunks<F: Real>(
     len: usize,
     build: impl Fn(usize, usize) -> Result<SparseOperator<F>, String> + Sync,
 ) -> Result<Vec<SparseOperator<F>>, String> {
+    // Parallel wrappers differ only in the unit of work they split over: elements for body force
+    // and thermal loads, boundary load records for pressure and traction.
     ranges_for_len(len, chunksize(len))
         .into_par_iter()
         .map(|(start, end)| build(start, end))
@@ -124,6 +132,8 @@ fn collect_thermal_load_operator_chunks<F: Real>(
     len: usize,
     build: impl Fn(usize, usize) -> Result<ThermalLoadOperator<F>, String> + Sync,
 ) -> Result<Vec<ThermalLoadOperator<F>>, String> {
+    // Keep thermal chunks typed separately so the reference-temperature RHS cannot be accidentally
+    // discarded by a generic sparse-only collector.
     ranges_for_len(len, chunksize(len))
         .into_par_iter()
         .map(|(start, end)| build(start, end))

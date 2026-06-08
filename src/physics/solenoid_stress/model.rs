@@ -7,7 +7,7 @@ use deimos_numerics::sparse::{
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::linalg::solvers::Lu;
-use faer::sparse::{SparseColMat, SparseColMatRef, SparseRowMat, Triplet};
+use faer::sparse::{SparseColMat, SparseColMatRef, SparseRowMat, SymbolicSparseRowMat, Triplet};
 use faer::{Accum, Col, Par};
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
@@ -20,13 +20,35 @@ use crate::physics::solenoid_stress::convenience::{
 };
 use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
-    SparseOperator, body_force_operator_for_family, pressure_operator_for_family,
-    temperature_operator_for_family, traction_operator_for_family,
+    SparseOperator, body_force_operator_for_family, body_force_operator_for_family_par,
+    pressure_operator_for_family, pressure_operator_for_family_par,
+    temperature_operator_for_family, temperature_operator_for_family_par,
+    traction_operator_for_family, traction_operator_for_family_par,
 };
-use crate::physics::solenoid_stress::recovery::quadrature_field_operators_for_family;
+use crate::physics::solenoid_stress::recovery::{
+    CsrOperatorParts, reduced_quadrature_field_operators_for_family,
+    reduced_quadrature_field_operators_for_family_par,
+};
 use crate::physics::solenoid_stress::types::{
     PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad, dof_per_element,
 };
+
+macro_rules! timed_stage {
+    ($enabled:expr, $label:expr, $body:block) => {{
+        if $enabled {
+            let start = std::time::Instant::now();
+            let result = (|| $body)();
+            eprintln!(
+                "[cfsem timing] {}: {:.6} s",
+                $label,
+                start.elapsed().as_secs_f64()
+            );
+            result
+        } else {
+            (|| $body)()
+        }
+    }};
+}
 
 mod private {
     use super::{CompensatedField, Real};
@@ -1144,6 +1166,16 @@ fn build_model_for_family<
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
+    let timing_enabled = std::env::var_os("CFSEM_TIMING").is_some();
+    let total_start = std::time::Instant::now();
+    if timing_enabled {
+        eprintln!(
+            "[cfsem timing] rust.build_model.start: nnode={} nelem={} par={}",
+            nodes_rz.len(),
+            elements.len(),
+            par
+        );
+    }
     let mesh = QuadMeshView2d { nodes_rz, elements };
     let ndof_full = nodes_rz.len() * 2;
     let nelem = elements.len();
@@ -1151,41 +1183,55 @@ where
     // live in the constrained reduced system, while `fixed_lookup` carries the prescribed values
     // needed to fold eliminated DOFs back into constant RHS terms.
     let (free_dofs, fixed_dofs, fixed_values, global_to_reduced, fixed_lookup) =
-        reduce_layout(ndof_full, prescribed)?;
+        timed_stage!(timing_enabled, "rust.build_model.reduce_layout", {
+            reduce_layout(ndof_full, prescribed)
+        })?;
     let ndof_reduced = free_dofs.len();
 
     // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
     // This keeps the element kernels simple and pushes all constraint handling into the common
     // reduction helpers below.
-    let stiffness_full = if par {
-        assemble_stiffness_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            material_ids,
-            material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-        )?
-    } else {
-        assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            material_ids,
-            material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-        )?
-    };
+    let stiffness_full = timed_stage!(timing_enabled, "rust.build_model.stiffness_triplets", {
+        if par {
+            assemble_stiffness_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
+            )
+        } else {
+            assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
+            )
+        }
+    })?;
     let mut constant_rhs = vec![F::zero(); ndof_reduced];
-    let stiffness_reduced = reduce_square_triplets(
-        &stiffness_full.rows,
-        &stiffness_full.cols,
-        &stiffness_full.vals,
-        &global_to_reduced,
-        &fixed_lookup,
-        &mut constant_rhs,
-    );
-    let stiffness = csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)?;
+    let stiffness_reduced = timed_stage!(timing_enabled, "rust.build_model.reduce_stiffness", {
+        reduce_square_triplets(
+            &stiffness_full.rows,
+            &stiffness_full.cols,
+            &stiffness_full.vals,
+            &global_to_reduced,
+            &fixed_lookup,
+            &mut constant_rhs,
+        )
+    });
+    let stiffness = timed_stage!(timing_enabled, "rust.build_model.stiffness_csc", {
+        csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)
+    })?;
+    if timing_enabled {
+        eprintln!(
+            "[cfsem timing] rust.build_model.stiffness_csc.nnz: {}",
+            stiffness.val().len()
+        );
+    }
     // Most load operators are naturally assembled in full nodal space and then reduced by
     // dropping rows associated with prescribed displacement DOFs.
     let reduce_operator =
@@ -1196,7 +1242,140 @@ where
             // Thermal loading has both a temperature-dependent operator and a constant offset from
             // per-material reference temperature, so keep those two pieces separate until the end.
             let thermal_full =
-                temperature_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                timed_stage!(timing_enabled, "rust.build_model.thermal_operator", {
+                    if par {
+                        temperature_operator_for_family_par::<
+                            F,
+                            Family,
+                            NODES_PER_ELEMENT,
+                            DOF_PER_ELEMENT,
+                        >(
+                            mesh,
+                            material_ids,
+                            material_table,
+                            thermal_material_table,
+                            material_orientation_angles,
+                            formulation,
+                            quadrature,
+                        )
+                    } else {
+                        temperature_operator_for_family::<
+                            F,
+                            Family,
+                            NODES_PER_ELEMENT,
+                            DOF_PER_ELEMENT,
+                        >(
+                            mesh,
+                            material_ids,
+                            material_table,
+                            thermal_material_table,
+                            material_orientation_angles,
+                            formulation,
+                            quadrature,
+                        )
+                    }
+                })?;
+            let reduced_reference_rhs = timed_stage!(
+                timing_enabled,
+                "rust.build_model.thermal_reference_reduce",
+                {
+                    free_dofs
+                        .iter()
+                        .map(|&dof| thermal_full.reference_rhs[dof])
+                        .collect::<Vec<_>>()
+                }
+            );
+            (
+                timed_stage!(timing_enabled, "rust.build_model.thermal_reduce_csr", {
+                    reduce_operator(thermal_full.temperature_to_rhs)
+                })?,
+                reduced_reference_rhs,
+                nodes_rz.len(),
+            )
+        } else {
+            (
+                timed_stage!(timing_enabled, "rust.build_model.empty_temperature_csr", {
+                    csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())
+                })?,
+                vec![F::zero(); ndof_reduced],
+                0,
+            )
+        };
+    // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
+    // reference-temperature contribution so all load-independent terms live in one vector.
+    timed_stage!(timing_enabled, "rust.build_model.constant_rhs_merge", {
+        for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
+            *dst = *dst + *src;
+        }
+    });
+
+    // These operators are stored directly in reduced row space because `build_rhs(...)` and
+    // `solve(...)` work only with the constrained system.
+    let body_force_to_rhs =
+        timed_stage!(timing_enabled, "rust.build_model.body_force_operator", {
+            let operator = if par {
+                body_force_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    mesh,
+                    formulation,
+                    quadrature,
+                )?
+            } else {
+                body_force_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    mesh,
+                    formulation,
+                    quadrature,
+                )?
+            };
+            reduce_operator(operator)
+        })?;
+    let pressure_to_rhs = timed_stage!(timing_enabled, "rust.build_model.pressure_operator", {
+        let operator = if par {
+            pressure_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                pressure_faces,
+                formulation,
+                quadrature,
+            )?
+        } else {
+            pressure_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                pressure_faces,
+                formulation,
+                quadrature,
+            )?
+        };
+        reduce_operator(operator)
+    })?;
+    let traction_to_rhs = timed_stage!(timing_enabled, "rust.build_model.traction_operator", {
+        let operator = if par {
+            traction_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                traction_faces,
+                formulation,
+                quadrature,
+            )?
+        } else {
+            traction_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                traction_faces,
+                formulation,
+                quadrature,
+            )?
+        };
+        reduce_operator(operator)
+    })?;
+
+    // Recovery rows are disjoint by quadrature point, so assemble directly in reduced CSR form
+    // instead of building full-space triplets and reducing them afterwards.
+    let recovery_reduced =
+        timed_stage!(timing_enabled, "rust.build_model.recovery_reduced_csr", {
+            if par {
+                reduced_quadrature_field_operators_for_family_par::<
+                    F,
+                    Family,
+                    NODES_PER_ELEMENT,
+                    DOF_PER_ELEMENT,
+                >(
                     mesh,
                     material_ids,
                     material_table,
@@ -1204,97 +1383,48 @@ where
                     material_orientation_angles,
                     formulation,
                     quadrature,
-                )?;
-            let reduced_reference_rhs = free_dofs
-                .iter()
-                .map(|&dof| thermal_full.reference_rhs[dof])
-                .collect::<Vec<_>>();
-            (
-                reduce_operator(thermal_full.temperature_to_rhs)?,
-                reduced_reference_rhs,
-                nodes_rz.len(),
-            )
-        } else {
-            (
-                csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
-                vec![F::zero(); ndof_reduced],
-                0,
-            )
-        };
-    // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
-    // reference-temperature contribution so all load-independent terms live in one vector.
-    for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
-        *dst = *dst + *src;
-    }
+                    &global_to_reduced,
+                    &fixed_lookup,
+                    ndof_reduced,
+                )
+            } else {
+                reduced_quadrature_field_operators_for_family::<
+                    F,
+                    Family,
+                    NODES_PER_ELEMENT,
+                    DOF_PER_ELEMENT,
+                >(
+                    mesh,
+                    material_ids,
+                    material_table,
+                    thermal_material_table,
+                    material_orientation_angles,
+                    formulation,
+                    quadrature,
+                    &global_to_reduced,
+                    &fixed_lookup,
+                    ndof_reduced,
+                )
+            }
+        })?;
+    let strain_operator = timed_stage!(timing_enabled, "rust.build_model.strain_csr_wrap", {
+        csr_from_canonical_parts(recovery_reduced.strain_operator)
+    });
+    let stress_operator = timed_stage!(timing_enabled, "rust.build_model.stress_csr_wrap", {
+        csr_from_canonical_parts(recovery_reduced.stress_operator)
+    });
+    let thermal_strain_operator = timed_stage!(
+        timing_enabled,
+        "rust.build_model.thermal_strain_csr_wrap",
+        { csr_from_canonical_parts(recovery_reduced.thermal_strain_operator) }
+    );
+    let thermal_stress_operator = timed_stage!(
+        timing_enabled,
+        "rust.build_model.thermal_stress_csr_wrap",
+        { csr_from_canonical_parts(recovery_reduced.thermal_stress_operator) }
+    );
 
-    // These operators are stored directly in reduced row space because `build_rhs(...)` and
-    // `solve(...)` work only with the constrained system.
-    let body_force_to_rhs = reduce_operator(body_force_operator_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(mesh, formulation, quadrature)?)?;
-    let pressure_to_rhs = reduce_operator(pressure_operator_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(mesh, pressure_faces, formulation, quadrature)?)?;
-    let traction_to_rhs = reduce_operator(traction_operator_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(mesh, traction_faces, formulation, quadrature)?)?;
-
-    // Recovery is assembled in full displacement space, then its displacement columns are reduced.
-    // Eliminated fixed-displacement columns become constant strain/stress offsets.
-    let recovery_full =
-        quadrature_field_operators_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            material_ids,
-            material_table,
-            thermal_material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-        )?;
-    let nq_row_count = recovery_full.points.len() * 4;
-    let (strain_operator, strain_constant) = reduce_column_operator(
-        recovery_full.strain_rows,
-        recovery_full.strain_cols,
-        recovery_full.strain_vals,
-        nq_row_count,
-        ndof_reduced,
-        &global_to_reduced,
-        &fixed_lookup,
-    )?;
-    let (stress_operator, stress_constant) = reduce_column_operator(
-        recovery_full.stress_rows,
-        recovery_full.stress_cols,
-        recovery_full.stress_vals,
-        nq_row_count,
-        ndof_reduced,
-        &global_to_reduced,
-        &fixed_lookup,
-    )?;
-    let thermal_strain_operator = csr_from_parts(
-        recovery_full.points.len() * 4,
-        recovery_full.ntemp,
-        recovery_full.thermal_strain_rows,
-        recovery_full.thermal_strain_cols,
-        recovery_full.thermal_strain_vals,
-    )?;
-    let thermal_stress_operator = csr_from_parts(
-        recovery_full.points.len() * 4,
-        recovery_full.ntemp,
-        recovery_full.thermal_stress_rows,
-        recovery_full.thermal_stress_cols,
-        recovery_full.thermal_stress_vals,
-    )?;
-
-    Ok(Structural2dModel {
+    let model = Structural2dModel {
         stiffness,
         body_force_to_rhs,
         pressure_to_rhs,
@@ -1302,16 +1432,16 @@ where
         temperature_to_rhs,
         constant_rhs,
         recovery: ReducedRecoveryOperators {
-            points: recovery_full.points,
+            points: recovery_reduced.points,
             strain_operator,
             stress_operator,
             thermal_strain_operator,
             thermal_stress_operator,
-            strain_constant,
-            stress_constant,
-            thermal_strain_constant: recovery_full.thermal_strain_constant,
-            thermal_stress_constant: recovery_full.thermal_stress_constant,
-            nq_per_element: recovery_full.nq_per_element,
+            strain_constant: recovery_reduced.strain_constant,
+            stress_constant: recovery_reduced.stress_constant,
+            thermal_strain_constant: recovery_reduced.thermal_strain_constant,
+            thermal_stress_constant: recovery_reduced.thermal_stress_constant,
+            nq_per_element: recovery_reduced.nq_per_element,
             n_temperature_nodes,
         },
         pressure_faces: pressure_faces
@@ -1341,7 +1471,14 @@ where
         equilibrated_stiffness: None,
         equilibrated_diagonal_preconditioner: None,
         previous_bicgstab_solution: None,
-    })
+    };
+    if timing_enabled {
+        eprintln!(
+            "[cfsem timing] rust.build_model.total: {:.6} s",
+            total_start.elapsed().as_secs_f64()
+        );
+    }
+    Ok(model)
 }
 
 /// Partition full-system displacement DOFs into free and fixed sets for Dirichlet reduction.
@@ -1466,38 +1603,6 @@ fn reduce_row_operator_to_csr<F: Real>(
     )
 }
 
-/// Reduce a full-space recovery operator by eliminating fixed displacement columns.
-///
-/// The eliminated fixed-value contributions are accumulated into the returned constant vector.
-fn reduce_column_operator<F: Real>(
-    rows: Vec<usize>,
-    cols: Vec<usize>,
-    vals: Vec<F>,
-    nrow: usize,
-    ncol: usize,
-    global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
-) -> Result<(SparseRowMat<usize, F>, Vec<F>), String> {
-    let mut constant = vec![F::zero(); nrow];
-    let mut reduced_rows = Vec::with_capacity(vals.len());
-    let mut reduced_cols = Vec::with_capacity(vals.len());
-    let mut reduced_vals = Vec::with_capacity(vals.len());
-    for ((row, col), value) in rows.into_iter().zip(cols.into_iter()).zip(vals.into_iter()) {
-        let reduced_col = global_to_reduced[col];
-        if reduced_col != usize::MAX {
-            reduced_rows.push(row);
-            reduced_cols.push(reduced_col);
-            reduced_vals.push(value);
-        } else if let Some(fixed_value) = fixed_lookup[col] {
-            constant[row] = constant[row] + value * fixed_value;
-        }
-    }
-    Ok((
-        csr_from_parts(nrow, ncol, reduced_rows, reduced_cols, reduced_vals)?,
-        constant,
-    ))
-}
-
 /// Compress triplet data into a CSR matrix with checked shape and index validity.
 fn csr_from_parts<F: Real>(
     nrow: usize,
@@ -1514,6 +1619,18 @@ fn csr_from_parts<F: Real>(
         .collect::<Vec<_>>();
     SparseRowMat::try_new_from_triplets(nrow, ncol, &triplets)
         .map_err(|err| format!("failed to build CSR operator: {err:?}"))
+}
+
+/// Build a CSR matrix from already canonical row pointers, column indices, and values.
+fn csr_from_canonical_parts<F: Real>(parts: CsrOperatorParts<F>) -> SparseRowMat<usize, F> {
+    let symbolic = SymbolicSparseRowMat::new_checked(
+        parts.nrow,
+        parts.ncol,
+        parts.row_ptr,
+        None,
+        parts.col_idx,
+    );
+    SparseRowMat::new(symbolic, parts.vals)
 }
 
 /// Compress stiffness triplets into the CSC format used by the cached sparse LU factorization.

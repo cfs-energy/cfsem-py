@@ -1,3 +1,6 @@
+use rayon::prelude::*;
+
+use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{
     accumulate_b_transpose_vector, build_b_matrix, constitutive_times_strain,
@@ -12,7 +15,7 @@ use crate::physics::solenoid_stress::types::{
     validate_element_material_inputs,
 };
 
-use super::{SparseOperator, ThermalLoadOperator};
+use super::{SparseOperator, ThermalLoadOperator, concat_thermal_load_operators, ranges_for_len};
 
 /// Local thermal operator data for one element.
 ///
@@ -125,6 +128,93 @@ where
         material_ids,
         material_orientation_angles,
     )?;
+    temperature_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        mesh,
+        material_ids,
+        material_table,
+        thermal_material_table,
+        material_orientation_angles,
+        formulation,
+        quadrature,
+        0,
+        mesh.num_elements(),
+    )
+}
+
+/// Assemble thermal load operators using element ranges split across Rayon workers.
+pub(crate) fn temperature_operator_for_family_par<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    material_ids: &[usize],
+    material_table: &[[[F; 4]; 4]],
+    thermal_material_table: &[ThermalMaterial<F>],
+    material_orientation_angles: Option<&[F]>,
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+) -> Result<ThermalLoadOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
+    let nelem = mesh.num_elements();
+    let ranges = ranges_for_len(nelem, chunksize(nelem));
+    let chunks = ranges
+        .into_par_iter()
+        .map(|(start, end)| {
+            temperature_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                thermal_material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
+                start,
+                end,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(concat_thermal_load_operators(
+        chunks,
+        mesh.num_nodes() * 2,
+        mesh.num_nodes(),
+        nelem * DOF_PER_ELEMENT * NODES_PER_ELEMENT,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn temperature_operator_range_for_family<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    material_ids: &[usize],
+    material_table: &[[[F; 4]; 4]],
+    thermal_material_table: &[ThermalMaterial<F>],
+    material_orientation_angles: Option<&[F]>,
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+    element_start: usize,
+    element_end: usize,
+) -> Result<ThermalLoadOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     let ndof = mesh.num_nodes() * 2;
     let ncol = mesh.num_nodes();
     let mut rows = Vec::new();
@@ -132,7 +222,7 @@ where
     let mut vals = Vec::new();
     let mut reference_rhs = vec![F::zero(); ndof];
 
-    for element_index in 0..mesh.num_elements() {
+    for element_index in element_start..element_end {
         let coords = mesh.element_coords(element_index)?;
         let nodes = mesh.element_nodes(element_index)?;
         let material_id = material_ids[element_index];

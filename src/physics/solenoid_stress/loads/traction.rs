@@ -1,3 +1,6 @@
+use rayon::prelude::*;
+
+use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{FaceSample, validate_structural_2d_mesh};
@@ -5,7 +8,7 @@ use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, Structural2dFormulation, TractionLoad, local_dofs, scatter_local_matrix,
 };
 
-use super::SparseOperator;
+use super::{SparseOperator, concat_sparse_operators, ranges_for_len};
 
 /// Build the local dense traction operator for one loaded face.
 ///
@@ -74,13 +77,87 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
+    traction_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        mesh,
+        traction_faces,
+        formulation,
+        quadrature,
+        0,
+        traction_faces.len(),
+    )
+}
+
+/// Assemble traction loads using traction-face ranges split across Rayon workers.
+pub(crate) fn traction_operator_for_family_par<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    traction_faces: &[TractionLoad],
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    let ranges = ranges_for_len(traction_faces.len(), chunksize(traction_faces.len()));
+    let chunks = ranges
+        .into_par_iter()
+        .map(|(start, end)| {
+            traction_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                traction_faces,
+                formulation,
+                quadrature,
+                start,
+                end,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(concat_sparse_operators(
+        chunks,
+        mesh.num_nodes() * 2,
+        2 * traction_faces.len(),
+        traction_faces.len() * DOF_PER_ELEMENT * 2,
+    ))
+}
+
+fn traction_operator_range_for_family<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    traction_faces: &[TractionLoad],
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+    load_start: usize,
+    load_end: usize,
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     let ndof = mesh.num_nodes() * 2;
     let ncol = 2 * traction_faces.len();
-    let mut rows = Vec::with_capacity(traction_faces.len() * DOF_PER_ELEMENT * 2);
-    let mut cols = Vec::with_capacity(traction_faces.len() * DOF_PER_ELEMENT * 2);
-    let mut vals = Vec::with_capacity(traction_faces.len() * DOF_PER_ELEMENT * 2);
+    let nloads = load_end - load_start;
+    let mut rows = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
+    let mut cols = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
+    let mut vals = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
 
-    for (load_index, load) in traction_faces.iter().enumerate() {
+    for (load_index, load) in traction_faces
+        .iter()
+        .enumerate()
+        .skip(load_start)
+        .take(nloads)
+    {
         if load.element >= mesh.num_elements() {
             return Err(format!(
                 "traction load references element {}, but mesh has only {} elements",

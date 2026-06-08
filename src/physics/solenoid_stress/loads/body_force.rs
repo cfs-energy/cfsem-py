@@ -1,3 +1,6 @@
+use rayon::prelude::*;
+
+use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
@@ -5,7 +8,7 @@ use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, Structural2dFormulation, local_dofs, scatter_local_matrix,
 };
 
-use super::SparseOperator;
+use super::{SparseOperator, concat_sparse_operators, ranges_for_len};
 
 /// Build the local dense body-force operator for one element.
 ///
@@ -73,13 +76,79 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
+    body_force_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        mesh,
+        formulation,
+        quadrature,
+        0,
+        mesh.num_elements(),
+    )
+}
+
+/// Assemble the global body-force-to-RHS operator using element ranges split across Rayon workers.
+pub(crate) fn body_force_operator_for_family_par<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    let nelem = mesh.num_elements();
+    let ranges = ranges_for_len(nelem, chunksize(nelem));
+    let chunks = ranges
+        .into_par_iter()
+        .map(|(start, end)| {
+            body_force_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                formulation,
+                quadrature,
+                start,
+                end,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(concat_sparse_operators(
+        chunks,
+        mesh.num_nodes() * 2,
+        2 * nelem,
+        nelem * DOF_PER_ELEMENT * 2,
+    ))
+}
+
+fn body_force_operator_range_for_family<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+    element_start: usize,
+    element_end: usize,
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     let ndof = mesh.num_nodes() * 2;
     let ncol = 2 * mesh.num_elements();
-    let mut rows = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * 2);
-    let mut cols = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * 2);
-    let mut vals = Vec::with_capacity(mesh.num_elements() * DOF_PER_ELEMENT * 2);
+    let nelem = element_end - element_start;
+    let mut rows = Vec::with_capacity(nelem * DOF_PER_ELEMENT * 2);
+    let mut cols = Vec::with_capacity(nelem * DOF_PER_ELEMENT * 2);
+    let mut vals = Vec::with_capacity(nelem * DOF_PER_ELEMENT * 2);
 
-    for element_index in 0..mesh.num_elements() {
+    for element_index in element_start..element_end {
         let coords = mesh.element_coords(element_index)?;
         let nodes = mesh.element_nodes(element_index)?;
         let samples = Family::volume_samples::<F>(&coords, quadrature)?;

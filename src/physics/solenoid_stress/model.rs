@@ -1,5 +1,8 @@
 //! Reduced-model assembly and solve wrapper for the 2D structural FEM.
 
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+
 use deimos_numerics::sparse::{
     BiCGSTAB, BiCGSTABSolveError, CompensatedField, DiagonalPrecond, Equilibration,
     EquilibrationParams, Precond, SparseMatVec,
@@ -7,25 +10,35 @@ use deimos_numerics::sparse::{
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::linalg::solvers::Lu;
-use faer::sparse::{SparseColMat, SparseColMatRef, SparseRowMat, Triplet};
+use faer::sparse::{
+    SparseColMat, SparseColMatRef, SparseRowMat, SymbolicSparseColMat, SymbolicSparseRowMat,
+    Triplet,
+};
 use faer::{Accum, Col, Par};
+use rayon::prelude::*;
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::{
-    assemble_stiffness_for_family, assemble_stiffness_for_family_par,
+    assemble_stiffness_chunks_for_family_par, assemble_stiffness_for_family,
 };
 use crate::physics::solenoid_stress::convenience::{
     QuadratureFieldSamples, Structural2dElementMeasures, Structural2dElementQuadrature,
 };
 use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
-    SparseOperator, body_force_operator_for_family, pressure_operator_for_family,
-    temperature_operator_for_family, traction_operator_for_family,
+    SparseOperator, body_force_operator_for_family, body_force_operator_for_family_par,
+    pressure_operator_for_family, pressure_operator_for_family_par,
+    temperature_operator_for_family, temperature_operator_for_family_par,
+    traction_operator_for_family, traction_operator_for_family_par,
 };
-use crate::physics::solenoid_stress::recovery::quadrature_field_operators_for_family;
+use crate::physics::solenoid_stress::recovery::{
+    CsrOperatorParts, reduced_quadrature_field_operators_for_family,
+    reduced_quadrature_field_operators_for_family_par,
+};
 use crate::physics::solenoid_stress::types::{
-    PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad, dof_per_element,
+    PressureLoad, Real, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
+    dof_per_element,
 };
 
 mod private {
@@ -1154,73 +1167,101 @@ where
         reduce_layout(ndof_full, prescribed)?;
     let ndof_reduced = free_dofs.len();
 
-    // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
-    // This keeps the element kernels simple and pushes all constraint handling into the common
-    // reduction helpers below.
-    let stiffness_full = if par {
-        assemble_stiffness_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            material_ids,
-            material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-        )?
-    } else {
-        assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            material_ids,
-            material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-        )?
-    };
     let mut constant_rhs = vec![F::zero(); ndof_reduced];
-    let stiffness_reduced = reduce_square_triplets(
-        &stiffness_full.rows,
-        &stiffness_full.cols,
-        &stiffness_full.vals,
-        &global_to_reduced,
-        &fixed_lookup,
-        &mut constant_rhs,
-    );
-    let stiffness = csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)?;
+    // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
+    // The parallel path keeps worker chunks separate so each chunk can be reduced and sorted
+    // independently before a k-way merge builds the canonical CSC structure.
+    let stiffness = if par {
+        let stiffness_chunks = assemble_stiffness_chunks_for_family_par::<
+            F,
+            Family,
+            NODES_PER_ELEMENT,
+            DOF_PER_ELEMENT,
+        >(
+            mesh,
+            material_ids,
+            material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+        )?;
+        let sorted_chunks = reduce_sort_stiffness_chunks(
+            stiffness_chunks,
+            &global_to_reduced,
+            &fixed_lookup,
+            &mut constant_rhs,
+            ndof_reduced,
+        );
+        csc_from_sorted_triplet_chunks(ndof_reduced, ndof_reduced, sorted_chunks)
+    } else {
+        let stiffness_full =
+            assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
+            )?;
+        let stiffness_reduced = reduce_square_triplets(
+            &stiffness_full.rows,
+            &stiffness_full.cols,
+            &stiffness_full.vals,
+            &global_to_reduced,
+            &fixed_lookup,
+            &mut constant_rhs,
+        );
+        csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)
+    };
     // Most load operators are naturally assembled in full nodal space and then reduced by
     // dropping rows associated with prescribed displacement DOFs.
     let reduce_operator =
         |operator| reduce_row_operator_to_csr(operator, &global_to_reduced, ndof_reduced);
 
-    let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) =
-        if let Some(thermal_material_table) = thermal_material_table {
-            // Thermal loading has both a temperature-dependent operator and a constant offset from
-            // per-material reference temperature, so keep those two pieces separate until the end.
-            let thermal_full =
-                temperature_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                    mesh,
-                    material_ids,
-                    material_table,
-                    thermal_material_table,
-                    material_orientation_angles,
-                    formulation,
-                    quadrature,
-                )?;
-            let reduced_reference_rhs = free_dofs
-                .iter()
-                .map(|&dof| thermal_full.reference_rhs[dof])
-                .collect::<Vec<_>>();
-            (
-                reduce_operator(thermal_full.temperature_to_rhs)?,
-                reduced_reference_rhs,
-                nodes_rz.len(),
+    let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) = if let Some(
+        thermal_material_table,
+    ) =
+        thermal_material_table
+    {
+        // Thermal loading has both a temperature-dependent operator and a constant offset from
+        // per-material reference temperature, so keep those two pieces separate until the end.
+        let thermal_full = if par {
+            temperature_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                thermal_material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
             )
         } else {
-            (
-                csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
-                vec![F::zero(); ndof_reduced],
-                0,
+            temperature_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                thermal_material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
             )
-        };
+        }?;
+        let reduced_reference_rhs = free_dofs
+            .iter()
+            .map(|&dof| thermal_full.reference_rhs[dof])
+            .collect::<Vec<_>>();
+        (
+            reduce_operator(thermal_full.temperature_to_rhs)?,
+            reduced_reference_rhs,
+            nodes_rz.len(),
+        )
+    } else {
+        (
+            csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
+            vec![F::zero(); ndof_reduced],
+            0,
+        )
+    };
     // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
     // reference-temperature contribution so all load-independent terms live in one vector.
     for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
@@ -1229,29 +1270,62 @@ where
 
     // These operators are stored directly in reduced row space because `build_rhs(...)` and
     // `solve(...)` work only with the constrained system.
-    let body_force_to_rhs = reduce_operator(body_force_operator_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(mesh, formulation, quadrature)?)?;
-    let pressure_to_rhs = reduce_operator(pressure_operator_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(mesh, pressure_faces, formulation, quadrature)?)?;
-    let traction_to_rhs = reduce_operator(traction_operator_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(mesh, traction_faces, formulation, quadrature)?)?;
+    let body_force_operator = if par {
+        body_force_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            formulation,
+            quadrature,
+        )?
+    } else {
+        body_force_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            formulation,
+            quadrature,
+        )?
+    };
+    let body_force_to_rhs = reduce_operator(body_force_operator)?;
+    let pressure_operator = if par {
+        pressure_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            pressure_faces,
+            formulation,
+            quadrature,
+        )?
+    } else {
+        pressure_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            pressure_faces,
+            formulation,
+            quadrature,
+        )?
+    };
+    let pressure_to_rhs = reduce_operator(pressure_operator)?;
+    let traction_operator = if par {
+        traction_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            traction_faces,
+            formulation,
+            quadrature,
+        )?
+    } else {
+        traction_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            traction_faces,
+            formulation,
+            quadrature,
+        )?
+    };
+    let traction_to_rhs = reduce_operator(traction_operator)?;
 
-    // Recovery is assembled in full displacement space, then its displacement columns are reduced.
-    // Eliminated fixed-displacement columns become constant strain/stress offsets.
-    let recovery_full =
-        quadrature_field_operators_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    // Recovery rows are disjoint by quadrature point, so assemble directly in reduced CSR form
+    // instead of building full-space triplets and reducing them afterwards.
+    let recovery_reduced = if par {
+        reduced_quadrature_field_operators_for_family_par::<
+            F,
+            Family,
+            NODES_PER_ELEMENT,
+            DOF_PER_ELEMENT,
+        >(
             mesh,
             material_ids,
             material_table,
@@ -1259,40 +1333,30 @@ where
             material_orientation_angles,
             formulation,
             quadrature,
-        )?;
-    let nq_row_count = recovery_full.points.len() * 4;
-    let (strain_operator, strain_constant) = reduce_column_operator(
-        recovery_full.strain_rows,
-        recovery_full.strain_cols,
-        recovery_full.strain_vals,
-        nq_row_count,
-        ndof_reduced,
-        &global_to_reduced,
-        &fixed_lookup,
-    )?;
-    let (stress_operator, stress_constant) = reduce_column_operator(
-        recovery_full.stress_rows,
-        recovery_full.stress_cols,
-        recovery_full.stress_vals,
-        nq_row_count,
-        ndof_reduced,
-        &global_to_reduced,
-        &fixed_lookup,
-    )?;
-    let thermal_strain_operator = csr_from_parts(
-        recovery_full.points.len() * 4,
-        recovery_full.ntemp,
-        recovery_full.thermal_strain_rows,
-        recovery_full.thermal_strain_cols,
-        recovery_full.thermal_strain_vals,
-    )?;
-    let thermal_stress_operator = csr_from_parts(
-        recovery_full.points.len() * 4,
-        recovery_full.ntemp,
-        recovery_full.thermal_stress_rows,
-        recovery_full.thermal_stress_cols,
-        recovery_full.thermal_stress_vals,
-    )?;
+            &global_to_reduced,
+            &fixed_lookup,
+            ndof_reduced,
+        )
+    } else {
+        reduced_quadrature_field_operators_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            material_ids,
+            material_table,
+            thermal_material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+            &global_to_reduced,
+            &fixed_lookup,
+            ndof_reduced,
+        )
+    }?;
+    let strain_operator = csr_from_canonical_parts(recovery_reduced.strain_operator);
+    let stress_operator = csr_from_canonical_parts(recovery_reduced.stress_operator);
+    let thermal_strain_operator =
+        csr_from_canonical_parts(recovery_reduced.thermal_strain_operator);
+    let thermal_stress_operator =
+        csr_from_canonical_parts(recovery_reduced.thermal_stress_operator);
 
     Ok(Structural2dModel {
         stiffness,
@@ -1302,16 +1366,16 @@ where
         temperature_to_rhs,
         constant_rhs,
         recovery: ReducedRecoveryOperators {
-            points: recovery_full.points,
+            points: recovery_reduced.points,
             strain_operator,
             stress_operator,
             thermal_strain_operator,
             thermal_stress_operator,
-            strain_constant,
-            stress_constant,
-            thermal_strain_constant: recovery_full.thermal_strain_constant,
-            thermal_stress_constant: recovery_full.thermal_stress_constant,
-            nq_per_element: recovery_full.nq_per_element,
+            strain_constant: recovery_reduced.strain_constant,
+            stress_constant: recovery_reduced.stress_constant,
+            thermal_strain_constant: recovery_reduced.thermal_strain_constant,
+            thermal_stress_constant: recovery_reduced.thermal_stress_constant,
+            nq_per_element: recovery_reduced.nq_per_element,
             n_temperature_nodes,
         },
         pressure_faces: pressure_faces
@@ -1419,6 +1483,79 @@ fn reduce_square_triplets<F: Real>(
     triplets
 }
 
+/// Reduce, sort, and coalesce each stiffness chunk independently.
+///
+/// Each Rayon worker returns full-system triplets for a disjoint element range.  Reduction can
+/// still create duplicate `(row, col)` entries inside a chunk, so this function canonicalizes each
+/// chunk before the final k-way merge.  The Dirichlet RHS offsets are accumulated per chunk to
+/// avoid shared mutable state during the parallel pass.
+fn reduce_sort_stiffness_chunks<F: Real>(
+    chunks: Vec<StiffnessTriplets<F>>,
+    global_to_reduced: &[usize],
+    fixed_lookup: &[Option<F>],
+    constant_rhs: &mut [F],
+    ndof_reduced: usize,
+) -> Vec<Vec<Triplet<usize, usize, F>>> {
+    let reduced_chunks = chunks
+        .into_par_iter()
+        .map(|chunk| {
+            let mut local_rhs = vec![F::zero(); ndof_reduced];
+            let triplets = reduce_square_triplets(
+                &chunk.rows,
+                &chunk.cols,
+                &chunk.vals,
+                global_to_reduced,
+                fixed_lookup,
+                &mut local_rhs,
+            );
+            (sort_coalesce_triplets(triplets), local_rhs)
+        })
+        .collect::<Vec<_>>();
+
+    let mut sorted_chunks = Vec::with_capacity(reduced_chunks.len());
+    for (triplets, local_rhs) in reduced_chunks {
+        for (dst, src) in constant_rhs.iter_mut().zip(local_rhs) {
+            *dst = *dst + src;
+        }
+        sorted_chunks.push(triplets);
+    }
+    sorted_chunks
+}
+
+/// Return triplets in canonical CSC order with duplicate `(column, row)` entries coalesced.
+fn sort_coalesce_triplets<F: Real>(
+    mut triplets: Vec<Triplet<usize, usize, F>>,
+) -> Vec<Triplet<usize, usize, F>> {
+    triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
+
+    let mut coalesced = Vec::with_capacity(triplets.len());
+    let mut pending: Option<Triplet<usize, usize, F>> = None;
+    for triplet in triplets {
+        if triplet.val == F::zero() {
+            continue;
+        }
+        match pending {
+            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
+                current.val = current.val + triplet.val;
+                pending = Some(current);
+            }
+            Some(current) => {
+                if current.val != F::zero() {
+                    coalesced.push(current);
+                }
+                pending = Some(triplet);
+            }
+            None => pending = Some(triplet),
+        }
+    }
+    if let Some(current) = pending
+        && current.val != F::zero()
+    {
+        coalesced.push(current);
+    }
+    coalesced
+}
+
 /// Drop rows belonging to fixed displacement DOFs from one full-system load operator.
 fn reduce_row_operator<F: Real>(
     operator: SparseOperator<F>,
@@ -1466,38 +1603,6 @@ fn reduce_row_operator_to_csr<F: Real>(
     )
 }
 
-/// Reduce a full-space recovery operator by eliminating fixed displacement columns.
-///
-/// The eliminated fixed-value contributions are accumulated into the returned constant vector.
-fn reduce_column_operator<F: Real>(
-    rows: Vec<usize>,
-    cols: Vec<usize>,
-    vals: Vec<F>,
-    nrow: usize,
-    ncol: usize,
-    global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
-) -> Result<(SparseRowMat<usize, F>, Vec<F>), String> {
-    let mut constant = vec![F::zero(); nrow];
-    let mut reduced_rows = Vec::with_capacity(vals.len());
-    let mut reduced_cols = Vec::with_capacity(vals.len());
-    let mut reduced_vals = Vec::with_capacity(vals.len());
-    for ((row, col), value) in rows.into_iter().zip(cols.into_iter()).zip(vals.into_iter()) {
-        let reduced_col = global_to_reduced[col];
-        if reduced_col != usize::MAX {
-            reduced_rows.push(row);
-            reduced_cols.push(reduced_col);
-            reduced_vals.push(value);
-        } else if let Some(fixed_value) = fixed_lookup[col] {
-            constant[row] = constant[row] + value * fixed_value;
-        }
-    }
-    Ok((
-        csr_from_parts(nrow, ncol, reduced_rows, reduced_cols, reduced_vals)?,
-        constant,
-    ))
-}
-
 /// Compress triplet data into a CSR matrix with checked shape and index validity.
 fn csr_from_parts<F: Real>(
     nrow: usize,
@@ -1516,14 +1621,203 @@ fn csr_from_parts<F: Real>(
         .map_err(|err| format!("failed to build CSR operator: {err:?}"))
 }
 
+/// Build a CSR matrix from already canonical row pointers, column indices, and values.
+fn csr_from_canonical_parts<F: Real>(parts: CsrOperatorParts<F>) -> SparseRowMat<usize, F> {
+    let symbolic = SymbolicSparseRowMat::new_checked(
+        parts.nrow,
+        parts.ncol,
+        parts.row_ptr,
+        None,
+        parts.col_idx,
+    );
+    SparseRowMat::new(symbolic, parts.vals)
+}
+
 /// Compress stiffness triplets into the CSC format used by the cached sparse LU factorization.
 fn csc_from_triplets<F: Real>(
     nrow: usize,
     ncol: usize,
+    mut triplets: Vec<Triplet<usize, usize, F>>,
+) -> SparseColMat<usize, F> {
+    triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
+
+    let (col_ptr, row_idx, vals) = pack_sorted_triplets_to_csc(nrow, ncol, triplets);
+    let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
+    SparseColMat::new(symbolic, vals)
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct TripletCursor {
+    /// Current triplet column in a sorted chunk.
+    col: usize,
+    /// Current triplet row in a sorted chunk.
+    row: usize,
+    /// Index of the source chunk in the outer chunk slice.
+    chunk: usize,
+    /// Index of the current triplet inside that source chunk.
+    index: usize,
+}
+
+impl Ord for TripletCursor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // `BinaryHeap` is a max-heap, so reverse the ordering to pop the smallest `(col, row)`
+        // cursor first during the k-way merge.
+        other
+            .col
+            .cmp(&self.col)
+            .then_with(|| other.row.cmp(&self.row))
+            .then_with(|| other.chunk.cmp(&self.chunk))
+            .then_with(|| other.index.cmp(&self.index))
+    }
+}
+
+impl PartialOrd for TripletCursor {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+struct CscPartsBuilder<F: Real> {
+    /// Number of matrix rows.
+    nrow: usize,
+    /// Number of matrix columns.
+    ncol: usize,
+    /// CSC column offsets under construction.
+    col_ptr: Vec<usize>,
+    /// Row index for each stored value.
+    row_idx: Vec<usize>,
+    /// Nonzero values in column-major CSC order.
+    vals: Vec<F>,
+    /// First column whose pointer has not yet been finalized.
+    next_col: usize,
+    /// Most recent sorted entry, held back so duplicates can be coalesced before writing.
+    pending: Option<Triplet<usize, usize, F>>,
+}
+
+impl<F: Real> CscPartsBuilder<F> {
+    /// Start a CSC builder that accepts triplets sorted by `(column, row)`.
+    fn new(nrow: usize, ncol: usize, capacity: usize) -> Self {
+        let mut col_ptr = Vec::with_capacity(ncol + 1);
+        col_ptr.push(0);
+        Self {
+            nrow,
+            ncol,
+            col_ptr,
+            row_idx: Vec::with_capacity(capacity),
+            vals: Vec::with_capacity(capacity),
+            next_col: 0,
+            pending: None,
+        }
+    }
+
+    /// Append one sorted triplet, coalescing duplicates and skipping exact zeros.
+    fn push_sorted(&mut self, triplet: Triplet<usize, usize, F>) {
+        debug_assert!(triplet.row < self.nrow);
+        debug_assert!(triplet.col < self.ncol);
+        if triplet.val == F::zero() {
+            return;
+        }
+        match self.pending {
+            Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
+                current.val = current.val + triplet.val;
+                self.pending = Some(current);
+            }
+            Some(current) => {
+                self.push_entry(current);
+                self.pending = Some(triplet);
+            }
+            None => self.pending = Some(triplet),
+        }
+    }
+
+    /// Finalize pending entries and close all remaining column pointers.
+    fn finish(mut self) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+        if let Some(current) = self.pending.take() {
+            self.push_entry(current);
+        }
+        while self.next_col < self.ncol {
+            self.col_ptr.push(self.row_idx.len());
+            self.next_col += 1;
+        }
+        debug_assert_eq!(self.col_ptr.len(), self.ncol + 1);
+        (self.col_ptr, self.row_idx, self.vals)
+    }
+
+    /// Write one already coalesced CSC entry and fill empty-column pointers before it.
+    fn push_entry(&mut self, entry: Triplet<usize, usize, F>) {
+        while self.next_col < entry.col {
+            self.col_ptr.push(self.row_idx.len());
+            self.next_col += 1;
+        }
+        if entry.val != F::zero() {
+            self.row_idx.push(entry.row);
+            self.vals.push(entry.val);
+        }
+    }
+}
+
+/// Merge already sorted/coalesced triplet chunks into the CSC format used by sparse LU.
+fn csc_from_sorted_triplet_chunks<F: Real>(
+    nrow: usize,
+    ncol: usize,
+    chunks: Vec<Vec<Triplet<usize, usize, F>>>,
+) -> SparseColMat<usize, F> {
+    let (col_ptr, row_idx, vals) = merge_sorted_triplet_chunks_to_csc(nrow, ncol, &chunks);
+    let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
+    SparseColMat::new(symbolic, vals)
+}
+
+fn merge_sorted_triplet_chunks_to_csc<F: Real>(
+    nrow: usize,
+    ncol: usize,
+    chunks: &[Vec<Triplet<usize, usize, F>>],
+) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+    let capacity = chunks.iter().map(Vec::len).sum::<usize>();
+    let mut builder = CscPartsBuilder::new(nrow, ncol, capacity);
+    let mut heap = BinaryHeap::with_capacity(chunks.len());
+    // Seed the heap with the first triplet from each sorted chunk.  Every pop advances only that
+    // source chunk, giving a k-way merge without flattening and sorting all triplets again.
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        if let Some(first) = chunk.first() {
+            heap.push(TripletCursor {
+                col: first.col,
+                row: first.row,
+                chunk: chunk_index,
+                index: 0,
+            });
+        }
+    }
+
+    while let Some(cursor) = heap.pop() {
+        let triplet = chunks[cursor.chunk][cursor.index];
+        builder.push_sorted(triplet);
+
+        let next_index = cursor.index + 1;
+        if next_index < chunks[cursor.chunk].len() {
+            let next = chunks[cursor.chunk][next_index];
+            heap.push(TripletCursor {
+                col: next.col,
+                row: next.row,
+                chunk: cursor.chunk,
+                index: next_index,
+            });
+        }
+    }
+
+    builder.finish()
+}
+
+/// Pack triplets sorted by `(column, row)` into canonical CSC arrays.
+fn pack_sorted_triplets_to_csc<F: Real>(
+    nrow: usize,
+    ncol: usize,
     triplets: Vec<Triplet<usize, usize, F>>,
-) -> Result<SparseColMat<usize, F>, String> {
-    SparseColMat::try_new_from_triplets(nrow, ncol, &triplets)
-        .map_err(|err| format!("failed to build CSC operator: {err:?}"))
+) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+    let mut builder = CscPartsBuilder::new(nrow, ncol, triplets.len());
+    for triplet in triplets {
+        builder.push_sorted(triplet);
+    }
+    builder.finish()
 }
 
 /// Apply one reduced CSR load operator to a dense load-amplitude vector and accumulate the result.

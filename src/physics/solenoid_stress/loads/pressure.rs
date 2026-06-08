@@ -5,7 +5,7 @@ use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, local_dofs, scatter_local_vector,
 };
 
-use super::SparseOperator;
+use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operators};
 
 /// Build the local dense pressure-load vector for one loaded face.
 ///
@@ -69,13 +69,83 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
+    pressure_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        mesh,
+        pressure_faces,
+        formulation,
+        quadrature,
+        0,
+        pressure_faces.len(),
+    )
+}
+
+/// Assemble pressure loads using pressure-face ranges split across Rayon workers.
+pub(crate) fn pressure_operator_for_family_par<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    pressure_faces: &[PressureLoad],
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    let chunks = collect_sparse_operator_chunks(pressure_faces.len(), |start, end| {
+        pressure_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            pressure_faces,
+            formulation,
+            quadrature,
+            start,
+            end,
+        )
+    })?;
+
+    Ok(concat_sparse_operators(
+        chunks,
+        mesh.num_nodes() * 2,
+        pressure_faces.len(),
+        pressure_faces.len() * DOF_PER_ELEMENT,
+    ))
+}
+
+fn pressure_operator_range_for_family<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    pressure_faces: &[PressureLoad],
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+    load_start: usize,
+    load_end: usize,
+) -> Result<SparseOperator<F>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     let ndof = mesh.num_nodes() * 2;
     let ncol = pressure_faces.len();
-    let mut rows = Vec::with_capacity(pressure_faces.len() * DOF_PER_ELEMENT);
-    let mut cols = Vec::with_capacity(pressure_faces.len() * DOF_PER_ELEMENT);
-    let mut vals = Vec::with_capacity(pressure_faces.len() * DOF_PER_ELEMENT);
+    let nloads = load_end - load_start;
+    let mut rows = Vec::with_capacity(nloads * DOF_PER_ELEMENT);
+    let mut cols = Vec::with_capacity(nloads * DOF_PER_ELEMENT);
+    let mut vals = Vec::with_capacity(nloads * DOF_PER_ELEMENT);
 
-    for (load_index, load) in pressure_faces.iter().enumerate() {
+    for (load_index, load) in pressure_faces
+        .iter()
+        .enumerate()
+        .skip(load_start)
+        .take(nloads)
+    {
         if load.element >= mesh.num_elements() {
             return Err(format!(
                 "pressure load references element {}, but mesh has only {} elements",

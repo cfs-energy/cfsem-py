@@ -9,7 +9,10 @@
 //! each stored coefficient has units
 //! `[output units / input units]`.
 
+use rayon::prelude::*;
+
 use crate::physics::solenoid_stress::types::Real;
+use crate::{chunksize, ranges_for_len};
 
 mod body_force;
 mod pressure;
@@ -57,7 +60,87 @@ pub struct ThermalLoadOperator<F: Real> {
     pub reference_rhs: Vec<F>,
 }
 
-pub(crate) use body_force::body_force_operator_for_family;
-pub(crate) use pressure::pressure_operator_for_family;
-pub(crate) use thermal::temperature_operator_for_family;
-pub(crate) use traction::traction_operator_for_family;
+fn concat_sparse_operators<F: Real>(
+    chunks: Vec<SparseOperator<F>>,
+    nrow: usize,
+    ncol: usize,
+    capacity: usize,
+) -> SparseOperator<F> {
+    // Worker chunks are emitted in the same order as `ranges_for_len`, so appending their triplet
+    // buffers preserves the serial load ordering.  Any duplicate structural rows are handled later
+    // by the CSR reduction/compression code.
+    let mut rows = Vec::with_capacity(capacity);
+    let mut cols = Vec::with_capacity(capacity);
+    let mut vals = Vec::with_capacity(capacity);
+
+    for chunk in chunks {
+        debug_assert_eq!(chunk.nrow, nrow);
+        debug_assert_eq!(chunk.ncol, ncol);
+        rows.extend(chunk.rows);
+        cols.extend(chunk.cols);
+        vals.extend(chunk.vals);
+    }
+
+    SparseOperator {
+        rows,
+        cols,
+        vals,
+        nrow,
+        ncol,
+    }
+}
+
+fn concat_thermal_load_operators<F: Real>(
+    chunks: Vec<ThermalLoadOperator<F>>,
+    ndof: usize,
+    ncol: usize,
+    capacity: usize,
+) -> ThermalLoadOperator<F> {
+    // Thermal loads have one sparse temperature operator plus a dense reference-temperature RHS.
+    // The sparse part can be concatenated like other loads; the dense offsets must be summed over
+    // all worker chunks because every element contributes to the same global RHS vector.
+    let mut reference_rhs = vec![F::zero(); ndof];
+    let sparse_chunks = chunks
+        .into_iter()
+        .map(|chunk| {
+            for (dst, src) in reference_rhs.iter_mut().zip(chunk.reference_rhs) {
+                *dst = *dst + src;
+            }
+            chunk.temperature_to_rhs
+        })
+        .collect::<Vec<_>>();
+
+    ThermalLoadOperator {
+        temperature_to_rhs: concat_sparse_operators(sparse_chunks, ndof, ncol, capacity),
+        reference_rhs,
+    }
+}
+
+fn collect_sparse_operator_chunks<F: Real>(
+    len: usize,
+    build: impl Fn(usize, usize) -> Result<SparseOperator<F>, String> + Sync,
+) -> Result<Vec<SparseOperator<F>>, String> {
+    // Parallel wrappers differ only in the unit of work they split over: elements for body force
+    // and thermal loads, boundary load records for pressure and traction.
+    ranges_for_len(len, chunksize(len))
+        .into_par_iter()
+        .map(|(start, end)| build(start, end))
+        .collect()
+}
+
+fn collect_thermal_load_operator_chunks<F: Real>(
+    len: usize,
+    build: impl Fn(usize, usize) -> Result<ThermalLoadOperator<F>, String> + Sync,
+) -> Result<Vec<ThermalLoadOperator<F>>, String> {
+    // Keep thermal chunks typed separately so the reference-temperature RHS cannot be accidentally
+    // discarded by a generic sparse-only collector.
+    ranges_for_len(len, chunksize(len))
+        .into_par_iter()
+        .map(|(start, end)| build(start, end))
+        .collect()
+}
+
+pub(crate) use body_force::{body_force_operator_for_family, body_force_operator_for_family_par};
+pub(crate) use pressure::{pressure_operator_for_family, pressure_operator_for_family_par};
+pub(crate) use thermal::{temperature_operator_for_family, temperature_operator_for_family_par};
+pub(crate) use traction::{traction_operator_for_family, traction_operator_for_family_par};

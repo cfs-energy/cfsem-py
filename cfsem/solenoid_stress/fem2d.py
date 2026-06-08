@@ -105,12 +105,6 @@ def _to_csc_matrix(matrix: Any) -> sp.csc_matrix:
     return cast(sp.csc_matrix, sp.csc_matrix(matrix))
 
 
-def _sparse_shape(matrix: Any) -> tuple[int, int]:
-    """Return a concrete 2D sparse shape for pyright and runtime callers."""
-
-    return cast(tuple[int, int], matrix.shape)
-
-
 def _as_float_array(data: Any, dtype: np.dtype[Any]) -> npt.NDArray[np.floating[Any]]:
     """Convert binding output to a NumPy floating array with an explicit static type."""
 
@@ -461,15 +455,12 @@ class Structural2DFEMModel:
         cache = getattr(self, attr)
         if cache is not None:
             return cast(sp.csr_matrix, cache)
-        if self.n_temperature_nodes == 0:
-            cache = sp.csr_matrix((nrow, 0), dtype=self.dtype)
-        else:
-            analysis_operator = _csr_matrix_from_binding(export(), self.dtype)
-            cache = (
-                analysis_operator
-                if self._elevated is None
-                else _to_csr_matrix(analysis_operator @ self._temperature_elevation())
-            )
+        analysis_operator = _csr_matrix_from_binding(export(), self.dtype)
+        cache = (
+            _to_csr_matrix(analysis_operator @ self._temperature_elevation())
+            if self._elevated is not None and self.n_temperature_nodes > 0
+            else analysis_operator
+        )
         setattr(self, attr, cache)
         return cache
 

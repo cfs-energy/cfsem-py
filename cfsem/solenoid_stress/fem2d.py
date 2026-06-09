@@ -324,12 +324,6 @@ class Structural2DFEMModel:
         self._thermal_stress_operator_cache: sp.csr_matrix | None = None
 
     @property
-    def dtype(self) -> np.dtype[Any]:
-        """Floating dtype used by structural FEM arrays and outputs."""
-
-        return _FLOAT_DTYPE
-
-    @property
     def ndof(self) -> int:
         """Compatibility alias for `ndof_full`, the full displacement-vector length `(ndof_full,)`."""
 

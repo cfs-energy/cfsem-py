@@ -220,6 +220,9 @@ class QuadMeshQuery:
 class Structural2DFEMModel:
     """Reusable 2D structural FEM model with sparse operators and reduced solve state.
 
+    Structural FEM numeric arrays are stored as `float64`. Floating inputs with lower precision are
+    accepted at the Python boundary and normalized before they enter the Rust backend.
+
     The sparse operators are exported from the Rust backend lazily:
     - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
       map load amplitudes to the reduced structural right-hand side,
@@ -326,7 +329,7 @@ class Structural2DFEMModel:
 
     @property
     def dtype(self) -> np.dtype[Any]:
-        """Floating dtype used by all exported operators, arrays, and convenience-method outputs."""
+        """Floating dtype used by exported operators, arrays, and convenience-method outputs."""
 
         return self._dtype
 
@@ -1490,7 +1493,7 @@ def assemble_structural_2d(
     Args:
         nodes: Corner-node coordinates with shape `(nnode, 2)`. Coordinates are `(r, z)` for
             `formulation="axisymmetric"` and `(x, y)` for `formulation="plane_strain"`.
-            Units are `[length]`.
+            Units are `[length]`. Floating inputs are normalized to `float64`.
         elements: Connectivity with shape `(nelem, 4)` for `element_type="quad4"`. For
             `element_type="quad9"`, pass either corner-only `(nelem, 4)` connectivity to infer a
             straight-sided quad9 mesh, or explicit `(nelem, 9)` connectivity in local order
@@ -1520,7 +1523,7 @@ def assemble_structural_2d(
 
     Returns:
         Structural2DFEMModel: Reusable model with backend solve state and lazy Python sparse
-        operator exports.
+        operator exports. The model stores floating arrays as `float64`.
 
     Raises:
         ValueError: If `quadrature` is unsupported.
@@ -1766,7 +1769,7 @@ def cfsem_radial_material(
     Args:
         youngs_modulus: Young's modulus with units `[pressure]`.
         poisson_ratio: Poisson ratio with units `[dimensionless]`.
-        dtype: Output floating dtype.
+        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order

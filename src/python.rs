@@ -407,7 +407,7 @@ struct SolenoidStress2dModelF64 {
     inner: physics::solenoid_stress::Structural2dModel,
 }
 
-/// Low-level PyO3 wrapper for the reusable axisymmetric FEM model.
+/// Low-level PyO3 wrapper for the reusable f64 structural 2D FEM model.
 ///
 /// The public Python API lives in `cfsem.solenoid_stress.fem2d`. This wrapper exposes
 /// raw arrays and sparse storage tuples so the higher-level Python module can normalize inputs,

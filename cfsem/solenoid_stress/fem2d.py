@@ -71,7 +71,6 @@ _orthotropic_axisymmetric_thermal_material_f64 = (
 
 ArrayLike = npt.ArrayLike
 _QUAD_FACE_NODE_PAIRS: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 3), (3, 0))
-_FLOAT_DTYPE = np.dtype(np.float64)
 
 
 def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:

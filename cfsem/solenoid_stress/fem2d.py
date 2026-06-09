@@ -1296,7 +1296,6 @@ def pack_material_tables_from_tags(
     material_ids: ArrayLike,
     material_table_by_tag: Mapping[int, ArrayLike],
     thermal_material_table_by_tag: Mapping[int, ArrayLike] | None = None,
-    dtype: npt.DTypeLike | None = None,
 ) -> tuple[
     npt.NDArray[np.uint64],
     npt.NDArray[np.floating[Any]],
@@ -1312,9 +1311,6 @@ def pack_material_tables_from_tags(
             with shape `(5,)` storing `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. Thermal
             expansion coefficients have units `[strain / temperature]` and `T_ref` has units
             `[temperature]`.
-        dtype: Optional output floating dtype. Defaults to the resolved dtype of the provided
-            material rows.
-
     Returns:
         tuple: `(packed_material_ids, packed_material_table, packed_thermal_material_table)` where:
             `packed_material_ids` has shape `(nelem,)`,
@@ -1327,14 +1323,7 @@ def pack_material_tables_from_tags(
     """
 
     assert material_table_by_tag, "material_table_by_tag cannot be empty"
-    resolved_dtype = (
-        np.dtype(dtype)
-        if dtype is not None
-        else _resolve_float_dtype(
-            material_table_by_tag,
-            thermal_material_table_by_tag,
-        )
-    )
+    resolved_dtype = np.dtype(np.float64)
     ids = np.asarray(material_ids, dtype=np.uint64)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
 
@@ -1620,21 +1609,18 @@ def assemble_structural_2d(
 def isotropic_axisymmetric_material(
     youngs_modulus: float,
     poisson_ratio: float,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct the isotropic axisymmetric elastic stress-strain matrix.
 
     Args:
         youngs_modulus: Young's modulus with units `[pressure]`.
         poisson_ratio: Poisson ratio with units `[dimensionless]`.
-        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order
         `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
     """
 
-    _ = dtype
     return _as_float_array(
         _isotropic_axisymmetric_material_f64(youngs_modulus, poisson_ratio),
         np.dtype(np.float64),
@@ -1644,14 +1630,12 @@ def isotropic_axisymmetric_material(
 def isotropic_axisymmetric_thermal_material(
     alpha: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct isotropic thermal-expansion data.
 
     Args:
         alpha: Isotropic thermal expansion coefficient with units `[strain / temperature]`.
         reference_temperature: Stress-free reference temperature with units `[temperature]`.
-        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Thermal material row with shape `(5,)` storing
@@ -1659,7 +1643,6 @@ def isotropic_axisymmetric_thermal_material(
         `[strain / temperature]`; `T_ref` has units `[temperature]`.
     """
 
-    _ = dtype
     return _as_float_array(
         _isotropic_axisymmetric_thermal_material_f64(alpha, reference_temperature),
         np.dtype(np.float64),
@@ -1669,7 +1652,6 @@ def isotropic_axisymmetric_thermal_material(
 def isotropic_plane_strain_material(
     youngs_modulus: float,
     poisson_ratio: float,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct the isotropic plane-strain elastic stress-strain matrix.
 
@@ -1678,7 +1660,6 @@ def isotropic_plane_strain_material(
     by the in-plane strains.
     """
 
-    _ = dtype
     return _as_float_array(
         _isotropic_plane_strain_material_f64(youngs_modulus, poisson_ratio),
         np.dtype(np.float64),
@@ -1688,7 +1669,6 @@ def isotropic_plane_strain_material(
 def isotropic_plane_strain_thermal_material(
     alpha: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct isotropic plane-strain thermal-expansion data.
 
@@ -1696,7 +1676,6 @@ def isotropic_plane_strain_thermal_material(
     coefficients and zero engineering shear expansion.
     """
 
-    _ = dtype
     return _as_float_array(
         _isotropic_plane_strain_thermal_material_f64(alpha, reference_temperature),
         np.dtype(np.float64),
@@ -1708,7 +1687,6 @@ def orthotropic_axisymmetric_thermal_material(
     alpha_z: float,
     alpha_t: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct orthotropic thermal-expansion data.
 
@@ -1717,7 +1695,6 @@ def orthotropic_axisymmetric_thermal_material(
         alpha_z: Axial thermal expansion coefficient with units `[strain / temperature]`.
         alpha_t: Hoop thermal expansion coefficient with units `[strain / temperature]`.
         reference_temperature: Stress-free reference temperature with units `[temperature]`.
-        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Thermal material row with shape `(5,)` storing
@@ -1725,7 +1702,6 @@ def orthotropic_axisymmetric_thermal_material(
         `[strain / temperature]`; `T_ref` has units `[temperature]`.
     """
 
-    _ = dtype
     return _as_float_array(
         _orthotropic_axisymmetric_thermal_material_f64(
             alpha_r,
@@ -1742,7 +1718,6 @@ def orthotropic_plane_strain_thermal_material(
     alpha_y: float,
     alpha_z: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct orthotropic plane-strain thermal-expansion data.
 
@@ -1755,28 +1730,24 @@ def orthotropic_plane_strain_thermal_material(
         alpha_y,
         alpha_z,
         reference_temperature,
-        dtype,
     )
 
 
 def cfsem_radial_material(
     youngs_modulus: float,
     poisson_ratio: float,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct the reduced elastic matrix used by the 1D radial solver.
 
     Args:
         youngs_modulus: Young's modulus with units `[pressure]`.
         poisson_ratio: Poisson ratio with units `[dimensionless]`.
-        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order
         `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
     """
 
-    _ = dtype
     return _as_float_array(
         _cfsem_radial_material_f64(youngs_modulus, poisson_ratio),
         np.dtype(np.float64),

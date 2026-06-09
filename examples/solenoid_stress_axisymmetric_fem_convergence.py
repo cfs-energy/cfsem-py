@@ -257,7 +257,7 @@ def solve_fem_midplane_profile(
     analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
     analysis_elements = elevated.analysis_elements if elevated is not None else elements
     nelem = elements.shape[0]
-    material = cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO, dtype=np.float64)
+    material = cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO)
     prescribed = prescribed_z_dofs(analysis_nodes.shape[0])
     model = assemble_structural_2d(
         nodes=nodes,

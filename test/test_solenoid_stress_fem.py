@@ -597,18 +597,18 @@ def build_multimaterial_checkerboard_case(
     nodes, elements = build_annulus_strip_mesh(ri, ro, height, nr=nr, nz=nz, dtype=dtype)
     material_table = np.asarray(
         [
-            isotropic_axisymmetric_material(205.0e9, 0.28, dtype=dtype),
-            isotropic_axisymmetric_material(145.0e9, 0.32, dtype=dtype),
+            isotropic_axisymmetric_material(205.0e9, 0.28),
+            isotropic_axisymmetric_material(145.0e9, 0.32),
         ],
         dtype=dtype,
     )
     thermal_material_table = np.asarray(
         [
             fem.isotropic_axisymmetric_thermal_material(
-                1.1e-5, thermal_reference_temperatures[0], dtype=dtype
+                1.1e-5, thermal_reference_temperatures[0]
             ),
             fem.isotropic_axisymmetric_thermal_material(
-                1.9e-5, thermal_reference_temperatures[1], dtype=dtype
+                1.9e-5, thermal_reference_temperatures[1]
             ),
         ],
         dtype=dtype,
@@ -840,7 +840,7 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)]),
         quadrature=quadrature,
     )
     measures = model.element_measures()
@@ -874,7 +874,7 @@ def test_body_force_total_matches_requested_total_force(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)]),
         quadrature=quadrature,
     )
     measures = model.element_measures()
@@ -885,7 +885,7 @@ def test_body_force_total_matches_requested_total_force(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)]),
         body_force=density,
         quadrature=quadrature,
     )
@@ -899,11 +899,10 @@ def test_body_force_total_matches_requested_total_force(
 
 def test_model_dtype_resolution_includes_material_tables() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     thermal_material = fem.isotropic_axisymmetric_thermal_material(
         1.1e-5,
         reference_temperature=293.15,
-        dtype=np.float64,
     )
     nodal_temperature = np.linspace(294.0, 301.0, nodes.shape[0], dtype=np.float32)
 
@@ -930,9 +929,9 @@ def test_model_dtype_resolution_includes_material_tables() -> None:
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
 def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
-    material = np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)])
+    material = np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)])
     thermal = np.asarray(
-        [fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15, dtype=dtype)]
+        [fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15)]
     )
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
@@ -1007,8 +1006,8 @@ def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=2, nz=1)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=2, nz=1)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    thermal = fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
+    thermal = fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15)
     model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
@@ -1065,7 +1064,7 @@ def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType,
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=4, nz=2, dtype=dtype)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=4, nz=2)
     pressure_faces = np.vstack([inner_faces, outer_faces])
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
@@ -1121,7 +1120,7 @@ def test_radial_traction_on_outer_face_matches_expected_total_force(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)]),
         body_force=np.array([0.0, 0.0], dtype=dtype),
         traction_faces=outer_faces,
         traction_values=np.array([traction, 0.0], dtype=dtype),
@@ -1148,7 +1147,7 @@ def test_axial_traction_on_top_face_matches_expected_total_force(quadrature: str
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)]),
+        material_table=np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)]),
         body_force=np.array([0.0, 0.0], dtype=dtype),
         traction_faces=top_faces,
         traction_values=np.array([0.0, traction], dtype=dtype),
@@ -1174,7 +1173,7 @@ def test_pressure_matches_equivalent_normal_traction_on_straight_faces(
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=2, nz=1)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=2, nz=1)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
 
     _outer_pressure_model, outer_pressure_rhs = assemble_model_and_rhs(
         nodes=nodes,
@@ -1243,7 +1242,7 @@ def test_zero_surface_traction_matches_natural_free_boundary(
             np.linspace(-1.5e4, 1.5e4, elements.shape[0], dtype=dtype),
         ]
     )
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     prescribed = {1: 0.0}
 
     free_model, free_rhs = assemble_model_and_rhs(
@@ -1281,7 +1280,7 @@ def test_factorized_solve_reuses_stiffness_with_varying_traction(quadrature: str
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=3, nz=2)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     prescribed = prescribed_z_dofs(analysis_node_count_for_element_type(nodes, elements, element_type))
     model = fem.assemble_structural_2d(
         nodes=nodes,
@@ -1339,11 +1338,10 @@ def test_uniform_temperature_recovery_matches_fully_constrained_thermal_stress(
     reference_temperature = 293.15
     delta_temperature = 40.0
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     thermal_material = fem.isotropic_axisymmetric_thermal_material(
         alpha,
         reference_temperature=reference_temperature,
-        dtype=dtype,
     )
     nodal_temperature = np.full(nodes.shape[0], reference_temperature + delta_temperature, dtype=dtype)
     all_fixed = {
@@ -1396,12 +1394,10 @@ def test_linear_radial_temperature_long_cylinder_matches_analytic_midplane_stres
     material = isotropic_axisymmetric_material(
         elasticity_modulus,
         poisson_ratio,
-        dtype=dtype,
     )
     thermal_material = fem.isotropic_axisymmetric_thermal_material(
         alpha,
         reference_temperature=reference_temperature,
-        dtype=dtype,
     )
     nodal_temperature = temperature_inner + (temperature_outer - temperature_inner) * (
         (nodes[:, 0] - ri) / (ro - ri)
@@ -1639,11 +1635,10 @@ def test_quadrature_recovery_splits_total_elastic_and_thermal_strain_consistentl
 ) -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     thermal_material = fem.isotropic_axisymmetric_thermal_material(
         9.0e-6,
         reference_temperature=290.0,
-        dtype=dtype,
     )
     analysis_nnode = analysis_node_count_for_element_type(nodes, elements, element_type)
     displacement = np.linspace(-2.0e-4, 3.0e-4, 2 * analysis_nnode, dtype=dtype)
@@ -1682,7 +1677,7 @@ def test_pressure_vessel_stresses_match_lame_reference(
         ]
     )
 
-    material = cfsem_radial_material(200.0e9, 0.27, dtype=dtype)
+    material = cfsem_radial_material(200.0e9, 0.27)
     prescribed = prescribed_z_dofs(analysis_node_count_for_element_type(nodes, elements, element_type))
     model_fe, rhs = assemble_model_and_rhs(
         nodes=nodes,
@@ -1730,7 +1725,7 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
     pin, pout = 1.5e6, 0.2e6
     nodes, elements = build_annulus_strip_mesh(ri, ro, height=0.1, nr=nr, nz=1, dtype=dtype)
     inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=1)
-    material = cfsem_radial_material(200.0e9, 0.27, dtype=dtype)
+    material = cfsem_radial_material(200.0e9, 0.27)
     model_fe, rhs = assemble_model_and_rhs(
         nodes=nodes,
         elements=elements,
@@ -1794,8 +1789,8 @@ def test_two_material_pressure_vessel_matches_chained_1d_solver(element_type: st
     outer_material = (135.0e9, 0.31)
     material_table = np.asarray(
         [
-            cfsem_radial_material(*inner_material, dtype=dtype),
-            cfsem_radial_material(*outer_material, dtype=dtype),
+            cfsem_radial_material(*inner_material),
+            cfsem_radial_material(*outer_material),
         ]
     )
     material_ids = np.concatenate(
@@ -1921,7 +1916,7 @@ def test_distorted_2d_mesh_matches_regular_solution_at_common_points(
             -3.0e4 * np.cos(np.pi * xi) * np.sin(np.pi * eta),
         ]
     )
-    material = isotropic_axisymmetric_material(205.0e9, 0.29, dtype=dtype)
+    material = isotropic_axisymmetric_material(205.0e9, 0.29)
     regular_analysis_nodes = analysis_nodes_for_element_type(regular_nodes, elements, element_type)
     prescribed = prescribed_bottom_supports(regular_analysis_nodes)
 
@@ -2061,7 +2056,7 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
 def test_model_zero_load_and_empty_reduction_branches() -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
 
     model = fem.assemble_structural_2d(
         nodes=nodes,
@@ -2091,8 +2086,8 @@ def test_model_zero_load_and_empty_reduction_branches() -> None:
 def test_thermal_model_missing_temperature_and_alignment_validation_branches() -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    thermal_material = fem.isotropic_axisymmetric_thermal_material(1.2e-5, 293.15, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
+    thermal_material = fem.isotropic_axisymmetric_thermal_material(1.2e-5, 293.15)
 
     model = fem.assemble_structural_2d(
         nodes=nodes,
@@ -2165,11 +2160,10 @@ def test_thermal_model_missing_temperature_and_alignment_validation_branches() -
 
 
 def test_pack_material_tables_from_tags_sorts_tags_and_rewrites_ids() -> None:
-    dtype = np.float64
-    material_a = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
-    material_b = isotropic_axisymmetric_material(150.0e9, 0.31, dtype=dtype)
-    thermal_a = fem.isotropic_axisymmetric_thermal_material(1.2e-5, 293.15, dtype=dtype)
-    thermal_b = fem.isotropic_axisymmetric_thermal_material(1.8e-5, 310.0, dtype=dtype)
+    material_a = isotropic_axisymmetric_material(200.0e9, 0.27)
+    material_b = isotropic_axisymmetric_material(150.0e9, 0.31)
+    thermal_a = fem.isotropic_axisymmetric_thermal_material(1.2e-5, 293.15)
+    thermal_b = fem.isotropic_axisymmetric_thermal_material(1.8e-5, 310.0)
 
     packed_ids_no_thermal, packed_material_table_no_thermal, packed_thermal_table_no_thermal = (
         fem.pack_material_tables_from_tags(
@@ -2196,27 +2190,24 @@ def test_pack_material_tables_from_tags_sorts_tags_and_rewrites_ids() -> None:
     assert np.allclose(packed_thermal_table[1], thermal_b)
 
 
-def test_python_convenience_wrappers_normalize_float32_inputs_to_float64() -> None:
-    requested_dtype = np.dtype(np.float32)
+def test_python_convenience_wrappers_return_float64() -> None:
     expected_dtype = np.dtype(np.float64)
-    iso = fem.isotropic_axisymmetric_material(200.0e9, 0.3, dtype=requested_dtype)
-    iso_plane = fem.isotropic_plane_strain_material(200.0e9, 0.3, dtype=requested_dtype)
-    reduced = fem.cfsem_radial_material(200.0e9, 0.3, dtype=requested_dtype)
+    iso = fem.isotropic_axisymmetric_material(200.0e9, 0.3)
+    iso_plane = fem.isotropic_plane_strain_material(200.0e9, 0.3)
+    reduced = fem.cfsem_radial_material(200.0e9, 0.3)
     thermal = fem.isotropic_axisymmetric_thermal_material(
         1.0e-5,
         reference_temperature=293.15,
-        dtype=requested_dtype,
     )
     thermal_plane = fem.isotropic_plane_strain_thermal_material(
         1.0e-5,
         reference_temperature=293.15,
-        dtype=requested_dtype,
     )
     ortho = fem.orthotropic_axisymmetric_thermal_material(
-        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=requested_dtype
+        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15
     )
     ortho_plane = fem.orthotropic_plane_strain_thermal_material(
-        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=requested_dtype
+        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15
     )
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
     elevated = fem.infer_quad9_mesh(nodes, elements)
@@ -2285,7 +2276,7 @@ def test_plane_strain_accepts_negative_coordinates_and_recovers_linear_strain() 
         dtype=dtype,
     )
     elements = np.asarray([[0, 1, 2, 3]], dtype=np.uint64)
-    material = fem.isotropic_plane_strain_material(200.0e9, 0.29, dtype=dtype)
+    material = fem.isotropic_plane_strain_material(200.0e9, 0.29)
 
     model = fem.assemble_structural_2d(
         nodes,
@@ -2384,7 +2375,7 @@ def test_explicit_quad9_input_uses_supplied_analysis_mesh() -> None:
         dtype=dtype,
     )
     elements = np.asarray([[0, 1, 2, 3, 4, 5, 6, 7, 8]], dtype=np.uint64)
-    material = fem.isotropic_plane_strain_material(185.0e9, 0.31, dtype=dtype)
+    material = fem.isotropic_plane_strain_material(185.0e9, 0.31)
     model = fem.assemble_structural_2d(
         nodes,
         elements,
@@ -2418,7 +2409,7 @@ def test_plane_strain_affine_patch_solve_is_exact(element_type: str, quadrature:
     dtype = np.float64
     nodes, elements = build_planar_rect_mesh(-1.25, 1.75, -0.8, 1.4, nx=2, ny=2, dtype=dtype)
     analysis_nodes = analysis_nodes_for_element_type(nodes, elements, element_type)
-    material = fem.isotropic_plane_strain_material(185.0e9, 0.31, dtype=dtype)
+    material = fem.isotropic_plane_strain_material(185.0e9, 0.31)
 
     a, b, c, d = 0.017, -0.023, 0.019, -0.013
 
@@ -2479,7 +2470,7 @@ def test_plane_strain_uniaxial_stress_has_nonzero_out_of_plane_stress(
     remote_stress = 12.5e6
     nodes, elements = build_planar_rect_mesh(-0.6, 0.9, -0.4, 0.5, nx=3, ny=3, dtype=dtype)
     analysis_nodes = analysis_nodes_for_element_type(nodes, elements, element_type)
-    material = fem.isotropic_plane_strain_material(youngs_modulus, poisson_ratio, dtype=dtype)
+    material = fem.isotropic_plane_strain_material(youngs_modulus, poisson_ratio)
 
     epsilon_xx = remote_stress * (1.0 - poisson_ratio**2) / youngs_modulus
     epsilon_yy = -poisson_ratio * (1.0 + poisson_ratio) * remote_stress / youngs_modulus
@@ -2557,7 +2548,7 @@ def test_plane_strain_circular_hole_matches_kirsch_stress_concentration(
     )
     traction_values = cartesian_traction_from_polar_stress(sigma_rr, sigma_rt, face_theta).astype(dtype)
 
-    material = fem.isotropic_plane_strain_material(200.0e9, poisson_ratio, dtype=dtype)
+    material = fem.isotropic_plane_strain_material(200.0e9, poisson_ratio)
     prescribed = {
         0: 0.0,
         1: 0.0,

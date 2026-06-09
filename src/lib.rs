@@ -27,7 +27,6 @@ pub const MU_0: f64 = 0.999_999_999_87 * core::f64::consts::PI * 4e-7; // [H/m]
 /// (H/m) Recurring constant multiple of `mu_0`
 pub const MU0_OVER_4PI: f64 = MU_0 / (4.0 * core::f64::consts::PI);
 
-
 /// Number of physical CPU cores available to Rayon-backed parallel loops.
 ///
 /// This is populated once on first access and then reused so chunk-size

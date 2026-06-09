@@ -3,18 +3,12 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use deimos_numerics::sparse::{
-    BiCGSTAB, BiCGSTABSolveError, CompensatedField, DiagonalPrecond, Equilibration,
-    EquilibrationParams, Precond, SparseMatVec,
-};
+use faer::Col;
 use faer::linalg::solvers::Solve;
-use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::linalg::solvers::Lu;
 use faer::sparse::{
-    SparseColMat, SparseColMatRef, SparseRowMat, SymbolicSparseColMat, SymbolicSparseRowMat,
-    Triplet,
+    SparseColMat, SparseRowMat, SymbolicSparseColMat, SymbolicSparseRowMat, Triplet,
 };
-use faer::{Accum, Col, Par};
 use rayon::prelude::*;
 
 use crate::mesh::elements::quad2d::{quad4, quad9};
@@ -41,20 +35,7 @@ use crate::physics::solenoid_stress::types::{
     dof_per_element,
 };
 
-mod private {
-    use super::{CompensatedField, Real};
-
-    pub trait IterativeScalarSealed: Real + CompensatedField {}
-
-    impl<T> IterativeScalarSealed for T where T: Real + CompensatedField {}
-}
-
-/// Scalar types supported by the iterative 2D structural FEM solve path.
-///
-/// This trait is sealed and implemented by the floating-point types supported by the backend.
-pub trait Structural2dIterativeScalar: Real + private::IterativeScalarSealed {}
-
-impl<T> Structural2dIterativeScalar for T where T: Real + private::IterativeScalarSealed {}
+type F = f64;
 
 /// Public element-family selector for the 2D structural solver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,152 +44,6 @@ pub enum Structural2dElementType {
     Quad4,
     /// Quadratic nine-node quadrilateral in the analysis plane.
     Quad9,
-}
-
-/// Linear-solver method used for one reduced 2D structural FEM solve.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Structural2dSolveMethod<F: Real> {
-    /// Sparse LU direct solve with lazy factorization caching.
-    Direct,
-    /// BiCGSTAB Krylov solve with optional diagonal preconditioning and equilibration.
-    Bicgstab(BicgstabSolveOptions<F>),
-}
-
-/// Compact solver name used by diagnostics and Python bindings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Structural2dSolveMethodName {
-    /// Sparse LU direct solve.
-    Direct,
-    /// BiCGSTAB Krylov solve.
-    Bicgstab,
-}
-
-impl Structural2dSolveMethodName {
-    /// Return the compact code used by the Python binding.
-    pub const fn code(self) -> u8 {
-        match self {
-            Self::Direct => 0,
-            Self::Bicgstab => 1,
-        }
-    }
-}
-
-/// Options for the BiCGSTAB reduced-system solve.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BicgstabSolveOptions<F: Real> {
-    /// Absolute BiCGSTAB residual tolerance in the units of the solved system.
-    ///
-    /// With equilibration disabled, this is in reduced-RHS units. With equilibration enabled, the
-    /// same value is passed to the equilibrated linear system rather than being rescaled back to
-    /// original RHS units.
-    pub tolerance: Option<F>,
-    /// Maximum number of BiCGSTAB iterations. If `None`, a size-based default is used.
-    pub max_iterations: Option<usize>,
-    /// Optional preconditioner used by BiCGSTAB.
-    pub preconditioner: BicgstabPreconditioner,
-    /// Optional matrix equilibration applied before BiCGSTAB.
-    pub equilibration: BicgstabEquilibration<F>,
-    /// Initial-guess policy for the reduced displacement vector.
-    pub initial_guess: BicgstabInitialGuess,
-}
-
-impl<F: Real> Default for BicgstabSolveOptions<F> {
-    fn default() -> Self {
-        Self {
-            tolerance: None,
-            max_iterations: None,
-            preconditioner: BicgstabPreconditioner::Diagonal,
-            equilibration: BicgstabEquilibration::Ruiz(EquilibrationSolveOptions::default()),
-            initial_guess: BicgstabInitialGuess::Zero,
-        }
-    }
-}
-
-/// Preconditioner selection for BiCGSTAB.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BicgstabPreconditioner {
-    /// No preconditioner.
-    None,
-    /// Diagonal/Jacobi-style preconditioner.
-    Diagonal,
-}
-
-/// Equilibration selection for BiCGSTAB.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BicgstabEquilibration<F: Real> {
-    /// Solve the original reduced system directly.
-    None,
-    /// Apply Ruiz-style row/column equilibration before solving.
-    Ruiz(EquilibrationSolveOptions<F>),
-}
-
-/// Parameters controlling Ruiz-style sparse matrix equilibration.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct EquilibrationSolveOptions<F: Real> {
-    /// Maximum number of equilibration iterations.
-    pub max_iterations: usize,
-    /// Dimensionless row/column balance tolerance.
-    pub tolerance: F,
-    /// Lower clamp applied to measured row/column norms.
-    pub norm_floor: F,
-    /// Upper clamp applied to measured row/column norms.
-    pub norm_ceil: F,
-}
-
-impl<F: Real> Default for EquilibrationSolveOptions<F> {
-    fn default() -> Self {
-        let params = EquilibrationParams::<F>::default();
-        Self {
-            max_iterations: params.max_iters,
-            tolerance: params.tol,
-            norm_floor: params.norm_floor,
-            norm_ceil: params.norm_ceil,
-        }
-    }
-}
-
-impl<F: Real> From<EquilibrationSolveOptions<F>> for EquilibrationParams<F> {
-    fn from(options: EquilibrationSolveOptions<F>) -> Self {
-        Self {
-            max_iters: options.max_iterations,
-            tol: options.tolerance,
-            norm_floor: options.norm_floor,
-            norm_ceil: options.norm_ceil,
-        }
-    }
-}
-
-/// Initial-guess policy for iterative solves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BicgstabInitialGuess {
-    /// Start from a zero reduced displacement vector.
-    Zero,
-    /// Reuse the previous converged BiCGSTAB reduced solution when available.
-    Previous,
-}
-
-/// Full displacement solution plus solve diagnostics.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Structural2dSolveOutput<F: Real> {
-    /// Full displacement vector with shape `(ndof_full,)`.
-    pub displacement: Vec<F>,
-    /// Solver diagnostics for the reduced solve.
-    pub diagnostics: Structural2dSolveDiagnostics<F>,
-}
-
-/// Diagnostics from one reduced structural solve.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Structural2dSolveDiagnostics<F: Real> {
-    /// Solver method used for this solve.
-    pub method: Structural2dSolveMethodName,
-    /// Whether the selected solver converged.
-    pub converged: bool,
-    /// Number of BiCGSTAB iterations, or zero for direct solves.
-    pub iterations: usize,
-    /// Latest residual norm in RHS units, or zero for direct solves.
-    pub residual_norm: F,
-    /// Whether row/column equilibration was applied.
-    pub equilibrated: bool,
 }
 
 impl Structural2dElementType {
@@ -252,7 +87,7 @@ pub enum Structural2dElements<'a> {
 /// vector acts on or stores flattened quadrature-point blocks with row ordering
 /// `[rr, zz, tt, rz]`, so those arrays have flattened shape `(4 * nelem * nq_per_element,)`.
 #[derive(Debug, Clone)]
-pub struct ReducedRecoveryOperators<F: Real> {
+pub struct ReducedRecoveryOperators {
     /// Quadrature-point coordinates `(r, z)` in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 2)`.
@@ -310,7 +145,7 @@ pub struct ReducedRecoveryOperators<F: Real> {
 /// `(nelem * nodes_per_element,)`, `pressure_faces` has shape `(n_pressure_faces, 2)`, and
 /// `traction_faces` has shape `(n_traction_faces, 2)`.
 #[derive(Debug)]
-pub struct Structural2dModel<F: Real> {
+pub struct Structural2dModel {
     /// Reduced structural stiffness matrix in CSC form.
     ///
     /// This matrix maps reduced displacements `[length]` to reduced generalized nodal forces
@@ -344,7 +179,7 @@ pub struct Structural2dModel<F: Real> {
     /// Units: `[energy / distance]`.
     pub constant_rhs: Vec<F>,
     /// Quadrature-point recovery operators and constants associated with this reduced model.
-    pub recovery: ReducedRecoveryOperators<F>,
+    pub recovery: ReducedRecoveryOperators,
     /// Metadata listing the loaded pressure faces as `[element_index, local_face]`.
     ///
     /// Shape: `(n_pressure_faces, 2)`.
@@ -390,15 +225,9 @@ pub struct Structural2dModel<F: Real> {
     /// Units: `[length]`.
     pub fixed_values: Vec<F>,
     lu: Option<Lu<usize, F>>,
-    diagonal_preconditioner: Option<DiagonalPrecond<F>>,
-    equilibration: Option<Equilibration<F>>,
-    equilibration_options: Option<EquilibrationSolveOptions<F>>,
-    equilibrated_stiffness: Option<SparseColMat<usize, F>>,
-    equilibrated_diagonal_preconditioner: Option<DiagonalPrecond<F>>,
-    previous_bicgstab_solution: Option<Vec<F>>,
 }
 
-impl<F: Real> Structural2dModel<F> {
+impl Structural2dModel {
     /// Build one reduced structural right-hand side.
     ///
     /// Args:
@@ -521,7 +350,7 @@ impl<F: Real> Structural2dModel<F> {
             reduced_solution.len(),
             self.ndof_reduced
         );
-        let mut full = vec![F::zero(); self.ndof_full];
+        let mut full = vec![0.0; self.ndof_full];
         for (&dof, &value) in self.fixed_dofs.iter().zip(&self.fixed_values) {
             full[dof] = value;
         }
@@ -570,8 +399,8 @@ impl<F: Real> Structural2dModel<F> {
     ///     - `volumes` shape `(nelem,)` and units `[volume]`
     pub fn element_measures(&self) -> Result<Structural2dElementMeasures<F>, String> {
         let quadrature = self.element_quadrature()?;
-        let mut areas = vec![F::zero(); self.nelem];
-        let mut volumes = vec![F::zero(); self.nelem];
+        let mut areas = vec![0.0; self.nelem];
+        let mut volumes = vec![0.0; self.nelem];
         for element in 0..self.nelem {
             let start = element * quadrature.nq_per_element;
             let end = start + quadrature.nq_per_element;
@@ -669,401 +498,9 @@ impl<F: Real> Structural2dModel<F> {
     }
 }
 
-impl<F: Structural2dIterativeScalar> Structural2dModel<F> {
-    /// Solve the reduced structural system with an explicit solver method.
-    ///
-    /// Args:
-    ///     rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
-    ///         `[generalized force] = [energy / distance]`.
-    ///     method: Solver method and method-specific options.
-    ///
-    /// Returns:
-    ///     Full displacement vector and solve diagnostics.
-    pub fn solve_with_method(
-        &mut self,
-        rhs: &[F],
-        method: Structural2dSolveMethod<F>,
-    ) -> Result<Structural2dSolveOutput<F>, String> {
-        let (reduced_solution, diagnostics) = match method {
-            Structural2dSolveMethod::Direct => {
-                (self.solve_direct_reduced(rhs)?, direct_diagnostics())
-            }
-            Structural2dSolveMethod::Bicgstab(options) => {
-                self.solve_bicgstab_reduced(rhs, options)?
-            }
-        };
-        Ok(Structural2dSolveOutput {
-            displacement: self.recover_full(&reduced_solution),
-            diagnostics,
-        })
-    }
-
-    /// Solve the reduced structural system with BiCGSTAB.
-    fn solve_bicgstab_reduced(
-        &mut self,
-        rhs: &[F],
-        options: BicgstabSolveOptions<F>,
-    ) -> Result<(Vec<F>, Structural2dSolveDiagnostics<F>), String> {
-        validate_bicgstab_options(options)?;
-        if rhs.len() != self.ndof_reduced {
-            return Err(format!(
-                "rhs has length {}, but reduced system has {} rows",
-                rhs.len(),
-                self.ndof_reduced
-            ));
-        }
-        if self.ndof_reduced == 0 {
-            return Ok((
-                Vec::new(),
-                Structural2dSolveDiagnostics {
-                    method: Structural2dSolveMethodName::Bicgstab,
-                    converged: true,
-                    iterations: 0,
-                    residual_norm: F::zero(),
-                    equilibrated: !matches!(options.equilibration, BicgstabEquilibration::None),
-                },
-            ));
-        }
-
-        let tolerance = resolve_bicgstab_tolerance(rhs, options.tolerance);
-        let max_iterations = options
-            .max_iterations
-            .unwrap_or_else(|| self.ndof_reduced.saturating_mul(2).max(100));
-        let mut rhs_work = rhs.to_vec();
-        let mut initial_guess = self.bicgstab_initial_guess(options.initial_guess);
-
-        match options.equilibration {
-            BicgstabEquilibration::None => {
-                if options.preconditioner == BicgstabPreconditioner::Diagonal {
-                    self.ensure_diagonal_preconditioner()?;
-                }
-                let (reduced_solution, diagnostics) = match options.preconditioner {
-                    BicgstabPreconditioner::None => solve_bicgstab_no_precond(
-                        self.stiffness.as_ref(),
-                        &initial_guess,
-                        &rhs_work,
-                        tolerance,
-                        max_iterations,
-                        false,
-                    )?,
-                    BicgstabPreconditioner::Diagonal => {
-                        let preconditioner = self
-                            .diagonal_preconditioner
-                            .as_ref()
-                            .ok_or_else(|| {
-                                "diagonal preconditioner was not initialized".to_string()
-                            })?
-                            .clone();
-                        solve_bicgstab_with_precond(
-                            self.stiffness.as_ref(),
-                            preconditioner,
-                            &initial_guess,
-                            &rhs_work,
-                            tolerance,
-                            max_iterations,
-                            false,
-                        )?
-                    }
-                };
-                self.previous_bicgstab_solution = Some(reduced_solution.clone());
-                Ok((reduced_solution, diagnostics))
-            }
-            BicgstabEquilibration::Ruiz(equilibration_options) => {
-                self.ensure_equilibration(equilibration_options)?;
-                if options.preconditioner == BicgstabPreconditioner::Diagonal {
-                    self.ensure_equilibrated_diagonal_preconditioner()?;
-                }
-                let equilibration = self
-                    .equilibration
-                    .as_ref()
-                    .ok_or_else(|| "equilibration was not initialized".to_string())?;
-                let equilibrated_stiffness = self
-                    .equilibrated_stiffness
-                    .as_ref()
-                    .ok_or_else(|| "equilibrated stiffness was not initialized".to_string())?;
-                equilibration.scale_rhs_in_place(&mut rhs_work);
-                equilibration.scale_initial_guess_in_place(&mut initial_guess);
-                let (mut reduced_solution, mut diagnostics) = match options.preconditioner {
-                    BicgstabPreconditioner::None => solve_bicgstab_no_precond(
-                        equilibrated_stiffness.as_ref(),
-                        &initial_guess,
-                        &rhs_work,
-                        tolerance,
-                        max_iterations,
-                        true,
-                    )?,
-                    BicgstabPreconditioner::Diagonal => {
-                        let preconditioner = self
-                            .equilibrated_diagonal_preconditioner
-                            .as_ref()
-                            .ok_or_else(|| {
-                                "equilibrated diagonal preconditioner was not initialized"
-                                    .to_string()
-                            })?
-                            .clone();
-                        solve_bicgstab_with_precond(
-                            equilibrated_stiffness.as_ref(),
-                            preconditioner,
-                            &initial_guess,
-                            &rhs_work,
-                            tolerance,
-                            max_iterations,
-                            true,
-                        )?
-                    }
-                };
-                equilibration.unscale_solution_in_place(&mut reduced_solution);
-                diagnostics.residual_norm =
-                    csc_residual_norm(self.stiffness.as_ref(), &reduced_solution, rhs)?;
-                self.previous_bicgstab_solution = Some(reduced_solution.clone());
-                Ok((reduced_solution, diagnostics))
-            }
-        }
-    }
-
-    /// Return the reduced-space initial guess requested by the iterative solve options.
-    fn bicgstab_initial_guess(&self, policy: BicgstabInitialGuess) -> Vec<F> {
-        match policy {
-            BicgstabInitialGuess::Zero => vec![F::zero(); self.ndof_reduced],
-            BicgstabInitialGuess::Previous => self
-                .previous_bicgstab_solution
-                .as_ref()
-                .filter(|solution| solution.len() == self.ndof_reduced)
-                .cloned()
-                .unwrap_or_else(|| vec![F::zero(); self.ndof_reduced]),
-        }
-    }
-
-    /// Build and cache the diagonal preconditioner for the original reduced stiffness.
-    fn ensure_diagonal_preconditioner(&mut self) -> Result<(), String> {
-        if self.diagonal_preconditioner.is_none() {
-            self.diagonal_preconditioner = Some(
-                DiagonalPrecond::try_from(self.stiffness.as_ref())
-                    .map_err(|err| format!("failed to build diagonal preconditioner: {err:?}"))?,
-            );
-        }
-        Ok(())
-    }
-
-    /// Build and cache equilibration scales and the scaled reduced stiffness.
-    fn ensure_equilibration(
-        &mut self,
-        options: EquilibrationSolveOptions<F>,
-    ) -> Result<(), String> {
-        if self.equilibration_options != Some(options) {
-            self.equilibration = None;
-            self.equilibrated_stiffness = None;
-            self.equilibrated_diagonal_preconditioner = None;
-            self.equilibration_options = Some(options);
-        }
-        if self.equilibration.is_none() || self.equilibrated_stiffness.is_none() {
-            let equilibration = Equilibration::<F>::compute_from_csc(
-                self.stiffness.as_ref(),
-                EquilibrationParams::from(options),
-            )
-            .map_err(|err| format!("failed to equilibrate reduced stiffness: {err:?}"))?;
-            let mut equilibrated_stiffness = self.stiffness.clone();
-            equilibration.scale_csc_matrix_in_place(&mut equilibrated_stiffness);
-            self.equilibration = Some(equilibration);
-            self.equilibrated_stiffness = Some(equilibrated_stiffness);
-            self.equilibrated_diagonal_preconditioner = None;
-        }
-        Ok(())
-    }
-
-    /// Build and cache the diagonal preconditioner for the equilibrated reduced stiffness.
-    fn ensure_equilibrated_diagonal_preconditioner(&mut self) -> Result<(), String> {
-        if self.equilibrated_diagonal_preconditioner.is_none() {
-            let stiffness = self
-                .equilibrated_stiffness
-                .as_ref()
-                .ok_or_else(|| "equilibrated stiffness was not initialized".to_string())?;
-            self.equilibrated_diagonal_preconditioner = Some(
-                DiagonalPrecond::try_from(stiffness.as_ref()).map_err(|err| {
-                    format!("failed to build equilibrated diagonal preconditioner: {err:?}")
-                })?,
-            );
-        }
-        Ok(())
-    }
-}
-
-/// Diagnostics for the sparse LU path.
-fn direct_diagnostics<F: Real>() -> Structural2dSolveDiagnostics<F> {
-    Structural2dSolveDiagnostics {
-        method: Structural2dSolveMethodName::Direct,
-        converged: true,
-        iterations: 0,
-        residual_norm: F::zero(),
-        equilibrated: false,
-    }
-}
-
-/// Validate BiCGSTAB and equilibration options before allocating solver scratch space.
-fn validate_bicgstab_options<F: Real>(options: BicgstabSolveOptions<F>) -> Result<(), String> {
-    if let Some(tolerance) = options.tolerance
-        && (!tolerance.is_finite() || tolerance <= F::zero())
-    {
-        return Err(format!(
-            "BiCGSTAB tolerance must be finite and positive; got {tolerance:?}"
-        ));
-    }
-    if let Some(max_iterations) = options.max_iterations
-        && max_iterations == 0
-    {
-        return Err("BiCGSTAB max_iterations must be at least 1".to_string());
-    }
-    if let BicgstabEquilibration::Ruiz(equilibration) = options.equilibration {
-        if equilibration.max_iterations == 0 {
-            return Err("equilibration max_iterations must be at least 1".to_string());
-        }
-        if !equilibration.tolerance.is_finite() || equilibration.tolerance < F::zero() {
-            return Err(format!(
-                "equilibration tolerance must be finite and nonnegative; got {:?}",
-                equilibration.tolerance
-            ));
-        }
-        if !equilibration.norm_floor.is_finite()
-            || equilibration.norm_floor <= F::zero()
-            || !equilibration.norm_ceil.is_finite()
-            || equilibration.norm_ceil <= equilibration.norm_floor
-        {
-            return Err(format!(
-                "equilibration norm clamps must satisfy 0 < floor < ceil; got floor={:?}, ceil={:?}",
-                equilibration.norm_floor, equilibration.norm_ceil
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Resolve a RHS-scaled absolute residual tolerance when the caller does not provide one.
-fn resolve_bicgstab_tolerance<F: Real>(rhs: &[F], tolerance: Option<F>) -> F {
-    if let Some(tolerance) = tolerance {
-        return tolerance;
-    }
-    let mut norm_sq = F::zero();
-    for &value in rhs {
-        norm_sq = value.mul_add(value, norm_sq);
-    }
-    let rhs_norm = norm_sq.sqrt();
-    let scale = if rhs_norm > F::zero() {
-        rhs_norm
-    } else {
-        F::one()
-    };
-    scale * F::epsilon().sqrt()
-}
-
-/// Compute `||A x - b||_2` for one CSC matrix-vector product.
-fn csc_residual_norm<F: Real>(
-    matrix: SparseColMatRef<'_, usize, F>,
-    solution: &[F],
-    rhs: &[F],
-) -> Result<F, String> {
-    if solution.len() != matrix.ncols() {
-        return Err(format!(
-            "solution has length {}, but CSC matrix has {} columns",
-            solution.len(),
-            matrix.ncols()
-        ));
-    }
-    if rhs.len() != matrix.nrows() {
-        return Err(format!(
-            "rhs has length {}, but CSC matrix has {} rows",
-            rhs.len(),
-            matrix.nrows()
-        ));
-    }
-    let solution = Col::from_fn(matrix.ncols(), |index| solution[index]);
-    let mut residual = Col::<F>::zeros(matrix.nrows());
-    sparse_dense_matmul(
-        residual.as_mat_mut(),
-        Accum::Replace,
-        matrix,
-        solution.as_mat(),
-        F::one(),
-        Par::Seq,
-    );
-    let mut norm_sq = F::zero();
-    for row in 0..rhs.len() {
-        let value = residual[row] - rhs[row];
-        norm_sq = value.mul_add(value, norm_sq);
-    }
-    Ok(norm_sq.sqrt())
-}
-
-/// Solve a reduced system with unpreconditioned BiCGSTAB.
-fn solve_bicgstab_no_precond<F: Structural2dIterativeScalar>(
-    matrix: SparseColMatRef<'_, usize, F>,
-    initial_guess: &[F],
-    rhs: &[F],
-    tolerance: F,
-    max_iterations: usize,
-    equilibrated: bool,
-) -> Result<(Vec<F>, Structural2dSolveDiagnostics<F>), String> {
-    match BiCGSTAB::solve(matrix, initial_guess, rhs, tolerance, max_iterations) {
-        Ok(solver) => Ok(bicgstab_success(solver, equilibrated)),
-        Err(BiCGSTABSolveError::InvalidInput(err)) => Err(format!("invalid BiCGSTAB input: {err}")),
-        Err(BiCGSTABSolveError::NoConvergence(solver)) => Err(format!(
-            "BiCGSTAB did not converge within {} iterations; residual norm is {:?}",
-            solver.iteration_count(),
-            solver.err()
-        )),
-    }
-}
-
-/// Solve a reduced system with diagonally preconditioned BiCGSTAB.
-fn solve_bicgstab_with_precond<F: Structural2dIterativeScalar>(
-    matrix: SparseColMatRef<'_, usize, F>,
-    preconditioner: DiagonalPrecond<F>,
-    initial_guess: &[F],
-    rhs: &[F],
-    tolerance: F,
-    max_iterations: usize,
-    equilibrated: bool,
-) -> Result<(Vec<F>, Structural2dSolveDiagnostics<F>), String> {
-    match BiCGSTAB::solve_with_precond(
-        matrix,
-        preconditioner,
-        initial_guess,
-        rhs,
-        tolerance,
-        max_iterations,
-    ) {
-        Ok(solver) => Ok(bicgstab_success(solver, equilibrated)),
-        Err(BiCGSTABSolveError::InvalidInput(err)) => Err(format!("invalid BiCGSTAB input: {err}")),
-        Err(BiCGSTABSolveError::NoConvergence(solver)) => Err(format!(
-            "BiCGSTAB did not converge within {} iterations; residual norm is {:?}",
-            solver.iteration_count(),
-            solver.err()
-        )),
-    }
-}
-
-/// Convert a converged BiCGSTAB solver state into a reduced solution and diagnostics.
-fn bicgstab_success<F: Structural2dIterativeScalar, A, P>(
-    solver: BiCGSTAB<F, A, P>,
-    equilibrated: bool,
-) -> (Vec<F>, Structural2dSolveDiagnostics<F>)
-where
-    A: SparseMatVec<F>,
-    P: Precond<F>,
-{
-    let diagnostics = Structural2dSolveDiagnostics {
-        method: Structural2dSolveMethodName::Bicgstab,
-        converged: true,
-        iterations: solver.iteration_count(),
-        residual_norm: solver.err(),
-        equilibrated,
-    };
-    let solution = solver.x().iter().copied().collect::<Vec<_>>();
-    (solution, diagnostics)
-}
-
 #[allow(clippy::too_many_arguments)]
 /// Assemble the reduced 2D structural model and all associated operators.
-pub fn assemble_structural_2d<F: Real>(
+pub fn assemble_structural_2d(
     nodes_rz: &[[F; 2]],
     elements: Structural2dElements<'_>,
     material_ids: &[usize],
@@ -1076,10 +513,9 @@ pub fn assemble_structural_2d<F: Real>(
     formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
     par: bool,
-) -> Result<Structural2dModel<F>, String> {
+) -> Result<Structural2dModel, String> {
     match elements {
         Structural2dElements::Quad4(elements) => build_model_for_family::<
-            F,
             Quad4Family,
             { quad4::NODES_PER_ELEMENT },
             { dof_per_element(quad4::NODES_PER_ELEMENT) },
@@ -1098,7 +534,6 @@ pub fn assemble_structural_2d<F: Real>(
             par,
         ),
         Structural2dElements::Quad9(elements) => build_model_for_family::<
-            F,
             Quad9Family,
             { quad9::NODES_PER_ELEMENT },
             { dof_per_element(quad9::NODES_PER_ELEMENT) },
@@ -1135,12 +570,7 @@ type ReducedLayout<F> = (Vec<usize>, Vec<usize>, Vec<F>, Vec<usize>, Vec<Option<
 /// This is the family-generic core of the public assembly path.  It builds the unreduced
 /// operators, applies Dirichlet reduction, compresses the final sparse matrices, and packages the
 /// result into the public `Structural2dModel`.
-fn build_model_for_family<
-    F: Real,
-    Family,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
+fn build_model_for_family<Family, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
     nodes_rz: &[[F; 2]],
     elements: &[[usize; NODES_PER_ELEMENT]],
     material_ids: &[usize],
@@ -1153,7 +583,7 @@ fn build_model_for_family<
     formulation: Structural2dFormulation<F>,
     quadrature: QuadratureRule,
     par: bool,
-) -> Result<Structural2dModel<F>, String>
+) -> Result<Structural2dModel, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -1167,7 +597,7 @@ where
         reduce_layout(ndof_full, prescribed)?;
     let ndof_reduced = free_dofs.len();
 
-    let mut constant_rhs = vec![F::zero(); ndof_reduced];
+    let mut constant_rhs = vec![0.0; ndof_reduced];
     // Assemble stiffness in the full displacement space first, then apply Dirichlet reduction.
     // The parallel path keeps worker chunks separate so each chunk can be reduced and sorted
     // independently before a k-way merge builds the canonical CSC structure.
@@ -1258,7 +688,7 @@ where
     } else {
         (
             csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
-            vec![F::zero(); ndof_reduced],
+            vec![0.0; ndof_reduced],
             0,
         )
     };
@@ -1399,12 +829,6 @@ where
         fixed_dofs,
         fixed_values,
         lu: None,
-        diagonal_preconditioner: None,
-        equilibration: None,
-        equilibration_options: None,
-        equilibrated_stiffness: None,
-        equilibrated_diagonal_preconditioner: None,
-        previous_bicgstab_solution: None,
     })
 }
 
@@ -2007,60 +1431,4 @@ fn pack_rank4_field<F: Real>(flat: Vec<F>) -> Result<Vec<[F; 4]>, String> {
         packed.push([chunk[0], chunk[1], chunk[2], chunk[3]]);
     }
     Ok(packed)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::physics::solenoid_stress::convenience::isotropic_axisymmetric_material;
-
-    #[test]
-    fn bicgstab_solve_matches_direct_solve() {
-        let material = [isotropic_axisymmetric_material(200.0e9_f64, 0.27)];
-        let mut model = assemble_structural_2d(
-            &crate::physics::solenoid_stress::test_utils::SINGLE_QUAD4_NODES,
-            Structural2dElements::Quad4(
-                &crate::physics::solenoid_stress::test_utils::SINGLE_QUAD4_ELEMENTS,
-            ),
-            &[0],
-            &material,
-            &[],
-            &[],
-            None,
-            None,
-            &[(0, 0.0), (1, 0.0), (3, 0.0), (5, 0.0), (7, 0.0)],
-            Structural2dFormulation::Axisymmetric,
-            QuadratureRule::GaussLegendre3,
-            false,
-        )
-        .unwrap();
-        let rhs = model
-            .build_rhs(Some(&[2.0e5, -1.0e5]), None, None, None)
-            .unwrap();
-        let direct = model.solve(&rhs).unwrap();
-        let iterative = model
-            .solve_with_method(
-                &rhs,
-                Structural2dSolveMethod::Bicgstab(BicgstabSolveOptions {
-                    tolerance: Some(1.0e-9),
-                    max_iterations: Some(1000),
-                    ..BicgstabSolveOptions::default()
-                }),
-            )
-            .unwrap();
-
-        assert!(iterative.diagnostics.converged);
-        assert!(iterative.diagnostics.iterations > 0);
-        let reduced_solution = model
-            .free_dofs
-            .iter()
-            .map(|&dof| iterative.displacement[dof])
-            .collect::<Vec<_>>();
-        let residual_norm =
-            csc_residual_norm(model.stiffness.as_ref(), &reduced_solution, &rhs).unwrap();
-        assert!((iterative.diagnostics.residual_norm - residual_norm).abs() < 1.0e-12);
-        for (actual, expected) in iterative.displacement.iter().zip(&direct) {
-            assert!((actual - expected).abs() < 1.0e-10);
-        }
-    }
 }

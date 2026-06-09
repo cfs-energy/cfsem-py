@@ -506,11 +506,8 @@ pub use convenience::{
     rotate_thermal_expansion_in_plane, rotate_thermal_material_in_plane,
 };
 pub use model::{
-    BicgstabEquilibration, BicgstabInitialGuess, BicgstabPreconditioner, BicgstabSolveOptions,
-    EquilibrationSolveOptions, ReducedRecoveryOperators, Structural2dElementType,
-    Structural2dElements, Structural2dIterativeScalar, Structural2dModel,
-    Structural2dSolveDiagnostics, Structural2dSolveMethod, Structural2dSolveMethodName,
-    Structural2dSolveOutput, assemble_structural_2d,
+    ReducedRecoveryOperators, Structural2dElementType, Structural2dElements, Structural2dModel,
+    assemble_structural_2d,
 };
 pub(crate) use types::validate_element_material_inputs;
 pub use types::{

@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, overload, cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -48,42 +48,22 @@ import scipy.sparse as sp
 
 import cfsem.cfsem as _cfsem_bindings
 
-_assemble_model_2d_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_model_2d_f32
 _assemble_model_2d_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_model_2d_f64
-_cfsem_radial_material_f32 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f32
 _cfsem_radial_material_f64 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f64
-_infer_quad9_mesh_f32 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f32
 _infer_quad9_mesh_f64 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f64
-_quad_mesh_interpolation_operator_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_quad_mesh_interpolation_operator_f32
-)
 _quad_mesh_interpolation_operator_f64 = (
     _cfsem_bindings.solenoid_stress_fem_quad_mesh_interpolation_operator_f64
 )
-_quad_mesh_query_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f32
 _quad_mesh_query_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f64
-_quad_mesh_strain_operator_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f32
 _quad_mesh_strain_operator_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f64
-_quad_mesh_stress_operator_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_stress_operator_f32
 _quad_mesh_stress_operator_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_stress_operator_f64
-_isotropic_axisymmetric_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f32
 _isotropic_axisymmetric_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f64
-_isotropic_plane_strain_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f32
 _isotropic_plane_strain_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f64
-_isotropic_axisymmetric_thermal_material_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32
-)
 _isotropic_axisymmetric_thermal_material_f64 = (
     _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64
 )
-_isotropic_plane_strain_thermal_material_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_thermal_material_f32
-)
 _isotropic_plane_strain_thermal_material_f64 = (
     _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_thermal_material_f64
-)
-_orthotropic_axisymmetric_thermal_material_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32
 )
 _orthotropic_axisymmetric_thermal_material_f64 = (
     _cfsem_bindings.solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f64
@@ -171,38 +151,6 @@ class ElementQuadrature:
     weights_area: npt.NDArray[np.floating[Any]]
     weights_volume: npt.NDArray[np.floating[Any]]
     nq_per_element: int
-
-
-@dataclass(frozen=True, slots=True)
-class Structural2DSolveDiagnostics:
-    """Diagnostics from one 2D FEM linear solve.
-
-    Args:
-        method: Solver method used for the reduced structural system.
-        converged: Whether the selected solver converged.
-        iterations: Number of BiCGSTAB iterations, or zero for direct solves.
-        residual_norm: Final residual norm in reduced-RHS units, or zero for direct solves.
-        equilibrated: Whether row/column equilibration was applied before the solve.
-    """
-
-    method: Literal["direct", "bicgstab"]
-    converged: bool
-    iterations: int
-    residual_norm: float
-    equilibrated: bool
-
-
-@dataclass(frozen=True, slots=True)
-class Structural2DSolveResult:
-    """Full displacement solution plus linear-solver diagnostics.
-
-    Args:
-        displacement: Full displacement vector with shape `(ndof_full,)`.
-        diagnostics: Solver diagnostics for the reduced structural solve.
-    """
-
-    displacement: npt.NDArray[np.floating[Any]]
-    diagnostics: Structural2DSolveDiagnostics
 
 
 @dataclass(frozen=True, slots=True)
@@ -682,128 +630,23 @@ class Structural2DFEMModel:
         )
         return np.asarray(rhs, dtype=self.dtype)
 
-    @overload
-    def solve(
-        self,
-        rhs: ArrayLike,
-        *,
-        method: Literal["direct", "bicgstab"] = "direct",
-        tolerance: float | None = None,
-        max_iterations: int | None = None,
-        preconditioner: Literal["none", "diagonal"] = "diagonal",
-        equilibration: Literal["none", "ruiz"] = "ruiz",
-        equilibration_max_iterations: int | None = None,
-        equilibration_tolerance: float | None = None,
-        equilibration_norm_floor: float | None = None,
-        equilibration_norm_ceil: float | None = None,
-        initial_guess: Literal["zero", "previous"] = "zero",
-        return_diagnostics: Literal[False] = False,
-    ) -> npt.NDArray[np.floating[Any]]: ...
-
-    @overload
-    def solve(
-        self,
-        rhs: ArrayLike,
-        *,
-        method: Literal["direct", "bicgstab"] = "direct",
-        tolerance: float | None = None,
-        max_iterations: int | None = None,
-        preconditioner: Literal["none", "diagonal"] = "diagonal",
-        equilibration: Literal["none", "ruiz"] = "ruiz",
-        equilibration_max_iterations: int | None = None,
-        equilibration_tolerance: float | None = None,
-        equilibration_norm_floor: float | None = None,
-        equilibration_norm_ceil: float | None = None,
-        initial_guess: Literal["zero", "previous"] = "zero",
-        return_diagnostics: Literal[True],
-    ) -> Structural2DSolveResult: ...
-
-    def solve(
-        self,
-        rhs: ArrayLike,
-        *,
-        method: Literal["direct", "bicgstab"] = "direct",
-        tolerance: float | None = None,
-        max_iterations: int | None = None,
-        preconditioner: Literal["none", "diagonal"] = "diagonal",
-        equilibration: Literal["none", "ruiz"] = "ruiz",
-        equilibration_max_iterations: int | None = None,
-        equilibration_tolerance: float | None = None,
-        equilibration_norm_floor: float | None = None,
-        equilibration_norm_ceil: float | None = None,
-        initial_guess: Literal["zero", "previous"] = "zero",
-        return_diagnostics: bool = False,
-    ) -> npt.NDArray[np.floating[Any]] | Structural2DSolveResult:
+    def solve(self, rhs: ArrayLike) -> npt.NDArray[np.floating[Any]]:
         """Solve the reduced system and recover the full displacement field.
 
         Args:
             rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
                 `[generalized force] = [energy / distance]`.
-            method: Linear solve method, either `"direct"` for cached sparse LU or `"bicgstab"`
-                for an iterative solve.
-            tolerance: Optional absolute BiCGSTAB residual tolerance for the solved system. If
-                omitted, Rust chooses an RHS-scaled default. When Ruiz equilibration is enabled,
-                this same value is applied to the equilibrated system rather than rescaled to
-                original reduced-RHS units.
-            max_iterations: Optional maximum number of BiCGSTAB iterations.
-            preconditioner: BiCGSTAB preconditioner, either `"diagonal"` or `"none"`.
-            equilibration: BiCGSTAB equilibration mode, either `"ruiz"` or `"none"`.
-            equilibration_max_iterations: Optional maximum number of equilibration iterations.
-            equilibration_tolerance: Optional dimensionless equilibration tolerance.
-            equilibration_norm_floor: Optional lower clamp for measured equilibration norms.
-            equilibration_norm_ceil: Optional upper clamp for measured equilibration norms.
-            initial_guess: BiCGSTAB initial guess, either `"zero"` or `"previous"`.
-            return_diagnostics: If true, return `Structural2DSolveResult` with displacement and
-                diagnostics. If false, return the displacement array directly.
 
         Returns:
-            NDArray | Structural2DSolveResult: Full displacement vector with shape
-            `(ndof_full,)` and component ordering `[u_r0, u_z0, u_r1, u_z1, ...]`, or the same
-            displacement packaged with solver diagnostics. Units are `[length]`.
+            NDArray: Full displacement vector with shape `(ndof_full,)` and component ordering
+            `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
         """
 
         rhs_arr = np.ascontiguousarray(np.asarray(rhs, dtype=self.dtype).reshape(-1))
         assert (
             rhs_arr.shape[0] == self.ndof_reduced
         ), f"rhs must have length {self.ndof_reduced}; got {rhs_arr.shape}"
-        norm_floor = _positive_float_or_none("equilibration_norm_floor", equilibration_norm_floor)
-        norm_ceil = _positive_float_or_none("equilibration_norm_ceil", equilibration_norm_ceil)
-        assert (
-            norm_floor is None or norm_ceil is None or norm_ceil > norm_floor
-        ), "equilibration_norm_ceil must be greater than equilibration_norm_floor"
-        (
-            displacement_raw,
-            method_code,
-            converged,
-            iterations,
-            residual_norm,
-            equilibrated,
-        ) = self._backend.solve(
-            rhs_arr,
-            _solve_method_code(method),
-            _positive_float_or_none("tolerance", tolerance),
-            _positive_int_or_none("max_iterations", max_iterations),
-            _bicgstab_preconditioner_code(preconditioner),
-            _bicgstab_equilibration_code(equilibration),
-            _positive_int_or_none("equilibration_max_iterations", equilibration_max_iterations),
-            _nonnegative_float_or_none("equilibration_tolerance", equilibration_tolerance),
-            norm_floor,
-            norm_ceil,
-            _bicgstab_initial_guess_code(initial_guess),
-        )
-        displacement = np.asarray(displacement_raw, dtype=self.dtype)
-        if not return_diagnostics:
-            return displacement
-        return Structural2DSolveResult(
-            displacement=displacement,
-            diagnostics=Structural2DSolveDiagnostics(
-                method=_solve_method_name(int(method_code)),
-                converged=bool(converged),
-                iterations=int(iterations),
-                residual_norm=float(residual_norm),
-                equilibrated=bool(equilibrated),
-            ),
-        )
+        return np.asarray(self._backend.solve(rhs_arr), dtype=self.dtype)
 
     def recover_full(self, reduced_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
         """Reinsert prescribed Dirichlet values into a reduced displacement vector.
@@ -966,18 +809,7 @@ def _normalize_material_orientation_angles(
     return np.ascontiguousarray(angles)
 
 
-def _resolve_float_dtype(*values: object) -> np.dtype[np.float32] | np.dtype[np.float64]:
-    arrays: list[np.ndarray[Any, Any]] = []
-    for value in values:
-        if value is None:
-            continue
-        if isinstance(value, Mapping):
-            arrays.extend(np.asarray(item) for item in value.values())
-        else:
-            arrays.append(np.asarray(value))
-    result = np.dtype(np.result_type(*arrays, np.float32))
-    if result.kind != "f" or result.itemsize <= 4:
-        return np.dtype(np.float32)
+def _resolve_float_dtype(*_values: object) -> np.dtype[np.float64]:
     return np.dtype(np.float64)
 
 
@@ -1020,14 +852,13 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
     dtype = _resolve_float_dtype(nodes)
     nodes_arr = _normalize_nodes(nodes, dtype)
     elements_arr = _normalize_elements(elements)
-    binding = _dispatch_pair(dtype, _infer_quad9_mesh_f32, _infer_quad9_mesh_f64)
     (
         analysis_nodes_flat,
         analysis_elements_flat,
         corner_node_indices,
         midside_node_indices,
         center_node_indices,
-    ) = binding(nodes_arr, elements_arr)
+    ) = _infer_quad9_mesh_f64(nodes_arr, elements_arr)
 
     return ElevatedQuad9Mesh(
         input_nodes=nodes_arr,
@@ -1057,7 +888,7 @@ def _normalize_query_tolerance(
         value = float(np.asarray(tolerance, dtype=dtype))
         assert value >= 0.0, f"tolerance must be nonnegative; got {tolerance!r}"
         return value
-    return 1.0e-5 if dtype == np.float32 else 1.0e-10
+    return 1.0e-10
 
 
 def _coo_operator_from_binding(
@@ -1117,8 +948,7 @@ def query_quad_mesh(
         4 if normalized_element_type == "quad4" else 9,
     )
     points_arr = _normalize_query_points(points, dtype)
-    binding = _dispatch_pair(dtype, _quad_mesh_query_f32, _quad_mesh_query_f64)
-    data = binding(
+    data = _quad_mesh_query_f64(
         nodes_arr,
         elements_arr,
         points_arr,
@@ -1171,13 +1001,8 @@ def quad_mesh_interpolation_operator(
     """
 
     dtype = query.nodes.dtype
-    binding = _dispatch_pair(
-        dtype,
-        _quad_mesh_interpolation_operator_f32,
-        _quad_mesh_interpolation_operator_f64,
-    )
     return _coo_operator_from_binding(
-        binding(
+        _quad_mesh_interpolation_operator_f64(
             query.nodes,
             query.elements,
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
@@ -1214,9 +1039,8 @@ def quad_mesh_strain_operator(
     normalized_formulation = _normalize_formulation(formulation)
     thickness_value = _normalize_thickness(normalized_formulation, thickness, query.nodes.dtype)
     dtype = query.nodes.dtype
-    binding = _dispatch_pair(dtype, _quad_mesh_strain_operator_f32, _quad_mesh_strain_operator_f64)
     return _coo_operator_from_binding(
-        binding(
+        _quad_mesh_strain_operator_f64(
             query.nodes,
             query.elements,
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
@@ -1277,9 +1101,8 @@ def quad_mesh_stress_operator(
     )
     normalized_formulation = _normalize_formulation(formulation)
     thickness_value = _normalize_thickness(normalized_formulation, thickness, dtype)
-    binding = _dispatch_pair(dtype, _quad_mesh_stress_operator_f32, _quad_mesh_stress_operator_f64)
     return _coo_operator_from_binding(
-        binding(
+        _quad_mesh_stress_operator_f64(
             np.asarray(query.nodes, dtype=dtype),
             query.elements,
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
@@ -1645,57 +1468,6 @@ def _normalize_prescribed_dirichlet(
     )
 
 
-def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
-    if dtype == np.float32:
-        return f32
-    return f64
-
-
-def _solve_method_code(method: str) -> int:
-    code_by_method = {"direct": 0, "bicgstab": 1}
-    assert method in code_by_method, 'method must be "direct" or "bicgstab"'
-    return code_by_method[method]
-
-
-def _solve_method_name(code: int) -> Literal["direct", "bicgstab"]:
-    name_by_code: tuple[Literal["direct"], Literal["bicgstab"]] = ("direct", "bicgstab")
-    assert 0 <= code < len(name_by_code), f"unexpected solve method code {code}"
-    return name_by_code[code]
-
-
-def _bicgstab_preconditioner_code(preconditioner: str) -> int:
-    code_by_preconditioner = {"none": 0, "diagonal": 1}
-    assert preconditioner in code_by_preconditioner, 'preconditioner must be "none" or "diagonal"'
-    return code_by_preconditioner[preconditioner]
-
-
-def _bicgstab_equilibration_code(equilibration: str) -> int:
-    code_by_equilibration = {"none": 0, "ruiz": 1}
-    assert equilibration in code_by_equilibration, 'equilibration must be "none" or "ruiz"'
-    return code_by_equilibration[equilibration]
-
-
-def _bicgstab_initial_guess_code(initial_guess: str) -> int:
-    code_by_initial_guess = {"zero": 0, "previous": 1}
-    assert initial_guess in code_by_initial_guess, 'initial_guess must be "zero" or "previous"'
-    return code_by_initial_guess[initial_guess]
-
-
-def _positive_float_or_none(name: str, value: float | None) -> float | None:
-    assert value is None or (np.isfinite(value) and value > 0.0), f"{name} must be finite and positive"
-    return None if value is None else float(value)
-
-
-def _nonnegative_float_or_none(name: str, value: float | None) -> float | None:
-    assert value is None or (np.isfinite(value) and value >= 0.0), f"{name} must be finite and nonnegative"
-    return None if value is None else float(value)
-
-
-def _positive_int_or_none(name: str, value: int | None) -> int | None:
-    assert value is None or value >= 1, f"{name} must be at least 1"
-    return None if value is None else int(value)
-
-
 def assemble_structural_2d(
     nodes: ArrayLike,
     elements: ArrayLike,
@@ -1785,12 +1557,7 @@ def assemble_structural_2d(
         int(analysis_elements.shape[0]),
         dtype,
     )
-    low_level = _dispatch_pair(
-        dtype,
-        _assemble_model_2d_f32,
-        _assemble_model_2d_f64,
-    )
-    backend = low_level(
+    backend = _assemble_model_2d_f64(
         analysis_nodes,
         analysis_elements,
         material_ids_arr,
@@ -1857,20 +1624,18 @@ def isotropic_axisymmetric_material(
     Args:
         youngs_modulus: Young's modulus with units `[pressure]`.
         poisson_ratio: Poisson ratio with units `[dimensionless]`.
-        dtype: Output floating dtype.
+        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order
         `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_axisymmetric_material_f32,
-        _isotropic_axisymmetric_material_f64,
-    )
-    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
+    _ = dtype
+    return _as_float_array(
+        _isotropic_axisymmetric_material_f64(youngs_modulus, poisson_ratio),
+        np.dtype(np.float64),
+    ).reshape(4, 4)
 
 
 def isotropic_axisymmetric_thermal_material(
@@ -1883,7 +1648,7 @@ def isotropic_axisymmetric_thermal_material(
     Args:
         alpha: Isotropic thermal expansion coefficient with units `[strain / temperature]`.
         reference_temperature: Stress-free reference temperature with units `[temperature]`.
-        dtype: Output floating dtype.
+        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Thermal material row with shape `(5,)` storing
@@ -1891,13 +1656,11 @@ def isotropic_axisymmetric_thermal_material(
         `[strain / temperature]`; `T_ref` has units `[temperature]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_axisymmetric_thermal_material_f32,
-        _isotropic_axisymmetric_thermal_material_f64,
+    _ = dtype
+    return _as_float_array(
+        _isotropic_axisymmetric_thermal_material_f64(alpha, reference_temperature),
+        np.dtype(np.float64),
     )
-    return _as_float_array(binding(alpha, reference_temperature), resolved_dtype)
 
 
 def isotropic_plane_strain_material(
@@ -1912,13 +1675,11 @@ def isotropic_plane_strain_material(
     by the in-plane strains.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_plane_strain_material_f32,
-        _isotropic_plane_strain_material_f64,
-    )
-    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
+    _ = dtype
+    return _as_float_array(
+        _isotropic_plane_strain_material_f64(youngs_modulus, poisson_ratio),
+        np.dtype(np.float64),
+    ).reshape(4, 4)
 
 
 def isotropic_plane_strain_thermal_material(
@@ -1932,13 +1693,11 @@ def isotropic_plane_strain_thermal_material(
     coefficients and zero engineering shear expansion.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_plane_strain_thermal_material_f32,
-        _isotropic_plane_strain_thermal_material_f64,
+    _ = dtype
+    return _as_float_array(
+        _isotropic_plane_strain_thermal_material_f64(alpha, reference_temperature),
+        np.dtype(np.float64),
     )
-    return _as_float_array(binding(alpha, reference_temperature), resolved_dtype)
 
 
 def orthotropic_axisymmetric_thermal_material(
@@ -1955,7 +1714,7 @@ def orthotropic_axisymmetric_thermal_material(
         alpha_z: Axial thermal expansion coefficient with units `[strain / temperature]`.
         alpha_t: Hoop thermal expansion coefficient with units `[strain / temperature]`.
         reference_temperature: Stress-free reference temperature with units `[temperature]`.
-        dtype: Output floating dtype.
+        dtype: Ignored; structural FEM material helpers always return `float64`.
 
     Returns:
         NDArray: Thermal material row with shape `(5,)` storing
@@ -1963,13 +1722,16 @@ def orthotropic_axisymmetric_thermal_material(
         `[strain / temperature]`; `T_ref` has units `[temperature]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _orthotropic_axisymmetric_thermal_material_f32,
-        _orthotropic_axisymmetric_thermal_material_f64,
+    _ = dtype
+    return _as_float_array(
+        _orthotropic_axisymmetric_thermal_material_f64(
+            alpha_r,
+            alpha_z,
+            alpha_t,
+            reference_temperature,
+        ),
+        np.dtype(np.float64),
     )
-    return _as_float_array(binding(alpha_r, alpha_z, alpha_t, reference_temperature), resolved_dtype)
 
 
 def orthotropic_plane_strain_thermal_material(
@@ -2011,13 +1773,11 @@ def cfsem_radial_material(
         `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _cfsem_radial_material_f32,
-        _cfsem_radial_material_f64,
-    )
-    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
+    _ = dtype
+    return _as_float_array(
+        _cfsem_radial_material_f64(youngs_modulus, poisson_ratio),
+        np.dtype(np.float64),
+    ).reshape(4, 4)
 
 
 def _normalize_displacements(
@@ -2042,8 +1802,6 @@ __all__ = [
     "QuadMeshQuery",
     "QuadratureFieldSamples",
     "assemble_structural_2d",
-    "Structural2DSolveDiagnostics",
-    "Structural2DSolveResult",
     "cfsem_radial_material",
     "interpolate_quad_mesh_values",
     "infer_quad9_mesh",

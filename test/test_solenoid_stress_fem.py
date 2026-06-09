@@ -1060,41 +1060,6 @@ def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
-@pytest.mark.parametrize("equilibration", ["ruiz", "none"])
-def test_iterative_structural_solve_matches_direct_and_reports_diagnostics(
-    dtype: DType,
-    equilibration: str,
-) -> None:
-    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
-    model, rhs = assemble_model_and_rhs(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([isotropic_axisymmetric_material(200.0, 0.27, dtype=dtype)]),
-        body_force=np.array([2.0, -1.0], dtype=dtype),
-        prescribed=prescribed_z_dofs(nodes.shape[0]),
-    )
-
-    direct = model.solve(rhs)
-    solve_tolerance = 1e-4 if dtype is np.float32 else 1.0e-9
-    iterative = model.solve(
-        rhs,
-        method="bicgstab",
-        tolerance=solve_tolerance,
-        max_iterations=100,
-        equilibration=equilibration,  # type: ignore[arg-type]
-        return_diagnostics=True,
-    )
-    rtol, atol = tolerance(dtype)
-
-    assert iterative.diagnostics.method == "bicgstab"
-    assert iterative.diagnostics.converged
-    assert iterative.diagnostics.iterations > 0
-    assert iterative.diagnostics.equilibrated == (equilibration == "ruiz")
-    assert np.allclose(iterative.displacement, direct, rtol=rtol, atol=atol)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("quadrature", QUADRATURES)
 def test_axisymmetric_model_reuses_factorization_across_load_cases(dtype: DType, quadrature: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=4, nz=2, dtype=dtype)
@@ -2077,18 +2042,18 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
     near_axis_nodes = np.array(
         [
             [0.0, 0.0],
-            [1.0e-8, 0.0],
-            [1.0e-8, 1.0],
+            [1.0e-16, 0.0],
+            [1.0e-16, 1.0],
             [0.0, 1.0],
         ],
-        dtype=np.float32,
+        dtype=np.float64,
     )
     with pytest.raises(ValueError, match="too close to zero"):
         model = fem.assemble_structural_2d(
             near_axis_nodes,
             np.array([[0, 1, 2, 3]], dtype=np.uint64),
             np.zeros((1,), dtype=np.uint64),
-            np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float32)]),
+            np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)]),
         )
         model.element_quadrature()
 
@@ -2231,22 +2196,27 @@ def test_pack_material_tables_from_tags_sorts_tags_and_rewrites_ids() -> None:
     assert np.allclose(packed_thermal_table[1], thermal_b)
 
 
-def test_python_convenience_wrappers_preserve_dtype_and_shapes() -> None:
-    dtype = np.dtype(np.float32)
-    iso = fem.isotropic_axisymmetric_material(200.0e9, 0.3, dtype=dtype)
-    iso_plane = fem.isotropic_plane_strain_material(200.0e9, 0.3, dtype=dtype)
-    reduced = fem.cfsem_radial_material(200.0e9, 0.3, dtype=dtype)
-    thermal = fem.isotropic_axisymmetric_thermal_material(1.0e-5, reference_temperature=293.15, dtype=dtype)
+def test_python_convenience_wrappers_normalize_float32_inputs_to_float64() -> None:
+    requested_dtype = np.dtype(np.float32)
+    expected_dtype = np.dtype(np.float64)
+    iso = fem.isotropic_axisymmetric_material(200.0e9, 0.3, dtype=requested_dtype)
+    iso_plane = fem.isotropic_plane_strain_material(200.0e9, 0.3, dtype=requested_dtype)
+    reduced = fem.cfsem_radial_material(200.0e9, 0.3, dtype=requested_dtype)
+    thermal = fem.isotropic_axisymmetric_thermal_material(
+        1.0e-5,
+        reference_temperature=293.15,
+        dtype=requested_dtype,
+    )
     thermal_plane = fem.isotropic_plane_strain_thermal_material(
         1.0e-5,
         reference_temperature=293.15,
-        dtype=dtype,
+        dtype=requested_dtype,
     )
     ortho = fem.orthotropic_axisymmetric_thermal_material(
-        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=dtype
+        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=requested_dtype
     )
     ortho_plane = fem.orthotropic_plane_strain_thermal_material(
-        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=dtype
+        1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15, dtype=requested_dtype
     )
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
     elevated = fem.infer_quad9_mesh(nodes, elements)
@@ -2258,15 +2228,15 @@ def test_python_convenience_wrappers_preserve_dtype_and_shapes() -> None:
     assert thermal_plane.shape == (5,)
     assert ortho.shape == (5,)
     assert ortho_plane.shape == (5,)
-    assert iso.dtype == dtype
-    assert iso_plane.dtype == dtype
-    assert reduced.dtype == dtype
-    assert thermal.dtype == dtype
-    assert thermal_plane.dtype == dtype
-    assert ortho.dtype == dtype
-    assert ortho_plane.dtype == dtype
+    assert iso.dtype == expected_dtype
+    assert iso_plane.dtype == expected_dtype
+    assert reduced.dtype == expected_dtype
+    assert thermal.dtype == expected_dtype
+    assert thermal_plane.dtype == expected_dtype
+    assert ortho.dtype == expected_dtype
+    assert ortho_plane.dtype == expected_dtype
     assert elevated.analysis_elements.shape[1] == 9
-    assert elevated.analysis_nodes.dtype == dtype
+    assert elevated.analysis_nodes.dtype == expected_dtype
 
 
 def test_private_formulation_code_rejects_unknown_formulation() -> None:

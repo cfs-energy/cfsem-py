@@ -26,9 +26,9 @@ from cfsem.solenoid_stress.thick_wall_cylinder_handcalc import (
 )
 
 
-DType = type[np.float32] | type[np.float64]
+DType = type[np.float64]
 QUADRATURES = ["gl3", "gl4"]
-DTYPES: list[DType] = [np.float32, np.float64]
+DTYPES: list[DType] = [np.float64]
 AREA_VOLUME_MESHES = [(1, 1), (3, 2)]
 BODY_FORCE_MESHES = [(2, 1), (4, 2)]
 PRESSURE_NR_CASES = [24, 48]
@@ -629,8 +629,6 @@ def build_multimaterial_checkerboard_case(
 
 
 def tolerance(dtype: DType) -> tuple[float, float]:
-    if dtype is np.float32:
-        return 1e-3, 1e-5
     return 1.0e-12, 1.0e-12
 
 
@@ -897,32 +895,36 @@ def test_body_force_total_matches_requested_total_force(
     assert np.allclose(rhs[:, 1].sum(), total_force[1], rtol=rtol, atol=max(atol, 1.0e-4))
 
 
-def test_model_dtype_resolution_includes_material_tables() -> None:
+def test_structural_fem_rejects_float32_input_arrays() -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
     material = isotropic_axisymmetric_material(200.0e9, 0.27)
     thermal_material = fem.isotropic_axisymmetric_thermal_material(
         1.1e-5,
         reference_temperature=293.15,
     )
-    nodal_temperature = np.linspace(294.0, 301.0, nodes.shape[0], dtype=np.float32)
 
+    with pytest.raises(TypeError, match="nodes"):
+        fem.assemble_structural_2d(
+            nodes=nodes,
+            elements=elements,
+            material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+            material_table=np.asarray([material]),
+            thermal_material_table=np.asarray([thermal_material]),
+        )
+
+
+def test_structural_rhs_rejects_float32_load_arrays() -> None:
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float64)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     model = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
         material_table=np.asarray([material]),
-        thermal_material_table=np.asarray([thermal_material]),
     )
 
-    assert model.dtype == np.dtype(np.float64)
-    assert model.stiffness.dtype == np.float64
-    assert (
-        model.build_rhs(
-            body_force=np.array([0.0, 0.0], dtype=np.float32),
-            nodal_temperature=nodal_temperature,
-        ).dtype
-        == np.float64
-    )
+    with pytest.raises(TypeError, match="body_force"):
+        model.build_rhs(body_force=np.array([0.0, 0.0], dtype=np.float32))
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
@@ -1697,12 +1699,8 @@ def test_pressure_vessel_stresses_match_lame_reference(
     radial_exact = s_radial_thick_wall_cylinder(radii, ri, ro, pin, pout)
     hoop_exact = s_hoop_thick_wall_cylinder(radii, ri, ro, pin, pout)
 
-    if nr <= 24 and dtype is np.float32:
-        radial_rtol, hoop_rtol, atol = 7.0e-2, 6.0e-2, 1.8e4
-    elif nr <= 24:
+    if nr <= 24:
         radial_rtol, hoop_rtol, atol = 5.0e-2, 4.0e-2, 1.0e4
-    elif dtype is np.float32:
-        radial_rtol, hoop_rtol, atol = 3.0e-2, 2.5e-2, 8.0e3
     else:
         radial_rtol, hoop_rtol, atol = 2.5e-2, 2.0e-2, 2.5e3
     # Stress is a recovered field built from displacement gradients, so it
@@ -1763,12 +1761,8 @@ def test_pressure_vessel_radial_displacement_matches_cfsem_1d_solver(
     )
     radial_cfsem = model.displacement_solver(rhs)[1:-1]
 
-    if nr <= 24 and dtype is np.float32:
-        rtol, atol = 7.0e-2, 2.5e-6
-    elif nr <= 24:
+    if nr <= 24:
         rtol, atol = 5.0e-2, 8.0e-7
-    elif dtype is np.float32:
-        rtol, atol = 4.0e-2, 1.0e-6
     else:
         rtol, atol = 3.0e-2, 2.0e-7
     assert np.allclose(radial_fe, radial_cfsem, rtol=rtol, atol=atol)
@@ -2209,7 +2203,7 @@ def test_python_convenience_wrappers_return_float64() -> None:
     ortho_plane = fem.orthotropic_plane_strain_thermal_material(
         1.0e-5, 2.0e-5, 3.0e-5, reference_temperature=293.15
     )
-    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float32)
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=np.float64)
     elevated = fem.infer_quad9_mesh(nodes, elements)
 
     assert iso.shape == (4, 4)
@@ -2257,7 +2251,6 @@ def test_quad9_temperature_elevation_reproduces_affine_temperature_field() -> No
         corner_temperature,
         nodes.shape[0],
         elevated,
-        dtype,
     )
     expected_temperature = a_r * elevated.analysis_nodes[:, 0] + b_z * elevated.analysis_nodes[:, 1] + c0
 

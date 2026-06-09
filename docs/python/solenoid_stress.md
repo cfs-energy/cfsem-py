@@ -28,7 +28,7 @@ The FEM path supports:
 - reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,
 - reduced quadrature-point recovery operators for strain and stress,
 - direct sparse-LU reduced-system solves,
-- `float64` numeric storage; `float32` inputs are accepted and normalized to `float64`,
+- `float64` numeric storage; floating input arrays must already have dtype `float64`,
 - model-owned Dirichlet constraints applied during assembly.
 
 The intended workflow is:

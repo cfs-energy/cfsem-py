@@ -28,6 +28,17 @@
     * Correct wrapper type hints for sparse triplets and circular-to-linear mutual inductance
     * Use ty instead of pyright
 
+## 9.1.0 2026-06-08
+
+* Rust
+    * 2D FEM solver
+        * Build loads and recovery operators by row instead of via triplets to eliminate sorting overhead
+        * Sort chunks of stiffness matrix triplets on each worker thread, then merge sorted chunks on root thread
+        * Only export python operator copies if requested
+        * Roughly 4x speedup overall
+* Python
+    * Update 2D FEM bindings for lazy cached properties
+
 ## 9.0.0 2026-06-05
 
 * Rust

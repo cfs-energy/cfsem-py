@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import pytest
@@ -634,6 +634,35 @@ def tolerance(dtype: DType) -> tuple[float, float]:
     return 1.0e-12, 1.0e-12
 
 
+def assert_sparse_allclose(
+    actual: Any,
+    expected: Any,
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    np.testing.assert_allclose(actual.toarray(), expected.toarray(), rtol=rtol, atol=atol)
+
+
+def assert_reduction_array_allclose(
+    actual: Any,
+    expected: Any,
+    *,
+    dtype: DType,
+    rtol: float,
+    atol: float,
+) -> None:
+    actual_array = np.asarray(actual)
+    expected_array = np.asarray(expected)
+    scale = max(
+        float(np.max(np.abs(actual_array), initial=0.0)),
+        float(np.max(np.abs(expected_array), initial=0.0)),
+        1.0,
+    )
+    scaled_atol = max(atol, float(np.finfo(dtype).eps) * scale)
+    np.testing.assert_allclose(actual_array, expected_array, rtol=rtol, atol=scaled_atol)
+
+
 def solve_with_factorized_model(
     model: fem.Structural2DFEMModel,
     rhs: np.ndarray,
@@ -902,12 +931,22 @@ def test_model_dtype_resolution_includes_material_tables() -> None:
 def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type: str) -> None:
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=3, nz=2, dtype=dtype)
     material = np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)])
+    thermal = np.asarray(
+        [fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15, dtype=dtype)]
+    )
     material_ids = np.zeros(elements.shape[0], dtype=np.uint64)
+    _inner_faces, outer_faces = pressure_faces_for_strip(nr=3, nz=2)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=3, nz=2)
+    prescribed = {0: 1.0e-6, 1: -2.0e-6}
     serial = fem.assemble_structural_2d(
         nodes=nodes,
         elements=elements,
         material_ids=material_ids,
         material_table=material,
+        pressure_faces=outer_faces,
+        traction_faces=top_faces,
+        thermal_material_table=thermal,
+        prescribed=prescribed,
         element_type=element_type,
         par=False,
     )
@@ -916,12 +955,108 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
         elements=elements,
         material_ids=material_ids,
         material_table=material,
+        pressure_faces=outer_faces,
+        traction_faces=top_faces,
+        thermal_material_table=thermal,
+        prescribed=prescribed,
         element_type=element_type,
         par=True,
     )
     rtol, atol = tolerance(dtype)
 
-    assert np.allclose(parallel.stiffness.toarray(), serial.stiffness.toarray(), rtol=rtol, atol=atol)
+    for operator_name in (
+        "stiffness",
+        "body_force_to_rhs",
+        "pressure_to_rhs",
+        "traction_to_rhs",
+        "temperature_to_rhs",
+        "strain_operator",
+        "stress_operator",
+        "thermal_strain_operator",
+        "thermal_stress_operator",
+    ):
+        assert_sparse_allclose(
+            getattr(parallel, operator_name),
+            getattr(serial, operator_name),
+            rtol=rtol,
+            atol=atol,
+        )
+
+    np.testing.assert_allclose(parallel.quadrature_points, serial.quadrature_points, rtol=rtol, atol=atol)
+    for array_name in (
+        "constant_rhs",
+        "strain_constant",
+        "stress_constant",
+        "thermal_strain_constant",
+        "thermal_stress_constant",
+    ):
+        assert_reduction_array_allclose(
+            getattr(parallel, array_name),
+            getattr(serial, array_name),
+            dtype=dtype,
+            rtol=rtol,
+            atol=atol,
+        )
+    np.testing.assert_array_equal(parallel.free_dofs, serial.free_dofs)
+    np.testing.assert_array_equal(parallel.fixed_dofs, serial.fixed_dofs)
+    np.testing.assert_allclose(parallel.fixed_values, serial.fixed_values, rtol=rtol, atol=atol)
+
+
+def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
+    _inner_faces, outer_faces = pressure_faces_for_strip(nr=2, nz=1)
+    _bottom_faces, top_faces = horizontal_faces_for_strip(nr=2, nz=1)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=dtype)
+    thermal = fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15, dtype=dtype)
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        pressure_faces=outer_faces,
+        traction_faces=top_faces,
+        thermal_material_table=np.asarray([thermal]),
+        element_type="quad9",
+    )
+    cache_names = (
+        "_stiffness_cache",
+        "_body_force_to_rhs_cache",
+        "_pressure_to_rhs_cache",
+        "_traction_to_rhs_cache",
+        "_temperature_to_rhs_cache",
+        "_strain_operator_cache",
+        "_stress_operator_cache",
+        "_thermal_strain_operator_cache",
+        "_thermal_stress_operator_cache",
+    )
+    for name in cache_names:
+        assert getattr(model, name) is None
+
+    _rhs = model.build_rhs(
+        body_force=np.array([1.0e3, -2.0e3], dtype=dtype),
+        pressure_values=np.full(outer_faces.shape[0], 2.5e5, dtype=dtype),
+        traction_values=np.full((top_faces.shape[0], 2), [1.0e4, -3.0e4], dtype=dtype),
+        nodal_temperature=np.full(nodes.shape[0], 300.0, dtype=dtype),
+    )
+    for name in cache_names:
+        assert getattr(model, name) is None
+
+    for public_name, cache_name in (
+        ("stiffness", "_stiffness_cache"),
+        ("body_force_to_rhs", "_body_force_to_rhs_cache"),
+        ("pressure_to_rhs", "_pressure_to_rhs_cache"),
+        ("traction_to_rhs", "_traction_to_rhs_cache"),
+        ("temperature_to_rhs", "_temperature_to_rhs_cache"),
+        ("strain_operator", "_strain_operator_cache"),
+        ("stress_operator", "_stress_operator_cache"),
+        ("thermal_strain_operator", "_thermal_strain_operator_cache"),
+        ("thermal_stress_operator", "_thermal_stress_operator_cache"),
+    ):
+        first = getattr(model, public_name)
+        second = getattr(model, public_name)
+        assert first is second
+        assert getattr(model, cache_name) is first
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)

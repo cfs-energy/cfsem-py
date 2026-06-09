@@ -27,15 +27,34 @@ pub const MU_0: f64 = 0.999_999_999_87 * core::f64::consts::PI * 4e-7; // [H/m]
 /// (H/m) Recurring constant multiple of `mu_0`
 pub const MU0_OVER_4PI: f64 = MU_0 / (4.0 * core::f64::consts::PI);
 
+
 /// Number of physical CPU cores available to Rayon-backed parallel loops.
 ///
 /// This is populated once on first access and then reused so chunk-size
 /// selection does not repeatedly query the OS.
 static PHYSICAL_CORES: LazyLock<usize> = LazyLock::new(num_cpus::get_physical);
 
-/// Chunk size for parallelism
+/// Chunk size for parallelism.
+///
+/// The heuristic aims for one chunk per physical core.  It intentionally returns at least one so
+/// small meshes keep the same code path without special-case empty chunk handling.
 pub(crate) fn chunksize(nelem: usize) -> usize {
     (nelem / (*PHYSICAL_CORES).max(1)).max(1)
+}
+
+/// Contiguous half-open ranges covering `0..len`.
+///
+/// The returned ranges preserve source ordering, which lets callers concatenate independently
+/// assembled chunks without reindexing rows or columns.
+pub(crate) fn ranges_for_len(len: usize, chunk: usize) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::with_capacity(len.div_ceil(chunk));
+    let mut start = 0;
+    while start < len {
+        let end = (start + chunk).min(len);
+        ranges.push((start, end));
+        start = end;
+    }
+    ranges
 }
 
 #[macro_use]

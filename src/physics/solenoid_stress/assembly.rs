@@ -5,7 +5,6 @@
 
 use rayon::prelude::*;
 
-use crate::chunksize;
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::axisym::{accumulate_stiffness, build_b_matrix};
 use crate::physics::solenoid_stress::convenience::rotate_material_in_plane;
@@ -15,6 +14,7 @@ use crate::physics::solenoid_stress::types::{
     DOF_PER_NODE, Real, StiffnessTriplets, Structural2dFormulation, local_dofs,
     validate_element_material_inputs,
 };
+use crate::{chunksize, ranges_for_len};
 
 /// Assemble the full unconstrained stiffness matrix for one quadrilateral family.
 ///
@@ -60,6 +60,7 @@ where
 /// Each worker owns an independent triplet buffer, so the element kernel has no shared mutable
 /// state.  The per-range triplets are concatenated in element order before the existing
 /// constrained-system reduction and sparse compression stages consume them.
+#[cfg(test)]
 pub(crate) fn assemble_stiffness_for_family_par<
     F: Real,
     Family,
@@ -76,6 +77,39 @@ pub(crate) fn assemble_stiffness_for_family_par<
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
+    let chunks =
+        assemble_stiffness_chunks_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            material_ids,
+            material_table,
+            material_orientation_angles,
+            formulation,
+            quadrature,
+        )?;
+
+    Ok(concat_stiffness_triplets(
+        chunks,
+        mesh.num_elements() * DOF_PER_ELEMENT * DOF_PER_ELEMENT,
+    ))
+}
+
+/// Assemble full-space stiffness triplet chunks with element ranges split across Rayon workers.
+pub(crate) fn assemble_stiffness_chunks_for_family_par<
+    F: Real,
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    material_ids: &[usize],
+    material_table: &[[[F; 4]; 4]],
+    material_orientation_angles: Option<&[F]>,
+    formulation: Structural2dFormulation<F>,
+    quadrature: QuadratureRule,
+) -> Result<Vec<StiffnessTriplets<F>>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
     validate_stiffness_inputs::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         material_ids,
@@ -83,16 +117,8 @@ where
         formulation,
     )?;
     let nelem = mesh.num_elements();
-    let chunk = chunksize(nelem);
-    let mut ranges = Vec::with_capacity(nelem.div_ceil(chunk));
-    let mut start = 0;
-    while start < nelem {
-        let end = (start + chunk).min(nelem);
-        ranges.push((start, end));
-        start = end;
-    }
 
-    let chunks = ranges
+    ranges_for_len(nelem, chunksize(nelem))
         .into_par_iter()
         .map(|(start, end)| {
             assemble_stiffness_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
@@ -106,12 +132,7 @@ where
                 end,
             )
         })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(concat_stiffness_triplets(
-        chunks,
-        nelem * DOF_PER_ELEMENT * DOF_PER_ELEMENT,
-    ))
+        .collect()
 }
 
 /// Validate shape and material inputs shared by serial and threaded stiffness assembly.
@@ -203,6 +224,7 @@ where
 }
 
 /// Concatenate independently assembled triplet chunks without changing element order.
+#[cfg(test)]
 fn concat_stiffness_triplets<F: Real>(
     chunks: Vec<StiffnessTriplets<F>>,
     capacity: usize,

@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, overload, cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -48,42 +48,22 @@ import scipy.sparse as sp
 
 import cfsem.cfsem as _cfsem_bindings
 
-_assemble_model_2d_f32 = _cfsem_bindings.solenoid_stress_fem_assemble_model_2d_f32
 _assemble_model_2d_f64 = _cfsem_bindings.solenoid_stress_fem_assemble_model_2d_f64
-_cfsem_radial_material_f32 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f32
 _cfsem_radial_material_f64 = _cfsem_bindings.solenoid_stress_fem_cfsem_radial_material_f64
-_infer_quad9_mesh_f32 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f32
 _infer_quad9_mesh_f64 = _cfsem_bindings.solenoid_stress_fem_infer_quad9_mesh_f64
-_quad_mesh_interpolation_operator_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_quad_mesh_interpolation_operator_f32
-)
 _quad_mesh_interpolation_operator_f64 = (
     _cfsem_bindings.solenoid_stress_fem_quad_mesh_interpolation_operator_f64
 )
-_quad_mesh_query_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f32
 _quad_mesh_query_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_query_f64
-_quad_mesh_strain_operator_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f32
 _quad_mesh_strain_operator_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_strain_operator_f64
-_quad_mesh_stress_operator_f32 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_stress_operator_f32
 _quad_mesh_stress_operator_f64 = _cfsem_bindings.solenoid_stress_fem_quad_mesh_stress_operator_f64
-_isotropic_axisymmetric_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f32
 _isotropic_axisymmetric_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_material_f64
-_isotropic_plane_strain_material_f32 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f32
 _isotropic_plane_strain_material_f64 = _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_material_f64
-_isotropic_axisymmetric_thermal_material_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32
-)
 _isotropic_axisymmetric_thermal_material_f64 = (
     _cfsem_bindings.solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64
 )
-_isotropic_plane_strain_thermal_material_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_thermal_material_f32
-)
 _isotropic_plane_strain_thermal_material_f64 = (
     _cfsem_bindings.solenoid_stress_fem_isotropic_plane_strain_thermal_material_f64
-)
-_orthotropic_axisymmetric_thermal_material_f32 = (
-    _cfsem_bindings.solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32
 )
 _orthotropic_axisymmetric_thermal_material_f64 = (
     _cfsem_bindings.solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f64
@@ -105,21 +85,20 @@ def _to_csc_matrix(matrix: Any) -> sp.csc_matrix:
     return cast(sp.csc_matrix, sp.csc_matrix(matrix))
 
 
-def _as_float_array(data: Any, dtype: np.dtype[Any]) -> npt.NDArray[np.floating[Any]]:
-    """Convert binding output to a NumPy floating array with an explicit static type."""
+def _as_float64_array(data: Any) -> npt.NDArray[np.float64]:
+    """Convert binding output to a NumPy float64 array with an explicit static type."""
 
-    return cast(npt.NDArray[np.floating[Any]], np.asarray(data, dtype=dtype))
+    return cast(npt.NDArray[np.float64], np.asarray(data, dtype=np.float64))
 
 
 def _csr_matrix_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
-    dtype: np.dtype[Any],
 ) -> sp.csr_matrix:
     vals, indices, indptr, nrow, ncol = binding
     return _to_csr_matrix(
         sp.csr_matrix(
             (
-                np.asarray(vals, dtype=dtype),
+                np.asarray(vals, dtype=np.float64),
                 np.asarray(indices, dtype=np.int64),
                 np.asarray(indptr, dtype=np.int64),
             ),
@@ -130,13 +109,12 @@ def _csr_matrix_from_binding(
 
 def _csc_matrix_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
-    dtype: np.dtype[Any],
 ) -> sp.csc_matrix:
     vals, indices, indptr, nrow, ncol = binding
     return _to_csc_matrix(
         sp.csc_matrix(
             (
-                np.asarray(vals, dtype=dtype),
+                np.asarray(vals, dtype=np.float64),
                 np.asarray(indices, dtype=np.int64),
                 np.asarray(indptr, dtype=np.int64),
             ),
@@ -171,38 +149,6 @@ class ElementQuadrature:
     weights_area: npt.NDArray[np.floating[Any]]
     weights_volume: npt.NDArray[np.floating[Any]]
     nq_per_element: int
-
-
-@dataclass(frozen=True, slots=True)
-class Structural2DSolveDiagnostics:
-    """Diagnostics from one 2D FEM linear solve.
-
-    Args:
-        method: Solver method used for the reduced structural system.
-        converged: Whether the selected solver converged.
-        iterations: Number of BiCGSTAB iterations, or zero for direct solves.
-        residual_norm: Final residual norm in reduced-RHS units, or zero for direct solves.
-        equilibrated: Whether row/column equilibration was applied before the solve.
-    """
-
-    method: Literal["direct", "bicgstab"]
-    converged: bool
-    iterations: int
-    residual_norm: float
-    equilibrated: bool
-
-
-@dataclass(frozen=True, slots=True)
-class Structural2DSolveResult:
-    """Full displacement solution plus linear-solver diagnostics.
-
-    Args:
-        displacement: Full displacement vector with shape `(ndof_full,)`.
-        diagnostics: Solver diagnostics for the reduced structural solve.
-    """
-
-    displacement: npt.NDArray[np.floating[Any]]
-    diagnostics: Structural2DSolveDiagnostics
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +218,8 @@ class QuadMeshQuery:
 class Structural2DFEMModel:
     """Reusable 2D structural FEM model with sparse operators and reduced solve state.
 
+    Structural FEM numeric arrays are `float64`; floating inputs must already use `float64` arrays.
+
     The sparse operators are exported from the Rust backend lazily:
     - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
       map load amplitudes to the reduced structural right-hand side,
@@ -301,7 +249,6 @@ class Structural2DFEMModel:
         self,
         *,
         backend: Any,
-        dtype: np.dtype[Any],
         input_nodes: npt.NDArray[np.floating[Any]],
         input_elements: npt.NDArray[np.uint64],
         analysis_nodes: npt.NDArray[np.floating[Any]],
@@ -328,7 +275,6 @@ class Structural2DFEMModel:
         n_temperature_nodes: int,
     ) -> None:
         self._backend = backend
-        self._dtype = dtype
         self._input_nodes = input_nodes
         self._input_elements = input_elements
         self._elevated = elevated
@@ -377,12 +323,6 @@ class Structural2DFEMModel:
         self._thermal_stress_operator_cache: sp.csr_matrix | None = None
 
     @property
-    def dtype(self) -> np.dtype[Any]:
-        """Floating dtype used by all exported operators, arrays, and convenience-method outputs."""
-
-        return self._dtype
-
-    @property
     def ndof(self) -> int:
         """Compatibility alias for `ndof_full`, the full displacement-vector length `(ndof_full,)`."""
 
@@ -413,7 +353,7 @@ class Structural2DFEMModel:
         assert elevated is not None, "temperature elevation is available only for inferred quad9 meshes"
         cache = self._temperature_elevation_cache
         if cache is None:
-            cache = _temperature_elevation_operator(elevated, self.dtype)
+            cache = _temperature_elevation_operator(elevated)
             self._temperature_elevation_cache = cache
         return cache
 
@@ -426,7 +366,7 @@ class Structural2DFEMModel:
 
         cache = getattr(self, attr)
         if cache is None:
-            cache = _csc_matrix_from_binding(export(), self.dtype)
+            cache = _csc_matrix_from_binding(export())
             setattr(self, attr, cache)
         return cast(sp.csc_matrix, cache)
 
@@ -435,7 +375,7 @@ class Structural2DFEMModel:
 
         cache = getattr(self, attr)
         if cache is None:
-            cache = _csr_matrix_from_binding(export(), self.dtype)
+            cache = _csr_matrix_from_binding(export())
             setattr(self, attr, cache)
         return cast(sp.csr_matrix, cache)
 
@@ -455,7 +395,7 @@ class Structural2DFEMModel:
         cache = getattr(self, attr)
         if cache is not None:
             return cast(sp.csr_matrix, cache)
-        analysis_operator = _csr_matrix_from_binding(export(), self.dtype)
+        analysis_operator = _csr_matrix_from_binding(export())
         cache = (
             _to_csr_matrix(analysis_operator @ self._temperature_elevation())
             if self._elevated is not None and self.n_temperature_nodes > 0
@@ -580,9 +520,9 @@ class Structural2DFEMModel:
             return cache
         points_flat, weights_area_flat, weights_volume_flat, nq = self._backend.element_quadrature()
         nelem = self.analysis_elements.shape[0]
-        points = np.asarray(points_flat, dtype=self.dtype).reshape(nelem, int(nq), 2)
-        weights_area = np.asarray(weights_area_flat, dtype=self.dtype).reshape(nelem, int(nq))
-        weights_volume = np.asarray(weights_volume_flat, dtype=self.dtype).reshape(nelem, int(nq))
+        points = np.asarray(points_flat, dtype=np.float64).reshape(nelem, int(nq), 2)
+        weights_area = np.asarray(weights_area_flat, dtype=np.float64).reshape(nelem, int(nq))
+        weights_volume = np.asarray(weights_volume_flat, dtype=np.float64).reshape(nelem, int(nq))
         cache = ElementQuadrature(
             points=points,
             weights_area=weights_area,
@@ -606,8 +546,8 @@ class Structural2DFEMModel:
             return cache
         areas, volumes = self._backend.element_measures()
         cache = ElementMeasures(
-            areas=np.asarray(areas, dtype=self.dtype),
-            volumes=np.asarray(volumes, dtype=self.dtype),
+            areas=np.asarray(areas, dtype=np.float64),
+            volumes=np.asarray(volumes, dtype=np.float64),
         )
         self._element_measures_cache = cache
         return cache
@@ -618,9 +558,9 @@ class Structural2DFEMModel:
     ) -> npt.NDArray[np.floating[Any]] | None:
         if self.n_temperature_nodes == 0:
             values = (
-                np.zeros((0,), dtype=self.dtype)
+                np.zeros((0,), dtype=np.float64)
                 if nodal_temperature is None
-                else np.asarray(nodal_temperature, dtype=self.dtype).reshape(-1)
+                else np.asarray(nodal_temperature).reshape(-1)
             )
             assert values.size == 0, "nodal_temperature was provided, but this model has no thermal operator"
             return None
@@ -630,7 +570,6 @@ class Structural2DFEMModel:
             nodal_temperature,
             self._input_nodes.shape[0],
             self._elevated,
-            self.dtype,
         )
 
     def build_rhs(
@@ -662,16 +601,15 @@ class Structural2DFEMModel:
         """
 
         body_force_arr = (
-            np.zeros((self.nelem, 2), dtype=self.dtype)
+            np.zeros((self.nelem, 2), dtype=np.float64)
             if body_force is None
-            else _normalize_body_force(body_force, self.nelem, self.dtype)
+            else _normalize_body_force(body_force, self.nelem)
         )
         npressure = int(self.pressure_faces.shape[0])
-        pressure_arr = _normalize_pressure_values(pressure_values, npressure, self.dtype)
+        pressure_arr = _normalize_pressure_values(pressure_values, npressure)
         traction_arr = _normalize_traction_values(
             traction_values,
             int(self.traction_faces.shape[0]),
-            self.dtype,
         )
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
         rhs = self._backend.build_rhs(
@@ -680,130 +618,25 @@ class Structural2DFEMModel:
             traction_arr.reshape(-1) if traction_arr.size else None,
             temperature_arr,
         )
-        return np.asarray(rhs, dtype=self.dtype)
+        return np.asarray(rhs, dtype=np.float64)
 
-    @overload
-    def solve(
-        self,
-        rhs: ArrayLike,
-        *,
-        method: Literal["direct", "bicgstab"] = "direct",
-        tolerance: float | None = None,
-        max_iterations: int | None = None,
-        preconditioner: Literal["none", "diagonal"] = "diagonal",
-        equilibration: Literal["none", "ruiz"] = "ruiz",
-        equilibration_max_iterations: int | None = None,
-        equilibration_tolerance: float | None = None,
-        equilibration_norm_floor: float | None = None,
-        equilibration_norm_ceil: float | None = None,
-        initial_guess: Literal["zero", "previous"] = "zero",
-        return_diagnostics: Literal[False] = False,
-    ) -> npt.NDArray[np.floating[Any]]: ...
-
-    @overload
-    def solve(
-        self,
-        rhs: ArrayLike,
-        *,
-        method: Literal["direct", "bicgstab"] = "direct",
-        tolerance: float | None = None,
-        max_iterations: int | None = None,
-        preconditioner: Literal["none", "diagonal"] = "diagonal",
-        equilibration: Literal["none", "ruiz"] = "ruiz",
-        equilibration_max_iterations: int | None = None,
-        equilibration_tolerance: float | None = None,
-        equilibration_norm_floor: float | None = None,
-        equilibration_norm_ceil: float | None = None,
-        initial_guess: Literal["zero", "previous"] = "zero",
-        return_diagnostics: Literal[True],
-    ) -> Structural2DSolveResult: ...
-
-    def solve(
-        self,
-        rhs: ArrayLike,
-        *,
-        method: Literal["direct", "bicgstab"] = "direct",
-        tolerance: float | None = None,
-        max_iterations: int | None = None,
-        preconditioner: Literal["none", "diagonal"] = "diagonal",
-        equilibration: Literal["none", "ruiz"] = "ruiz",
-        equilibration_max_iterations: int | None = None,
-        equilibration_tolerance: float | None = None,
-        equilibration_norm_floor: float | None = None,
-        equilibration_norm_ceil: float | None = None,
-        initial_guess: Literal["zero", "previous"] = "zero",
-        return_diagnostics: bool = False,
-    ) -> npt.NDArray[np.floating[Any]] | Structural2DSolveResult:
+    def solve(self, rhs: ArrayLike) -> npt.NDArray[np.floating[Any]]:
         """Solve the reduced system and recover the full displacement field.
 
         Args:
             rhs: Reduced right-hand side with shape `(ndof_reduced,)` and units
                 `[generalized force] = [energy / distance]`.
-            method: Linear solve method, either `"direct"` for cached sparse LU or `"bicgstab"`
-                for an iterative solve.
-            tolerance: Optional absolute BiCGSTAB residual tolerance for the solved system. If
-                omitted, Rust chooses an RHS-scaled default. When Ruiz equilibration is enabled,
-                this same value is applied to the equilibrated system rather than rescaled to
-                original reduced-RHS units.
-            max_iterations: Optional maximum number of BiCGSTAB iterations.
-            preconditioner: BiCGSTAB preconditioner, either `"diagonal"` or `"none"`.
-            equilibration: BiCGSTAB equilibration mode, either `"ruiz"` or `"none"`.
-            equilibration_max_iterations: Optional maximum number of equilibration iterations.
-            equilibration_tolerance: Optional dimensionless equilibration tolerance.
-            equilibration_norm_floor: Optional lower clamp for measured equilibration norms.
-            equilibration_norm_ceil: Optional upper clamp for measured equilibration norms.
-            initial_guess: BiCGSTAB initial guess, either `"zero"` or `"previous"`.
-            return_diagnostics: If true, return `Structural2DSolveResult` with displacement and
-                diagnostics. If false, return the displacement array directly.
 
         Returns:
-            NDArray | Structural2DSolveResult: Full displacement vector with shape
-            `(ndof_full,)` and component ordering `[u_r0, u_z0, u_r1, u_z1, ...]`, or the same
-            displacement packaged with solver diagnostics. Units are `[length]`.
+            NDArray: Full displacement vector with shape `(ndof_full,)` and component ordering
+            `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
         """
 
-        rhs_arr = np.ascontiguousarray(np.asarray(rhs, dtype=self.dtype).reshape(-1))
+        rhs_arr = np.asarray(rhs).reshape(-1)
         assert (
             rhs_arr.shape[0] == self.ndof_reduced
         ), f"rhs must have length {self.ndof_reduced}; got {rhs_arr.shape}"
-        norm_floor = _positive_float_or_none("equilibration_norm_floor", equilibration_norm_floor)
-        norm_ceil = _positive_float_or_none("equilibration_norm_ceil", equilibration_norm_ceil)
-        assert (
-            norm_floor is None or norm_ceil is None or norm_ceil > norm_floor
-        ), "equilibration_norm_ceil must be greater than equilibration_norm_floor"
-        (
-            displacement_raw,
-            method_code,
-            converged,
-            iterations,
-            residual_norm,
-            equilibrated,
-        ) = self._backend.solve(
-            rhs_arr,
-            _solve_method_code(method),
-            _positive_float_or_none("tolerance", tolerance),
-            _positive_int_or_none("max_iterations", max_iterations),
-            _bicgstab_preconditioner_code(preconditioner),
-            _bicgstab_equilibration_code(equilibration),
-            _positive_int_or_none("equilibration_max_iterations", equilibration_max_iterations),
-            _nonnegative_float_or_none("equilibration_tolerance", equilibration_tolerance),
-            norm_floor,
-            norm_ceil,
-            _bicgstab_initial_guess_code(initial_guess),
-        )
-        displacement = np.asarray(displacement_raw, dtype=self.dtype)
-        if not return_diagnostics:
-            return displacement
-        return Structural2DSolveResult(
-            displacement=displacement,
-            diagnostics=Structural2DSolveDiagnostics(
-                method=_solve_method_name(int(method_code)),
-                converged=bool(converged),
-                iterations=int(iterations),
-                residual_norm=float(residual_norm),
-                equilibrated=bool(equilibrated),
-            ),
-        )
+        return np.asarray(self._backend.solve(rhs_arr), dtype=np.float64)
 
     def recover_full(self, reduced_solution: ArrayLike) -> npt.NDArray[np.floating[Any]]:
         """Reinsert prescribed Dirichlet values into a reduced displacement vector.
@@ -817,11 +650,11 @@ class Structural2DFEMModel:
             `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
         """
 
-        reduced_arr = np.asarray(reduced_solution, dtype=self.dtype).reshape(-1)
+        reduced_arr = np.asarray(reduced_solution).reshape(-1)
         assert (
             reduced_arr.shape[0] == self.ndof_reduced
         ), f"reduced_solution must have length {self.ndof_reduced}; got {reduced_arr.shape}"
-        full = np.zeros((self.ndof_full,), dtype=self.dtype)
+        full = np.zeros((self.ndof_full,), dtype=np.float64)
         full[self.fixed_dofs] = self.fixed_values
         full[self.free_dofs] = reduced_arr
         return full
@@ -852,12 +685,12 @@ class Structural2DFEMModel:
             ValueError: If thermal materials are present but `nodal_temperature` is omitted.
         """
 
-        arr = np.asarray(displacements, dtype=self.dtype)
+        arr = np.asarray(displacements)
         if arr.ndim == 1 and arr.shape == (self.ndof_reduced,):
             displacements_full = self.recover_full(arr)
         else:
             displacements_full = _normalize_displacements(
-                displacements, self.analysis_nodes.shape[0], self.dtype
+                displacements, self.analysis_nodes.shape[0]
             ).reshape(-1)
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
         (
@@ -871,11 +704,11 @@ class Structural2DFEMModel:
         nelem = self.analysis_elements.shape[0]
         nq = int(nq)
         return QuadratureFieldSamples(
-            points=np.asarray(points_flat, dtype=self.dtype).reshape(nelem, nq, 2),
-            strain=np.asarray(strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
-            thermal_strain=np.asarray(thermal_strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
-            elastic_strain=np.asarray(elastic_strain_flat, dtype=self.dtype).reshape(nelem, nq, 4),
-            stress=np.asarray(stress_flat, dtype=self.dtype).reshape(nelem, nq, 4),
+            points=np.asarray(points_flat, dtype=np.float64).reshape(nelem, nq, 2),
+            strain=np.asarray(strain_flat, dtype=np.float64).reshape(nelem, nq, 4),
+            thermal_strain=np.asarray(thermal_strain_flat, dtype=np.float64).reshape(nelem, nq, 4),
+            elastic_strain=np.asarray(elastic_strain_flat, dtype=np.float64).reshape(nelem, nq, 4),
+            stress=np.asarray(stress_flat, dtype=np.float64).reshape(nelem, nq, 4),
         )
 
 
@@ -939,13 +772,12 @@ def _formulation_code(formulation: str) -> int:
 def _normalize_thickness(
     formulation: str,
     thickness: float | None,
-    dtype: np.dtype[Any],
 ) -> float:
     if formulation == "axisymmetric":
         assert thickness is None, "thickness is only valid for formulation='plane_strain'"
-        return float(np.asarray(0.0, dtype=dtype))
+        return 0.0
     assert thickness is not None, "thickness is required for formulation='plane_strain'"
-    value = float(np.asarray(thickness, dtype=dtype))
+    value = float(thickness)
     assert value > 0.0, f"thickness must be positive; got {thickness!r}"
     return value
 
@@ -953,51 +785,35 @@ def _normalize_thickness(
 def _normalize_material_orientation_angles(
     material_orientation_angles: ArrayLike | None,
     nelem: int,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
     if material_orientation_angles is None:
-        return np.zeros((0,), dtype=dtype)
-    angles = np.asarray(material_orientation_angles, dtype=dtype)
+        return np.zeros((0,), dtype=np.float64)
+    angles = np.asarray(material_orientation_angles)
     if angles.ndim == 0:
         angles = np.broadcast_to(angles, (nelem,)).copy()
     assert angles.ndim == 1 and angles.shape[0] == nelem, (
         f"material_orientation_angles must be a scalar or have shape ({nelem},); " f"got {angles.shape}"
     )
-    return np.ascontiguousarray(angles)
+    return angles
 
 
-def _resolve_float_dtype(*values: object) -> np.dtype[np.float32] | np.dtype[np.float64]:
-    arrays: list[np.ndarray[Any, Any]] = []
-    for value in values:
-        if value is None:
-            continue
-        if isinstance(value, Mapping):
-            arrays.extend(np.asarray(item) for item in value.values())
-        else:
-            arrays.append(np.asarray(value))
-    result = np.dtype(np.result_type(*arrays, np.float32))
-    if result.kind != "f" or result.itemsize <= 4:
-        return np.dtype(np.float32)
-    return np.dtype(np.float64)
-
-
-def _normalize_nodes(nodes: ArrayLike, dtype: np.dtype[Any]) -> npt.NDArray[np.floating[Any]]:
-    arr = np.asarray(nodes, dtype=dtype)
+def _normalize_nodes(nodes: ArrayLike) -> npt.NDArray[np.floating[Any]]:
+    arr = np.asarray(nodes)
     assert arr.ndim == 2 and arr.shape[1] == 2, f"nodes must have shape (nnode, 2); got {arr.shape}"
-    return np.ascontiguousarray(arr)
+    return arr
 
 
 def _normalize_elements(
     elements: ArrayLike,
     nodes_per_element: int | tuple[int, ...] = 4,
 ) -> npt.NDArray[np.uint64]:
-    arr = np.asarray(elements, dtype=np.uint64)
+    arr = np.asarray(elements)
     expected = (nodes_per_element,) if isinstance(nodes_per_element, int) else nodes_per_element
     expected_text = " or ".join(f"(nelem, {count})" for count in expected)
     assert (
         arr.ndim == 2 and arr.shape[1] in expected
     ), f"elements must have shape {expected_text}; got {arr.shape}"
-    return np.ascontiguousarray(arr)
+    return arr
 
 
 def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh:
@@ -1017,22 +833,20 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
             one-dimensional index arrays.
     """
 
-    dtype = _resolve_float_dtype(nodes)
-    nodes_arr = _normalize_nodes(nodes, dtype)
+    nodes_arr = _normalize_nodes(nodes)
     elements_arr = _normalize_elements(elements)
-    binding = _dispatch_pair(dtype, _infer_quad9_mesh_f32, _infer_quad9_mesh_f64)
     (
         analysis_nodes_flat,
         analysis_elements_flat,
         corner_node_indices,
         midside_node_indices,
         center_node_indices,
-    ) = binding(nodes_arr, elements_arr)
+    ) = _infer_quad9_mesh_f64(nodes_arr, elements_arr)
 
     return ElevatedQuad9Mesh(
         input_nodes=nodes_arr,
         input_elements=elements_arr,
-        analysis_nodes=np.asarray(analysis_nodes_flat, dtype=dtype).reshape(-1, 2),
+        analysis_nodes=np.asarray(analysis_nodes_flat, dtype=np.float64).reshape(-1, 2),
         analysis_elements=np.asarray(analysis_elements_flat, dtype=np.uint64).reshape(-1, 9),
         corner_node_indices=np.asarray(corner_node_indices, dtype=np.int64),
         midside_node_indices=np.asarray(midside_node_indices, dtype=np.int64),
@@ -1042,33 +856,30 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
 
 def _normalize_query_points(
     points: ArrayLike,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
-    arr = np.asarray(points, dtype=dtype)
+    arr = np.asarray(points)
     assert arr.ndim == 2 and arr.shape[1] == 2, f"points must have shape (npoint, 2); got {arr.shape}"
-    return np.ascontiguousarray(arr)
+    return arr
 
 
 def _normalize_query_tolerance(
     tolerance: float | None,
-    dtype: np.dtype[Any],
 ) -> float:
     if tolerance is not None:
-        value = float(np.asarray(tolerance, dtype=dtype))
+        value = float(tolerance)
         assert value >= 0.0, f"tolerance must be nonnegative; got {tolerance!r}"
         return value
-    return 1.0e-5 if dtype == np.float32 else 1.0e-10
+    return 1.0e-10
 
 
 def _coo_operator_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
-    dtype: np.dtype[Any],
 ) -> sp.csr_matrix:
     vals, rows, cols, nrow, ncol = binding
     return _to_csr_matrix(
         sp.coo_matrix(
             (
-                np.asarray(vals, dtype=dtype),
+                np.asarray(vals, dtype=np.float64),
                 (
                     np.asarray(rows, dtype=np.int64),
                     np.asarray(cols, dtype=np.int64),
@@ -1109,16 +920,14 @@ def query_quad_mesh(
         and index arrays are unitless.
     """
 
-    dtype = _resolve_float_dtype(nodes, points)
     normalized_element_type = _normalize_element_type(element_type)
-    nodes_arr = _normalize_nodes(nodes, dtype)
+    nodes_arr = _normalize_nodes(nodes)
     elements_arr = _normalize_elements(
         elements,
         4 if normalized_element_type == "quad4" else 9,
     )
-    points_arr = _normalize_query_points(points, dtype)
-    binding = _dispatch_pair(dtype, _quad_mesh_query_f32, _quad_mesh_query_f64)
-    data = binding(
+    points_arr = _normalize_query_points(points)
+    data = _quad_mesh_query_f64(
         nodes_arr,
         elements_arr,
         points_arr,
@@ -1132,23 +941,23 @@ def query_quad_mesh(
         points=points_arr,
         element_type=normalized_element_type,
         nearest_node_indices=np.asarray(data["nearest_node_indices"], dtype=np.int64),
-        nearest_node_points=np.asarray(data["nearest_node_points"], dtype=dtype).reshape(-1, 2),
-        nearest_node_distances=np.asarray(data["nearest_node_distances"], dtype=dtype),
+        nearest_node_points=np.asarray(data["nearest_node_points"], dtype=np.float64).reshape(-1, 2),
+        nearest_node_distances=np.asarray(data["nearest_node_distances"], dtype=np.float64),
         nearest_element_indices=np.asarray(data["nearest_element_indices"], dtype=np.int64),
         nearest_element_reference_points=np.asarray(
             data["nearest_element_reference_points"],
-            dtype=dtype,
+            dtype=np.float64,
         ).reshape(-1, 2),
-        nearest_element_points=np.asarray(data["nearest_element_points"], dtype=dtype).reshape(-1, 2),
-        nearest_element_distances=np.asarray(data["nearest_element_distances"], dtype=dtype),
+        nearest_element_points=np.asarray(data["nearest_element_points"], dtype=np.float64).reshape(-1, 2),
+        nearest_element_distances=np.asarray(data["nearest_element_distances"], dtype=np.float64),
         nearest_face_element_indices=np.asarray(data["nearest_face_element_indices"], dtype=np.int64),
         nearest_face_local_faces=np.asarray(data["nearest_face_local_faces"], dtype=np.int64),
         nearest_face_reference_coordinates=np.asarray(
             data["nearest_face_reference_coordinates"],
-            dtype=dtype,
+            dtype=np.float64,
         ),
-        nearest_face_points=np.asarray(data["nearest_face_points"], dtype=dtype).reshape(-1, 2),
-        nearest_face_distances=np.asarray(data["nearest_face_distances"], dtype=dtype),
+        nearest_face_points=np.asarray(data["nearest_face_points"], dtype=np.float64).reshape(-1, 2),
+        nearest_face_distances=np.asarray(data["nearest_face_distances"], dtype=np.float64),
     )
 
 
@@ -1170,21 +979,14 @@ def quad_mesh_interpolation_operator(
         matrix multiplication.
     """
 
-    dtype = query.nodes.dtype
-    binding = _dispatch_pair(
-        dtype,
-        _quad_mesh_interpolation_operator_f32,
-        _quad_mesh_interpolation_operator_f64,
-    )
     return _coo_operator_from_binding(
-        binding(
+        _quad_mesh_interpolation_operator_f64(
             query.nodes,
             query.elements,
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
             query.nearest_element_reference_points,
             query.element_type,
         ),
-        dtype,
     )
 
 
@@ -1212,11 +1014,9 @@ def quad_mesh_strain_operator(
     """
 
     normalized_formulation = _normalize_formulation(formulation)
-    thickness_value = _normalize_thickness(normalized_formulation, thickness, query.nodes.dtype)
-    dtype = query.nodes.dtype
-    binding = _dispatch_pair(dtype, _quad_mesh_strain_operator_f32, _quad_mesh_strain_operator_f64)
+    thickness_value = _normalize_thickness(normalized_formulation, thickness)
     return _coo_operator_from_binding(
-        binding(
+        _quad_mesh_strain_operator_f64(
             query.nodes,
             query.elements,
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
@@ -1225,7 +1025,6 @@ def quad_mesh_strain_operator(
             _formulation_code(normalized_formulation),
             thickness_value,
         ),
-        dtype,
     )
 
 
@@ -1265,25 +1064,22 @@ def quad_mesh_stress_operator(
         units `[pressure]`.
     """
 
-    dtype = _resolve_float_dtype(query.nodes, material_table, material_orientation_angles)
-    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table)
     assert material_ids_arr.shape == (
         query.elements.shape[0],
     ), f"material_ids must have shape ({query.elements.shape[0]},); got {material_ids_arr.shape}"
     material_orientation_angles_arr = _normalize_material_orientation_angles(
         material_orientation_angles,
         query.elements.shape[0],
-        dtype,
     )
     normalized_formulation = _normalize_formulation(formulation)
-    thickness_value = _normalize_thickness(normalized_formulation, thickness, dtype)
-    binding = _dispatch_pair(dtype, _quad_mesh_stress_operator_f32, _quad_mesh_stress_operator_f64)
+    thickness_value = _normalize_thickness(normalized_formulation, thickness)
     return _coo_operator_from_binding(
-        binding(
-            np.asarray(query.nodes, dtype=dtype),
+        _quad_mesh_stress_operator_f64(
+            query.nodes,
             query.elements,
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
-            np.asarray(query.nearest_element_reference_points, dtype=dtype),
+            query.nearest_element_reference_points,
             material_ids_arr,
             material_table_arr,
             material_orientation_angles_arr,
@@ -1291,7 +1087,6 @@ def quad_mesh_stress_operator(
             _formulation_code(normalized_formulation),
             thickness_value,
         ),
-        dtype,
     )
 
 
@@ -1334,7 +1129,6 @@ def interpolate_quad_mesh_values(
         is unitless with shape `(npoint, 2)`; `inside` has shape `(npoint,)`.
     """
 
-    dtype = _resolve_float_dtype(nodes, nodal_values, points)
     query = query_quad_mesh(
         nodes,
         elements,
@@ -1342,14 +1136,14 @@ def interpolate_quad_mesh_values(
         element_type=element_type,
         max_iterations=max_iterations,
     )
-    values_arr = np.asarray(nodal_values, dtype=dtype)
+    values_arr = np.asarray(nodal_values)
     assert (
         values_arr.ndim >= 1 and values_arr.shape[0] == query.nodes.shape[0]
     ), f"nodal_values must have shape (nnode,) or (nnode, ...); got {values_arr.shape}"
     values_shape = values_arr.shape[1:]
-    values_2d = np.ascontiguousarray(values_arr.reshape(query.nodes.shape[0], -1), dtype=dtype)
+    values_2d = values_arr.reshape(query.nodes.shape[0], -1)
     outside_policy = str(outside).strip().lower()
-    tol = _normalize_query_tolerance(tolerance, dtype)
+    tol = _normalize_query_tolerance(tolerance)
     inside = query.nearest_element_distances <= tol
     if outside_policy in {"raise", "error"} and not np.all(inside):
         first = int(np.flatnonzero(~inside)[0])
@@ -1357,7 +1151,7 @@ def interpolate_quad_mesh_values(
     if outside_policy not in {"nearest", "nan", "raise", "error"}:
         raise ValueError(f"unsupported outside policy {outside!r}; use 'raise', 'nan', or 'nearest'")
     operator = quad_mesh_interpolation_operator(query)
-    values = np.asarray(operator @ values_2d, dtype=dtype).reshape((query.points.shape[0], *values_shape))
+    values = np.asarray(operator @ values_2d).reshape((query.points.shape[0], *values_shape))
     if outside_policy == "nan" and np.any(~inside):
         values[~inside] = np.nan
     return QuadMeshInterpolation(
@@ -1370,7 +1164,6 @@ def interpolate_quad_mesh_values(
 
 def _temperature_elevation_operator(
     elevated: ElevatedQuad9Mesh,
-    dtype: np.dtype[Any],
 ) -> sp.csr_matrix:
     n_input_nodes = elevated.input_nodes.shape[0]
     n_analysis_nodes = elevated.analysis_nodes.shape[0]
@@ -1404,7 +1197,7 @@ def _temperature_elevation_operator(
     return _to_csr_matrix(
         sp.coo_matrix(
             (
-                np.asarray(vals, dtype=dtype),
+                np.asarray(vals, dtype=np.float64),
                 (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64)),
             ),
             shape=(n_analysis_nodes, n_input_nodes),
@@ -1416,40 +1209,36 @@ def _analysis_temperature_for_element_type(
     nodal_temperature: ArrayLike,
     n_input_nodes: int,
     elevated: ElevatedQuad9Mesh | None,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
     if elevated is None:
-        return _normalize_nodal_temperature(nodal_temperature, n_input_nodes, dtype)
+        return _normalize_nodal_temperature(nodal_temperature, n_input_nodes)
     input_temperature = _normalize_nodal_temperature(
         nodal_temperature,
         n_input_nodes,
-        dtype,
     )
-    elevation = _temperature_elevation_operator(elevated, dtype)
-    return np.asarray(elevation @ input_temperature, dtype=dtype)
+    elevation = _temperature_elevation_operator(elevated)
+    return np.asarray(elevation @ input_temperature, dtype=np.float64)
 
 
 def _normalize_materials(
     material_ids: ArrayLike,
     material_table: ArrayLike,
-    dtype: np.dtype[Any],
 ) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
-    ids = np.asarray(material_ids, dtype=np.uint64)
+    ids = np.asarray(material_ids)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     assert not isinstance(
         material_table, Mapping
     ), "material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
-    table = np.asarray(material_table, dtype=dtype)
+    table = np.asarray(material_table)
     assert table.ndim == 3 and table.shape[1:] == (
         4,
         4,
     ), f"material_table must have shape (nmat, 4, 4); got {table.shape}"
-    return np.ascontiguousarray(ids), np.ascontiguousarray(table)
+    return ids, table
 
 
 def _normalize_thermal_material_table(
     thermal_material_table: ArrayLike | None,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]] | None:
     if thermal_material_table is None:
         return None
@@ -1457,11 +1246,10 @@ def _normalize_thermal_material_table(
         "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) "
         "for tagged inputs"
     )
-    table = np.asarray(thermal_material_table, dtype=dtype)
+    table = np.asarray(thermal_material_table)
     assert (
         table.ndim == 2 and table.shape[1] == 5
     ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
-    table = np.ascontiguousarray(table)
     assert not np.any(table[:, 3] != 0.0), "shear thermal expansion (alpha_rz) is not yet supported"
     return table
 
@@ -1470,7 +1258,6 @@ def pack_material_tables_from_tags(
     material_ids: ArrayLike,
     material_table_by_tag: Mapping[int, ArrayLike],
     thermal_material_table_by_tag: Mapping[int, ArrayLike] | None = None,
-    dtype: npt.DTypeLike | None = None,
 ) -> tuple[
     npt.NDArray[np.uint64],
     npt.NDArray[np.floating[Any]],
@@ -1486,9 +1273,6 @@ def pack_material_tables_from_tags(
             with shape `(5,)` storing `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. Thermal
             expansion coefficients have units `[strain / temperature]` and `T_ref` has units
             `[temperature]`.
-        dtype: Optional output floating dtype. Defaults to the resolved dtype of the provided
-            material rows.
-
     Returns:
         tuple: `(packed_material_ids, packed_material_table, packed_thermal_material_table)` where:
             `packed_material_ids` has shape `(nelem,)`,
@@ -1501,14 +1285,7 @@ def pack_material_tables_from_tags(
     """
 
     assert material_table_by_tag, "material_table_by_tag cannot be empty"
-    resolved_dtype = (
-        np.dtype(dtype)
-        if dtype is not None
-        else _resolve_float_dtype(
-            material_table_by_tag,
-            thermal_material_table_by_tag,
-        )
-    )
+    resolved_dtype = np.dtype(np.float64)
     ids = np.asarray(material_ids, dtype=np.uint64)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
 
@@ -1570,130 +1347,74 @@ def pack_material_tables_from_tags(
 def _normalize_nodal_temperature(
     nodal_temperature: ArrayLike,
     nnode: int,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
-    arr = np.asarray(nodal_temperature, dtype=dtype)
+    arr = np.asarray(nodal_temperature)
     assert (
         arr.ndim == 1 and arr.shape[0] == nnode
     ), f"nodal_temperature must have shape ({nnode},); got {arr.shape}"
-    return np.ascontiguousarray(arr)
+    return arr
 
 
 def _normalize_body_force(
     body_force: ArrayLike,
     nelem: int,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
-    arr = np.asarray(body_force, dtype=dtype)
+    arr = np.asarray(body_force)
     if arr.ndim == 1 and arr.shape == (2,):
         arr = np.broadcast_to(arr, (nelem, 2)).copy()
     assert arr.ndim == 2 and arr.shape == (
         nelem,
         2,
     ), f"body_force must have shape (2,) or (nelem, 2); got {arr.shape}"
-    return np.ascontiguousarray(arr)
+    return arr
 
 
 def _normalize_face_pairs(name: str, faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
     if faces is None:
         return np.zeros((0, 2), dtype=np.uint64)
-    faces = np.asarray(faces, dtype=np.uint64)
+    faces = np.asarray(faces)
     assert faces.ndim == 2 and faces.shape[1] == 2, f"{name} must have shape (nload, 2); got {faces.shape}"
-    return np.ascontiguousarray(faces)
+    return faces
 
 
 def _normalize_pressure_values(
     pressure_values: ArrayLike | None,
     nload: int,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
     if pressure_values is None:
-        return np.zeros((nload,), dtype=dtype)
-    values = np.asarray(pressure_values, dtype=dtype)
+        return np.zeros((nload,), dtype=np.float64)
+    values = np.asarray(pressure_values)
     assert values.ndim == 1, f"pressure_values must have shape (nload,); got {values.shape}"
     assert values.shape[0] == nload, f"pressure_values has {values.shape[0]} entries, but expected {nload}"
-    return np.ascontiguousarray(values)
+    return values
 
 
 def _normalize_traction_values(
     traction_values: ArrayLike | None,
     nload: int,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
     if traction_values is None:
-        return np.zeros((nload, 2), dtype=dtype)
-    values = np.asarray(traction_values, dtype=dtype)
+        return np.zeros((nload, 2), dtype=np.float64)
+    values = np.asarray(traction_values)
     if values.ndim == 1 and values.shape == (2,):
         values = np.broadcast_to(values, (nload, 2)).copy()
     assert values.ndim == 2 and values.shape == (
         nload,
         2,
     ), f"traction_values must have shape (2,) or ({nload}, 2); got {values.shape}"
-    return np.ascontiguousarray(values)
+    return values
 
 
 def _normalize_prescribed_dirichlet(
     prescribed: Mapping[int, float] | None,
-    dtype: np.dtype[Any],
 ) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
     if prescribed is None:
-        return np.zeros((0,), dtype=np.uint64), np.zeros((0,), dtype=dtype)
+        return np.zeros((0,), dtype=np.uint64), np.zeros((0,), dtype=np.float64)
     items = sorted((int(dof), float(value)) for dof, value in prescribed.items())
     return (
         np.asarray([dof for dof, _ in items], dtype=np.uint64),
-        np.asarray([value for _, value in items], dtype=dtype),
+        np.asarray([value for _, value in items], dtype=np.float64),
     )
-
-
-def _dispatch_pair(dtype: np.dtype[Any], f32: Any, f64: Any) -> Any:
-    if dtype == np.float32:
-        return f32
-    return f64
-
-
-def _solve_method_code(method: str) -> int:
-    code_by_method = {"direct": 0, "bicgstab": 1}
-    assert method in code_by_method, 'method must be "direct" or "bicgstab"'
-    return code_by_method[method]
-
-
-def _solve_method_name(code: int) -> Literal["direct", "bicgstab"]:
-    name_by_code: tuple[Literal["direct"], Literal["bicgstab"]] = ("direct", "bicgstab")
-    assert 0 <= code < len(name_by_code), f"unexpected solve method code {code}"
-    return name_by_code[code]
-
-
-def _bicgstab_preconditioner_code(preconditioner: str) -> int:
-    code_by_preconditioner = {"none": 0, "diagonal": 1}
-    assert preconditioner in code_by_preconditioner, 'preconditioner must be "none" or "diagonal"'
-    return code_by_preconditioner[preconditioner]
-
-
-def _bicgstab_equilibration_code(equilibration: str) -> int:
-    code_by_equilibration = {"none": 0, "ruiz": 1}
-    assert equilibration in code_by_equilibration, 'equilibration must be "none" or "ruiz"'
-    return code_by_equilibration[equilibration]
-
-
-def _bicgstab_initial_guess_code(initial_guess: str) -> int:
-    code_by_initial_guess = {"zero": 0, "previous": 1}
-    assert initial_guess in code_by_initial_guess, 'initial_guess must be "zero" or "previous"'
-    return code_by_initial_guess[initial_guess]
-
-
-def _positive_float_or_none(name: str, value: float | None) -> float | None:
-    assert value is None or (np.isfinite(value) and value > 0.0), f"{name} must be finite and positive"
-    return None if value is None else float(value)
-
-
-def _nonnegative_float_or_none(name: str, value: float | None) -> float | None:
-    assert value is None or (np.isfinite(value) and value >= 0.0), f"{name} must be finite and nonnegative"
-    return None if value is None else float(value)
-
-
-def _positive_int_or_none(name: str, value: int | None) -> int | None:
-    assert value is None or value >= 1, f"{name} must be at least 1"
-    return None if value is None else int(value)
 
 
 def assemble_structural_2d(
@@ -1718,7 +1439,7 @@ def assemble_structural_2d(
     Args:
         nodes: Corner-node coordinates with shape `(nnode, 2)`. Coordinates are `(r, z)` for
             `formulation="axisymmetric"` and `(x, y)` for `formulation="plane_strain"`.
-            Units are `[length]`.
+            Units are `[length]`. Floating input arrays must have dtype `float64`.
         elements: Connectivity with shape `(nelem, 4)` for `element_type="quad4"`. For
             `element_type="quad9"`, pass either corner-only `(nelem, 4)` connectivity to infer a
             straight-sided quad9 mesh, or explicit `(nelem, 9)` connectivity in local order
@@ -1756,19 +1477,17 @@ def assemble_structural_2d(
             instead of dense arrays.
     """
 
-    dtype = _resolve_float_dtype(nodes, material_table, thermal_material_table)
-    nodes_arr = _normalize_nodes(nodes, dtype)
-    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table, dtype)
+    nodes_arr = _normalize_nodes(nodes)
+    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table)
     thermal_material_table_arr = _normalize_thermal_material_table(
         thermal_material_table,
-        dtype,
     )
     pressure_faces_arr = _normalize_face_pairs("pressure_faces", pressure_faces)
     traction_faces_arr = _normalize_face_pairs("traction_faces", traction_faces)
-    prescribed_dofs, prescribed_values = _normalize_prescribed_dirichlet(prescribed, dtype)
+    prescribed_dofs, prescribed_values = _normalize_prescribed_dirichlet(prescribed)
     quadrature_code = _quadrature_code(quadrature)
     normalized_formulation = _normalize_formulation(formulation)
-    thickness_value = _normalize_thickness(normalized_formulation, thickness, dtype)
+    thickness_value = _normalize_thickness(normalized_formulation, thickness)
     normalized_element_type = _normalize_element_type(element_type)
     if normalized_element_type == "quad4":
         elements_arr = _normalize_elements(elements, 4)
@@ -1783,14 +1502,8 @@ def assemble_structural_2d(
     material_orientation_angles_arr = _normalize_material_orientation_angles(
         material_orientation_angles,
         int(analysis_elements.shape[0]),
-        dtype,
     )
-    low_level = _dispatch_pair(
-        dtype,
-        _assemble_model_2d_f32,
-        _assemble_model_2d_f64,
-    )
-    backend = low_level(
+    backend = _assemble_model_2d_f64(
         analysis_nodes,
         analysis_elements,
         material_ids_arr,
@@ -1800,7 +1513,7 @@ def assemble_structural_2d(
         (
             thermal_material_table_arr
             if thermal_material_table_arr is not None
-            else np.zeros((0, 5), dtype=dtype)
+            else np.zeros((0, 5), dtype=np.float64)
         ),
         material_orientation_angles_arr,
         prescribed_dofs,
@@ -1815,7 +1528,6 @@ def assemble_structural_2d(
 
     model = Structural2DFEMModel(
         backend=backend,
-        dtype=dtype,
         input_nodes=nodes_arr,
         input_elements=elements_arr,
         analysis_nodes=analysis_nodes,
@@ -1826,18 +1538,18 @@ def assemble_structural_2d(
         formulation=normalized_formulation,
         thickness=thickness_value,
         element_type=normalized_element_type,
-        constant_rhs=np.asarray(backend.constant_rhs(), dtype=dtype),
+        constant_rhs=np.asarray(backend.constant_rhs(), dtype=np.float64),
         quadrature_points=np.asarray(
             backend.quadrature_points_flat(),
-            dtype=dtype,
+            dtype=np.float64,
         ).reshape(analysis_elements.shape[0], int(backend.nq_per_element), 2),
-        strain_constant=np.asarray(backend.strain_constant(), dtype=dtype),
-        stress_constant=np.asarray(backend.stress_constant(), dtype=dtype),
-        thermal_strain_constant=np.asarray(backend.thermal_strain_constant(), dtype=dtype),
-        thermal_stress_constant=np.asarray(backend.thermal_stress_constant(), dtype=dtype),
+        strain_constant=np.asarray(backend.strain_constant(), dtype=np.float64),
+        stress_constant=np.asarray(backend.stress_constant(), dtype=np.float64),
+        thermal_strain_constant=np.asarray(backend.thermal_strain_constant(), dtype=np.float64),
+        thermal_stress_constant=np.asarray(backend.thermal_stress_constant(), dtype=np.float64),
         free_dofs=np.asarray(backend.free_dofs(), dtype=np.int64),
         fixed_dofs=np.asarray(backend.fixed_dofs(), dtype=np.int64),
-        fixed_values=np.asarray(backend.fixed_values(), dtype=dtype),
+        fixed_values=np.asarray(backend.fixed_values(), dtype=np.float64),
         ndof_full=int(backend.ndof_full),
         ndof_reduced=int(backend.ndof_reduced),
         nelem=elements_arr.shape[0],
@@ -1850,40 +1562,32 @@ def assemble_structural_2d(
 def isotropic_axisymmetric_material(
     youngs_modulus: float,
     poisson_ratio: float,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct the isotropic axisymmetric elastic stress-strain matrix.
 
     Args:
         youngs_modulus: Young's modulus with units `[pressure]`.
         poisson_ratio: Poisson ratio with units `[dimensionless]`.
-        dtype: Output floating dtype.
 
     Returns:
         NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order
         `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_axisymmetric_material_f32,
-        _isotropic_axisymmetric_material_f64,
+    return _as_float64_array(_isotropic_axisymmetric_material_f64(youngs_modulus, poisson_ratio)).reshape(
+        4, 4
     )
-    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
 
 
 def isotropic_axisymmetric_thermal_material(
     alpha: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct isotropic thermal-expansion data.
 
     Args:
         alpha: Isotropic thermal expansion coefficient with units `[strain / temperature]`.
         reference_temperature: Stress-free reference temperature with units `[temperature]`.
-        dtype: Output floating dtype.
 
     Returns:
         NDArray: Thermal material row with shape `(5,)` storing
@@ -1891,19 +1595,12 @@ def isotropic_axisymmetric_thermal_material(
         `[strain / temperature]`; `T_ref` has units `[temperature]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_axisymmetric_thermal_material_f32,
-        _isotropic_axisymmetric_thermal_material_f64,
-    )
-    return _as_float_array(binding(alpha, reference_temperature), resolved_dtype)
+    return _as_float64_array(_isotropic_axisymmetric_thermal_material_f64(alpha, reference_temperature))
 
 
 def isotropic_plane_strain_material(
     youngs_modulus: float,
     poisson_ratio: float,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct the isotropic plane-strain elastic stress-strain matrix.
 
@@ -1912,19 +1609,14 @@ def isotropic_plane_strain_material(
     by the in-plane strains.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_plane_strain_material_f32,
-        _isotropic_plane_strain_material_f64,
+    return _as_float64_array(_isotropic_plane_strain_material_f64(youngs_modulus, poisson_ratio)).reshape(
+        4, 4
     )
-    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
 
 
 def isotropic_plane_strain_thermal_material(
     alpha: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct isotropic plane-strain thermal-expansion data.
 
@@ -1932,13 +1624,7 @@ def isotropic_plane_strain_thermal_material(
     coefficients and zero engineering shear expansion.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _isotropic_plane_strain_thermal_material_f32,
-        _isotropic_plane_strain_thermal_material_f64,
-    )
-    return _as_float_array(binding(alpha, reference_temperature), resolved_dtype)
+    return _as_float64_array(_isotropic_plane_strain_thermal_material_f64(alpha, reference_temperature))
 
 
 def orthotropic_axisymmetric_thermal_material(
@@ -1946,7 +1632,6 @@ def orthotropic_axisymmetric_thermal_material(
     alpha_z: float,
     alpha_t: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct orthotropic thermal-expansion data.
 
@@ -1955,7 +1640,6 @@ def orthotropic_axisymmetric_thermal_material(
         alpha_z: Axial thermal expansion coefficient with units `[strain / temperature]`.
         alpha_t: Hoop thermal expansion coefficient with units `[strain / temperature]`.
         reference_temperature: Stress-free reference temperature with units `[temperature]`.
-        dtype: Output floating dtype.
 
     Returns:
         NDArray: Thermal material row with shape `(5,)` storing
@@ -1963,13 +1647,14 @@ def orthotropic_axisymmetric_thermal_material(
         `[strain / temperature]`; `T_ref` has units `[temperature]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _orthotropic_axisymmetric_thermal_material_f32,
-        _orthotropic_axisymmetric_thermal_material_f64,
+    return _as_float64_array(
+        _orthotropic_axisymmetric_thermal_material_f64(
+            alpha_r,
+            alpha_z,
+            alpha_t,
+            reference_temperature,
+        )
     )
-    return _as_float_array(binding(alpha_r, alpha_z, alpha_t, reference_temperature), resolved_dtype)
 
 
 def orthotropic_plane_strain_thermal_material(
@@ -1977,7 +1662,6 @@ def orthotropic_plane_strain_thermal_material(
     alpha_y: float,
     alpha_z: float,
     reference_temperature: float = 0.0,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct orthotropic plane-strain thermal-expansion data.
 
@@ -1990,42 +1674,32 @@ def orthotropic_plane_strain_thermal_material(
         alpha_y,
         alpha_z,
         reference_temperature,
-        dtype,
     )
 
 
 def cfsem_radial_material(
     youngs_modulus: float,
     poisson_ratio: float,
-    dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray[np.floating[Any]]:
     """Construct the reduced elastic matrix used by the 1D radial solver.
 
     Args:
         youngs_modulus: Young's modulus with units `[pressure]`.
         poisson_ratio: Poisson ratio with units `[dimensionless]`.
-        dtype: Output floating dtype.
 
     Returns:
         NDArray: Elastic stress-strain matrix with shape `(4, 4)` in component order
         `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
     """
 
-    resolved_dtype = np.dtype(dtype)
-    binding = _dispatch_pair(
-        resolved_dtype,
-        _cfsem_radial_material_f32,
-        _cfsem_radial_material_f64,
-    )
-    return _as_float_array(binding(youngs_modulus, poisson_ratio), resolved_dtype).reshape(4, 4)
+    return _as_float64_array(_cfsem_radial_material_f64(youngs_modulus, poisson_ratio)).reshape(4, 4)
 
 
 def _normalize_displacements(
     displacements: ArrayLike,
     nnode: int,
-    dtype: np.dtype[Any],
 ) -> npt.NDArray[np.floating[Any]]:
-    arr = np.asarray(displacements, dtype=dtype)
+    arr = np.asarray(displacements)
     if arr.ndim == 1 and arr.shape == (2 * nnode,):
         return arr.reshape(nnode, 2)
     if arr.ndim == 2 and arr.shape == (nnode, 2):
@@ -2042,8 +1716,6 @@ __all__ = [
     "QuadMeshQuery",
     "QuadratureFieldSamples",
     "assemble_structural_2d",
-    "Structural2DSolveDiagnostics",
-    "Structural2DSolveResult",
     "cfsem_radial_material",
     "interpolate_quad_mesh_values",
     "infer_quad9_mesh",

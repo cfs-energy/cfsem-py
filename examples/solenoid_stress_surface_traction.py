@@ -189,11 +189,10 @@ def main() -> None:
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=nr, nz=nz)
     _bottom_faces, top_faces = horizontal_faces_for_strip(nr=nr, nz=nz)
 
-    material = isotropic_axisymmetric_material(200.0e9, 0.27, dtype=np.float64)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
     thermal_material = isotropic_axisymmetric_thermal_material(
         1.1e-5,
         reference_temperature=293.15,
-        dtype=np.float64,
     )
 
     analysis_nodes = nodes if element_type == "quad4" else infer_quad9_mesh(nodes, elements).analysis_nodes

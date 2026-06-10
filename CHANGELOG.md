@@ -1,5 +1,14 @@
 # Changelog
 
+## 10.0.0 2026-06-09
+
+* Rust
+    * !Remove f32 and iterative solve support for 2D FEM solver
+        * Field testing showed only ~25% speedup for each on a problem with >1M elements
+        * This is not enough to justify the complexity and maintenance overhead
+* Python
+    * !Update bindings for changed FEM API
+
 ## 9.1.0 2026-06-08
 
 * Rust

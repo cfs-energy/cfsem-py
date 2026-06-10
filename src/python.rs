@@ -335,82 +335,6 @@ fn parse_solenoid_fem_quadrature(
         .map_err(|msg| PyInteropError::ValueError { msg }.into())
 }
 
-fn parse_solenoid_fem_solve_method<F: physics::solenoid_stress::Real>(
-    method: u8,
-    tolerance: Option<F>,
-    max_iterations: Option<usize>,
-    preconditioner: u8,
-    equilibration: u8,
-    equilibration_max_iterations: Option<usize>,
-    equilibration_tolerance: Option<F>,
-    equilibration_norm_floor: Option<F>,
-    equilibration_norm_ceil: Option<F>,
-    initial_guess: u8,
-) -> PyResult<physics::solenoid_stress::Structural2dSolveMethod<F>> {
-    match method {
-        0 => Ok(physics::solenoid_stress::Structural2dSolveMethod::Direct),
-        1 => {
-            let preconditioner = match preconditioner {
-                0 => physics::solenoid_stress::BicgstabPreconditioner::None,
-                1 => physics::solenoid_stress::BicgstabPreconditioner::Diagonal,
-                _ => {
-                    return Err(PyInteropError::ValueError {
-                        msg: "unsupported BiCGSTAB preconditioner code".to_string(),
-                    }
-                    .into());
-                }
-            };
-            let mut equilibration_options =
-                physics::solenoid_stress::EquilibrationSolveOptions::<F>::default();
-            if let Some(max_iterations) = equilibration_max_iterations {
-                equilibration_options.max_iterations = max_iterations;
-            }
-            if let Some(tolerance) = equilibration_tolerance {
-                equilibration_options.tolerance = tolerance;
-            }
-            if let Some(norm_floor) = equilibration_norm_floor {
-                equilibration_options.norm_floor = norm_floor;
-            }
-            if let Some(norm_ceil) = equilibration_norm_ceil {
-                equilibration_options.norm_ceil = norm_ceil;
-            }
-            let equilibration = match equilibration {
-                0 => physics::solenoid_stress::BicgstabEquilibration::None,
-                1 => physics::solenoid_stress::BicgstabEquilibration::Ruiz(equilibration_options),
-                _ => {
-                    return Err(PyInteropError::ValueError {
-                        msg: "unsupported BiCGSTAB equilibration code".to_string(),
-                    }
-                    .into());
-                }
-            };
-            let initial_guess = match initial_guess {
-                0 => physics::solenoid_stress::BicgstabInitialGuess::Zero,
-                1 => physics::solenoid_stress::BicgstabInitialGuess::Previous,
-                _ => {
-                    return Err(PyInteropError::ValueError {
-                        msg: "unsupported BiCGSTAB initial guess code".to_string(),
-                    }
-                    .into());
-                }
-            };
-            Ok(physics::solenoid_stress::Structural2dSolveMethod::Bicgstab(
-                physics::solenoid_stress::BicgstabSolveOptions {
-                    tolerance,
-                    max_iterations,
-                    preconditioner,
-                    equilibration,
-                    initial_guess,
-                },
-            ))
-        }
-        _ => Err(PyInteropError::ValueError {
-            msg: "unsupported structural solve method code".to_string(),
-        }
-        .into()),
-    }
-}
-
 fn flatten_points<F: Copy>(points: Vec<[F; 2]>) -> Vec<F> {
     let mut points_flat = Vec::with_capacity(points.len() * 2);
     for point in points {
@@ -480,18 +404,13 @@ fn read_axisym_prescribed<F: NumpyElement + Copy>(
 
 #[pyclass(module = "cfsem", unsendable)]
 struct SolenoidStress2dModelF64 {
-    inner: physics::solenoid_stress::Structural2dModel<f64>,
+    inner: physics::solenoid_stress::Structural2dModel,
 }
 
-#[pyclass(module = "cfsem", unsendable)]
-struct SolenoidStress2dModelF32 {
-    inner: physics::solenoid_stress::Structural2dModel<f32>,
-}
-
-/// Low-level PyO3 wrapper for the reusable axisymmetric FEM model.
+/// Low-level PyO3 wrapper for the reusable f64 structural 2D FEM model.
 ///
 /// The public Python API lives in `cfsem.solenoid_stress.fem2d`. This wrapper exposes
-/// raw arrays and sparse storage tuples so the higher-level Python module can normalize inputs,
+/// raw arrays and sparse storage tuples so the higher-level Python module can validate shapes,
 /// build SciPy sparse matrices, and present a cleaner user-facing surface.
 macro_rules! impl_solenoid_stress_model_pyclass {
     ($name:ident, $ty:ty) => {
@@ -804,59 +723,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 Ok(PyArray1::from_vec(py, rhs).unbind())
             }
 
-            #[pyo3(signature = (
-                rhs,
-                method=0,
-                tolerance=None,
-                max_iterations=None,
-                preconditioner=1,
-                equilibration=1,
-                equilibration_max_iterations=None,
-                equilibration_tolerance=None,
-                equilibration_norm_floor=None,
-                equilibration_norm_ceil=None,
-                initial_guess=0
-            ))]
             fn solve<'py>(
                 &mut self,
                 py: Python<'py>,
                 rhs: PyReadonlyArray1<'_, $ty>,
-                method: u8,
-                tolerance: Option<$ty>,
-                max_iterations: Option<usize>,
-                preconditioner: u8,
-                equilibration: u8,
-                equilibration_max_iterations: Option<usize>,
-                equilibration_tolerance: Option<$ty>,
-                equilibration_norm_floor: Option<$ty>,
-                equilibration_norm_ceil: Option<$ty>,
-                initial_guess: u8,
-            ) -> PyResult<(Py<PyArray1<$ty>>, u8, bool, usize, $ty, bool)> {
+            ) -> PyResult<Py<PyArray1<$ty>>> {
                 let rhs = rhs.as_slice()?;
-                let method = parse_solenoid_fem_solve_method(
-                    method,
-                    tolerance,
-                    max_iterations,
-                    preconditioner,
-                    equilibration,
-                    equilibration_max_iterations,
-                    equilibration_tolerance,
-                    equilibration_norm_floor,
-                    equilibration_norm_ceil,
-                    initial_guess,
-                )?;
-                let output = self
+                let displacement = self
                     .inner
-                    .solve_with_method(rhs, method)
+                    .solve(rhs)
                     .map_err(|msg| PyInteropError::ValueError { msg })?;
-                Ok((
-                    PyArray1::from_vec(py, output.displacement).unbind(),
-                    output.diagnostics.method.code(),
-                    output.diagnostics.converged,
-                    output.diagnostics.iterations,
-                    output.diagnostics.residual_norm,
-                    output.diagnostics.equilibrated,
-                ))
+                Ok(PyArray1::from_vec(py, displacement).unbind())
             }
 
             fn element_quadrature<'py>(
@@ -931,25 +808,24 @@ macro_rules! impl_solenoid_stress_model_pyclass {
 }
 
 impl_solenoid_stress_model_pyclass!(SolenoidStress2dModelF64, f64);
-impl_solenoid_stress_model_pyclass!(SolenoidStress2dModelF32, f32);
 
-fn assemble_structural_2d_model_low_level<F: physics::solenoid_stress::Real + NumpyElement>(
-    nodes: PyReadonlyArray2<'_, F>,
+fn assemble_structural_2d_model_low_level(
+    nodes: PyReadonlyArray2<'_, f64>,
     elements: PyReadonlyArray2<'_, u64>,
     material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, F>,
+    material_table: PyReadonlyArray3<'_, f64>,
     pressure_faces: PyReadonlyArray2<'_, u64>,
     traction_faces: PyReadonlyArray2<'_, u64>,
-    thermal_material_table: PyReadonlyArray2<'_, F>,
-    material_orientation_angles: PyReadonlyArray1<'_, F>,
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
+    material_orientation_angles: PyReadonlyArray1<'_, f64>,
     prescribed_dofs: PyReadonlyArray1<'_, u64>,
-    prescribed_values: PyReadonlyArray1<'_, F>,
+    prescribed_values: PyReadonlyArray1<'_, f64>,
     element_type: u8,
     formulation: u8,
-    thickness: F,
+    thickness: f64,
     quadrature: u8,
     par: bool,
-) -> PyResult<physics::solenoid_stress::Structural2dModel<F>> {
+) -> PyResult<physics::solenoid_stress::Structural2dModel> {
     let quadrature = parse_solenoid_fem_quadrature(quadrature)?;
     let element_type = physics::solenoid_stress::Structural2dElementType::from_code(element_type)
         .map_err(|msg| PyInteropError::ValueError { msg })?;
@@ -1032,47 +908,7 @@ fn solenoid_stress_fem_assemble_model_2d_f64(
     par: bool,
 ) -> PyResult<SolenoidStress2dModelF64> {
     Ok(SolenoidStress2dModelF64 {
-        inner: assemble_structural_2d_model_low_level::<f64>(
-            nodes,
-            elements,
-            material_ids,
-            material_table,
-            pressure_faces,
-            traction_faces,
-            thermal_material_table,
-            material_orientation_angles,
-            prescribed_dofs,
-            prescribed_values,
-            element_type,
-            formulation,
-            thickness,
-            quadrature,
-            par,
-        )?,
-    })
-}
-
-/// Low-level binding for `physics::solenoid_stress::assemble_structural_2d` using `f32`.
-#[pyfunction]
-fn solenoid_stress_fem_assemble_model_2d_f32(
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f32>,
-    pressure_faces: PyReadonlyArray2<'_, u64>,
-    traction_faces: PyReadonlyArray2<'_, u64>,
-    thermal_material_table: PyReadonlyArray2<'_, f32>,
-    material_orientation_angles: PyReadonlyArray1<'_, f32>,
-    prescribed_dofs: PyReadonlyArray1<'_, u64>,
-    prescribed_values: PyReadonlyArray1<'_, f32>,
-    element_type: u8,
-    formulation: u8,
-    thickness: f32,
-    quadrature: u8,
-    par: bool,
-) -> PyResult<SolenoidStress2dModelF32> {
-    Ok(SolenoidStress2dModelF32 {
-        inner: assemble_structural_2d_model_low_level::<f32>(
+        inner: assemble_structural_2d_model_low_level(
             nodes,
             elements,
             material_ids,
@@ -1108,22 +944,6 @@ fn solenoid_stress_fem_isotropic_axisymmetric_material_f64<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
-/// Low-level binding for the isotropic constitutive helper returning a flattened `4 x 4` matrix.
-#[pyfunction]
-fn solenoid_stress_fem_isotropic_axisymmetric_material_f32<'py>(
-    py: Python<'py>,
-    youngs_modulus: f32,
-    poisson_ratio: f32,
-) -> Py<PyArray1<f32>> {
-    let material =
-        physics::solenoid_stress::isotropic_axisymmetric_material(youngs_modulus, poisson_ratio);
-    let mut flat = Vec::with_capacity(16);
-    for row in material {
-        flat.extend_from_slice(&row);
-    }
-    PyArray1::from_vec(py, flat).unbind()
-}
-
 /// Low-level binding for the isotropic plane-strain constitutive helper returning a flattened `4 x 4` matrix.
 #[pyfunction]
 fn solenoid_stress_fem_isotropic_plane_strain_material_f64<'py>(
@@ -1132,16 +952,6 @@ fn solenoid_stress_fem_isotropic_plane_strain_material_f64<'py>(
     poisson_ratio: f64,
 ) -> Py<PyArray1<f64>> {
     solenoid_stress_fem_isotropic_axisymmetric_material_f64(py, youngs_modulus, poisson_ratio)
-}
-
-/// Low-level binding for the isotropic plane-strain constitutive helper returning a flattened `4 x 4` matrix.
-#[pyfunction]
-fn solenoid_stress_fem_isotropic_plane_strain_material_f32<'py>(
-    py: Python<'py>,
-    youngs_modulus: f32,
-    poisson_ratio: f32,
-) -> Py<PyArray1<f32>> {
-    solenoid_stress_fem_isotropic_axisymmetric_material_f32(py, youngs_modulus, poisson_ratio)
 }
 
 /// Low-level binding for the isotropic thermal-material helper returning `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`.
@@ -1161,23 +971,6 @@ fn solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
-/// Low-level binding for the isotropic thermal-material helper returning `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`.
-#[pyfunction]
-fn solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32<'py>(
-    py: Python<'py>,
-    alpha: f32,
-    reference_temperature: f32,
-) -> Py<PyArray1<f32>> {
-    let material = physics::solenoid_stress::isotropic_axisymmetric_thermal_material(
-        alpha,
-        reference_temperature,
-    );
-    let mut flat = Vec::with_capacity(5);
-    flat.extend_from_slice(&material.alpha);
-    flat.push(material.reference_temperature);
-    PyArray1::from_vec(py, flat).unbind()
-}
-
 /// Low-level binding for the isotropic plane-strain thermal-material helper returning `[alpha_x, alpha_y, alpha_z, alpha_xy, T_ref]`.
 #[pyfunction]
 fn solenoid_stress_fem_isotropic_plane_strain_thermal_material_f64<'py>(
@@ -1186,20 +979,6 @@ fn solenoid_stress_fem_isotropic_plane_strain_thermal_material_f64<'py>(
     reference_temperature: f64,
 ) -> Py<PyArray1<f64>> {
     solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f64(
-        py,
-        alpha,
-        reference_temperature,
-    )
-}
-
-/// Low-level binding for the isotropic plane-strain thermal-material helper returning `[alpha_x, alpha_y, alpha_z, alpha_xy, T_ref]`.
-#[pyfunction]
-fn solenoid_stress_fem_isotropic_plane_strain_thermal_material_f32<'py>(
-    py: Python<'py>,
-    alpha: f32,
-    reference_temperature: f32,
-) -> Py<PyArray1<f32>> {
-    solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32(
         py,
         alpha,
         reference_temperature,
@@ -1227,27 +1006,6 @@ fn solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f64<'py>(
     PyArray1::from_vec(py, flat).unbind()
 }
 
-/// Low-level binding for the orthotropic thermal-material helper returning `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`.
-#[pyfunction]
-fn solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32<'py>(
-    py: Python<'py>,
-    alpha_r: f32,
-    alpha_z: f32,
-    alpha_t: f32,
-    reference_temperature: f32,
-) -> Py<PyArray1<f32>> {
-    let material = physics::solenoid_stress::orthotropic_axisymmetric_thermal_material(
-        alpha_r,
-        alpha_z,
-        alpha_t,
-        reference_temperature,
-    );
-    let mut flat = Vec::with_capacity(5);
-    flat.extend_from_slice(&material.alpha);
-    flat.push(material.reference_temperature);
-    PyArray1::from_vec(py, flat).unbind()
-}
-
 /// Low-level binding for the reduced constitutive helper returning a flattened `4 x 4` matrix.
 #[pyfunction]
 fn solenoid_stress_fem_cfsem_radial_material_f64<'py>(
@@ -1255,21 +1013,6 @@ fn solenoid_stress_fem_cfsem_radial_material_f64<'py>(
     youngs_modulus: f64,
     poisson_ratio: f64,
 ) -> Py<PyArray1<f64>> {
-    let material = physics::solenoid_stress::cfsem_radial_material(youngs_modulus, poisson_ratio);
-    let mut flat = Vec::with_capacity(16);
-    for row in material {
-        flat.extend_from_slice(&row);
-    }
-    PyArray1::from_vec(py, flat).unbind()
-}
-
-/// Low-level binding for the reduced constitutive helper returning a flattened `4 x 4` matrix.
-#[pyfunction]
-fn solenoid_stress_fem_cfsem_radial_material_f32<'py>(
-    py: Python<'py>,
-    youngs_modulus: f32,
-    poisson_ratio: f32,
-) -> Py<PyArray1<f32>> {
     let material = physics::solenoid_stress::cfsem_radial_material(youngs_modulus, poisson_ratio);
     let mut flat = Vec::with_capacity(16);
     for row in material {
@@ -1286,61 +1029,6 @@ fn solenoid_stress_fem_infer_quad9_mesh_f64<'py>(
     elements: PyReadonlyArray2<'_, u64>,
 ) -> PyResult<(
     Py<PyArray1<f64>>,
-    Py<PyArray1<u64>>,
-    Py<PyArray1<u64>>,
-    Py<PyArray1<u64>>,
-    Py<PyArray1<u64>>,
-)> {
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let elements = read_axisym_elements::<4>("elements", elements)?;
-    let elevated = physics::solenoid_stress::infer_quad9_mesh(&nodes, &elements)
-        .map_err(|msg| PyInteropError::ValueError { msg })?;
-    let analysis_nodes = flatten_points(elevated.analysis_nodes);
-    let mut analysis_elements = Vec::with_capacity(elevated.analysis_elements.len() * 9);
-    for conn in elevated.analysis_elements {
-        analysis_elements.extend(conn.into_iter().map(|node| node as u64));
-    }
-    Ok((
-        PyArray1::from_vec(py, analysis_nodes).unbind(),
-        PyArray1::from_vec(py, analysis_elements).unbind(),
-        PyArray1::from_vec(
-            py,
-            elevated
-                .corner_node_indices
-                .into_iter()
-                .map(|index| index as u64)
-                .collect(),
-        )
-        .unbind(),
-        PyArray1::from_vec(
-            py,
-            elevated
-                .midside_node_indices
-                .into_iter()
-                .map(|index| index as u64)
-                .collect(),
-        )
-        .unbind(),
-        PyArray1::from_vec(
-            py,
-            elevated
-                .center_node_indices
-                .into_iter()
-                .map(|index| index as u64)
-                .collect(),
-        )
-        .unbind(),
-    ))
-}
-
-/// Low-level binding for elevating a quad4 input mesh to an explicit quad9 analysis mesh.
-#[pyfunction]
-fn solenoid_stress_fem_infer_quad9_mesh_f32<'py>(
-    py: Python<'py>,
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-) -> PyResult<(
-    Py<PyArray1<f32>>,
     Py<PyArray1<u64>>,
     Py<PyArray1<u64>>,
     Py<PyArray1<u64>>,
@@ -1535,23 +1223,6 @@ fn solenoid_stress_fem_quad_mesh_query_f64<'py>(
     quad_mesh_query_to_py(py, query)
 }
 
-/// Low-level binding for one-pass quad mesh queries.
-#[pyfunction]
-fn solenoid_stress_fem_quad_mesh_query_f32<'py>(
-    py: Python<'py>,
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    points: PyReadonlyArray2<'_, f32>,
-    element_type: &str,
-    max_iterations: usize,
-) -> PyResult<Py<PyDict>> {
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let points = read_axisym_nodes("points", points)?;
-    let query =
-        quad_mesh_query_for_element_type(&nodes, elements, &points, element_type, max_iterations)?;
-    quad_mesh_query_to_py(py, query)
-}
-
 fn quad_mesh_interpolation_operator_for_element_type<F>(
     nodes: &[[F; 2]],
     elements: PyReadonlyArray2<'_, u64>,
@@ -1730,35 +1401,6 @@ fn solenoid_stress_fem_quad_mesh_interpolation_operator_f64<'py>(
     sparse_operator_to_py(py, operator)
 }
 
-/// Low-level binding for scalar interpolation operators from query element/reference data.
-#[pyfunction]
-fn solenoid_stress_fem_quad_mesh_interpolation_operator_f32<'py>(
-    py: Python<'py>,
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    element_indices: PyReadonlyArray1<'_, u64>,
-    reference_points: PyReadonlyArray2<'_, f32>,
-    element_type: &str,
-) -> PyResult<(
-    Py<PyArray1<f32>>,
-    Py<PyArray1<u64>>,
-    Py<PyArray1<u64>>,
-    u64,
-    u64,
-)> {
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
-    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
-    let operator = quad_mesh_interpolation_operator_for_element_type(
-        &nodes,
-        elements,
-        &element_indices,
-        &reference_points,
-        element_type,
-    )?;
-    sparse_operator_to_py(py, operator)
-}
-
 /// Low-level binding for strain-recovery operators from query element/reference data.
 #[pyfunction]
 fn solenoid_stress_fem_quad_mesh_strain_operator_f64<'py>(
@@ -1772,41 +1414,6 @@ fn solenoid_stress_fem_quad_mesh_strain_operator_f64<'py>(
     thickness: f64,
 ) -> PyResult<(
     Py<PyArray1<f64>>,
-    Py<PyArray1<u64>>,
-    Py<PyArray1<u64>>,
-    u64,
-    u64,
-)> {
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
-    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
-    let formulation =
-        physics::solenoid_stress::Structural2dFormulation::from_code(formulation, thickness)
-            .map_err(|msg| PyInteropError::ValueError { msg })?;
-    let operator = quad_mesh_strain_operator_for_element_type(
-        &nodes,
-        elements,
-        &element_indices,
-        &reference_points,
-        element_type,
-        formulation,
-    )?;
-    sparse_operator_to_py(py, operator)
-}
-
-/// Low-level binding for strain-recovery operators from query element/reference data.
-#[pyfunction]
-fn solenoid_stress_fem_quad_mesh_strain_operator_f32<'py>(
-    py: Python<'py>,
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    element_indices: PyReadonlyArray1<'_, u64>,
-    reference_points: PyReadonlyArray2<'_, f32>,
-    element_type: &str,
-    formulation: u8,
-    thickness: f32,
-) -> PyResult<(
-    Py<PyArray1<f32>>,
     Py<PyArray1<u64>>,
     Py<PyArray1<u64>>,
     u64,
@@ -1845,55 +1452,6 @@ fn solenoid_stress_fem_quad_mesh_stress_operator_f64<'py>(
     thickness: f64,
 ) -> PyResult<(
     Py<PyArray1<f64>>,
-    Py<PyArray1<u64>>,
-    Py<PyArray1<u64>>,
-    u64,
-    u64,
-)> {
-    let nodes = read_axisym_nodes("nodes", nodes)?;
-    let element_indices = read_axisym_material_ids("element_indices", element_indices)?;
-    let reference_points = read_axisym_nodes("reference_points", reference_points)?;
-    let material_ids = read_axisym_material_ids("material_ids", material_ids)?;
-    let material_table = read_axisym_material_table("material_table", material_table)?;
-    let material_orientation_angles = read_axisym_material_orientation_angles(
-        "material_orientation_angles",
-        material_orientation_angles,
-    )?;
-    let material_orientation_angles =
-        (!material_orientation_angles.is_empty()).then_some(material_orientation_angles.as_slice());
-    let formulation =
-        physics::solenoid_stress::Structural2dFormulation::from_code(formulation, thickness)
-            .map_err(|msg| PyInteropError::ValueError { msg })?;
-    let operator = quad_mesh_stress_operator_for_element_type(
-        &nodes,
-        elements,
-        &element_indices,
-        &reference_points,
-        &material_ids,
-        &material_table,
-        material_orientation_angles,
-        element_type,
-        formulation,
-    )?;
-    sparse_operator_to_py(py, operator)
-}
-
-/// Low-level binding for stress-recovery operators from query element/reference data.
-#[pyfunction]
-fn solenoid_stress_fem_quad_mesh_stress_operator_f32<'py>(
-    py: Python<'py>,
-    nodes: PyReadonlyArray2<'_, f32>,
-    elements: PyReadonlyArray2<'_, u64>,
-    element_indices: PyReadonlyArray1<'_, u64>,
-    reference_points: PyReadonlyArray2<'_, f32>,
-    material_ids: PyReadonlyArray1<'_, u64>,
-    material_table: PyReadonlyArray3<'_, f32>,
-    material_orientation_angles: PyReadonlyArray1<'_, f32>,
-    element_type: &str,
-    formulation: u8,
-    thickness: f32,
-) -> PyResult<(
-    Py<PyArray1<f32>>,
     Py<PyArray1<u64>>,
     Py<PyArray1<u64>>,
     u64,
@@ -3764,13 +3322,8 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
 
     // Solenoid stress FEM
     m.add_class::<SolenoidStress2dModelF64>()?;
-    m.add_class::<SolenoidStress2dModelF32>()?;
     m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_assemble_model_2d_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_assemble_model_2d_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
@@ -3778,15 +3331,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_isotropic_axisymmetric_material_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_isotropic_plane_strain_material_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_isotropic_plane_strain_material_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
@@ -3794,15 +3339,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_isotropic_axisymmetric_thermal_material_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_isotropic_plane_strain_thermal_material_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_isotropic_plane_strain_thermal_material_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
@@ -3810,15 +3347,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_orthotropic_axisymmetric_thermal_material_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_cfsem_radial_material_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_cfsem_radial_material_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
@@ -3826,15 +3355,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_infer_quad9_mesh_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_quad_mesh_query_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quad_mesh_query_f32,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
@@ -3842,23 +3363,11 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quad_mesh_interpolation_operator_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_quad_mesh_strain_operator_f64,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quad_mesh_strain_operator_f32,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
         solenoid_stress_fem_quad_mesh_stress_operator_f64,
-        m.clone()
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        solenoid_stress_fem_quad_mesh_stress_operator_f32,
         m.clone()
     )?)?;
     Ok(())

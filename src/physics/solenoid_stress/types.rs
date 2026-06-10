@@ -5,8 +5,8 @@ use num_traits::{Float, FromPrimitive};
 
 /// Floating-point trait bound used throughout the solenoid-stress backend.
 ///
-/// Keeping the bound in one place makes it easier to support both `f32` and `f64` entry points
-/// without duplicating generic constraints everywhere else.
+/// Keeping the bound in one place avoids duplicating generic constraints inside the Rust backend,
+/// even though the public Python structural-FEM bindings expose only `f64` entry points.
 pub trait Real:
     Float + FromPrimitive + RealField + Copy + std::fmt::Debug + Send + Sync + 'static
 {

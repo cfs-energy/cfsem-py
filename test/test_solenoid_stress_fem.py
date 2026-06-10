@@ -1185,6 +1185,36 @@ def test_model_locate_points_in_elements_drives_recovery_and_interpolation() -> 
     )
 
 
+def test_model_locate_points_validates_outside_policy() -> None:
+    dtype = np.float64
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+        ],
+        dtype=dtype,
+    )
+    elements = np.array([[0, 1, 2, 3]], dtype=np.uint64)
+    material = fem.isotropic_plane_strain_material(200.0e9, 0.27)
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        prescribed={0: 0.0, 1: 0.0, 3: 0.0},
+        formulation="plane_strain",
+        thickness=1.0,
+    )
+
+    with pytest.raises(ValueError, match="unsupported outside policy"):
+        model.locate_points([[0.25, 0.5]], outside="clip")
+
+    with pytest.raises(ValueError, match="query point 0 is outside the quad mesh"):
+        model.locate_points([[2.0, 2.0]], outside="raise", tolerance=1.0e-12)
+
+
 def test_model_locations_validate_shape_and_element_type() -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)

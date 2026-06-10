@@ -1,9 +1,7 @@
 //! Shared constants and structural types for the solenoid-stress backend.
 
-/// Return the constant `2*pi`.
-pub fn two_pi() -> f64 {
-    2.0 * core::f64::consts::PI
-}
+/// Axisymmetric revolution factor.
+pub const TWO_PI: f64 = 2.0 * core::f64::consts::PI;
 
 /// Structural 2D reduction used by the quadrilateral FEM backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,7 +52,7 @@ impl Structural2dFormulation {
                         point[0]
                     ));
                 }
-                Ok(two_pi() * point[0] * det_j * weight)
+                Ok(TWO_PI * point[0] * det_j * weight)
             }
             Self::PlaneStrain { thickness } => Ok(thickness * det_j * weight),
         }
@@ -75,7 +73,7 @@ impl Structural2dFormulation {
                         point[0]
                     ));
                 }
-                Ok(two_pi() * point[0] * line_jacobian * weight)
+                Ok(TWO_PI * point[0] * line_jacobian * weight)
             }
             Self::PlaneStrain { thickness } => Ok(thickness * line_jacobian * weight),
         }

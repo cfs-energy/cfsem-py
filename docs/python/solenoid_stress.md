@@ -46,6 +46,15 @@ By default, `model.solve(rhs)` uses the direct sparse-LU path and returns the fu
 array. The sparse-LU factorization is built lazily on the first solve and then cached on the model
 for repeated right-hand sides.
 
+Location-based recovery returns flat point-major arrays. `model.quadrature()` returns
+`QuadPointLocations` with `nelem * nq_per_element` points plus flat `weights_area` and
+`weights_volume` arrays; reshape those arrays as `(nelem, nq_per_element, ...)` when element-major
+quadrature output is needed. `model.locate_points(...)` performs a mesh query for arbitrary
+physical points, while `model.locate_points_in_elements(...)` is the cheaper path when element
+ownership is already known. Sparse recovery exports use the same locations:
+`model.interpolation_operator(locations)`, `model.strain_operator(locations)`, and
+`model.stress_operator(locations)`.
+
 ### Formulation Notes
 
 The axisymmetric and plane-strain solvers share the same 2D quadrilateral mesh, two displacement

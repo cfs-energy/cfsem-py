@@ -140,10 +140,20 @@ class ElementMeasures:
 class QuadPointLocations:
     """Element-owned physical and reference point locations.
 
-    `points` has shape `(npoint, 2)`, `element_indices` has shape `(npoint,)`, and
-    `reference_points` has shape `(npoint, 2)`. Quadrature locations also carry flat
-    `weights_area` and `weights_volume` arrays with shape `(npoint,)`; non-quadrature locations
-    store empty weight arrays.
+    A location is a physical point together with the quadrilateral element that owns or is nearest
+    to that point and the corresponding element-local reference coordinates. Recovery and sparse
+    operator construction use `element_indices` and `reference_points` as the source of truth;
+    `points` is included for caller inspection and plotting.
+
+    `points` has shape `(npoint, 2)` and units `[length]`. `element_indices` has shape
+    `(npoint,)` and stores unitless analysis-element indices. `reference_points` has shape
+    `(npoint, 2)` and stores unitless coordinates in the element's `[-1, 1]^2` reference domain.
+    `element_type` records the element family that produced the locations so model methods can
+    reject locations from an incompatible mesh.
+
+    Quadrature locations also carry flat `weights_area` and `weights_volume` arrays with shape
+    `(npoint,)`; reshape them as `(nelem, points_per_element)` for element-major reductions.
+    Non-quadrature locations store empty weight arrays and `points_per_element == 0`.
     """
 
     points: npt.NDArray[np.floating[Any]]
@@ -230,6 +240,11 @@ class Structural2DFEMModel:
     Field recovery uses explicit `QuadPointLocations` objects. Use `quadrature()` for quadrature
     locations, `locate_points(...)` for arbitrary physical points, or `locate_points_in_elements(...)`
     when element ownership is already known.
+
+    Matrix-free field methods (`strain`, `stress`, `thermal_strain`, `thermal_stress`) evaluate
+    values directly at supplied locations. Sparse operator methods (`interpolation_operator`,
+    `strain_operator`, `stress_operator`) materialize user-owned SciPy matrices for workflows that
+    apply the same located recovery many times.
 
     Key public array shapes and units:
     - `stiffness` has shape `(ndof_reduced, ndof_reduced)` with entry units
@@ -339,13 +354,25 @@ class Structural2DFEMModel:
         return cache
 
     def quadrature(self) -> QuadPointLocations:
-        """Return element-major quadrature locations and mapped weights."""
+        """Return element-major quadrature locations and mapped integration weights.
+
+        The returned locations are built directly from the model's quadrature rule and element
+        geometry, so no global mesh query or point inversion is performed. Results are cached
+        because the model mesh, quadrature rule, and geometry are immutable after assembly.
+
+        Returns:
+            QuadPointLocations: Flat element-major locations with `nelem * nq_per_element` rows.
+            `points` has shape `(npoint, 2)`, `element_indices` repeats each element index
+            `nq_per_element` times, `reference_points` stores the reference quadrature
+            coordinates, and `weights_area` / `weights_volume` have shape `(npoint,)`.
+        """
 
         cache = self._quadrature_cache
         if cache is None:
             points, element_indices, reference_points, weights_area, weights_volume, points_per_element = (
                 self._backend.quadrature()
             )
+            # Quadrature locations are the only located points that carry integration weights.
             cache = QuadPointLocations(
                 points=np.asarray(points, dtype=np.float64).reshape(-1, 2),
                 element_indices=np.asarray(element_indices, dtype=np.int64),
@@ -366,7 +393,26 @@ class Structural2DFEMModel:
         tolerance: float | None = None,
         max_iterations: int = 20,
     ) -> QuadPointLocations:
-        """Locate arbitrary physical points in this model's analysis mesh."""
+        """Locate arbitrary physical points in this model's analysis mesh.
+
+        This uses the current brute-force quadrilateral mesh query and returns the nearest element
+        plus reference coordinates for each query point. Points outside the mesh are projected to
+        the nearest element unless `outside="raise"` or `outside="error"` is supplied.
+
+        Args:
+            points: Physical coordinates with shape `(npoint, 2)` and units `[length]`.
+            outside: Outside-mesh policy. `"nearest"` returns nearest-element projections;
+                `"raise"` and `"error"` raise if any point is outside `tolerance`.
+            tolerance: Nonnegative physical distance used to classify contained points. Defaults
+                to `1e-10`.
+            max_iterations: Maximum local inverse-map iterations per element during the query.
+
+        Returns:
+            QuadPointLocations: Located points with empty weight arrays and `points_per_element=0`.
+
+        Raises:
+            ValueError: If `outside` requests an error and at least one point is outside the mesh.
+        """
 
         query = query_quad_mesh(
             self.analysis_nodes,
@@ -403,7 +449,21 @@ class Structural2DFEMModel:
         *,
         max_iterations: int = 20,
     ) -> QuadPointLocations:
-        """Project physical points into caller-supplied owning elements."""
+        """Project physical points into caller-supplied owning elements.
+
+        This is the fast path when the caller already knows element ownership, such as when
+        reusing element indices returned from `quadrature()` or a previous mesh query. It performs
+        one local element projection per point and does not scan the global mesh.
+
+        Args:
+            points: Physical coordinates with shape `(npoint, 2)` and units `[length]`.
+            element_indices: Owning analysis-element indices with shape `(npoint,)`.
+            max_iterations: Maximum inverse-map iterations for each local element projection.
+
+        Returns:
+            QuadPointLocations: Projected physical points, caller-supplied element indices, and
+            reference coordinates. Weight arrays are empty and `points_per_element=0`.
+        """
 
         points_arr = _normalize_query_points(points)
         element_indices_arr = np.asarray(element_indices, dtype=np.uint64).reshape(-1)
@@ -509,7 +569,18 @@ class Structural2DFEMModel:
         )
 
     def interpolation_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
-        """Operator mapping scalar analysis-node values to located points."""
+        """Build a sparse interpolation operator for located points.
+
+        Args:
+            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
+                `locate_points_in_elements(...)`.
+
+        Returns:
+            csr_matrix: Sparse operator with shape `(npoint, n_analysis_nodes)`. Multiplying by a
+            scalar nodal field with shape `(n_analysis_nodes,)` returns interpolated values with
+            shape `(npoint,)`; multiplying by `(n_analysis_nodes, ncomponent)` interpolates each
+            component independently. Entries are unitless shape-function values.
+        """
 
         locations = self._validate_locations(locations)
         return _coo_operator_from_binding(
@@ -523,7 +594,18 @@ class Structural2DFEMModel:
         )
 
     def strain_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
-        """Operator mapping full analysis displacements to located-point total strain."""
+        """Build a sparse total-strain recovery operator for located points.
+
+        Args:
+            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
+                `locate_points_in_elements(...)`.
+
+        Returns:
+            csr_matrix: Sparse operator with shape `(4 * npoint, 2 * n_analysis_nodes)`. Rows are
+            grouped by point and tensor component. Multiplying by full analysis displacements with
+            shape `(2 * n_analysis_nodes,)` returns flat strain samples with shape `(4 * npoint,)`.
+            Entries have units `[1 / length]`.
+        """
 
         locations = self._validate_locations(locations)
         return _coo_operator_from_binding(
@@ -539,7 +621,18 @@ class Structural2DFEMModel:
         )
 
     def stress_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
-        """Operator mapping full analysis displacements to located-point stress."""
+        """Build a sparse elastic-stress recovery operator for located points.
+
+        Args:
+            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
+                `locate_points_in_elements(...)`.
+
+        Returns:
+            csr_matrix: Sparse operator with shape `(4 * npoint, 2 * n_analysis_nodes)`. Rows are
+            grouped by point and tensor component. Multiplying by full analysis displacements with
+            shape `(2 * n_analysis_nodes,)` returns flat stress samples with shape `(4 * npoint,)`.
+            Entries have units `[stress / length]`.
+        """
 
         locations = self._validate_locations(locations)
         return _coo_operator_from_binding(
@@ -736,8 +829,10 @@ class Structural2DFEMModel:
                 `[length]`.
 
         Returns:
-            NDArray: Total strain with shape `(nelem, nq_per_element, 4)` and component ordering
-            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
+            NDArray: Total strain with shape `(npoint, 4)` and component ordering `[rr, zz, tt,
+            rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain. Strain is
+            unitless. For quadrature locations, reshape as `(nelem, nq_per_element, 4)` when an
+            element-major view is needed.
         """
 
         locations = self._validate_locations(locations)
@@ -765,9 +860,10 @@ class Structural2DFEMModel:
                 `[length]`.
 
         Returns:
-            NDArray: Stress with shape `(nelem, nq_per_element, 4)` and component ordering
-            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
-            Units are `[stress]`.
+            NDArray: Stress with shape `(npoint, 4)` and component ordering `[rr, zz, tt, rz]` for
+            axisymmetric models or `[xx, yy, zz, xy]` for plane strain. Units are `[stress]`. For
+            quadrature locations, reshape as `(nelem, nq_per_element, 4)` when an element-major
+            view is needed.
         """
 
         locations = self._validate_locations(locations)
@@ -793,8 +889,10 @@ class Structural2DFEMModel:
                 `[temperature]`. Required only when the model includes thermal materials.
 
         Returns:
-            NDArray: Thermal strain with shape `(nelem, nq_per_element, 4)` and component ordering
-            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
+            NDArray: Thermal strain with shape `(npoint, 4)` and component ordering `[rr, zz, tt,
+            rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain. Strain is
+            unitless. Models without thermal materials return zeros and do not require
+            `nodal_temperature`.
         """
 
         locations = self._validate_locations(locations)
@@ -820,9 +918,10 @@ class Structural2DFEMModel:
                 `[temperature]`. Required only when the model includes thermal materials.
 
         Returns:
-            NDArray: Thermal stress with shape `(nelem, nq_per_element, 4)` and component ordering
-            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
-            Units are `[stress]`.
+            NDArray: Thermal stress with shape `(npoint, 4)` and component ordering `[rr, zz, tt,
+            rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain. Units are
+            `[stress]`. Models without thermal materials return zeros and do not require
+            `nodal_temperature`.
         """
 
         locations = self._validate_locations(locations)

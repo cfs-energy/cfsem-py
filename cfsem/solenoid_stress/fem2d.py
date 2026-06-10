@@ -227,10 +227,10 @@ class Structural2DFEMModel:
       `thermal_stress_operator` map solved displacements or nodal temperatures to quadrature-point
       fields.
 
-    `build_rhs(...)`, `solve(...)`, `element_quadrature()`, `element_measures()`, and
-    `evaluate_quadrature_strain(...)` call the Rust backend directly and do not materialize these
-    sparse matrices. Sparse operator exports are user-owned artifacts; retain the returned SciPy
-    matrix explicitly when a workflow needs reuse.
+    `build_rhs(...)`, `solve(...)`, `element_quadrature()`, `element_measures()`, and the
+    `evaluate_quadrature_*` field-recovery methods call the Rust backend directly and do not
+    materialize these sparse matrices. Sparse operator exports are user-owned artifacts; retain the
+    returned SciPy matrix explicitly when a workflow needs reuse.
 
     Key public array shapes and units:
     - `stiffness` has shape `(ndof_reduced, ndof_reduced)` with entry units
@@ -691,6 +691,14 @@ class Structural2DFEMModel:
         full[self.free_dofs] = reduced_arr
         return full
 
+    def _full_displacement_for_backend(self, displacements: ArrayLike) -> npt.NDArray[np.floating[Any]]:
+        """Normalize reduced or full displacements to the backend's full flat vector."""
+
+        arr = np.asarray(displacements)
+        if arr.ndim == 1 and arr.shape == (self.ndof_reduced,):
+            return self.recover_full(arr)
+        return _normalize_displacements(displacements, self.analysis_nodes.shape[0]).reshape(-1)
+
     def evaluate_quadrature_strain(
         self,
         displacements: ArrayLike,
@@ -708,17 +716,78 @@ class Structural2DFEMModel:
             `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
         """
 
-        arr = np.asarray(displacements)
-        if arr.ndim == 1 and arr.shape == (self.ndof_reduced,):
-            displacements_full = self.recover_full(arr)
-        else:
-            displacements_full = _normalize_displacements(
-                displacements, self.analysis_nodes.shape[0]
-            ).reshape(-1)
+        displacements_full = self._full_displacement_for_backend(displacements)
         strain_flat, nq = self._backend.evaluate_quadrature_strain(displacements_full)
         nelem = self.analysis_elements.shape[0]
         nq = int(nq)
         return np.asarray(strain_flat, dtype=np.float64).reshape(nelem, nq, 4)
+
+    def evaluate_quadrature_stress(
+        self,
+        displacements: ArrayLike,
+    ) -> npt.NDArray[np.floating[Any]]:
+        """Evaluate quadrature-point stress without materializing recovery matrices.
+
+        Args:
+            displacements: Either the reduced displacement solution with shape
+                `(ndof_reduced,)`, or the full analysis displacement field with shape
+                `(2 * n_analysis_nodes,)` or `(n_analysis_nodes, 2)`. Displacement units are
+                `[length]`.
+
+        Returns:
+            NDArray: Stress with shape `(nelem, nq_per_element, 4)` and component ordering
+            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
+            Units are `[stress]`.
+        """
+
+        displacements_full = self._full_displacement_for_backend(displacements)
+        stress_flat, nq = self._backend.evaluate_quadrature_stress(displacements_full)
+        nelem = self.analysis_elements.shape[0]
+        nq = int(nq)
+        return np.asarray(stress_flat, dtype=np.float64).reshape(nelem, nq, 4)
+
+    def evaluate_quadrature_thermal_strain(
+        self,
+        nodal_temperature: ArrayLike | None = None,
+    ) -> npt.NDArray[np.floating[Any]]:
+        """Evaluate quadrature-point thermal strain without materializing recovery matrices.
+
+        Args:
+            nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
+                `[temperature]`. Required only when the model includes thermal materials.
+
+        Returns:
+            NDArray: Thermal strain with shape `(nelem, nq_per_element, 4)` and component ordering
+            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
+        """
+
+        temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
+        thermal_strain_flat, nq = self._backend.evaluate_quadrature_thermal_strain(temperature_arr)
+        nelem = self.analysis_elements.shape[0]
+        nq = int(nq)
+        return np.asarray(thermal_strain_flat, dtype=np.float64).reshape(nelem, nq, 4)
+
+    def evaluate_quadrature_thermal_stress(
+        self,
+        nodal_temperature: ArrayLike | None = None,
+    ) -> npt.NDArray[np.floating[Any]]:
+        """Evaluate quadrature-point thermal stress without materializing recovery matrices.
+
+        Args:
+            nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
+                `[temperature]`. Required only when the model includes thermal materials.
+
+        Returns:
+            NDArray: Thermal stress with shape `(nelem, nq_per_element, 4)` and component ordering
+            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
+            Units are `[stress]`.
+        """
+
+        temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
+        thermal_stress_flat, nq = self._backend.evaluate_quadrature_thermal_stress(temperature_arr)
+        nelem = self.analysis_elements.shape[0]
+        nq = int(nq)
+        return np.asarray(thermal_stress_flat, dtype=np.float64).reshape(nelem, nq, 4)
 
 
 def _quadrature_code(quadrature: str | int) -> int:

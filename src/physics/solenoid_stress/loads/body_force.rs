@@ -140,21 +140,52 @@ where
             values.len()
         ));
     }
-    for element_index in 0..mesh.num_elements() {
+    for_body_force_element_blocks::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        formulation,
+        quadrature,
+        0,
+        mesh.num_elements(),
+        |element_index, global_rows, local| {
+            let radial = values[2 * element_index];
+            let axial = values[2 * element_index + 1];
+            for local_dof in 0..DOF_PER_ELEMENT {
+                let reduced_row = global_to_reduced[global_rows[local_dof]];
+                if reduced_row != usize::MAX {
+                    rhs[reduced_row] += local[local_dof][0] * radial + local[local_dof][1] * axial;
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn for_body_force_element_blocks<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+    Consume,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    element_start: usize,
+    element_end: usize,
+    mut consume: Consume,
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    Consume:
+        FnMut(usize, [usize; DOF_PER_ELEMENT], [[f64; 2]; DOF_PER_ELEMENT]) -> Result<(), String>,
+{
+    for element_index in element_start..element_end {
         let coords = mesh.element_coords(element_index)?;
         let nodes = mesh.element_nodes(element_index)?;
         let samples = Family::volume_samples(&coords, quadrature)?;
         let local =
             body_force_element_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
         let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
-        let radial = values[2 * element_index];
-        let axial = values[2 * element_index + 1];
-        for local_dof in 0..DOF_PER_ELEMENT {
-            let reduced_row = global_to_reduced[global_rows[local_dof]];
-            if reduced_row != usize::MAX {
-                rhs[reduced_row] += local[local_dof][0] * radial + local[local_dof][1] * axial;
-            }
-        }
+        consume(element_index, global_rows, local)?;
     }
     Ok(())
 }
@@ -180,23 +211,25 @@ where
     let mut cols = Vec::with_capacity(nelem * DOF_PER_ELEMENT * 2);
     let mut vals = Vec::with_capacity(nelem * DOF_PER_ELEMENT * 2);
 
-    for element_index in element_start..element_end {
-        let coords = mesh.element_coords(element_index)?;
-        let nodes = mesh.element_nodes(element_index)?;
-        let samples = Family::volume_samples(&coords, quadrature)?;
-        let local =
-            body_force_element_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
-        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
-        let global_cols = [2 * element_index, 2 * element_index + 1];
-        scatter_local_matrix(
-            &mut rows,
-            &mut cols,
-            &mut vals,
-            &global_rows,
-            &global_cols,
-            &local,
-        );
-    }
+    for_body_force_element_blocks::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        formulation,
+        quadrature,
+        element_start,
+        element_end,
+        |element_index, global_rows, local| {
+            let global_cols = [2 * element_index, 2 * element_index + 1];
+            scatter_local_matrix(
+                &mut rows,
+                &mut cols,
+                &mut vals,
+                &global_rows,
+                &global_cols,
+                &local,
+            );
+            Ok(())
+        },
+    )?;
 
     Ok(SparseOperator {
         rows,

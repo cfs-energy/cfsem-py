@@ -828,6 +828,64 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 ))
             }
 
+            fn evaluate_quadrature_stress<'py>(
+                &self,
+                py: Python<'py>,
+                displacements_full: PyReadonlyArray1<'_, $ty>,
+            ) -> PyResult<(Py<PyArray1<$ty>>, usize)> {
+                let displacements_full = displacements_full.as_slice()?;
+                let stress = self
+                    .inner
+                    .evaluate_quadrature_stress(displacements_full)
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
+                    PyArray1::from_vec(py, flatten_rank4_samples(stress)).unbind(),
+                    self.inner.nq_per_element,
+                ))
+            }
+
+            #[pyo3(signature = (nodal_temperature=None))]
+            fn evaluate_quadrature_thermal_strain<'py>(
+                &self,
+                py: Python<'py>,
+                nodal_temperature: Option<PyReadonlyArray1<'_, $ty>>,
+            ) -> PyResult<(Py<PyArray1<$ty>>, usize)> {
+                let empty: [$ty; 0] = [];
+                let nodal_temperature = match &nodal_temperature {
+                    Some(arr) => arr.as_slice()?,
+                    None => &empty,
+                };
+                let thermal_strain = self
+                    .inner
+                    .evaluate_quadrature_thermal_strain(nodal_temperature)
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
+                    PyArray1::from_vec(py, flatten_rank4_samples(thermal_strain)).unbind(),
+                    self.inner.nq_per_element,
+                ))
+            }
+
+            #[pyo3(signature = (nodal_temperature=None))]
+            fn evaluate_quadrature_thermal_stress<'py>(
+                &self,
+                py: Python<'py>,
+                nodal_temperature: Option<PyReadonlyArray1<'_, $ty>>,
+            ) -> PyResult<(Py<PyArray1<$ty>>, usize)> {
+                let empty: [$ty; 0] = [];
+                let nodal_temperature = match &nodal_temperature {
+                    Some(arr) => arr.as_slice()?,
+                    None => &empty,
+                };
+                let thermal_stress = self
+                    .inner
+                    .evaluate_quadrature_thermal_stress(nodal_temperature)
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
+                    PyArray1::from_vec(py, flatten_rank4_samples(thermal_stress)).unbind(),
+                    self.inner.nq_per_element,
+                ))
+            }
+
         }
     };
 }

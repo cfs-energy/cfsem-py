@@ -683,35 +683,16 @@ def evaluate_quadrature_samples(
     nodal_temperature: np.ndarray | None = None,
 ) -> QuadratureSamples:
     total_strain = model.evaluate_quadrature_strain(displacement)
-    arr = np.asarray(displacement)
-    if arr.ndim == 1 and arr.shape == (model.ndof_reduced,):
-        reduced = arr
-    else:
-        full = arr.reshape(-1)
-        assert full.shape == (model.ndof_full,)
-        reduced = full[model.free_dofs]
-
-    shape = total_strain.shape
-    stress_from_displacement = np.asarray(
-        model.stress_operator @ reduced + model.stress_constant,
-        dtype=np.float64,
-    ).reshape(shape)
+    stress_from_displacement = model.evaluate_quadrature_stress(displacement)
 
     if model.n_temperature_nodes == 0:
-        thermal_strain = np.zeros(shape, dtype=np.float64)
-        thermal_stress = np.zeros(shape, dtype=np.float64)
+        thermal_strain = model.evaluate_quadrature_thermal_strain()
+        thermal_stress = model.evaluate_quadrature_thermal_stress()
     else:
         if nodal_temperature is None:
             raise ValueError("nodal_temperature is required because this model includes thermal materials")
-        temperature = np.asarray(nodal_temperature, dtype=np.float64).reshape(-1)
-        thermal_strain = np.asarray(
-            model.thermal_strain_operator @ temperature + model.thermal_strain_constant,
-            dtype=np.float64,
-        ).reshape(shape)
-        thermal_stress = np.asarray(
-            model.thermal_stress_operator @ temperature + model.thermal_stress_constant,
-            dtype=np.float64,
-        ).reshape(shape)
+        thermal_strain = model.evaluate_quadrature_thermal_strain(nodal_temperature)
+        thermal_stress = model.evaluate_quadrature_thermal_stress(nodal_temperature)
 
     return QuadratureSamples(
         points=model.quadrature_points,
@@ -1105,6 +1086,70 @@ def test_structural_sparse_operators_are_user_owned_exports() -> None:
         second = getattr(model, name)
         assert first is not second
         assert_sparse_allclose(first, second, rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_matrix_free_recovery_fields_match_sparse_exports() -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=2, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
+    thermal = fem.isotropic_axisymmetric_thermal_material(1.2e-5, reference_temperature=293.15)
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        thermal_material_table=np.asarray([thermal]),
+        prescribed={0: 1.0e-6, 1: -2.0e-6},
+        element_type="quad9",
+    )
+    displacement = np.linspace(-3.0e-6, 4.0e-6, model.ndof_full, dtype=dtype)
+    displacement[model.fixed_dofs] = model.fixed_values
+    reduced = displacement[model.free_dofs]
+    input_temperature = 293.15 + 8.0 * nodes[:, 0] - 3.0 * nodes[:, 1]
+    shape = (model.nelem, model.nq_per_element, 4)
+
+    expected_stress = np.asarray(
+        model.stress_operator @ reduced + model.stress_constant,
+        dtype=dtype,
+    ).reshape(shape)
+    expected_thermal_strain = np.asarray(
+        model.thermal_strain_operator @ input_temperature + model.thermal_strain_constant,
+        dtype=dtype,
+    ).reshape(shape)
+    expected_thermal_stress = np.asarray(
+        model.thermal_stress_operator @ input_temperature + model.thermal_stress_constant,
+        dtype=dtype,
+    ).reshape(shape)
+
+    np.testing.assert_allclose(model.evaluate_quadrature_stress(displacement), expected_stress)
+    np.testing.assert_allclose(
+        model.evaluate_quadrature_thermal_strain(input_temperature),
+        expected_thermal_strain,
+    )
+    np.testing.assert_allclose(
+        model.evaluate_quadrature_thermal_stress(input_temperature),
+        expected_thermal_stress,
+    )
+
+
+def test_matrix_free_thermal_recovery_without_thermal_materials_returns_zero() -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+    )
+    shape = (model.nelem, model.nq_per_element, 4)
+
+    thermal_strain = model.evaluate_quadrature_thermal_strain()
+    thermal_stress = model.evaluate_quadrature_thermal_stress()
+    assert thermal_strain.shape == shape
+    assert thermal_stress.shape == shape
+    np.testing.assert_allclose(thermal_strain, 0.0)
+    np.testing.assert_allclose(thermal_stress, 0.0)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)

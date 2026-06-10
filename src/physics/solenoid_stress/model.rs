@@ -16,9 +16,10 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::{
     assemble_stiffness_chunks_for_family_par, assemble_stiffness_for_family,
 };
-use crate::physics::solenoid_stress::axisym::build_b_matrix;
+use crate::physics::solenoid_stress::axisym::{build_b_matrix, constitutive_times_strain};
 use crate::physics::solenoid_stress::convenience::{
-    Structural2dElementMeasures, Structural2dElementQuadrature,
+    Structural2dElementMeasures, Structural2dElementQuadrature, rotate_material_in_plane,
+    rotate_thermal_material_in_plane,
 };
 use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
@@ -746,6 +747,150 @@ impl Structural2dModel {
         Ok(strain)
     }
 
+    fn evaluate_quadrature_stress_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+        displacements_full: &[f64],
+    ) -> Result<Vec<[f64; 4]>, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let mut stress = Vec::with_capacity(self.nelem * self.nq_per_element);
+        for element_index in 0..mesh.num_elements() {
+            let coords = mesh.element_coords(element_index)?;
+            let nodes = mesh.element_nodes(element_index)?;
+            let material_id = self.assembly.material_ids[element_index];
+            let material = self
+                .assembly
+                .material_table
+                .get(material_id)
+                .ok_or_else(|| {
+                    format!("material_id {material_id} on element {element_index} is out of range")
+                })?;
+            let material_storage;
+            let material = if let Some(angles) = self.assembly.material_orientation_angles.as_ref()
+            {
+                material_storage = rotate_material_in_plane(material, angles[element_index]);
+                &material_storage
+            } else {
+                material
+            };
+            let mut local_u = [0.0; DOF_PER_ELEMENT];
+            for local_node in 0..NODES_PER_ELEMENT {
+                let global_node = nodes[local_node];
+                local_u[2 * local_node] = displacements_full[2 * global_node];
+                local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
+            }
+            for sample in Family::volume_samples(&coords, self.quadrature)? {
+                let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    self.formulation,
+                    &sample.n,
+                    &sample.grad_phys,
+                    sample.point,
+                )?;
+                let mut sample_strain = [0.0; 4];
+                for component in 0..4 {
+                    let mut value = 0.0;
+                    for dof in 0..DOF_PER_ELEMENT {
+                        value += b[component][dof] * local_u[dof];
+                    }
+                    sample_strain[component] = value;
+                }
+                stress.push(constitutive_times_strain(material, &sample_strain));
+            }
+        }
+        Ok(stress)
+    }
+
+    fn evaluate_quadrature_thermal_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const STRESS: bool,
+    >(
+        &self,
+        nodal_temperature: &[f64],
+    ) -> Result<Vec<[f64; 4]>, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let Some(thermal_material_table) = self.assembly.thermal_material_table.as_ref() else {
+            return Ok(vec![[0.0; 4]; self.nelem * self.nq_per_element]);
+        };
+        if nodal_temperature.len() != self.n_temperature_nodes {
+            return Err(format!(
+                "nodal_temperature has length {}, but thermal recovery expects {} values",
+                nodal_temperature.len(),
+                self.n_temperature_nodes
+            ));
+        }
+
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let mut values = Vec::with_capacity(self.nelem * self.nq_per_element);
+        for element_index in 0..mesh.num_elements() {
+            let coords = mesh.element_coords(element_index)?;
+            let nodes = mesh.element_nodes(element_index)?;
+            let material_id = self.assembly.material_ids[element_index];
+            let material = self
+                .assembly
+                .material_table
+                .get(material_id)
+                .ok_or_else(|| {
+                    format!("material_id {material_id} on element {element_index} is out of range")
+                })?;
+            let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
+                format!(
+                    "thermal material_id {material_id} on element {element_index} is out of range"
+                )
+            })?;
+            let material_storage;
+            let thermal_storage;
+            let (material, thermal) = if let Some(angles) =
+                self.assembly.material_orientation_angles.as_ref()
+            {
+                material_storage = rotate_material_in_plane(material, angles[element_index]);
+                thermal_storage = rotate_thermal_material_in_plane(thermal, angles[element_index]);
+                (&material_storage, &thermal_storage)
+            } else {
+                (material, thermal)
+            };
+            let thermal_stress_unit =
+                STRESS.then(|| constitutive_times_strain(material, &thermal.alpha));
+
+            for sample in Family::volume_samples(&coords, self.quadrature)? {
+                let mut temperature_delta = -thermal.reference_temperature;
+                for local_node in 0..NODES_PER_ELEMENT {
+                    temperature_delta +=
+                        sample.n[local_node] * nodal_temperature[nodes[local_node]];
+                }
+                let mut sample_value = [0.0; 4];
+                if let Some(thermal_stress_unit) = thermal_stress_unit.as_ref() {
+                    for component in 0..4 {
+                        sample_value[component] =
+                            thermal_stress_unit[component] * temperature_delta;
+                    }
+                } else {
+                    for component in 0..4 {
+                        sample_value[component] = thermal.alpha[component] * temperature_delta;
+                    }
+                }
+                values.push(sample_value);
+            }
+        }
+        Ok(values)
+    }
+
     /// Build one reduced structural right-hand side.
     ///
     /// Args:
@@ -933,6 +1078,79 @@ impl Structural2dModel {
                 { quad9::NODES_PER_ELEMENT },
                 { dof_per_element(quad9::NODES_PER_ELEMENT) },
             >(displacements_full),
+        }
+    }
+
+    /// Evaluate quadrature-point stress without materializing sparse recovery operators.
+    ///
+    /// The returned samples are element-major and do not include quadrature-point coordinates.
+    /// Use [`Structural2dModel::element_quadrature`] when coordinates are explicitly needed.
+    pub fn evaluate_quadrature_stress(
+        &self,
+        displacements_full: &[f64],
+    ) -> Result<Vec<[f64; 4]>, String> {
+        if displacements_full.len() != self.ndof_full {
+            return Err(format!(
+                "displacements_full has length {}, but full system has {} DOFs",
+                displacements_full.len(),
+                self.ndof_full
+            ));
+        }
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.evaluate_quadrature_stress_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(displacements_full),
+            Structural2dElementType::Quad9 => self.evaluate_quadrature_stress_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(displacements_full),
+        }
+    }
+
+    /// Evaluate quadrature-point thermal strain without materializing recovery operators.
+    ///
+    /// The returned samples are element-major. Models without thermal materials return a zero field
+    /// with the correct quadrature shape.
+    pub fn evaluate_quadrature_thermal_strain(
+        &self,
+        nodal_temperature: &[f64],
+    ) -> Result<Vec<[f64; 4]>, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.evaluate_quadrature_thermal_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                false,
+            >(nodal_temperature),
+            Structural2dElementType::Quad9 => self.evaluate_quadrature_thermal_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                false,
+            >(nodal_temperature),
+        }
+    }
+
+    /// Evaluate quadrature-point thermal stress without materializing recovery operators.
+    ///
+    /// The returned samples are element-major. Models without thermal materials return a zero field
+    /// with the correct quadrature shape.
+    pub fn evaluate_quadrature_thermal_stress(
+        &self,
+        nodal_temperature: &[f64],
+    ) -> Result<Vec<[f64; 4]>, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.evaluate_quadrature_thermal_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                true,
+            >(nodal_temperature),
+            Structural2dElementType::Quad9 => self.evaluate_quadrature_thermal_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                true,
+            >(nodal_temperature),
         }
     }
 }

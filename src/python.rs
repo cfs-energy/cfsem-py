@@ -169,10 +169,10 @@ fn read_axisym_material_ids(
         .map_err(Into::into)
 }
 
-fn read_axisym_material_table<F: physics::solenoid_stress::Real + NumpyElement>(
+fn read_axisym_material_table(
     name: &str,
-    material_table: PyReadonlyArray3<'_, F>,
-) -> PyResult<Vec<[[F; 4]; 4]>> {
+    material_table: PyReadonlyArray3<'_, f64>,
+) -> PyResult<Vec<[[f64; 4]; 4]>> {
     let view = material_table.as_array();
     let shape = view.shape();
     if shape.len() != 3 || shape[1] != 4 || shape[2] != 4 {
@@ -183,7 +183,7 @@ fn read_axisym_material_table<F: physics::solenoid_stress::Real + NumpyElement>(
     }
     let mut out = Vec::with_capacity(shape[0]);
     for matrix in view.outer_iter() {
-        let mut entry = [[F::zero(); 4]; 4];
+        let mut entry = [[0.0; 4]; 4];
         for row in 0..4 {
             for col in 0..4 {
                 entry[row][col] = matrix[[row, col]];
@@ -194,10 +194,10 @@ fn read_axisym_material_table<F: physics::solenoid_stress::Real + NumpyElement>(
     Ok(out)
 }
 
-fn read_axisym_thermal_material_table<F: physics::solenoid_stress::Real + NumpyElement>(
+fn read_axisym_thermal_material_table(
     name: &str,
-    thermal_material_table: PyReadonlyArray2<'_, F>,
-) -> PyResult<Vec<physics::solenoid_stress::ThermalMaterial<F>>> {
+    thermal_material_table: PyReadonlyArray2<'_, f64>,
+) -> PyResult<Vec<physics::solenoid_stress::ThermalMaterial>> {
     let view = thermal_material_table.as_array();
     let shape = view.shape();
     if shape.len() != 2 || shape[1] != 5 {
@@ -216,10 +216,10 @@ fn read_axisym_thermal_material_table<F: physics::solenoid_stress::Real + NumpyE
     Ok(out)
 }
 
-fn read_axisym_material_orientation_angles<F: NumpyElement + Copy>(
+fn read_axisym_material_orientation_angles(
     name: &str,
-    angles: PyReadonlyArray1<'_, F>,
-) -> PyResult<Vec<F>> {
+    angles: PyReadonlyArray1<'_, f64>,
+) -> PyResult<Vec<f64>> {
     let view = angles.as_array();
     let shape = view.shape();
     if shape.len() != 1 {
@@ -361,10 +361,10 @@ fn flatten_rank4_samples<F: Copy>(samples: Vec<[F; 4]>) -> Vec<F> {
     out
 }
 
-fn read_axisym_prescribed<F: NumpyElement + Copy>(
+fn read_axisym_prescribed(
     prescribed_dofs: PyReadonlyArray1<'_, u64>,
-    prescribed_values: PyReadonlyArray1<'_, F>,
-) -> PyResult<Vec<(usize, F)>> {
+    prescribed_values: PyReadonlyArray1<'_, f64>,
+) -> PyResult<Vec<(usize, f64)>> {
     let dofs = prescribed_dofs.as_array();
     let values = prescribed_values.as_array();
     if dofs.ndim() != 1 {
@@ -1084,7 +1084,7 @@ fn quad_mesh_query_for_element_type<F>(
     max_iterations: usize,
 ) -> PyResult<mesh::quad2d::QuadMeshQueryResult<F>>
 where
-    F: physics::solenoid_stress::Real + NumpyElement,
+    F: mesh::Scalar + NumpyElement,
 {
     match element_type {
         "quad4" => {
@@ -1231,7 +1231,7 @@ fn quad_mesh_interpolation_operator_for_element_type<F>(
     element_type: &str,
 ) -> PyResult<mesh::quad2d::QuadMeshSparseOperator<F>>
 where
-    F: physics::solenoid_stress::Real + NumpyElement,
+    F: mesh::Scalar + NumpyElement,
 {
     match element_type {
         "quad4" => {
@@ -1273,21 +1273,18 @@ where
     }
 }
 
-fn quad_mesh_strain_operator_for_element_type<F>(
-    nodes: &[[F; 2]],
+fn quad_mesh_strain_operator_for_element_type(
+    nodes: &[[f64; 2]],
     elements: PyReadonlyArray2<'_, u64>,
     element_indices: &[usize],
-    reference_points: &[[F; 2]],
+    reference_points: &[[f64; 2]],
     element_type: &str,
-    formulation: physics::solenoid_stress::Structural2dFormulation<F>,
-) -> PyResult<mesh::quad2d::QuadMeshSparseOperator<F>>
-where
-    F: physics::solenoid_stress::Real + NumpyElement,
-{
+    formulation: physics::solenoid_stress::Structural2dFormulation,
+) -> PyResult<mesh::quad2d::QuadMeshSparseOperator<f64>> {
     match element_type {
         "quad4" => {
             let elements = read_axisym_elements::<4>("elements", elements)?;
-            mesh::quad2d::quad_mesh_strain_operator::<mesh::quad2d::Quad4ReferenceElement, _, 4, 8>(
+            mesh::quad2d::quad_mesh_strain_operator::<mesh::quad2d::Quad4ReferenceElement, 4, 8>(
                 mesh::QuadMeshView2d {
                     nodes_rz: nodes,
                     elements: &elements,
@@ -1300,7 +1297,7 @@ where
         }
         "quad9" => {
             let elements = read_axisym_elements::<9>("elements", elements)?;
-            mesh::quad2d::quad_mesh_strain_operator::<mesh::quad2d::Quad9ReferenceElement, _, 9, 18>(
+            mesh::quad2d::quad_mesh_strain_operator::<mesh::quad2d::Quad9ReferenceElement, 9, 18>(
                 mesh::QuadMeshView2d {
                     nodes_rz: nodes,
                     elements: &elements,
@@ -1318,24 +1315,21 @@ where
     }
 }
 
-fn quad_mesh_stress_operator_for_element_type<F>(
-    nodes: &[[F; 2]],
+fn quad_mesh_stress_operator_for_element_type(
+    nodes: &[[f64; 2]],
     elements: PyReadonlyArray2<'_, u64>,
     element_indices: &[usize],
-    reference_points: &[[F; 2]],
+    reference_points: &[[f64; 2]],
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    material_orientation_angles: Option<&[F]>,
+    material_table: &[[[f64; 4]; 4]],
+    material_orientation_angles: Option<&[f64]>,
     element_type: &str,
-    formulation: physics::solenoid_stress::Structural2dFormulation<F>,
-) -> PyResult<mesh::quad2d::QuadMeshSparseOperator<F>>
-where
-    F: physics::solenoid_stress::Real + NumpyElement,
-{
+    formulation: physics::solenoid_stress::Structural2dFormulation,
+) -> PyResult<mesh::quad2d::QuadMeshSparseOperator<f64>> {
     match element_type {
         "quad4" => {
             let elements = read_axisym_elements::<4>("elements", elements)?;
-            mesh::quad2d::quad_mesh_stress_operator::<mesh::quad2d::Quad4ReferenceElement, _, 4, 8>(
+            mesh::quad2d::quad_mesh_stress_operator::<mesh::quad2d::Quad4ReferenceElement, 4, 8>(
                 mesh::QuadMeshView2d {
                     nodes_rz: nodes,
                     elements: &elements,
@@ -1351,7 +1345,7 @@ where
         }
         "quad9" => {
             let elements = read_axisym_elements::<9>("elements", elements)?;
-            mesh::quad2d::quad_mesh_stress_operator::<mesh::quad2d::Quad9ReferenceElement, _, 9, 18>(
+            mesh::quad2d::quad_mesh_stress_operator::<mesh::quad2d::Quad9ReferenceElement, 9, 18>(
                 mesh::QuadMeshView2d {
                     nodes_rz: nodes,
                     elements: &elements,

@@ -511,6 +511,6 @@ pub use model::{
 };
 pub(crate) use types::validate_element_material_inputs;
 pub use types::{
-    DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, ThermalMaterial, TractionLoad,
+    DOF_PER_NODE, PressureLoad, Structural2dFormulation, ThermalMaterial, TractionLoad,
     dof_per_element,
 };

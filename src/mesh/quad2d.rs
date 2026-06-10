@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::mesh::elements::quad2d::{mapping, quad4, quad9};
 use crate::mesh::{Scalar, cast};
 use crate::physics::solenoid_stress::{
-    DOF_PER_NODE, Real, Structural2dFormulation, build_b_matrix, rotate_material_in_plane,
+    DOF_PER_NODE, Structural2dFormulation, build_b_matrix, rotate_material_in_plane,
     validate_element_material_inputs,
 };
 
@@ -541,20 +541,14 @@ where
 /// The operator has shape `(4 * nquery, 2 * nnode)` and maps full nodal displacement values to the
 /// four-component strain vector at each query point. Rows are grouped per query point in the same
 /// component ordering as the structural formulation.
-pub fn quad_mesh_strain_operator<
-    E,
-    F,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+pub fn quad_mesh_strain_operator<E, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     element_indices: &[usize],
-    reference_points: &[[F; 2]],
-    formulation: Structural2dFormulation<F>,
-) -> Result<QuadMeshSparseOperator<F>, String>
+    reference_points: &[[f64; 2]],
+    formulation: Structural2dFormulation,
+) -> Result<QuadMeshSparseOperator<f64>, String>
 where
     E: QuadReferenceElement<NODES_PER_ELEMENT>,
-    F: Real,
 {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
@@ -584,7 +578,7 @@ where
         let inv_jac = mapping::inv_j(&jac)?;
         let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
         let point = mapping::map_point(&coords, &shape);
-        let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             formulation,
             &shape,
             &grad_phys,
@@ -596,7 +590,7 @@ where
                 for dof_component in 0..DOF_PER_NODE {
                     let local_dof = DOF_PER_NODE * local_node + dof_component;
                     let value = b[component][local_dof];
-                    if value != F::zero() {
+                    if value != 0.0 {
                         rows.push(row);
                         cols.push(DOF_PER_NODE * nodes[local_node] + dof_component);
                         vals.push(value);
@@ -629,23 +623,17 @@ where
 /// `material_orientation_angles` has shape `(nelem,)` and unitless radians. Operator entries have
 /// units `[pressure / length]`, so multiplying by nodal displacements with units `[length]`
 /// returns stresses with units `[pressure]`.
-pub fn quad_mesh_stress_operator<
-    E,
-    F,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+pub fn quad_mesh_stress_operator<E, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     element_indices: &[usize],
-    reference_points: &[[F; 2]],
+    reference_points: &[[f64; 2]],
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
-) -> Result<QuadMeshSparseOperator<F>, String>
+    material_table: &[[[f64; 4]; 4]],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
+) -> Result<QuadMeshSparseOperator<f64>, String>
 where
     E: QuadReferenceElement<NODES_PER_ELEMENT>,
-    F: Real,
 {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
@@ -692,7 +680,7 @@ where
         let inv_jac = mapping::inv_j(&jac)?;
         let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
         let point = mapping::map_point(&coords, &shape);
-        let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             formulation,
             &shape,
             &grad_phys,
@@ -704,13 +692,13 @@ where
             for local_node in 0..NODES_PER_ELEMENT {
                 for dof_component in 0..DOF_PER_NODE {
                     let local_dof = DOF_PER_NODE * local_node + dof_component;
-                    let mut value = F::zero();
+                    let mut value = 0.0;
                     for strain_component in 0..4 {
                         value = value
                             + material[component][strain_component]
                                 * b[strain_component][local_dof];
                     }
-                    if value != F::zero() {
+                    if value != 0.0 {
                         rows.push(row);
                         cols.push(DOF_PER_NODE * nodes[local_node] + dof_component);
                         vals.push(value);
@@ -864,7 +852,7 @@ mod tests {
         let query =
             query_quad_mesh::<Quad4ReferenceElement, _, 4>(mesh, &[[0.25, 0.5], [1.75, 0.5]], 20)
                 .expect("mesh query");
-        let operator = quad_mesh_stress_operator::<Quad4ReferenceElement, _, 4, 8>(
+        let operator = quad_mesh_stress_operator::<Quad4ReferenceElement, 4, 8>(
             mesh,
             &query.nearest_element_indices,
             &query.nearest_element_reference_points,

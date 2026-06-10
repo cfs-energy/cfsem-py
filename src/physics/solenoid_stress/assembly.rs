@@ -11,7 +11,7 @@ use crate::physics::solenoid_stress::convenience::rotate_material_in_plane;
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::validate_structural_2d_mesh;
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, StiffnessTriplets, Structural2dFormulation, local_dofs,
+    DOF_PER_NODE, StiffnessTriplets, Structural2dFormulation, local_dofs,
     validate_element_material_inputs,
 };
 use crate::{chunksize, ranges_for_len};
@@ -22,28 +22,27 @@ use crate::{chunksize, ranges_for_len};
 /// reduction and CSC compression.  Its entries have units
 /// `[generalized nodal force / displacement] = [energy / distance^2]`.
 pub(crate) fn assemble_stiffness_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<StiffnessTriplets<F>, String>
+) -> Result<StiffnessTriplets, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
-    validate_stiffness_inputs::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    validate_stiffness_inputs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         material_ids,
         material_orientation_angles,
         formulation,
     )?;
-    assemble_stiffness_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    assemble_stiffness_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         material_ids,
         material_table,
@@ -62,23 +61,22 @@ where
 /// constrained-system reduction and sparse compression stages consume them.
 #[cfg(test)]
 pub(crate) fn assemble_stiffness_for_family_par<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<StiffnessTriplets<F>, String>
+) -> Result<StiffnessTriplets, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
     let chunks =
-        assemble_stiffness_chunks_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        assemble_stiffness_chunks_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             material_ids,
             material_table,
@@ -95,22 +93,21 @@ where
 
 /// Assemble full-space stiffness triplet chunks with element ranges split across Rayon workers.
 pub(crate) fn assemble_stiffness_chunks_for_family_par<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<Vec<StiffnessTriplets<F>>, String>
+) -> Result<Vec<StiffnessTriplets>, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
-    validate_stiffness_inputs::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    validate_stiffness_inputs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         material_ids,
         material_orientation_angles,
@@ -121,7 +118,7 @@ where
     ranges_for_len(nelem, chunksize(nelem))
         .into_par_iter()
         .map(|(start, end)| {
-            assemble_stiffness_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            assemble_stiffness_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
                 mesh,
                 material_ids,
                 material_table,
@@ -136,15 +133,11 @@ where
 }
 
 /// Validate shape and material inputs shared by serial and threaded stiffness assembly.
-fn validate_stiffness_inputs<
-    F: Real,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+fn validate_stiffness_inputs<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
 ) -> Result<(), String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
@@ -160,20 +153,19 @@ fn validate_stiffness_inputs<
 #[allow(clippy::too_many_arguments)]
 /// Assemble the contribution from a contiguous element range into an independent triplet buffer.
 fn assemble_stiffness_range_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     element_start: usize,
     element_end: usize,
-) -> Result<StiffnessTriplets<F>, String>
+) -> Result<StiffnessTriplets, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -196,10 +188,10 @@ where
         } else {
             material
         };
-        let mut ke = [[F::zero(); DOF_PER_ELEMENT]; DOF_PER_ELEMENT];
+        let mut ke = [[0.0; DOF_PER_ELEMENT]; DOF_PER_ELEMENT];
 
-        for sample in Family::volume_samples::<F>(&coords, quadrature)? {
-            let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        for sample in Family::volume_samples(&coords, quadrature)? {
+            let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
                 formulation,
                 &sample.n,
                 &sample.grad_phys,
@@ -225,10 +217,7 @@ where
 
 /// Concatenate independently assembled triplet chunks without changing element order.
 #[cfg(test)]
-fn concat_stiffness_triplets<F: Real>(
-    chunks: Vec<StiffnessTriplets<F>>,
-    capacity: usize,
-) -> StiffnessTriplets<F> {
+fn concat_stiffness_triplets(chunks: Vec<StiffnessTriplets>, capacity: usize) -> StiffnessTriplets {
     let mut rows = Vec::with_capacity(capacity);
     let mut cols = Vec::with_capacity(capacity);
     let mut vals = Vec::with_capacity(capacity);
@@ -257,7 +246,7 @@ mod tests {
         let mesh = single_element_quad4_mesh();
         let material_ids = [0usize];
         let material_table = [isotropic_axisymmetric_material(200.0e9, 0.27)];
-        let result = assemble_stiffness_for_family::<f64, Quad4Family, 4, { dof_per_element(4) }>(
+        let result = assemble_stiffness_for_family::<Quad4Family, 4, { dof_per_element(4) }>(
             mesh,
             &material_ids,
             &material_table,
@@ -285,7 +274,7 @@ mod tests {
         let mesh = single_element_quad4_mesh();
         let material_ids = [0usize];
         let material_table = [isotropic_axisymmetric_material(200.0e9, 0.27)];
-        let serial = assemble_stiffness_for_family::<f64, Quad4Family, 4, { dof_per_element(4) }>(
+        let serial = assemble_stiffness_for_family::<Quad4Family, 4, { dof_per_element(4) }>(
             mesh,
             &material_ids,
             &material_table,
@@ -294,16 +283,15 @@ mod tests {
             QuadratureRule::GaussLegendre3,
         )
         .expect("serial assembly should succeed");
-        let parallel =
-            assemble_stiffness_for_family_par::<f64, Quad4Family, 4, { dof_per_element(4) }>(
-                mesh,
-                &material_ids,
-                &material_table,
-                None,
-                crate::physics::solenoid_stress::types::Structural2dFormulation::Axisymmetric,
-                QuadratureRule::GaussLegendre3,
-            )
-            .expect("parallel assembly should succeed");
+        let parallel = assemble_stiffness_for_family_par::<Quad4Family, 4, { dof_per_element(4) }>(
+            mesh,
+            &material_ids,
+            &material_table,
+            None,
+            crate::physics::solenoid_stress::types::Structural2dFormulation::Axisymmetric,
+            QuadratureRule::GaussLegendre3,
+        )
+        .expect("parallel assembly should succeed");
 
         assert_eq!(serial.rows, parallel.rows);
         assert_eq!(serial.cols, parallel.cols);

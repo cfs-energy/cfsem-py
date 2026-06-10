@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use crate::mesh::elements::quad2d::quad4;
-use crate::physics::solenoid_stress::types::{Real, ThermalMaterial, cast};
+use crate::physics::solenoid_stress::types::ThermalMaterial;
 
 /// Per-element quadrature data in element-major flattened form.
 ///
@@ -16,22 +16,22 @@ use crate::physics::solenoid_stress::types::{Real, ThermalMaterial, cast};
 /// `weights_area` and `weights_volume` have flattened shape `(nelem * nq_per_element,)`, and
 /// `nq_per_element` gives the number of consecutive quadrature entries belonging to each element.
 #[derive(Debug, Clone)]
-pub struct Structural2dElementQuadrature<F: Real> {
+pub struct Structural2dElementQuadrature {
     /// Physical quadrature-point coordinates in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
-    pub points: Vec<[F; 2]>,
+    pub points: Vec<[f64; 2]>,
     /// Mapped analysis-plane area weights `det(J) w` in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element,)`.
     /// Units: `[area]`.
-    pub weights_area: Vec<F>,
+    pub weights_area: Vec<f64>,
     /// Mapped represented-volume weights in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element,)`.
     /// Units: `[volume]`.
-    pub weights_volume: Vec<F>,
+    pub weights_volume: Vec<f64>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
 }
@@ -40,17 +40,17 @@ pub struct Structural2dElementQuadrature<F: Real> {
 ///
 /// Both vectors have shape `(nelem,)`.
 #[derive(Debug, Clone)]
-pub struct Structural2dElementMeasures<F: Real> {
+pub struct Structural2dElementMeasures {
     /// Analysis-plane area of each element.
     ///
     /// Shape: `(nelem,)`.
     /// Units: `[area]`.
-    pub areas: Vec<F>,
+    pub areas: Vec<f64>,
     /// Represented 3D volume for each element.
     ///
     /// Shape: `(nelem,)`.
     /// Units: `[volume]`.
-    pub volumes: Vec<F>,
+    pub volumes: Vec<f64>,
 }
 
 /// Recovered quadrature-point fields in element-major flattened form.
@@ -60,32 +60,32 @@ pub struct Structural2dElementMeasures<F: Real> {
 /// flattened shape `(nelem * nq_per_element, 4)`. `nq_per_element` records how many consecutive
 /// samples belong to each element.
 #[derive(Debug, Clone)]
-pub struct QuadratureFieldSamples<F: Real> {
+pub struct QuadratureFieldSamples {
     /// Physical quadrature-point coordinates in element-major order.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
-    pub points: Vec<[F; 2]>,
+    pub points: Vec<[f64; 2]>,
     /// Total strain samples `[e_rr, e_zz, e_tt, g_rz]`.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[strain]`.
-    pub strain: Vec<[F; 4]>,
+    pub strain: Vec<[f64; 4]>,
     /// Thermal strain samples in the same ordering as `strain`.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[strain]`.
-    pub thermal_strain: Vec<[F; 4]>,
+    pub thermal_strain: Vec<[f64; 4]>,
     /// Elastic strain samples `strain - thermal_strain`.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[strain]`.
-    pub elastic_strain: Vec<[F; 4]>,
+    pub elastic_strain: Vec<[f64; 4]>,
     /// Stress samples `[sigma_rr, sigma_zz, sigma_tt, tau_rz]`.
     ///
     /// Flattened shape: `(nelem * nq_per_element, 4)`.
     /// Units: `[stress]`.
-    pub stress: Vec<[F; 4]>,
+    pub stress: Vec<[f64; 4]>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
 }
@@ -96,12 +96,12 @@ pub struct QuadratureFieldSamples<F: Real> {
 /// `analysis_nodes` has shape `(n_analysis_nodes, 2)`, and `analysis_elements` has shape
 /// `(nelem, 9)`.
 #[derive(Debug, Clone)]
-pub struct ElevatedQuad9Mesh<F: Real> {
+pub struct ElevatedQuad9Mesh {
     /// Input corner-node coordinates.
     ///
     /// Shape: `(nnode, 2)`.
     /// Units: `[length]`.
-    pub input_nodes: Vec<[F; 2]>,
+    pub input_nodes: Vec<[f64; 2]>,
     /// Input quad4 connectivity.
     ///
     /// Shape: `(nelem, 4)`.
@@ -110,7 +110,7 @@ pub struct ElevatedQuad9Mesh<F: Real> {
     ///
     /// Shape: `(n_analysis_nodes, 2)`.
     /// Units: `[length]`.
-    pub analysis_nodes: Vec<[F; 2]>,
+    pub analysis_nodes: Vec<[f64; 2]>,
     /// Elevated quad9 connectivity.
     ///
     /// Shape: `(nelem, 9)`.
@@ -142,19 +142,15 @@ pub struct ElevatedQuad9Mesh<F: Real> {
 /// Returns:
 ///     Elastic stress-strain matrix with shape `(4, 4)` in component order
 ///     `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
-pub fn isotropic_axisymmetric_material<F: Real>(
-    youngs_modulus: F,
-    poisson_ratio: F,
-) -> [[F; 4]; 4] {
-    let two = cast::<F>(2.0);
-    let lam = youngs_modulus * poisson_ratio
-        / ((F::one() + poisson_ratio) * (F::one() - two * poisson_ratio));
-    let mu = youngs_modulus / (two * (F::one() + poisson_ratio));
+pub fn isotropic_axisymmetric_material(youngs_modulus: f64, poisson_ratio: f64) -> [[f64; 4]; 4] {
+    let lam =
+        youngs_modulus * poisson_ratio / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio));
+    let mu = youngs_modulus / (2.0 * (1.0 + poisson_ratio));
     [
-        [lam + two * mu, lam, lam, F::zero()],
-        [lam, lam + two * mu, lam, F::zero()],
-        [lam, lam, lam + two * mu, F::zero()],
-        [F::zero(), F::zero(), F::zero(), mu],
+        [lam + 2.0 * mu, lam, lam, 0.0],
+        [lam, lam + 2.0 * mu, lam, 0.0],
+        [lam, lam, lam + 2.0 * mu, 0.0],
+        [0.0, 0.0, 0.0, mu],
     ]
 }
 
@@ -168,12 +164,12 @@ pub fn isotropic_axisymmetric_material<F: Real>(
 ///     Thermal material data with row shape `(5,)`, stored as
 ///     `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. The first four entries have units
 ///     `[strain / temperature]`; `T_ref` has units `[temperature]`.
-pub fn isotropic_axisymmetric_thermal_material<F: Real>(
-    alpha: F,
-    reference_temperature: F,
-) -> ThermalMaterial<F> {
+pub fn isotropic_axisymmetric_thermal_material(
+    alpha: f64,
+    reference_temperature: f64,
+) -> ThermalMaterial {
     ThermalMaterial {
-        alpha: [alpha, alpha, alpha, F::zero()],
+        alpha: [alpha, alpha, alpha, 0.0],
         reference_temperature,
     }
 }
@@ -190,14 +186,14 @@ pub fn isotropic_axisymmetric_thermal_material<F: Real>(
 ///     Thermal material data with row shape `(5,)`, stored as
 ///     `[alpha_r, alpha_z, alpha_t, alpha_rz, T_ref]`. The first four entries have units
 ///     `[strain / temperature]`; `T_ref` has units `[temperature]`.
-pub fn orthotropic_axisymmetric_thermal_material<F: Real>(
-    alpha_r: F,
-    alpha_z: F,
-    alpha_t: F,
-    reference_temperature: F,
-) -> ThermalMaterial<F> {
+pub fn orthotropic_axisymmetric_thermal_material(
+    alpha_r: f64,
+    alpha_z: f64,
+    alpha_t: f64,
+    reference_temperature: f64,
+) -> ThermalMaterial {
     ThermalMaterial {
-        alpha: [alpha_r, alpha_z, alpha_t, F::zero()],
+        alpha: [alpha_r, alpha_z, alpha_t, 0.0],
         reference_temperature,
     }
 }
@@ -207,8 +203,8 @@ pub fn orthotropic_axisymmetric_thermal_material<F: Real>(
 /// The local component order is `[11, 22, 33, 12]`.  The returned global matrix is expressed in
 /// `[rr, zz, tt, rz]` for axisymmetric use or `[xx, yy, zz, xy]` for plane-strain use.  The angle
 /// is measured from global axis 0 to local material axis 1.
-pub fn rotate_material_in_plane<F: Real>(material: &[[F; 4]; 4], angle: F) -> [[F; 4]; 4] {
-    if angle == F::zero() {
+pub fn rotate_material_in_plane(material: &[[f64; 4]; 4], angle: f64) -> [[f64; 4]; 4] {
+    if angle == 0.0 {
         return *material;
     }
     let c = angle.cos();
@@ -216,27 +212,26 @@ pub fn rotate_material_in_plane<F: Real>(material: &[[F; 4]; 4], angle: F) -> [[
     let c2 = c * c;
     let s2 = s * s;
     let cs = c * s;
-    let two = cast::<F>(2.0);
 
     // local_strain = strain_to_local * global_strain
     let strain_to_local = [
-        [c2, s2, F::zero(), cs],
-        [s2, c2, F::zero(), -cs],
-        [F::zero(), F::zero(), F::one(), F::zero()],
-        [-two * cs, two * cs, F::zero(), c2 - s2],
+        [c2, s2, 0.0, cs],
+        [s2, c2, 0.0, -cs],
+        [0.0, 0.0, 1.0, 0.0],
+        [-2.0 * cs, 2.0 * cs, 0.0, c2 - s2],
     ];
     // global_stress = stress_to_global * local_stress
     let stress_to_global = [
-        [c2, s2, F::zero(), -two * cs],
-        [s2, c2, F::zero(), two * cs],
-        [F::zero(), F::zero(), F::one(), F::zero()],
-        [cs, -cs, F::zero(), c2 - s2],
+        [c2, s2, 0.0, -2.0 * cs],
+        [s2, c2, 0.0, 2.0 * cs],
+        [0.0, 0.0, 1.0, 0.0],
+        [cs, -cs, 0.0, c2 - s2],
     ];
 
-    let mut local_times_strain = [[F::zero(); 4]; 4];
+    let mut local_times_strain = [[0.0; 4]; 4];
     for row in 0..4 {
         for col in 0..4 {
-            let mut value = F::zero();
+            let mut value = 0.0;
             for (k, strain_row) in strain_to_local.iter().enumerate() {
                 value = value + material[row][k] * strain_row[col];
             }
@@ -244,10 +239,10 @@ pub fn rotate_material_in_plane<F: Real>(material: &[[F; 4]; 4], angle: F) -> [[
         }
     }
 
-    let mut rotated = [[F::zero(); 4]; 4];
+    let mut rotated = [[0.0; 4]; 4];
     for row in 0..4 {
         for col in 0..4 {
-            let mut value = F::zero();
+            let mut value = 0.0;
             for (k, local_row) in local_times_strain.iter().enumerate() {
                 value = value + stress_to_global[row][k] * local_row[col];
             }
@@ -261,8 +256,8 @@ pub fn rotate_material_in_plane<F: Real>(material: &[[F; 4]; 4], angle: F) -> [[
 ///
 /// The local input order is `[alpha_1, alpha_2, alpha_3, alpha_12]`; the returned vector is in the
 /// global four-component order for the active 2D formulation.
-pub fn rotate_thermal_expansion_in_plane<F: Real>(alpha: &[F; 4], angle: F) -> [F; 4] {
-    if angle == F::zero() {
+pub fn rotate_thermal_expansion_in_plane(alpha: &[f64; 4], angle: f64) -> [f64; 4] {
+    if angle == 0.0 {
         return *alpha;
     }
     let c = angle.cos();
@@ -270,12 +265,11 @@ pub fn rotate_thermal_expansion_in_plane<F: Real>(alpha: &[F; 4], angle: F) -> [
     let c2 = c * c;
     let s2 = s * s;
     let cs = c * s;
-    let two = cast::<F>(2.0);
     [
         c2 * alpha[0] + s2 * alpha[1] - cs * alpha[3],
         s2 * alpha[0] + c2 * alpha[1] + cs * alpha[3],
         alpha[2],
-        two * cs * alpha[0] - two * cs * alpha[1] + (c2 - s2) * alpha[3],
+        2.0 * cs * alpha[0] - 2.0 * cs * alpha[1] + (c2 - s2) * alpha[3],
     ]
 }
 
@@ -283,10 +277,7 @@ pub fn rotate_thermal_expansion_in_plane<F: Real>(alpha: &[F; 4], angle: F) -> [
 ///
 /// The expansion coefficients are transformed with the same engineering-shear convention used by
 /// [`rotate_thermal_expansion_in_plane`], while the reference temperature is unchanged.
-pub fn rotate_thermal_material_in_plane<F: Real>(
-    thermal: &ThermalMaterial<F>,
-    angle: F,
-) -> ThermalMaterial<F> {
+pub fn rotate_thermal_material_in_plane(thermal: &ThermalMaterial, angle: f64) -> ThermalMaterial {
     ThermalMaterial {
         alpha: rotate_thermal_expansion_in_plane(&thermal.alpha, angle),
         reference_temperature: thermal.reference_temperature,
@@ -302,14 +293,14 @@ pub fn rotate_thermal_material_in_plane<F: Real>(
 /// Returns:
 ///     Elastic stress-strain matrix with shape `(4, 4)` in component order
 ///     `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
-pub fn cfsem_radial_material<F: Real>(youngs_modulus: F, poisson_ratio: F) -> [[F; 4]; 4] {
-    let factor = youngs_modulus / (F::one() - poisson_ratio * poisson_ratio);
-    let shear = youngs_modulus / (cast::<F>(2.0) * (F::one() + poisson_ratio));
+pub fn cfsem_radial_material(youngs_modulus: f64, poisson_ratio: f64) -> [[f64; 4]; 4] {
+    let factor = youngs_modulus / (1.0 - poisson_ratio * poisson_ratio);
+    let shear = youngs_modulus / (2.0 * (1.0 + poisson_ratio));
     [
-        [factor, F::zero(), factor * poisson_ratio, F::zero()],
-        [F::zero(), youngs_modulus, F::zero(), F::zero()],
-        [factor * poisson_ratio, F::zero(), factor, F::zero()],
-        [F::zero(), F::zero(), F::zero(), shear],
+        [factor, 0.0, factor * poisson_ratio, 0.0],
+        [0.0, youngs_modulus, 0.0, 0.0],
+        [factor * poisson_ratio, 0.0, factor, 0.0],
+        [0.0, 0.0, 0.0, shear],
     ]
 }
 
@@ -333,10 +324,10 @@ pub fn cfsem_radial_material<F: Real>(youngs_modulus: F, poisson_ratio: F) -> [[
 ///     - `analysis_elements` shape `(nelem, 9)`
 ///     - `corner_node_indices`, `midside_node_indices`, and `center_node_indices` as
 ///       one-dimensional index vectors.
-pub fn infer_quad9_mesh<F: Real>(
-    nodes_rz: &[[F; 2]],
+pub fn infer_quad9_mesh(
+    nodes_rz: &[[f64; 2]],
     elements: &[[usize; 4]],
-) -> Result<ElevatedQuad9Mesh<F>, String> {
+) -> Result<ElevatedQuad9Mesh, String> {
     let node_count = nodes_rz.len();
     for (element_index, conn) in elements.iter().enumerate() {
         for &node in conn {
@@ -369,8 +360,8 @@ pub fn infer_quad9_mesh<F: Real>(
                 index
             } else {
                 let midpoint = [
-                    cast::<F>(0.5) * (coords[local_a][0] + coords[local_b][0]),
-                    cast::<F>(0.5) * (coords[local_a][1] + coords[local_b][1]),
+                    0.5 * (coords[local_a][0] + coords[local_b][0]),
+                    0.5 * (coords[local_a][1] + coords[local_b][1]),
                 ];
                 let index = analysis_nodes.len();
                 analysis_nodes.push(midpoint);
@@ -381,10 +372,9 @@ pub fn infer_quad9_mesh<F: Real>(
             analysis_elements[element_index][4 + local_edge] = midpoint_index;
         }
 
-        let quarter = cast::<F>(0.25);
         let center = [
-            quarter * (coords[0][0] + coords[1][0] + coords[2][0] + coords[3][0]),
-            quarter * (coords[0][1] + coords[1][1] + coords[2][1] + coords[3][1]),
+            0.25 * (coords[0][0] + coords[1][0] + coords[2][0] + coords[3][0]),
+            0.25 * (coords[0][1] + coords[1][1] + coords[2][1] + coords[3][1]),
         ];
         let center_index = analysis_nodes.len();
         analysis_nodes.push(center);

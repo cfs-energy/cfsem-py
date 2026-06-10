@@ -31,11 +31,9 @@ use crate::physics::solenoid_stress::recovery::{
     reduced_quadrature_field_operators_for_family_par,
 };
 use crate::physics::solenoid_stress::types::{
-    PressureLoad, Real, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
+    PressureLoad, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
     dof_per_element,
 };
-
-type F = f64;
 
 /// Public element-family selector for the 2D structural solver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,44 +90,44 @@ pub struct ReducedRecoveryOperators {
     ///
     /// Flattened shape: `(nelem * nq_per_element, 2)`.
     /// Units: `[length]`.
-    pub points: Vec<[F; 2]>,
+    pub points: Vec<[f64; 2]>,
     /// CSR operator mapping reduced displacements `[length]` to quadrature-point strains
     /// `[dimensionless]`.
     ///
     /// Entry units: `[strain / displacement] = [1 / length]`.
-    pub strain_operator: SparseRowMat<usize, F>,
+    pub strain_operator: SparseRowMat<usize, f64>,
     /// CSR operator mapping reduced displacements `[length]` to quadrature-point stresses.
     ///
     /// Entry units: `[stress / displacement] = [pressure / length]`.
-    pub stress_operator: SparseRowMat<usize, F>,
+    pub stress_operator: SparseRowMat<usize, f64>,
     /// CSR operator mapping nodal temperatures `[temperature]` to quadrature-point thermal strain.
     ///
     /// Entry units: `[strain / temperature]`.
-    pub thermal_strain_operator: SparseRowMat<usize, F>,
+    pub thermal_strain_operator: SparseRowMat<usize, f64>,
     /// CSR operator mapping nodal temperatures `[temperature]` to quadrature-point thermal stress.
     ///
     /// Entry units: `[stress / temperature]`.
-    pub thermal_stress_operator: SparseRowMat<usize, F>,
+    pub thermal_stress_operator: SparseRowMat<usize, f64>,
     /// Constant strain offset induced by nonzero prescribed Dirichlet values.
     ///
     /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[strain]`.
-    pub strain_constant: Vec<F>,
+    pub strain_constant: Vec<f64>,
     /// Constant stress offset induced by nonzero prescribed Dirichlet values.
     ///
     /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[stress]`.
-    pub stress_constant: Vec<F>,
+    pub stress_constant: Vec<f64>,
     /// Constant thermal-strain offset induced by per-material reference temperature.
     ///
     /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[strain]`.
-    pub thermal_strain_constant: Vec<F>,
+    pub thermal_strain_constant: Vec<f64>,
     /// Constant thermal-stress offset induced by per-material reference temperature.
     ///
     /// Flattened shape: `(4 * nelem * nq_per_element,)`.
     /// Units: `[stress]`.
-    pub thermal_stress_constant: Vec<F>,
+    pub thermal_stress_constant: Vec<f64>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
     /// Number of nodal temperatures expected by the thermal recovery operators.
@@ -152,32 +150,32 @@ pub struct Structural2dModel {
     /// `[energy / distance]`.
     ///
     /// Entry units: `[generalized force / displacement] = [energy / distance^2]`.
-    pub stiffness: SparseColMat<usize, F>,
+    pub stiffness: SparseColMat<usize, f64>,
     /// Reduced RHS operator for per-element body-force density amplitudes.
     ///
     /// Shape: `(ndof_reduced, 2 * nelem)`. Columns are grouped by element as `[b_r, b_z]`.
     /// Entry units: `[volume]`.
-    pub body_force_to_rhs: SparseRowMat<usize, F>,
+    pub body_force_to_rhs: SparseRowMat<usize, f64>,
     /// Reduced RHS operator for scalar pressure amplitudes on `pressure_faces`.
     ///
     /// Shape: `(ndof_reduced, n_pressure_faces)`. One column per loaded face.
     /// Entry units: `[area]`.
-    pub pressure_to_rhs: SparseRowMat<usize, F>,
+    pub pressure_to_rhs: SparseRowMat<usize, f64>,
     /// Reduced RHS operator for vector traction amplitudes on `traction_faces`.
     ///
     /// Shape: `(ndof_reduced, 2 * n_traction_faces)`. Columns are grouped by face as `[t_r, t_z]`.
     /// Entry units: `[area]`.
-    pub traction_to_rhs: SparseRowMat<usize, F>,
+    pub traction_to_rhs: SparseRowMat<usize, f64>,
     /// Reduced RHS operator for nodal temperatures.
     ///
     /// Shape: `(ndof_reduced, n_temperature_nodes)`.
     /// Entry units: `[generalized force / temperature] = [energy / (distance * temperature)]`.
-    pub temperature_to_rhs: SparseRowMat<usize, F>,
+    pub temperature_to_rhs: SparseRowMat<usize, f64>,
     /// Constant reduced RHS contribution from prescribed displacements and thermal reference state.
     ///
     /// Shape: `(ndof_reduced,)`.
     /// Units: `[energy / distance]`.
-    pub constant_rhs: Vec<F>,
+    pub constant_rhs: Vec<f64>,
     /// Quadrature-point recovery operators and constants associated with this reduced model.
     pub recovery: ReducedRecoveryOperators,
     /// Metadata listing the loaded pressure faces as `[element_index, local_face]`.
@@ -192,7 +190,7 @@ pub struct Structural2dModel {
     ///
     /// Shape: `(n_analysis_nodes, 2)`.
     /// Units: `[length]`.
-    pub analysis_nodes: Vec<[F; 2]>,
+    pub analysis_nodes: Vec<[f64; 2]>,
     /// Flattened analysis connectivity in element-major order.
     ///
     /// Shape: `(nelem * nodes_per_element,)`.
@@ -204,7 +202,7 @@ pub struct Structural2dModel {
     /// Volume and face quadrature rule used to assemble the stored operators.
     pub quadrature: QuadratureRule,
     /// Structural 2D formulation used by the backend.
-    pub formulation: Structural2dFormulation<F>,
+    pub formulation: Structural2dFormulation,
     /// Number of displacement DOFs in the unreduced full system.
     pub ndof_full: usize,
     /// Number of displacement DOFs remaining after Dirichlet reduction.
@@ -223,8 +221,8 @@ pub struct Structural2dModel {
     ///
     /// Shape: `(n_fixed,)`.
     /// Units: `[length]`.
-    pub fixed_values: Vec<F>,
-    lu: Option<Lu<usize, F>>,
+    pub fixed_values: Vec<f64>,
+    lu: Option<Lu<usize, f64>>,
 }
 
 impl Structural2dModel {
@@ -245,11 +243,11 @@ impl Structural2dModel {
     ///     `[generalized force] = [energy / distance]`.
     pub fn build_rhs(
         &self,
-        body_force: Option<&[F]>,
-        pressure_values: Option<&[F]>,
-        traction_values: Option<&[F]>,
-        nodal_temperature: Option<&[F]>,
-    ) -> Result<Vec<F>, String> {
+        body_force: Option<&[f64]>,
+        pressure_values: Option<&[f64]>,
+        traction_values: Option<&[f64]>,
+        nodal_temperature: Option<&[f64]>,
+    ) -> Result<Vec<f64>, String> {
         let mut rhs = self.constant_rhs.clone();
         apply_csr_operator(&self.body_force_to_rhs, body_force, "body_force", &mut rhs)?;
         apply_csr_operator(
@@ -298,13 +296,13 @@ impl Structural2dModel {
     /// Returns:
     ///     Full displacement vector with shape `(ndof_full,)` and component ordering
     ///     `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
-    pub fn solve(&mut self, rhs: &[F]) -> Result<Vec<F>, String> {
+    pub fn solve(&mut self, rhs: &[f64]) -> Result<Vec<f64>, String> {
         let reduced_solution = self.solve_direct_reduced(rhs)?;
         Ok(self.recover_full(&reduced_solution))
     }
 
     /// Solve the reduced structural system with the cached sparse LU factorization.
-    fn solve_direct_reduced(&mut self, rhs: &[F]) -> Result<Vec<F>, String> {
+    fn solve_direct_reduced(&mut self, rhs: &[f64]) -> Result<Vec<f64>, String> {
         if rhs.len() != self.ndof_reduced {
             return Err(format!(
                 "rhs has length {}, but reduced system has {} rows",
@@ -323,7 +321,7 @@ impl Structural2dModel {
             );
         }
         let lu = self.lu.as_ref().expect("lu cache should be initialized");
-        let mut reduced_solution = Col::<F>::zeros(self.ndof_reduced);
+        let mut reduced_solution = Col::<f64>::zeros(self.ndof_reduced);
         for (index, value) in rhs.iter().copied().enumerate() {
             reduced_solution[index] = value;
         }
@@ -343,7 +341,7 @@ impl Structural2dModel {
     /// Returns:
     ///     Full displacement vector with shape `(ndof_full,)` and component ordering
     ///     `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
-    pub fn recover_full(&self, reduced_solution: &[F]) -> Vec<F> {
+    pub fn recover_full(&self, reduced_solution: &[f64]) -> Vec<f64> {
         assert!(
             reduced_solution.len() == self.ndof_reduced,
             "reduced_solution has length {}, but reduced system has {} rows",
@@ -368,10 +366,10 @@ impl Structural2dModel {
     ///     - `weights_area` length `nelem * nq_per_element` with units `[area]`
     ///     - `weights_volume` length `nelem * nq_per_element` with units `[volume]`
     ///     - `nq_per_element` giving the number of consecutive quadrature entries per element
-    pub fn element_quadrature(&self) -> Result<Structural2dElementQuadrature<F>, String> {
+    pub fn element_quadrature(&self) -> Result<Structural2dElementQuadrature, String> {
         match self.element_type {
             Structural2dElementType::Quad4 => {
-                element_quadrature_for_family::<F, Quad4Family, { quad4::NODES_PER_ELEMENT }>(
+                element_quadrature_for_family::<Quad4Family, { quad4::NODES_PER_ELEMENT }>(
                     &self.analysis_nodes,
                     &self.analysis_elements_flat,
                     self.nelem,
@@ -380,7 +378,7 @@ impl Structural2dModel {
                 )
             }
             Structural2dElementType::Quad9 => {
-                element_quadrature_for_family::<F, Quad9Family, { quad9::NODES_PER_ELEMENT }>(
+                element_quadrature_for_family::<Quad9Family, { quad9::NODES_PER_ELEMENT }>(
                     &self.analysis_nodes,
                     &self.analysis_elements_flat,
                     self.nelem,
@@ -397,7 +395,7 @@ impl Structural2dModel {
     ///     Per-element measures with:
     ///     - `areas` shape `(nelem,)` and units `[area]`
     ///     - `volumes` shape `(nelem,)` and units `[volume]`
-    pub fn element_measures(&self) -> Result<Structural2dElementMeasures<F>, String> {
+    pub fn element_measures(&self) -> Result<Structural2dElementMeasures, String> {
         let quadrature = self.element_quadrature()?;
         let mut areas = vec![0.0; self.nelem];
         let mut volumes = vec![0.0; self.nelem];
@@ -432,9 +430,9 @@ impl Structural2dModel {
     ///     - `nq_per_element` gives the number of consecutive samples per element
     pub fn evaluate_quadrature(
         &self,
-        displacements_full: &[F],
-        nodal_temperature: Option<&[F]>,
-    ) -> Result<QuadratureFieldSamples<F>, String> {
+        displacements_full: &[f64],
+        nodal_temperature: Option<&[f64]>,
+    ) -> Result<QuadratureFieldSamples, String> {
         if displacements_full.len() != self.ndof_full {
             return Err(format!(
                 "displacements_full has length {}, but full system has {} DOFs",
@@ -501,16 +499,16 @@ impl Structural2dModel {
 #[allow(clippy::too_many_arguments)]
 /// Assemble the reduced 2D structural model and all associated operators.
 pub fn assemble_structural_2d(
-    nodes_rz: &[[F; 2]],
+    nodes_rz: &[[f64; 2]],
     elements: Structural2dElements<'_>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
+    material_table: &[[[f64; 4]; 4]],
     pressure_faces: &[PressureLoad],
     traction_faces: &[TractionLoad],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    material_orientation_angles: Option<&[F]>,
-    prescribed: &[(usize, F)],
-    formulation: Structural2dFormulation<F>,
+    thermal_material_table: Option<&[ThermalMaterial]>,
+    material_orientation_angles: Option<&[f64]>,
+    prescribed: &[(usize, f64)],
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     par: bool,
 ) -> Result<Structural2dModel, String> {
@@ -562,7 +560,13 @@ pub fn assemble_structural_2d(
 /// - fixed DOF values,
 /// - the full-to-reduced lookup table,
 /// - and a dense lookup of fixed values by full DOF index.
-type ReducedLayout<F> = (Vec<usize>, Vec<usize>, Vec<F>, Vec<usize>, Vec<Option<F>>);
+type ReducedLayout = (
+    Vec<usize>,
+    Vec<usize>,
+    Vec<f64>,
+    Vec<usize>,
+    Vec<Option<f64>>,
+);
 
 #[allow(clippy::too_many_arguments)]
 /// Assemble the full set of reduced operators for one specific quadrilateral family.
@@ -571,16 +575,16 @@ type ReducedLayout<F> = (Vec<usize>, Vec<usize>, Vec<F>, Vec<usize>, Vec<Option<
 /// operators, applies Dirichlet reduction, compresses the final sparse matrices, and packages the
 /// result into the public `Structural2dModel`.
 fn build_model_for_family<Family, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
-    nodes_rz: &[[F; 2]],
+    nodes_rz: &[[f64; 2]],
     elements: &[[usize; NODES_PER_ELEMENT]],
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
+    material_table: &[[[f64; 4]; 4]],
     pressure_faces: &[PressureLoad],
     traction_faces: &[TractionLoad],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    material_orientation_angles: Option<&[F]>,
-    prescribed: &[(usize, F)],
-    formulation: Structural2dFormulation<F>,
+    thermal_material_table: Option<&[ThermalMaterial]>,
+    material_orientation_angles: Option<&[f64]>,
+    prescribed: &[(usize, f64)],
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     par: bool,
 ) -> Result<Structural2dModel, String>
@@ -602,19 +606,15 @@ where
     // The parallel path keeps worker chunks separate so each chunk can be reduced and sorted
     // independently before a k-way merge builds the canonical CSC structure.
     let stiffness = if par {
-        let stiffness_chunks = assemble_stiffness_chunks_for_family_par::<
-            F,
-            Family,
-            NODES_PER_ELEMENT,
-            DOF_PER_ELEMENT,
-        >(
-            mesh,
-            material_ids,
-            material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-        )?;
+        let stiffness_chunks =
+            assemble_stiffness_chunks_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                material_ids,
+                material_table,
+                material_orientation_angles,
+                formulation,
+                quadrature,
+            )?;
         let sorted_chunks = reduce_sort_stiffness_chunks(
             stiffness_chunks,
             &global_to_reduced,
@@ -625,7 +625,7 @@ where
         csc_from_sorted_triplet_chunks(ndof_reduced, ndof_reduced, sorted_chunks)
     } else {
         let stiffness_full =
-            assemble_stiffness_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            assemble_stiffness_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
                 mesh,
                 material_ids,
                 material_table,
@@ -648,50 +648,47 @@ where
     let reduce_operator =
         |operator| reduce_row_operator_to_csr(operator, &global_to_reduced, ndof_reduced);
 
-    let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) = if let Some(
-        thermal_material_table,
-    ) =
-        thermal_material_table
-    {
-        // Thermal loading has both a temperature-dependent operator and a constant offset from
-        // per-material reference temperature, so keep those two pieces separate until the end.
-        let thermal_full = if par {
-            temperature_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                material_ids,
-                material_table,
-                thermal_material_table,
-                material_orientation_angles,
-                formulation,
-                quadrature,
+    let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) =
+        if let Some(thermal_material_table) = thermal_material_table {
+            // Thermal loading has both a temperature-dependent operator and a constant offset from
+            // per-material reference temperature, so keep those two pieces separate until the end.
+            let thermal_full = if par {
+                temperature_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    mesh,
+                    material_ids,
+                    material_table,
+                    thermal_material_table,
+                    material_orientation_angles,
+                    formulation,
+                    quadrature,
+                )
+            } else {
+                temperature_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    mesh,
+                    material_ids,
+                    material_table,
+                    thermal_material_table,
+                    material_orientation_angles,
+                    formulation,
+                    quadrature,
+                )
+            }?;
+            let reduced_reference_rhs = free_dofs
+                .iter()
+                .map(|&dof| thermal_full.reference_rhs[dof])
+                .collect::<Vec<_>>();
+            (
+                reduce_operator(thermal_full.temperature_to_rhs)?,
+                reduced_reference_rhs,
+                nodes_rz.len(),
             )
         } else {
-            temperature_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                mesh,
-                material_ids,
-                material_table,
-                thermal_material_table,
-                material_orientation_angles,
-                formulation,
-                quadrature,
+            (
+                csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
+                vec![0.0; ndof_reduced],
+                0,
             )
-        }?;
-        let reduced_reference_rhs = free_dofs
-            .iter()
-            .map(|&dof| thermal_full.reference_rhs[dof])
-            .collect::<Vec<_>>();
-        (
-            reduce_operator(thermal_full.temperature_to_rhs)?,
-            reduced_reference_rhs,
-            nodes_rz.len(),
-        )
-    } else {
-        (
-            csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
-            vec![0.0; ndof_reduced],
-            0,
-        )
-    };
+        };
     // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
     // reference-temperature contribution so all load-independent terms live in one vector.
     for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
@@ -701,13 +698,13 @@ where
     // These operators are stored directly in reduced row space because `build_rhs(...)` and
     // `solve(...)` work only with the constrained system.
     let body_force_operator = if par {
-        body_force_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        body_force_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             formulation,
             quadrature,
         )?
     } else {
-        body_force_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        body_force_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             formulation,
             quadrature,
@@ -715,14 +712,14 @@ where
     };
     let body_force_to_rhs = reduce_operator(body_force_operator)?;
     let pressure_operator = if par {
-        pressure_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        pressure_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             pressure_faces,
             formulation,
             quadrature,
         )?
     } else {
-        pressure_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        pressure_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             pressure_faces,
             formulation,
@@ -731,14 +728,14 @@ where
     };
     let pressure_to_rhs = reduce_operator(pressure_operator)?;
     let traction_operator = if par {
-        traction_operator_for_family_par::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        traction_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             traction_faces,
             formulation,
             quadrature,
         )?
     } else {
-        traction_operator_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        traction_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             traction_faces,
             formulation,
@@ -751,7 +748,6 @@ where
     // instead of building full-space triplets and reducing them afterwards.
     let recovery_reduced = if par {
         reduced_quadrature_field_operators_for_family_par::<
-            F,
             Family,
             NODES_PER_ELEMENT,
             DOF_PER_ELEMENT,
@@ -768,7 +764,7 @@ where
             ndof_reduced,
         )
     } else {
-        reduced_quadrature_field_operators_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        reduced_quadrature_field_operators_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             material_ids,
             material_table,
@@ -833,10 +829,7 @@ where
 }
 
 /// Partition full-system displacement DOFs into free and fixed sets for Dirichlet reduction.
-fn reduce_layout<F: Real>(
-    ndof_full: usize,
-    prescribed: &[(usize, F)],
-) -> Result<ReducedLayout<F>, String> {
+fn reduce_layout(ndof_full: usize, prescribed: &[(usize, f64)]) -> Result<ReducedLayout, String> {
     let mut prescribed_sorted = prescribed.to_vec();
     prescribed_sorted.sort_by_key(|&(dof, _)| dof);
     for window in prescribed_sorted.windows(2) {
@@ -884,14 +877,14 @@ fn reduce_layout<F: Real>(
 /// Reduce full-system stiffness triplets to the free DOF subspace.
 ///
 /// This helper also accumulates the Dirichlet offset `-K_fc u_c` into `constant_rhs`.
-fn reduce_square_triplets<F: Real>(
+fn reduce_square_triplets(
     rows: &[usize],
     cols: &[usize],
-    vals: &[F],
+    vals: &[f64],
     global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
-    constant_rhs: &mut [F],
-) -> Vec<Triplet<usize, usize, F>> {
+    fixed_lookup: &[Option<f64>],
+    constant_rhs: &mut [f64],
+) -> Vec<Triplet<usize, usize, f64>> {
     let mut triplets = Vec::with_capacity(vals.len());
     for ((&row, &col), &value) in rows.iter().zip(cols).zip(vals) {
         let reduced_row = global_to_reduced[row];
@@ -913,17 +906,17 @@ fn reduce_square_triplets<F: Real>(
 /// still create duplicate `(row, col)` entries inside a chunk, so this function canonicalizes each
 /// chunk before the final k-way merge.  The Dirichlet RHS offsets are accumulated per chunk to
 /// avoid shared mutable state during the parallel pass.
-fn reduce_sort_stiffness_chunks<F: Real>(
-    chunks: Vec<StiffnessTriplets<F>>,
+fn reduce_sort_stiffness_chunks(
+    chunks: Vec<StiffnessTriplets>,
     global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
-    constant_rhs: &mut [F],
+    fixed_lookup: &[Option<f64>],
+    constant_rhs: &mut [f64],
     ndof_reduced: usize,
-) -> Vec<Vec<Triplet<usize, usize, F>>> {
+) -> Vec<Vec<Triplet<usize, usize, f64>>> {
     let reduced_chunks = chunks
         .into_par_iter()
         .map(|chunk| {
-            let mut local_rhs = vec![F::zero(); ndof_reduced];
+            let mut local_rhs = vec![0.0; ndof_reduced];
             let triplets = reduce_square_triplets(
                 &chunk.rows,
                 &chunk.cols,
@@ -947,15 +940,15 @@ fn reduce_sort_stiffness_chunks<F: Real>(
 }
 
 /// Return triplets in canonical CSC order with duplicate `(column, row)` entries coalesced.
-fn sort_coalesce_triplets<F: Real>(
-    mut triplets: Vec<Triplet<usize, usize, F>>,
-) -> Vec<Triplet<usize, usize, F>> {
+fn sort_coalesce_triplets(
+    mut triplets: Vec<Triplet<usize, usize, f64>>,
+) -> Vec<Triplet<usize, usize, f64>> {
     triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
 
     let mut coalesced = Vec::with_capacity(triplets.len());
-    let mut pending: Option<Triplet<usize, usize, F>> = None;
+    let mut pending: Option<Triplet<usize, usize, f64>> = None;
     for triplet in triplets {
-        if triplet.val == F::zero() {
+        if triplet.val == 0.0 {
             continue;
         }
         match pending {
@@ -964,7 +957,7 @@ fn sort_coalesce_triplets<F: Real>(
                 pending = Some(current);
             }
             Some(current) => {
-                if current.val != F::zero() {
+                if current.val != 0.0 {
                     coalesced.push(current);
                 }
                 pending = Some(triplet);
@@ -973,7 +966,7 @@ fn sort_coalesce_triplets<F: Real>(
         }
     }
     if let Some(current) = pending
-        && current.val != F::zero()
+        && current.val != 0.0
     {
         coalesced.push(current);
     }
@@ -981,11 +974,11 @@ fn sort_coalesce_triplets<F: Real>(
 }
 
 /// Drop rows belonging to fixed displacement DOFs from one full-system load operator.
-fn reduce_row_operator<F: Real>(
-    operator: SparseOperator<F>,
+fn reduce_row_operator(
+    operator: SparseOperator,
     global_to_reduced: &[usize],
     nrow_reduced: usize,
-) -> SparseOperator<F> {
+) -> SparseOperator {
     let mut rows = Vec::with_capacity(operator.vals.len());
     let mut cols = Vec::with_capacity(operator.vals.len());
     let mut vals = Vec::with_capacity(operator.vals.len());
@@ -1012,11 +1005,11 @@ fn reduce_row_operator<F: Real>(
 }
 
 /// Reduce one full-system load operator and compress it into CSR form.
-fn reduce_row_operator_to_csr<F: Real>(
-    operator: SparseOperator<F>,
+fn reduce_row_operator_to_csr(
+    operator: SparseOperator,
     global_to_reduced: &[usize],
     nrow_reduced: usize,
-) -> Result<SparseRowMat<usize, F>, String> {
+) -> Result<SparseRowMat<usize, f64>, String> {
     let operator = reduce_row_operator(operator, global_to_reduced, nrow_reduced);
     csr_from_parts(
         operator.nrow,
@@ -1028,13 +1021,13 @@ fn reduce_row_operator_to_csr<F: Real>(
 }
 
 /// Compress triplet data into a CSR matrix with checked shape and index validity.
-fn csr_from_parts<F: Real>(
+fn csr_from_parts(
     nrow: usize,
     ncol: usize,
     rows: Vec<usize>,
     cols: Vec<usize>,
-    vals: Vec<F>,
-) -> Result<SparseRowMat<usize, F>, String> {
+    vals: Vec<f64>,
+) -> Result<SparseRowMat<usize, f64>, String> {
     let triplets = rows
         .into_iter()
         .zip(cols)
@@ -1046,7 +1039,7 @@ fn csr_from_parts<F: Real>(
 }
 
 /// Build a CSR matrix from already canonical row pointers, column indices, and values.
-fn csr_from_canonical_parts<F: Real>(parts: CsrOperatorParts<F>) -> SparseRowMat<usize, F> {
+fn csr_from_canonical_parts(parts: CsrOperatorParts) -> SparseRowMat<usize, f64> {
     let symbolic = SymbolicSparseRowMat::new_checked(
         parts.nrow,
         parts.ncol,
@@ -1058,11 +1051,11 @@ fn csr_from_canonical_parts<F: Real>(parts: CsrOperatorParts<F>) -> SparseRowMat
 }
 
 /// Compress stiffness triplets into the CSC format used by the cached sparse LU factorization.
-fn csc_from_triplets<F: Real>(
+fn csc_from_triplets(
     nrow: usize,
     ncol: usize,
-    mut triplets: Vec<Triplet<usize, usize, F>>,
-) -> SparseColMat<usize, F> {
+    mut triplets: Vec<Triplet<usize, usize, f64>>,
+) -> SparseColMat<usize, f64> {
     triplets.sort_by(|a, b| a.col.cmp(&b.col).then_with(|| a.row.cmp(&b.row)));
 
     let (col_ptr, row_idx, vals) = pack_sorted_triplets_to_csc(nrow, ncol, triplets);
@@ -1101,7 +1094,7 @@ impl PartialOrd for TripletCursor {
     }
 }
 
-struct CscPartsBuilder<F: Real> {
+struct CscPartsBuilder {
     /// Number of matrix rows.
     nrow: usize,
     /// Number of matrix columns.
@@ -1111,14 +1104,14 @@ struct CscPartsBuilder<F: Real> {
     /// Row index for each stored value.
     row_idx: Vec<usize>,
     /// Nonzero values in column-major CSC order.
-    vals: Vec<F>,
+    vals: Vec<f64>,
     /// First column whose pointer has not yet been finalized.
     next_col: usize,
     /// Most recent sorted entry, held back so duplicates can be coalesced before writing.
-    pending: Option<Triplet<usize, usize, F>>,
+    pending: Option<Triplet<usize, usize, f64>>,
 }
 
-impl<F: Real> CscPartsBuilder<F> {
+impl CscPartsBuilder {
     /// Start a CSC builder that accepts triplets sorted by `(column, row)`.
     fn new(nrow: usize, ncol: usize, capacity: usize) -> Self {
         let mut col_ptr = Vec::with_capacity(ncol + 1);
@@ -1135,10 +1128,10 @@ impl<F: Real> CscPartsBuilder<F> {
     }
 
     /// Append one sorted triplet, coalescing duplicates and skipping exact zeros.
-    fn push_sorted(&mut self, triplet: Triplet<usize, usize, F>) {
+    fn push_sorted(&mut self, triplet: Triplet<usize, usize, f64>) {
         debug_assert!(triplet.row < self.nrow);
         debug_assert!(triplet.col < self.ncol);
-        if triplet.val == F::zero() {
+        if triplet.val == 0.0 {
             return;
         }
         match self.pending {
@@ -1155,7 +1148,7 @@ impl<F: Real> CscPartsBuilder<F> {
     }
 
     /// Finalize pending entries and close all remaining column pointers.
-    fn finish(mut self) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+    fn finish(mut self) -> (Vec<usize>, Vec<usize>, Vec<f64>) {
         if let Some(current) = self.pending.take() {
             self.push_entry(current);
         }
@@ -1168,12 +1161,12 @@ impl<F: Real> CscPartsBuilder<F> {
     }
 
     /// Write one already coalesced CSC entry and fill empty-column pointers before it.
-    fn push_entry(&mut self, entry: Triplet<usize, usize, F>) {
+    fn push_entry(&mut self, entry: Triplet<usize, usize, f64>) {
         while self.next_col < entry.col {
             self.col_ptr.push(self.row_idx.len());
             self.next_col += 1;
         }
-        if entry.val != F::zero() {
+        if entry.val != 0.0 {
             self.row_idx.push(entry.row);
             self.vals.push(entry.val);
         }
@@ -1181,21 +1174,21 @@ impl<F: Real> CscPartsBuilder<F> {
 }
 
 /// Merge already sorted/coalesced triplet chunks into the CSC format used by sparse LU.
-fn csc_from_sorted_triplet_chunks<F: Real>(
+fn csc_from_sorted_triplet_chunks(
     nrow: usize,
     ncol: usize,
-    chunks: Vec<Vec<Triplet<usize, usize, F>>>,
-) -> SparseColMat<usize, F> {
+    chunks: Vec<Vec<Triplet<usize, usize, f64>>>,
+) -> SparseColMat<usize, f64> {
     let (col_ptr, row_idx, vals) = merge_sorted_triplet_chunks_to_csc(nrow, ncol, &chunks);
     let symbolic = SymbolicSparseColMat::new_checked(nrow, ncol, col_ptr, None, row_idx);
     SparseColMat::new(symbolic, vals)
 }
 
-fn merge_sorted_triplet_chunks_to_csc<F: Real>(
+fn merge_sorted_triplet_chunks_to_csc(
     nrow: usize,
     ncol: usize,
-    chunks: &[Vec<Triplet<usize, usize, F>>],
-) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+    chunks: &[Vec<Triplet<usize, usize, f64>>],
+) -> (Vec<usize>, Vec<usize>, Vec<f64>) {
     let capacity = chunks.iter().map(Vec::len).sum::<usize>();
     let mut builder = CscPartsBuilder::new(nrow, ncol, capacity);
     let mut heap = BinaryHeap::with_capacity(chunks.len());
@@ -1232,11 +1225,11 @@ fn merge_sorted_triplet_chunks_to_csc<F: Real>(
 }
 
 /// Pack triplets sorted by `(column, row)` into canonical CSC arrays.
-fn pack_sorted_triplets_to_csc<F: Real>(
+fn pack_sorted_triplets_to_csc(
     nrow: usize,
     ncol: usize,
-    triplets: Vec<Triplet<usize, usize, F>>,
-) -> (Vec<usize>, Vec<usize>, Vec<F>) {
+    triplets: Vec<Triplet<usize, usize, f64>>,
+) -> (Vec<usize>, Vec<usize>, Vec<f64>) {
     let mut builder = CscPartsBuilder::new(nrow, ncol, triplets.len());
     for triplet in triplets {
         builder.push_sorted(triplet);
@@ -1245,11 +1238,11 @@ fn pack_sorted_triplets_to_csc<F: Real>(
 }
 
 /// Apply one reduced CSR load operator to a dense load-amplitude vector and accumulate the result.
-fn apply_csr_operator<F: Real>(
-    operator: &SparseRowMat<usize, F>,
-    input: Option<&[F]>,
+fn apply_csr_operator(
+    operator: &SparseRowMat<usize, f64>,
+    input: Option<&[f64]>,
     name: &str,
-    output: &mut [F],
+    output: &mut [f64],
 ) -> Result<(), String> {
     if operator.ncols() == 0 {
         if let Some(input) = input {
@@ -1272,7 +1265,7 @@ fn apply_csr_operator<F: Real>(
     for row in 0..operator.nrows() {
         let start = operator.row_ptr()[row];
         let end = operator.row_ptr()[row + 1];
-        let mut sum = F::zero();
+        let mut sum = 0.0;
         for index in start..end {
             sum = sum + operator.val()[index] * input[operator.col_idx()[index]];
         }
@@ -1282,17 +1275,17 @@ fn apply_csr_operator<F: Real>(
 }
 
 /// Gather one element's node coordinates from the flattened analysis connectivity.
-fn element_coords_from_flat<F: Real, const NODES_PER_ELEMENT: usize>(
-    analysis_nodes: &[[F; 2]],
+fn element_coords_from_flat<const NODES_PER_ELEMENT: usize>(
+    analysis_nodes: &[[f64; 2]],
     analysis_elements_flat: &[usize],
     element_index: usize,
-) -> Result<[[F; 2]; NODES_PER_ELEMENT], String> {
+) -> Result<[[f64; 2]; NODES_PER_ELEMENT], String> {
     let start = element_index * NODES_PER_ELEMENT;
     let end = start + NODES_PER_ELEMENT;
     let conn = analysis_elements_flat
         .get(start..end)
         .ok_or_else(|| format!("element index {element_index} out of bounds"))?;
-    let mut coords = [[F::zero(); 2]; NODES_PER_ELEMENT];
+    let mut coords = [[0.0; 2]; NODES_PER_ELEMENT];
     for (local_node, &node) in conn.iter().enumerate() {
         coords[local_node] = *analysis_nodes.get(node).ok_or_else(|| {
             format!(
@@ -1305,13 +1298,13 @@ fn element_coords_from_flat<F: Real, const NODES_PER_ELEMENT: usize>(
 }
 
 /// Recompute physical quadrature points and mapped weights for one stored element family.
-fn element_quadrature_for_family<F: Real, Family, const NODES_PER_ELEMENT: usize>(
-    analysis_nodes: &[[F; 2]],
+fn element_quadrature_for_family<Family, const NODES_PER_ELEMENT: usize>(
+    analysis_nodes: &[[f64; 2]],
     analysis_elements_flat: &[usize],
     nelem: usize,
-    formulation: Structural2dFormulation<F>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<Structural2dElementQuadrature<F>, String>
+) -> Result<Structural2dElementQuadrature, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -1320,7 +1313,7 @@ where
     let mut weights_volume = Vec::new();
     let mut nq_per_element = None;
     for element_index in 0..nelem {
-        let coords = element_coords_from_flat::<F, NODES_PER_ELEMENT>(
+        let coords = element_coords_from_flat::<NODES_PER_ELEMENT>(
             analysis_nodes,
             analysis_elements_flat,
             element_index,
@@ -1356,12 +1349,12 @@ where
 }
 
 /// Multiply one CSR operator by a dense input vector.
-fn csr_matvec<F: Real>(operator: &SparseRowMat<usize, F>, input: &[F]) -> Vec<F> {
-    let mut output = vec![F::zero(); operator.nrows()];
+fn csr_matvec(operator: &SparseRowMat<usize, f64>, input: &[f64]) -> Vec<f64> {
+    let mut output = vec![0.0; operator.nrows()];
     for row in 0..operator.nrows() {
         let start = operator.row_ptr()[row];
         let end = operator.row_ptr()[row + 1];
-        let mut sum = F::zero();
+        let mut sum = 0.0;
         for index in start..end {
             sum = sum + operator.val()[index] * input[operator.col_idx()[index]];
         }
@@ -1371,11 +1364,11 @@ fn csr_matvec<F: Real>(operator: &SparseRowMat<usize, F>, input: &[F]) -> Vec<F>
 }
 
 /// Validate one optional temperature vector against the model's thermal operator width.
-fn normalize_temperature<'a, F: Real>(
-    temperature: Option<&'a [F]>,
+fn normalize_temperature<'a>(
+    temperature: Option<&'a [f64]>,
     expected_len: usize,
     name: &str,
-) -> Result<&'a [F], String> {
+) -> Result<&'a [f64], String> {
     match (expected_len, temperature) {
         (0, Some(values)) if !values.is_empty() => Err(format!(
             "{name} was provided, but this model has no thermal operator"
@@ -1393,7 +1386,7 @@ fn normalize_temperature<'a, F: Real>(
 }
 
 /// Add one constant vector to a dense field vector.
-fn add_constant<F: Real>(mut values: Vec<F>, constant: &[F]) -> Vec<F> {
+fn add_constant(mut values: Vec<f64>, constant: &[f64]) -> Vec<f64> {
     assert!(
         values.len() == constant.len(),
         "cannot add vectors of lengths {} and {}",
@@ -1407,7 +1400,7 @@ fn add_constant<F: Real>(mut values: Vec<F>, constant: &[F]) -> Vec<F> {
 }
 
 /// Subtract one dense vector from another.
-fn subtract_vectors<F: Real>(lhs: &[F], rhs: &[F]) -> Result<Vec<F>, String> {
+fn subtract_vectors(lhs: &[f64], rhs: &[f64]) -> Result<Vec<f64>, String> {
     if lhs.len() != rhs.len() {
         return Err(format!(
             "cannot subtract vectors of lengths {} and {}",
@@ -1419,7 +1412,7 @@ fn subtract_vectors<F: Real>(lhs: &[F], rhs: &[F]) -> Result<Vec<F>, String> {
 }
 
 /// Pack a flattened quadrature field into one `[rr, zz, tt, rz]` sample per point.
-fn pack_rank4_field<F: Real>(flat: Vec<F>) -> Result<Vec<[F; 4]>, String> {
+fn pack_rank4_field(flat: Vec<f64>) -> Result<Vec<[f64; 4]>, String> {
     if flat.len() % 4 != 0 {
         return Err(format!(
             "quadrature field has {} entries, which is not divisible by 4",

@@ -1,6 +1,6 @@
 //! Shared constants and structural types for the solenoid-stress backend.
 
-/// Return the constant `2*pi` in the active floating-point type.
+/// Return the constant `2*pi`.
 pub fn two_pi() -> f64 {
     2.0 * core::f64::consts::PI
 }

@@ -2,7 +2,7 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{FaceSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, PressureLoad, Real, Structural2dFormulation, local_dofs, scatter_local_vector,
+    DOF_PER_NODE, PressureLoad, Structural2dFormulation, local_dofs, scatter_local_vector,
 };
 
 use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operators};
@@ -14,20 +14,20 @@ use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operat
 /// `[energy / distance]`.
 ///
 /// Each vector entry therefore has units of area.
-fn pressure_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
-    samples: &[FaceSample<F, NODES_PER_ELEMENT>],
-    formulation: Structural2dFormulation<F>,
-) -> Result<[F; DOF_PER_ELEMENT], String> {
+fn pressure_face_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    samples: &[FaceSample<f64, NODES_PER_ELEMENT>],
+    formulation: Structural2dFormulation,
+) -> Result<[f64; DOF_PER_ELEMENT], String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    let mut local = [F::zero(); DOF_PER_ELEMENT];
+    let mut local = [0.0; DOF_PER_ELEMENT];
 
     for sample in samples {
         // Rotating the physical tangent gives `n * |dx/ds|`, so the line Jacobian is already
         // embedded in `normal_area`.
         let normal_area = [sample.tangent[1], -sample.tangent[0]];
-        let scale = -formulation.face_scale(sample.point, F::one(), sample.weight)?;
+        let scale = -formulation.face_scale(sample.point, 1.0, sample.weight)?;
         for local_node in 0..NODES_PER_ELEMENT {
             local[2 * local_node] =
                 local[2 * local_node] + scale * sample.n[local_node] * normal_area[0];
@@ -52,16 +52,15 @@ fn pressure_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
 ///
 /// Entry units: `[area]`.
 pub(crate) fn pressure_operator_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     pressure_faces: &[PressureLoad],
-    formulation: Structural2dFormulation<F>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String>
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -69,7 +68,7 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    pressure_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    pressure_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         pressure_faces,
         formulation,
@@ -81,16 +80,15 @@ where
 
 /// Assemble pressure loads using pressure-face ranges split across Rayon workers.
 pub(crate) fn pressure_operator_for_family_par<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     pressure_faces: &[PressureLoad],
-    formulation: Structural2dFormulation<F>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String>
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -99,7 +97,7 @@ where
     }
     validate_structural_2d_mesh(mesh, formulation)?;
     let chunks = collect_sparse_operator_chunks(pressure_faces.len(), |start, end| {
-        pressure_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        pressure_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             pressure_faces,
             formulation,
@@ -118,18 +116,17 @@ where
 }
 
 fn pressure_operator_range_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     pressure_faces: &[PressureLoad],
-    formulation: Structural2dFormulation<F>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     load_start: usize,
     load_end: usize,
-) -> Result<SparseOperator<F>, String>
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -155,9 +152,9 @@ where
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
-        let samples = Family::face_samples::<F>(&coords, load.local_face, quadrature)?;
+        let samples = Family::face_samples(&coords, load.local_face, quadrature)?;
         let local =
-            pressure_face_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
+            pressure_face_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
         let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
         scatter_local_vector(
             &mut rows,

@@ -8,7 +8,7 @@ use crate::physics::solenoid_stress::convenience::{
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, local_dofs, scatter_local_matrix,
+    DOF_PER_NODE, Structural2dFormulation, ThermalMaterial, local_dofs, scatter_local_matrix,
     validate_element_material_inputs,
 };
 
@@ -25,9 +25,9 @@ use super::{
 ///
 /// `reference_rhs` is the constant offset contributed by the material's stress-free reference
 /// temperature and has units `[energy / distance]`.
-struct LocalThermalKernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize> {
-    temperature_to_rhs: [[F; NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
-    reference_rhs: [F; DOF_PER_ELEMENT],
+struct LocalThermalKernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize> {
+    temperature_to_rhs: [[f64; NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
+    reference_rhs: [f64; DOF_PER_ELEMENT],
 }
 
 /// Build the local dense thermal load operator for one element.
@@ -36,18 +36,18 @@ struct LocalThermalKernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
 /// `epsilon_th = alpha * (T - T_ref)`,
 /// where `alpha` has units `[strain / temperature]`.  The returned block therefore maps nodal
 /// temperatures directly to generalized nodal loads.
-fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
-    samples: &[VolumeSample<F, NODES_PER_ELEMENT>],
-    material: &[[F; 4]; 4],
-    thermal: &ThermalMaterial<F>,
-    formulation: Structural2dFormulation<F>,
-) -> Result<LocalThermalKernel<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>, String> {
+fn thermal_element_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    samples: &[VolumeSample<f64, NODES_PER_ELEMENT>],
+    material: &[[f64; 4]; 4],
+    thermal: &ThermalMaterial,
+    formulation: Structural2dFormulation,
+) -> Result<LocalThermalKernel<NODES_PER_ELEMENT, DOF_PER_ELEMENT>, String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     let mut local = LocalThermalKernel {
-        temperature_to_rhs: [[F::zero(); NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
-        reference_rhs: [F::zero(); DOF_PER_ELEMENT],
+        temperature_to_rhs: [[0.0; NODES_PER_ELEMENT]; DOF_PER_ELEMENT],
+        reference_rhs: [0.0; DOF_PER_ELEMENT],
     };
     let thermal_stress_unit = constitutive_times_strain(material, &thermal.alpha);
 
@@ -55,14 +55,14 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
         // `B` has units `[1 / length]`, `D * alpha` has units `[stress / temperature]`, and the
         // quadrature scale contributes a physical volume. The resulting local block has units
         // `[force / temperature]`.
-        let b = build_b_matrix::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             formulation,
             &sample.n,
             &sample.grad_phys,
             sample.point,
         )?;
         let scale = formulation.volume_scale(sample.point, sample.det_j, sample.weight)?;
-        let mut local_unit_rhs = [F::zero(); DOF_PER_ELEMENT];
+        let mut local_unit_rhs = [0.0; DOF_PER_ELEMENT];
         accumulate_b_transpose_vector(&mut local_unit_rhs, &b, &thermal_stress_unit, scale);
 
         for local_temp_node in 0..NODES_PER_ELEMENT {
@@ -103,19 +103,18 @@ fn thermal_element_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER
 /// - `temperature_to_rhs`: `[generalized force / temperature] = [energy / (distance * temperature)]`
 /// - `reference_rhs`: `[generalized force] = [energy / distance]`
 pub(crate) fn temperature_operator_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: &[ThermalMaterial<F>],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: &[ThermalMaterial],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<ThermalLoadOperator<F>, String>
+) -> Result<ThermalLoadOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -128,7 +127,7 @@ where
         material_ids,
         material_orientation_angles,
     )?;
-    temperature_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    temperature_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         material_ids,
         material_table,
@@ -143,19 +142,18 @@ where
 
 /// Assemble thermal load operators using element ranges split across Rayon workers.
 pub(crate) fn temperature_operator_for_family_par<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: &[ThermalMaterial<F>],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: &[ThermalMaterial],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<ThermalLoadOperator<F>, String>
+) -> Result<ThermalLoadOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -170,7 +168,7 @@ where
     )?;
     let nelem = mesh.num_elements();
     let chunks = collect_thermal_load_operator_chunks(nelem, |start, end| {
-        temperature_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        temperature_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             material_ids,
             material_table,
@@ -193,21 +191,20 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn temperature_operator_range_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: &[ThermalMaterial<F>],
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: &[ThermalMaterial],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     element_start: usize,
     element_end: usize,
-) -> Result<ThermalLoadOperator<F>, String>
+) -> Result<ThermalLoadOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -216,7 +213,7 @@ where
     let mut rows = Vec::new();
     let mut cols = Vec::new();
     let mut vals = Vec::new();
-    let mut reference_rhs = vec![F::zero(); ndof];
+    let mut reference_rhs = vec![0.0; ndof];
 
     for element_index in element_start..element_end {
         let coords = mesh.element_coords(element_index)?;
@@ -237,8 +234,8 @@ where
         } else {
             (material, thermal)
         };
-        let samples = Family::volume_samples::<F>(&coords, quadrature)?;
-        let local = thermal_element_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        let samples = Family::volume_samples(&coords, quadrature)?;
+        let local = thermal_element_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             &samples,
             material,
             thermal,

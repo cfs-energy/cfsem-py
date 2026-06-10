@@ -52,7 +52,7 @@ use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structura
 #[cfg(test)]
 use crate::physics::solenoid_stress::types::scatter_local_matrix;
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, ThermalMaterial, validate_element_material_inputs,
+    DOF_PER_NODE, Structural2dFormulation, ThermalMaterial, validate_element_material_inputs,
 };
 use crate::{chunksize, ranges_for_len};
 
@@ -63,11 +63,11 @@ use crate::{chunksize, ranges_for_len};
 #[cfg(test)]
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct QuadratureFieldOperators<F: Real> {
+pub struct QuadratureFieldOperators {
     /// Quadrature-point coordinates `(r, z)` in element-major order.
     ///
     /// Units: `[length]`.
-    pub points: Vec<[F; 2]>,
+    pub points: Vec<[f64; 2]>,
     /// Sparse row indices for the strain operator triplets.
     pub strain_rows: Vec<usize>,
     /// Sparse column indices for the strain operator triplets.
@@ -77,7 +77,7 @@ pub struct QuadratureFieldOperators<F: Real> {
     /// Sparse values for the strain operator triplets.
     ///
     /// Units: `[strain / displacement] = [1 / length]`.
-    pub strain_vals: Vec<F>,
+    pub strain_vals: Vec<f64>,
     /// Sparse row indices for the stress operator triplets.
     pub stress_rows: Vec<usize>,
     /// Sparse column indices for the stress operator triplets.
@@ -87,7 +87,7 @@ pub struct QuadratureFieldOperators<F: Real> {
     /// Sparse values for the stress operator triplets.
     ///
     /// Units: `[stress / displacement] = [pressure / length]`.
-    pub stress_vals: Vec<F>,
+    pub stress_vals: Vec<f64>,
     /// Sparse row indices for the thermal-strain operator triplets.
     pub thermal_strain_rows: Vec<usize>,
     /// Sparse column indices for the thermal-strain operator triplets.
@@ -97,7 +97,7 @@ pub struct QuadratureFieldOperators<F: Real> {
     /// Sparse values for the thermal-strain operator triplets.
     ///
     /// Units: `[strain / temperature]`.
-    pub thermal_strain_vals: Vec<F>,
+    pub thermal_strain_vals: Vec<f64>,
     /// Sparse row indices for the thermal-stress operator triplets.
     pub thermal_stress_rows: Vec<usize>,
     /// Sparse column indices for the thermal-stress operator triplets.
@@ -107,15 +107,15 @@ pub struct QuadratureFieldOperators<F: Real> {
     /// Sparse values for the thermal-stress operator triplets.
     ///
     /// Units: `[stress / temperature]`.
-    pub thermal_stress_vals: Vec<F>,
+    pub thermal_stress_vals: Vec<f64>,
     /// Constant quadrature-point thermal strain contribution from per-material reference temperature.
     ///
     /// Units: `[strain]`.
-    pub thermal_strain_constant: Vec<F>,
+    pub thermal_strain_constant: Vec<f64>,
     /// Constant quadrature-point thermal stress contribution from per-material reference temperature.
     ///
     /// Units: `[stress]`.
-    pub thermal_stress_constant: Vec<F>,
+    pub thermal_stress_constant: Vec<f64>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
     /// Number of nodal temperatures the thermal operators act on.
@@ -124,7 +124,7 @@ pub struct QuadratureFieldOperators<F: Real> {
 
 /// Canonical CSR operator parts with strictly increasing column indices in each row.
 #[derive(Debug, Clone)]
-pub struct CsrOperatorParts<F: Real> {
+pub struct CsrOperatorParts {
     /// Number of matrix rows.
     pub nrow: usize,
     /// Number of matrix columns.
@@ -134,18 +134,18 @@ pub struct CsrOperatorParts<F: Real> {
     /// Column index for each stored value.
     pub col_idx: Vec<usize>,
     /// Nonzero values in row-major CSR order.
-    pub vals: Vec<F>,
+    pub vals: Vec<f64>,
 }
 
-struct CsrPartsBuilder<F: Real> {
+struct CsrPartsBuilder {
     nrow: usize,
     ncol: usize,
     row_ptr: Vec<usize>,
     col_idx: Vec<usize>,
-    vals: Vec<F>,
+    vals: Vec<f64>,
 }
 
-impl<F: Real> CsrPartsBuilder<F> {
+impl CsrPartsBuilder {
     /// Start a CSR builder whose rows must be appended in increasing row order.
     fn new(nrow: usize, ncol: usize) -> Self {
         let mut row_ptr = Vec::with_capacity(nrow + 1);
@@ -164,11 +164,11 @@ impl<F: Real> CsrPartsBuilder<F> {
     /// Recovery assembly naturally emits a small unsorted row from local shape-function
     /// contributions.  Canonicalizing one row at a time avoids a global triplet sort and makes the
     /// finished parts directly suitable for faer's CSR constructor.
-    fn push_canonical_row(&mut self, entries: &mut Vec<(usize, F)>) {
+    fn push_canonical_row(&mut self, entries: &mut Vec<(usize, f64)>) {
         entries.sort_unstable_by_key(|(col, _)| *col);
-        let mut pending: Option<(usize, F)> = None;
+        let mut pending: Option<(usize, f64)> = None;
         for (col, value) in entries.drain(..) {
-            if value == F::zero() {
+            if value == 0.0 {
                 continue;
             }
             match pending {
@@ -176,7 +176,7 @@ impl<F: Real> CsrPartsBuilder<F> {
                     pending = Some((pending_col, pending_value + value));
                 }
                 Some((pending_col, pending_value)) => {
-                    if pending_value != F::zero() {
+                    if pending_value != 0.0 {
                         self.col_idx.push(pending_col);
                         self.vals.push(pending_value);
                     }
@@ -186,7 +186,7 @@ impl<F: Real> CsrPartsBuilder<F> {
             }
         }
         if let Some((col, value)) = pending
-            && value != F::zero()
+            && value != 0.0
         {
             self.col_idx.push(col);
             self.vals.push(value);
@@ -200,7 +200,7 @@ impl<F: Real> CsrPartsBuilder<F> {
     }
 
     /// Finish the builder after exactly `nrow` rows have been appended.
-    fn finish(self) -> CsrOperatorParts<F> {
+    fn finish(self) -> CsrOperatorParts {
         debug_assert_eq!(self.row_ptr.len(), self.nrow + 1);
         CsrOperatorParts {
             nrow: self.nrow,
@@ -214,25 +214,25 @@ impl<F: Real> CsrPartsBuilder<F> {
 
 /// Reduced-space quadrature recovery operators in direct CSR form.
 #[derive(Debug, Clone)]
-pub struct ReducedQuadratureFieldOperators<F: Real> {
+pub struct ReducedQuadratureFieldOperators {
     /// Quadrature-point coordinates `(r, z)` in element-major order.
-    pub points: Vec<[F; 2]>,
+    pub points: Vec<[f64; 2]>,
     /// Reduced displacement-to-strain operator.
-    pub strain_operator: CsrOperatorParts<F>,
+    pub strain_operator: CsrOperatorParts,
     /// Reduced displacement-to-stress operator.
-    pub stress_operator: CsrOperatorParts<F>,
+    pub stress_operator: CsrOperatorParts,
     /// Input-temperature-to-thermal-strain operator.
-    pub thermal_strain_operator: CsrOperatorParts<F>,
+    pub thermal_strain_operator: CsrOperatorParts,
     /// Input-temperature-to-thermal-stress operator.
-    pub thermal_stress_operator: CsrOperatorParts<F>,
+    pub thermal_stress_operator: CsrOperatorParts,
     /// Strain contribution from prescribed displacement DOFs.
-    pub strain_constant: Vec<F>,
+    pub strain_constant: Vec<f64>,
     /// Stress contribution from prescribed displacement DOFs.
-    pub stress_constant: Vec<F>,
+    pub stress_constant: Vec<f64>,
     /// Thermal strain contribution from material reference temperatures.
-    pub thermal_strain_constant: Vec<F>,
+    pub thermal_strain_constant: Vec<f64>,
     /// Thermal stress contribution from material reference temperatures.
-    pub thermal_stress_constant: Vec<F>,
+    pub thermal_stress_constant: Vec<f64>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
     /// Number of nodal temperature inputs, or zero when no thermal material table is present.
@@ -245,11 +245,11 @@ pub struct ReducedQuadratureFieldOperators<F: Real> {
 /// - `thermal_strain`: `[strain / temperature]`
 /// - `thermal_stress`: `[stress / temperature]`
 /// - `thermal_*_constant`: `strain` and `stress`, respectively
-struct LocalThermalSampleKernel<F: Real, const NODES_PER_ELEMENT: usize> {
-    thermal_strain: [[F; NODES_PER_ELEMENT]; 4],
-    thermal_stress: [[F; NODES_PER_ELEMENT]; 4],
-    thermal_strain_constant: [F; 4],
-    thermal_stress_constant: [F; 4],
+struct LocalThermalSampleKernel<const NODES_PER_ELEMENT: usize> {
+    thermal_strain: [[f64; NODES_PER_ELEMENT]; 4],
+    thermal_stress: [[f64; NODES_PER_ELEMENT]; 4],
+    thermal_strain_constant: [f64; 4],
+    thermal_stress_constant: [f64; 4],
 }
 
 /// Build the dense thermal recovery blocks for one quadrature point.
@@ -257,16 +257,16 @@ struct LocalThermalSampleKernel<F: Real, const NODES_PER_ELEMENT: usize> {
 /// This helper builds the local thermal operators and constant offsets associated with the
 /// material reference temperature. Mechanical strain/stress recovery is assembled through the
 /// shared query-coordinate mesh operators.
-fn thermal_sample_kernel<F: Real, const NODES_PER_ELEMENT: usize>(
-    sample: &VolumeSample<F, NODES_PER_ELEMENT>,
-    thermal: &ThermalMaterial<F>,
-    thermal_stress_unit: &[F; 4],
-) -> LocalThermalSampleKernel<F, NODES_PER_ELEMENT> {
+fn thermal_sample_kernel<const NODES_PER_ELEMENT: usize>(
+    sample: &VolumeSample<f64, NODES_PER_ELEMENT>,
+    thermal: &ThermalMaterial,
+    thermal_stress_unit: &[f64; 4],
+) -> LocalThermalSampleKernel<NODES_PER_ELEMENT> {
     let mut local = LocalThermalSampleKernel {
-        thermal_strain: [[F::zero(); NODES_PER_ELEMENT]; 4],
-        thermal_stress: [[F::zero(); NODES_PER_ELEMENT]; 4],
-        thermal_strain_constant: [F::zero(); 4],
-        thermal_stress_constant: [F::zero(); 4],
+        thermal_strain: [[0.0; NODES_PER_ELEMENT]; 4],
+        thermal_stress: [[0.0; NODES_PER_ELEMENT]; 4],
+        thermal_strain_constant: [0.0; 4],
+        thermal_stress_constant: [0.0; 4],
     };
 
     for component in 0..4 {
@@ -293,12 +293,12 @@ fn thermal_sample_kernel<F: Real, const NODES_PER_ELEMENT: usize>(
 /// shape expected by the query-coordinate strain/stress operators, but avoid the `O(nquery *
 /// nelem)` nearest-element search that `query_quad_mesh` performs for arbitrary physical points.
 #[cfg(test)]
-fn element_major_reference_points_range<F: Real>(
+fn element_major_reference_points_range(
     element_start: usize,
     element_end: usize,
     quadrature: QuadratureRule,
-) -> (Vec<usize>, Vec<[F; 2]>) {
-    let references = gauss_volume::<F>(quadrature);
+) -> (Vec<usize>, Vec<[f64; 2]>) {
+    let references = gauss_volume::<f64>(quadrature);
     let nelem = element_end - element_start;
     let mut element_indices = Vec::with_capacity(nelem * references.len());
     let mut reference_points = Vec::with_capacity(nelem * references.len());
@@ -311,18 +311,18 @@ fn element_major_reference_points_range<F: Real>(
     (element_indices, reference_points)
 }
 
-fn append_reduced_displacement_entry<F: Real>(
-    entries: &mut Vec<(usize, F)>,
-    constant: &mut [F],
+fn append_reduced_displacement_entry(
+    entries: &mut Vec<(usize, f64)>,
+    constant: &mut [f64],
     row: usize,
     full_col: usize,
-    value: F,
+    value: f64,
     global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
+    fixed_lookup: &[Option<f64>],
 ) {
     // Fixed displacement columns are eliminated from the operator and folded into the additive
     // recovery constant. Free columns are remapped into reduced-system column indices.
-    if value == F::zero() {
+    if value == 0.0 {
         return;
     }
     let reduced_col = global_to_reduced[full_col];
@@ -333,19 +333,15 @@ fn append_reduced_displacement_entry<F: Real>(
     }
 }
 
-fn append_temperature_entry<F: Real>(entries: &mut Vec<(usize, F)>, col: usize, value: F) {
+fn append_temperature_entry(entries: &mut Vec<(usize, f64)>, col: usize, value: f64) {
     // Temperature is not part of the structural Dirichlet reduction, so thermal recovery columns
     // remain indexed by the input temperature node.
-    if value != F::zero() {
+    if value != 0.0 {
         entries.push((col, value));
     }
 }
 
-fn concat_csr_chunks<F: Real>(
-    chunks: Vec<CsrOperatorParts<F>>,
-    nrow: usize,
-    ncol: usize,
-) -> CsrOperatorParts<F> {
+fn concat_csr_chunks(chunks: Vec<CsrOperatorParts>, nrow: usize, ncol: usize) -> CsrOperatorParts {
     // Each chunk covers a contiguous element range and therefore a contiguous row range.  The
     // per-row column order is already canonical, so concatenation only needs to offset row
     // pointers by the number of stored entries seen so far.
@@ -371,13 +367,13 @@ fn concat_csr_chunks<F: Real>(
     }
 }
 
-fn concat_reduced_quadrature_chunks<F: Real>(
-    chunks: Vec<ReducedQuadratureFieldOperators<F>>,
+fn concat_reduced_quadrature_chunks(
+    chunks: Vec<ReducedQuadratureFieldOperators>,
     nq_per_element: usize,
     ntemp: usize,
     ndof_reduced: usize,
     n_temperature_nodes: usize,
-) -> ReducedQuadratureFieldOperators<F> {
+) -> ReducedQuadratureFieldOperators {
     // Reduced recovery chunks are independent by quadrature row.  Constants and points concatenate
     // in the same row order as the CSR chunks, preserving element-major quadrature ordering.
     let total_points = chunks.iter().map(|chunk| chunk.points.len()).sum::<usize>();
@@ -442,19 +438,18 @@ fn concat_reduced_quadrature_chunks<F: Real>(
 /// - within each quadrature point the row components are ordered `[rr, zz, tt, rz]`.
 #[cfg(test)]
 pub(crate) fn quadrature_field_operators_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial]>,
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<QuadratureFieldOperators<F>, String>
+) -> Result<QuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -468,7 +463,7 @@ where
         material_orientation_angles,
     )?;
 
-    quadrature_field_operators_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    quadrature_field_operators_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         material_ids,
         material_table,
@@ -483,22 +478,21 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reduced_quadrature_field_operators_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial]>,
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
+    fixed_lookup: &[Option<f64>],
     ndof_reduced: usize,
-) -> Result<ReducedQuadratureFieldOperators<F>, String>
+) -> Result<ReducedQuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -511,12 +505,7 @@ where
         material_ids,
         material_orientation_angles,
     )?;
-    reduced_quadrature_field_operators_range_for_family::<
-        F,
-        Family,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(
+    reduced_quadrature_field_operators_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         material_ids,
         material_table,
@@ -534,22 +523,21 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reduced_quadrature_field_operators_for_family_par<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial]>,
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
+    fixed_lookup: &[Option<f64>],
     ndof_reduced: usize,
-) -> Result<ReducedQuadratureFieldOperators<F>, String>
+) -> Result<ReducedQuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -574,7 +562,6 @@ where
         .into_par_iter()
         .map(|(start, end)| {
             reduced_quadrature_field_operators_range_for_family::<
-                F,
                 Family,
                 NODES_PER_ELEMENT,
                 DOF_PER_ELEMENT,
@@ -606,24 +593,23 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn reduced_quadrature_field_operators_range_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial]>,
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     global_to_reduced: &[usize],
-    fixed_lookup: &[Option<F>],
+    fixed_lookup: &[Option<f64>],
     ndof_reduced: usize,
     element_start: usize,
     element_end: usize,
-) -> Result<ReducedQuadratureFieldOperators<F>, String>
+) -> Result<ReducedQuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -640,10 +626,10 @@ where
     let mut stress_operator = CsrPartsBuilder::new(nrows, ndof_reduced);
     let mut thermal_strain_operator = CsrPartsBuilder::new(nrows, n_temperature_nodes);
     let mut thermal_stress_operator = CsrPartsBuilder::new(nrows, n_temperature_nodes);
-    let mut strain_constant = vec![F::zero(); nrows];
-    let mut stress_constant = vec![F::zero(); nrows];
-    let mut thermal_strain_constant = vec![F::zero(); nrows];
-    let mut thermal_stress_constant = vec![F::zero(); nrows];
+    let mut strain_constant = vec![0.0; nrows];
+    let mut stress_constant = vec![0.0; nrows];
+    let mut thermal_strain_constant = vec![0.0; nrows];
+    let mut thermal_stress_constant = vec![0.0; nrows];
     let mut row_entries = Vec::with_capacity(DOF_PER_ELEMENT);
 
     for element_index in element_start..element_end {
@@ -675,7 +661,7 @@ where
         let thermal_stress_unit =
             thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
 
-        for (q_local, sample) in Family::volume_samples::<F>(&coords, quadrature)?
+        for (q_local, sample) in Family::volume_samples(&coords, quadrature)?
             .into_iter()
             .enumerate()
         {
@@ -683,7 +669,6 @@ where
             let row_base = 4 * (local_element_index * nq_per_element + q_local);
             points.push(sample.point);
             let b = crate::physics::solenoid_stress::axisym::build_b_matrix::<
-                F,
                 NODES_PER_ELEMENT,
                 DOF_PER_ELEMENT,
             >(formulation, &sample.n, &sample.grad_phys, sample.point)?;
@@ -713,7 +698,7 @@ where
                     for dof_component in 0..DOF_PER_NODE {
                         let local_dof = DOF_PER_NODE * local_node + dof_component;
                         let full_col = DOF_PER_NODE * nodes[local_node] + dof_component;
-                        let mut value = F::zero();
+                        let mut value = 0.0;
                         for strain_component in 0..4 {
                             value = value
                                 + material[component][strain_component]
@@ -789,48 +774,42 @@ where
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 fn quadrature_field_operators_range_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     material_ids: &[usize],
-    material_table: &[[[F; 4]; 4]],
-    thermal_material_table: Option<&[ThermalMaterial<F>]>,
-    material_orientation_angles: Option<&[F]>,
-    formulation: Structural2dFormulation<F>,
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: Option<&[ThermalMaterial]>,
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     element_start: usize,
     element_end: usize,
-) -> Result<QuadratureFieldOperators<F>, String>
+) -> Result<QuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
     let nq_per_element = quadrature.points_per_element();
     let nsamples = (element_end - element_start) * nq_per_element;
     let (element_indices, reference_points) =
-        element_major_reference_points_range::<F>(element_start, element_end, quadrature);
+        element_major_reference_points_range(element_start, element_end, quadrature);
     let strain_operator = quad_mesh_strain_operator::<
         Family::ReferenceElement,
-        F,
         NODES_PER_ELEMENT,
         DOF_PER_ELEMENT,
     >(mesh, &element_indices, &reference_points, formulation)?;
-    let stress_operator = quad_mesh_stress_operator::<
-        Family::ReferenceElement,
-        F,
-        NODES_PER_ELEMENT,
-        DOF_PER_ELEMENT,
-    >(
-        mesh,
-        &element_indices,
-        &reference_points,
-        material_ids,
-        material_table,
-        material_orientation_angles,
-        formulation,
-    )?;
+    let stress_operator =
+        quad_mesh_stress_operator::<Family::ReferenceElement, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            mesh,
+            &element_indices,
+            &reference_points,
+            material_ids,
+            material_table,
+            material_orientation_angles,
+            formulation,
+        )?;
 
     let mut points = Vec::with_capacity(nsamples);
     let mut thermal_strain_rows = Vec::new();
@@ -839,8 +818,8 @@ where
     let mut thermal_stress_rows = Vec::new();
     let mut thermal_stress_cols = Vec::new();
     let mut thermal_stress_vals = Vec::new();
-    let mut thermal_strain_constant = vec![F::zero(); nsamples * 4];
-    let mut thermal_stress_constant = vec![F::zero(); nsamples * 4];
+    let mut thermal_strain_constant = vec![0.0; nsamples * 4];
+    let mut thermal_stress_constant = vec![0.0; nsamples * 4];
 
     for element_index in element_start..element_end {
         let coords = mesh.element_coords(element_index)?;
@@ -871,7 +850,7 @@ where
         let thermal_stress_unit =
             thermal_material.map(|thermal| constitutive_times_strain(material, &thermal.alpha));
 
-        for (q_local, sample) in Family::volume_samples::<F>(&coords, quadrature)?
+        for (q_local, sample) in Family::volume_samples(&coords, quadrature)?
             .into_iter()
             .enumerate()
         {
@@ -962,7 +941,7 @@ mod tests {
         let material_ids = [0usize];
         let material_table = [isotropic_axisymmetric_material(200.0e9, 0.27)];
         let operators =
-            quadrature_field_operators_for_family::<f64, Quad4Family, 4, { dof_per_element(4) }>(
+            quadrature_field_operators_for_family::<Quad4Family, 4, { dof_per_element(4) }>(
                 mesh,
                 &material_ids,
                 &material_table,
@@ -993,7 +972,7 @@ mod tests {
         let samples = sampling::volume_samples_quad4(&coords, QuadratureRule::GaussLegendre3)
             .expect("samples");
         for (q_local, sample) in samples.into_iter().enumerate() {
-            let b = build_b_matrix::<f64, 4, 8>(
+            let b = build_b_matrix::<4, 8>(
                 Structural2dFormulation::Axisymmetric,
                 &sample.n,
                 &sample.grad_phys,

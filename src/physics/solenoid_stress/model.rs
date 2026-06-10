@@ -1,5 +1,6 @@
 //! Reduced-model assembly and solve wrapper for the 2D structural FEM.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -16,15 +17,19 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::{
     assemble_stiffness_chunks_for_family_par, assemble_stiffness_for_family,
 };
+use crate::physics::solenoid_stress::axisym::build_b_matrix;
 use crate::physics::solenoid_stress::convenience::{
-    QuadratureFieldSamples, Structural2dElementMeasures, Structural2dElementQuadrature,
+    Structural2dElementMeasures, Structural2dElementQuadrature,
 };
 use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
-    SparseOperator, body_force_operator_for_family, body_force_operator_for_family_par,
+    SparseOperator, apply_body_force_rhs_for_family, apply_pressure_rhs_for_family,
+    apply_temperature_rhs_for_family, apply_traction_rhs_for_family,
+    body_force_operator_for_family, body_force_operator_for_family_par,
     pressure_operator_for_family, pressure_operator_for_family_par,
     temperature_operator_for_family, temperature_operator_for_family_par,
-    traction_operator_for_family, traction_operator_for_family_par,
+    thermal_reference_rhs_for_family, traction_operator_for_family,
+    traction_operator_for_family_par,
 };
 use crate::physics::solenoid_stress::recovery::{
     CsrOperatorParts, reduced_quadrature_field_operators_for_family,
@@ -75,6 +80,42 @@ pub enum Structural2dElements<'a> {
     Quad4(&'a [[usize; 4]]),
     /// Nine-node quadratic quadrilateral connectivity in local corner, midside, center order.
     Quad9(&'a [[usize; 9]]),
+}
+
+/// Load operator application strategy for one RHS build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadApplication {
+    /// Apply load vectors directly from element kernels without populating sparse load caches.
+    MatrixFree,
+    /// Build or reuse cached sparse load operators, then apply them with CSR matvecs.
+    Cached,
+}
+
+/// Inputs retained so lazy operators can be rebuilt after initial model assembly.
+#[derive(Debug, Clone)]
+struct Structural2dAssemblyData {
+    material_ids: Vec<usize>,
+    material_table: Vec<[[f64; 4]; 4]>,
+    thermal_material_table: Option<Vec<ThermalMaterial>>,
+    material_orientation_angles: Option<Vec<f64>>,
+    global_to_reduced: Vec<usize>,
+    fixed_lookup: Vec<Option<f64>>,
+    par: bool,
+}
+
+/// Lazily populated reduced load operators.
+#[derive(Debug, Default)]
+struct LazyLoadOperators {
+    body_force_to_rhs: Option<SparseRowMat<usize, f64>>,
+    pressure_to_rhs: Option<SparseRowMat<usize, f64>>,
+    traction_to_rhs: Option<SparseRowMat<usize, f64>>,
+    temperature_to_rhs: Option<SparseRowMat<usize, f64>>,
+}
+
+/// Lazily populated quadrature recovery bundle.
+#[derive(Debug, Default)]
+struct LazyRecovery {
+    operators: Option<ReducedRecoveryOperators>,
 }
 
 /// Reduced-space recovery operators and constants stored on the assembled model.
@@ -151,33 +192,19 @@ pub struct Structural2dModel {
     ///
     /// Entry units: `[generalized force / displacement] = [energy / distance^2]`.
     pub stiffness: SparseColMat<usize, f64>,
-    /// Reduced RHS operator for per-element body-force density amplitudes.
-    ///
-    /// Shape: `(ndof_reduced, 2 * nelem)`. Columns are grouped by element as `[b_r, b_z]`.
-    /// Entry units: `[volume]`.
-    pub body_force_to_rhs: SparseRowMat<usize, f64>,
-    /// Reduced RHS operator for scalar pressure amplitudes on `pressure_faces`.
-    ///
-    /// Shape: `(ndof_reduced, n_pressure_faces)`. One column per loaded face.
-    /// Entry units: `[area]`.
-    pub pressure_to_rhs: SparseRowMat<usize, f64>,
-    /// Reduced RHS operator for vector traction amplitudes on `traction_faces`.
-    ///
-    /// Shape: `(ndof_reduced, 2 * n_traction_faces)`. Columns are grouped by face as `[t_r, t_z]`.
-    /// Entry units: `[area]`.
-    pub traction_to_rhs: SparseRowMat<usize, f64>,
-    /// Reduced RHS operator for nodal temperatures.
-    ///
-    /// Shape: `(ndof_reduced, n_temperature_nodes)`.
-    /// Entry units: `[generalized force / temperature] = [energy / (distance * temperature)]`.
-    pub temperature_to_rhs: SparseRowMat<usize, f64>,
+    /// Lazily populated reduced load operators.
+    load_ops: RefCell<LazyLoadOperators>,
     /// Constant reduced RHS contribution from prescribed displacements and thermal reference state.
     ///
     /// Shape: `(ndof_reduced,)`.
     /// Units: `[energy / distance]`.
     pub constant_rhs: Vec<f64>,
-    /// Quadrature-point recovery operators and constants associated with this reduced model.
-    pub recovery: ReducedRecoveryOperators,
+    /// Lazily populated quadrature-point recovery operators and constants.
+    recovery: RefCell<LazyRecovery>,
+    /// Number of quadrature points contributed by each element.
+    pub nq_per_element: usize,
+    /// Number of nodal temperatures expected by thermal operators.
+    pub n_temperature_nodes: usize,
     /// Metadata listing the loaded pressure faces as `[element_index, local_face]`.
     ///
     /// Shape: `(n_pressure_faces, 2)`.
@@ -222,10 +249,652 @@ pub struct Structural2dModel {
     /// Shape: `(n_fixed,)`.
     /// Units: `[length]`.
     pub fixed_values: Vec<f64>,
+    /// Assembly inputs retained for lazy load/recovery construction.
+    assembly: Structural2dAssemblyData,
     lu: Option<Lu<usize, f64>>,
 }
 
 impl Structural2dModel {
+    fn analysis_elements<const NODES_PER_ELEMENT: usize>(
+        &self,
+    ) -> Result<Vec<[usize; NODES_PER_ELEMENT]>, String> {
+        elements_from_flat::<NODES_PER_ELEMENT>(
+            &self.analysis_elements_flat,
+            self.nelem,
+            self.element_type,
+        )
+    }
+
+    fn pressure_loads(&self) -> Vec<PressureLoad> {
+        self.pressure_faces
+            .iter()
+            .map(|face| PressureLoad {
+                element: face[0],
+                local_face: face[1] as u8,
+            })
+            .collect()
+    }
+
+    fn traction_loads(&self) -> Vec<TractionLoad> {
+        self.traction_faces
+            .iter()
+            .map(|face| TractionLoad {
+                element: face[0],
+                local_face: face[1] as u8,
+            })
+            .collect()
+    }
+
+    fn reduce_load_operator(
+        &self,
+        operator: SparseOperator,
+    ) -> Result<SparseRowMat<usize, f64>, String> {
+        reduce_row_operator_to_csr(
+            operator,
+            &self.assembly.global_to_reduced,
+            self.ndof_reduced,
+        )
+    }
+
+    fn build_body_force_to_rhs_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+    ) -> Result<SparseRowMat<usize, f64>, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let operator = if self.assembly.par {
+            body_force_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                self.formulation,
+                self.quadrature,
+            )
+        } else {
+            body_force_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                self.formulation,
+                self.quadrature,
+            )
+        }?;
+        self.reduce_load_operator(operator)
+    }
+
+    fn build_pressure_to_rhs_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+    ) -> Result<SparseRowMat<usize, f64>, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let pressure_faces = self.pressure_loads();
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let operator = if self.assembly.par {
+            pressure_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &pressure_faces,
+                self.formulation,
+                self.quadrature,
+            )
+        } else {
+            pressure_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &pressure_faces,
+                self.formulation,
+                self.quadrature,
+            )
+        }?;
+        self.reduce_load_operator(operator)
+    }
+
+    fn build_traction_to_rhs_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+    ) -> Result<SparseRowMat<usize, f64>, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let traction_faces = self.traction_loads();
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let operator = if self.assembly.par {
+            traction_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &traction_faces,
+                self.formulation,
+                self.quadrature,
+            )
+        } else {
+            traction_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &traction_faces,
+                self.formulation,
+                self.quadrature,
+            )
+        }?;
+        self.reduce_load_operator(operator)
+    }
+
+    fn build_temperature_to_rhs_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+    ) -> Result<SparseRowMat<usize, f64>, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let Some(thermal_material_table) = self.assembly.thermal_material_table.as_ref() else {
+            return csr_from_parts(self.ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new());
+        };
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let operator = if self.assembly.par {
+            temperature_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &self.assembly.material_ids,
+                &self.assembly.material_table,
+                thermal_material_table,
+                self.assembly.material_orientation_angles.as_deref(),
+                self.formulation,
+                self.quadrature,
+            )
+        } else {
+            temperature_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &self.assembly.material_ids,
+                &self.assembly.material_table,
+                thermal_material_table,
+                self.assembly.material_orientation_angles.as_deref(),
+                self.formulation,
+                self.quadrature,
+            )
+        }?;
+        self.reduce_load_operator(operator.temperature_to_rhs)
+    }
+
+    fn build_body_force_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.build_body_force_to_rhs_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(),
+            Structural2dElementType::Quad9 => self.build_body_force_to_rhs_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(),
+        }
+    }
+
+    fn build_pressure_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.build_pressure_to_rhs_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(),
+            Structural2dElementType::Quad9 => self.build_pressure_to_rhs_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(),
+        }
+    }
+
+    fn build_traction_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.build_traction_to_rhs_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(),
+            Structural2dElementType::Quad9 => self.build_traction_to_rhs_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(),
+        }
+    }
+
+    fn build_temperature_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.build_temperature_to_rhs_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(),
+            Structural2dElementType::Quad9 => self.build_temperature_to_rhs_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(),
+        }
+    }
+
+    fn ensure_body_force_to_rhs(&self) -> Result<(), String> {
+        if self.load_ops.borrow().body_force_to_rhs.is_none() {
+            let operator = self.build_body_force_to_rhs()?;
+            self.load_ops.borrow_mut().body_force_to_rhs = Some(operator);
+        }
+        Ok(())
+    }
+
+    fn ensure_pressure_to_rhs(&self) -> Result<(), String> {
+        if self.load_ops.borrow().pressure_to_rhs.is_none() {
+            let operator = self.build_pressure_to_rhs()?;
+            self.load_ops.borrow_mut().pressure_to_rhs = Some(operator);
+        }
+        Ok(())
+    }
+
+    fn ensure_traction_to_rhs(&self) -> Result<(), String> {
+        if self.load_ops.borrow().traction_to_rhs.is_none() {
+            let operator = self.build_traction_to_rhs()?;
+            self.load_ops.borrow_mut().traction_to_rhs = Some(operator);
+        }
+        Ok(())
+    }
+
+    fn ensure_temperature_to_rhs(&self) -> Result<(), String> {
+        if self.load_ops.borrow().temperature_to_rhs.is_none() {
+            let operator = self.build_temperature_to_rhs()?;
+            self.load_ops.borrow_mut().temperature_to_rhs = Some(operator);
+        }
+        Ok(())
+    }
+
+    pub fn with_body_force_to_rhs<R>(
+        &self,
+        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
+    ) -> Result<R, String> {
+        self.ensure_body_force_to_rhs()?;
+        let load_ops = self.load_ops.borrow();
+        Ok(f(load_ops
+            .body_force_to_rhs
+            .as_ref()
+            .expect("body-force cache should be populated")))
+    }
+
+    pub fn with_pressure_to_rhs<R>(
+        &self,
+        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
+    ) -> Result<R, String> {
+        self.ensure_pressure_to_rhs()?;
+        let load_ops = self.load_ops.borrow();
+        Ok(f(load_ops
+            .pressure_to_rhs
+            .as_ref()
+            .expect("pressure cache should be populated")))
+    }
+
+    pub fn with_traction_to_rhs<R>(
+        &self,
+        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
+    ) -> Result<R, String> {
+        self.ensure_traction_to_rhs()?;
+        let load_ops = self.load_ops.borrow();
+        Ok(f(load_ops
+            .traction_to_rhs
+            .as_ref()
+            .expect("traction cache should be populated")))
+    }
+
+    pub fn with_temperature_to_rhs<R>(
+        &self,
+        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
+    ) -> Result<R, String> {
+        self.ensure_temperature_to_rhs()?;
+        let load_ops = self.load_ops.borrow();
+        Ok(f(load_ops
+            .temperature_to_rhs
+            .as_ref()
+            .expect("temperature cache should be populated")))
+    }
+
+    #[cfg(test)]
+    fn load_cache_status(&self) -> (bool, bool, bool, bool) {
+        let load_ops = self.load_ops.borrow();
+        (
+            load_ops.body_force_to_rhs.is_some(),
+            load_ops.pressure_to_rhs.is_some(),
+            load_ops.traction_to_rhs.is_some(),
+            load_ops.temperature_to_rhs.is_some(),
+        )
+    }
+
+    #[cfg(test)]
+    fn recovery_cache_populated(&self) -> bool {
+        self.recovery.borrow().operators.is_some()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_matrix_free_loads_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+        body_force: Option<&[f64]>,
+        pressure_values: Option<&[f64]>,
+        traction_values: Option<&[f64]>,
+        nodal_temperature: Option<&[f64]>,
+        rhs: &mut [f64],
+    ) -> Result<(), String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        if let Some(body_force) = body_force {
+            apply_body_force_rhs_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                self.formulation,
+                self.quadrature,
+                body_force,
+                &self.assembly.global_to_reduced,
+                rhs,
+            )?;
+        }
+        if let Some(pressure_values) = pressure_values {
+            let pressure_faces = self.pressure_loads();
+            apply_pressure_rhs_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &pressure_faces,
+                self.formulation,
+                self.quadrature,
+                pressure_values,
+                &self.assembly.global_to_reduced,
+                rhs,
+            )?;
+        }
+        if let Some(traction_values) = traction_values {
+            let traction_faces = self.traction_loads();
+            apply_traction_rhs_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                mesh,
+                &traction_faces,
+                self.formulation,
+                self.quadrature,
+                traction_values,
+                &self.assembly.global_to_reduced,
+                rhs,
+            )?;
+        }
+        match (
+            self.assembly.thermal_material_table.as_ref(),
+            nodal_temperature,
+        ) {
+            (Some(thermal_material_table), Some(nodal_temperature)) => {
+                apply_temperature_rhs_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    mesh,
+                    &self.assembly.material_ids,
+                    &self.assembly.material_table,
+                    thermal_material_table,
+                    self.assembly.material_orientation_angles.as_deref(),
+                    self.formulation,
+                    self.quadrature,
+                    nodal_temperature,
+                    &self.assembly.global_to_reduced,
+                    rhs,
+                )?;
+            }
+            (Some(_), None) => {
+                return Err(
+                    "nodal_temperature is required because this model includes thermal materials"
+                        .to_string(),
+                );
+            }
+            (None, Some(nodal_temperature)) if !nodal_temperature.is_empty() => {
+                return Err(
+                    "nodal_temperature was provided, but this model has no thermal operator"
+                        .to_string(),
+                );
+            }
+            (None, _) => {}
+        }
+        Ok(())
+    }
+
+    fn apply_matrix_free_loads(
+        &self,
+        body_force: Option<&[f64]>,
+        pressure_values: Option<&[f64]>,
+        traction_values: Option<&[f64]>,
+        nodal_temperature: Option<&[f64]>,
+        rhs: &mut [f64],
+    ) -> Result<(), String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.apply_matrix_free_loads_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(body_force, pressure_values, traction_values, nodal_temperature, rhs),
+            Structural2dElementType::Quad9 => self.apply_matrix_free_loads_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(body_force, pressure_values, traction_values, nodal_temperature, rhs),
+        }
+    }
+
+    fn apply_cached_loads(
+        &self,
+        body_force: Option<&[f64]>,
+        pressure_values: Option<&[f64]>,
+        traction_values: Option<&[f64]>,
+        nodal_temperature: Option<&[f64]>,
+        rhs: &mut [f64],
+    ) -> Result<(), String> {
+        self.with_body_force_to_rhs(|operator| {
+            apply_csr_operator(operator, body_force, "body_force", rhs)
+        })??;
+        self.with_pressure_to_rhs(|operator| {
+            apply_csr_operator(operator, pressure_values, "pressure_values", rhs)
+        })??;
+        self.with_traction_to_rhs(|operator| {
+            apply_csr_operator(operator, traction_values, "traction_values", rhs)
+        })??;
+        self.with_temperature_to_rhs(|operator| {
+            if operator.ncols() > 0 {
+                let nodal_temperature = nodal_temperature.ok_or_else(|| {
+                    "nodal_temperature is required because this model includes thermal materials"
+                        .to_string()
+                })?;
+                apply_csr_operator(operator, Some(nodal_temperature), "nodal_temperature", rhs)
+            } else if let Some(nodal_temperature) = nodal_temperature {
+                if !nodal_temperature.is_empty() {
+                    return Err(
+                        "nodal_temperature was provided, but this model has no thermal operator"
+                            .to_string(),
+                    );
+                }
+                Ok(())
+            } else {
+                Ok(())
+            }
+        })??;
+        Ok(())
+    }
+
+    fn build_recovery_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+    ) -> Result<ReducedRecoveryOperators, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let recovery_reduced = if self.assembly.par {
+            reduced_quadrature_field_operators_for_family_par::<
+                Family,
+                NODES_PER_ELEMENT,
+                DOF_PER_ELEMENT,
+            >(
+                mesh,
+                &self.assembly.material_ids,
+                &self.assembly.material_table,
+                self.assembly.thermal_material_table.as_deref(),
+                self.assembly.material_orientation_angles.as_deref(),
+                self.formulation,
+                self.quadrature,
+                &self.assembly.global_to_reduced,
+                &self.assembly.fixed_lookup,
+                self.ndof_reduced,
+            )
+        } else {
+            reduced_quadrature_field_operators_for_family::<
+                Family,
+                NODES_PER_ELEMENT,
+                DOF_PER_ELEMENT,
+            >(
+                mesh,
+                &self.assembly.material_ids,
+                &self.assembly.material_table,
+                self.assembly.thermal_material_table.as_deref(),
+                self.assembly.material_orientation_angles.as_deref(),
+                self.formulation,
+                self.quadrature,
+                &self.assembly.global_to_reduced,
+                &self.assembly.fixed_lookup,
+                self.ndof_reduced,
+            )
+        }?;
+        Ok(ReducedRecoveryOperators {
+            points: recovery_reduced.points,
+            strain_operator: csr_from_canonical_parts(recovery_reduced.strain_operator),
+            stress_operator: csr_from_canonical_parts(recovery_reduced.stress_operator),
+            thermal_strain_operator: csr_from_canonical_parts(
+                recovery_reduced.thermal_strain_operator,
+            ),
+            thermal_stress_operator: csr_from_canonical_parts(
+                recovery_reduced.thermal_stress_operator,
+            ),
+            strain_constant: recovery_reduced.strain_constant,
+            stress_constant: recovery_reduced.stress_constant,
+            thermal_strain_constant: recovery_reduced.thermal_strain_constant,
+            thermal_stress_constant: recovery_reduced.thermal_stress_constant,
+            nq_per_element: recovery_reduced.nq_per_element,
+            n_temperature_nodes: self.n_temperature_nodes,
+        })
+    }
+
+    fn build_recovery(&self) -> Result<ReducedRecoveryOperators, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.build_recovery_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(),
+            Structural2dElementType::Quad9 => self.build_recovery_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(),
+        }
+    }
+
+    fn ensure_recovery(&self) -> Result<(), String> {
+        if self.recovery.borrow().operators.is_none() {
+            let recovery = self.build_recovery()?;
+            self.recovery.borrow_mut().operators = Some(recovery);
+        }
+        Ok(())
+    }
+
+    pub fn with_recovery<R>(
+        &self,
+        f: impl FnOnce(&ReducedRecoveryOperators) -> R,
+    ) -> Result<R, String> {
+        self.ensure_recovery()?;
+        let recovery = self.recovery.borrow();
+        Ok(f(recovery
+            .operators
+            .as_ref()
+            .expect("recovery cache should be populated")))
+    }
+
+    fn evaluate_quadrature_strain_for_family<
+        Family,
+        const NODES_PER_ELEMENT: usize,
+        const DOF_PER_ELEMENT: usize,
+    >(
+        &self,
+        displacements_full: &[f64],
+    ) -> Result<Vec<[f64; 4]>, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let mut strain = Vec::with_capacity(self.nelem * self.nq_per_element);
+        for element_index in 0..mesh.num_elements() {
+            let coords = mesh.element_coords(element_index)?;
+            let nodes = mesh.element_nodes(element_index)?;
+            let mut local_u = [0.0; DOF_PER_ELEMENT];
+            for local_node in 0..NODES_PER_ELEMENT {
+                let global_node = nodes[local_node];
+                local_u[2 * local_node] = displacements_full[2 * global_node];
+                local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
+            }
+            for sample in Family::volume_samples(&coords, self.quadrature)? {
+                let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    self.formulation,
+                    &sample.n,
+                    &sample.grad_phys,
+                    sample.point,
+                )?;
+                let mut sample_strain = [0.0; 4];
+                for component in 0..4 {
+                    let mut value = 0.0;
+                    for dof in 0..DOF_PER_ELEMENT {
+                        value += b[component][dof] * local_u[dof];
+                    }
+                    sample_strain[component] = value;
+                }
+                strain.push(sample_strain);
+            }
+        }
+        Ok(strain)
+    }
+
     /// Build one reduced structural right-hand side.
     ///
     /// Args:
@@ -248,38 +917,39 @@ impl Structural2dModel {
         traction_values: Option<&[f64]>,
         nodal_temperature: Option<&[f64]>,
     ) -> Result<Vec<f64>, String> {
-        let mut rhs = self.constant_rhs.clone();
-        apply_csr_operator(&self.body_force_to_rhs, body_force, "body_force", &mut rhs)?;
-        apply_csr_operator(
-            &self.pressure_to_rhs,
+        self.build_rhs_with_application(
+            body_force,
             pressure_values,
-            "pressure_values",
-            &mut rhs,
-        )?;
-        apply_csr_operator(
-            &self.traction_to_rhs,
             traction_values,
-            "traction_values",
-            &mut rhs,
-        )?;
-        if self.temperature_to_rhs.ncols() > 0 {
-            let nodal_temperature = nodal_temperature.ok_or_else(|| {
-                "nodal_temperature is required because this model includes thermal materials"
-                    .to_string()
-            })?;
-            apply_csr_operator(
-                &self.temperature_to_rhs,
-                Some(nodal_temperature),
-                "nodal_temperature",
+            nodal_temperature,
+            LoadApplication::MatrixFree,
+        )
+    }
+
+    pub fn build_rhs_with_application(
+        &self,
+        body_force: Option<&[f64]>,
+        pressure_values: Option<&[f64]>,
+        traction_values: Option<&[f64]>,
+        nodal_temperature: Option<&[f64]>,
+        load_application: LoadApplication,
+    ) -> Result<Vec<f64>, String> {
+        let mut rhs = self.constant_rhs.clone();
+        match load_application {
+            LoadApplication::MatrixFree => self.apply_matrix_free_loads(
+                body_force,
+                pressure_values,
+                traction_values,
+                nodal_temperature,
                 &mut rhs,
-            )?;
-        } else if let Some(nodal_temperature) = nodal_temperature {
-            if !nodal_temperature.is_empty() {
-                return Err(
-                    "nodal_temperature was provided, but this model has no thermal operator"
-                        .to_string(),
-                );
-            }
+            )?,
+            LoadApplication::Cached => self.apply_cached_loads(
+                body_force,
+                pressure_values,
+                traction_values,
+                nodal_temperature,
+                &mut rhs,
+            )?,
         }
         Ok(rhs)
     }
@@ -412,27 +1082,14 @@ impl Structural2dModel {
         Ok(Structural2dElementMeasures { areas, volumes })
     }
 
-    /// Recover quadrature-point strain and stress fields.
+    /// Evaluate quadrature-point total strain without materializing sparse recovery operators.
     ///
-    /// Args:
-    ///     displacements_full: Full displacement vector with shape `(ndof_full,)` and component
-    ///         ordering `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
-    ///     nodal_temperature: Optional nodal temperatures with shape `(n_temperature_nodes,)`.
-    ///         Units are `[temperature]`. Required only when the model includes thermal materials.
-    ///
-    /// Returns:
-    ///     Recovered quadrature fields where:
-    ///     - `points` has length `nelem * nq_per_element` and units `[length]`
-    ///     - `strain`, `thermal_strain`, and `elastic_strain` each have length
-    ///       `nelem * nq_per_element`, with component order `[rr, zz, tt, rz]` and units `[strain]`
-    ///     - `stress` has length `nelem * nq_per_element`, with component order
-    ///       `[rr, zz, tt, rz]` and units `[stress]`
-    ///     - `nq_per_element` gives the number of consecutive samples per element
-    pub fn evaluate_quadrature(
+    /// The returned samples are element-major and do not include quadrature-point coordinates.
+    /// Use [`Structural2dModel::element_quadrature`] when coordinates are explicitly needed.
+    pub fn evaluate_quadrature_strain(
         &self,
         displacements_full: &[f64],
-        nodal_temperature: Option<&[f64]>,
-    ) -> Result<QuadratureFieldSamples, String> {
+    ) -> Result<Vec<[f64; 4]>, String> {
         if displacements_full.len() != self.ndof_full {
             return Err(format!(
                 "displacements_full has length {}, but full system has {} DOFs",
@@ -440,59 +1097,18 @@ impl Structural2dModel {
                 self.ndof_full
             ));
         }
-
-        let reduced = self
-            .free_dofs
-            .iter()
-            .map(|&dof| displacements_full[dof])
-            .collect::<Vec<_>>();
-        let temperature = normalize_temperature(
-            nodal_temperature,
-            self.recovery.n_temperature_nodes,
-            "nodal_temperature",
-        )?;
-
-        let strain = add_constant(
-            csr_matvec(&self.recovery.strain_operator, &reduced),
-            &self.recovery.strain_constant,
-        );
-        let stress_from_displacement = add_constant(
-            csr_matvec(&self.recovery.stress_operator, &reduced),
-            &self.recovery.stress_constant,
-        );
-        let thermal_strain = add_constant(
-            csr_matvec(&self.recovery.thermal_strain_operator, temperature),
-            &self.recovery.thermal_strain_constant,
-        );
-        let thermal_stress = add_constant(
-            csr_matvec(&self.recovery.thermal_stress_operator, temperature),
-            &self.recovery.thermal_stress_constant,
-        );
-        let stress = subtract_vectors(&stress_from_displacement, &thermal_stress)?;
-        let strain = pack_rank4_field(strain)?;
-        let thermal_strain = pack_rank4_field(thermal_strain)?;
-        let stress = pack_rank4_field(stress)?;
-        let elastic_strain = strain
-            .iter()
-            .zip(&thermal_strain)
-            .map(|(total, thermal)| {
-                [
-                    total[0] - thermal[0],
-                    total[1] - thermal[1],
-                    total[2] - thermal[2],
-                    total[3] - thermal[3],
-                ]
-            })
-            .collect();
-
-        Ok(QuadratureFieldSamples {
-            points: self.recovery.points.clone(),
-            strain,
-            thermal_strain,
-            elastic_strain,
-            stress,
-            nq_per_element: self.recovery.nq_per_element,
-        })
+        match self.element_type {
+            Structural2dElementType::Quad4 => self.evaluate_quadrature_strain_for_family::<
+                Quad4Family,
+                { quad4::NODES_PER_ELEMENT },
+                { dof_per_element(quad4::NODES_PER_ELEMENT) },
+            >(displacements_full),
+            Structural2dElementType::Quad9 => self.evaluate_quadrature_strain_for_family::<
+                Quad9Family,
+                { quad9::NODES_PER_ELEMENT },
+                { dof_per_element(quad9::NODES_PER_ELEMENT) },
+            >(displacements_full),
+        }
     }
 }
 
@@ -643,17 +1259,10 @@ where
         );
         csc_from_triplets(ndof_reduced, ndof_reduced, stiffness_reduced)
     };
-    // Most load operators are naturally assembled in full nodal space and then reduced by
-    // dropping rows associated with prescribed displacement DOFs.
-    let reduce_operator =
-        |operator| reduce_row_operator_to_csr(operator, &global_to_reduced, ndof_reduced);
-
-    let (temperature_to_rhs, thermal_reference_rhs, n_temperature_nodes) =
+    let (thermal_reference_rhs, n_temperature_nodes) =
         if let Some(thermal_material_table) = thermal_material_table {
-            // Thermal loading has both a temperature-dependent operator and a constant offset from
-            // per-material reference temperature, so keep those two pieces separate until the end.
-            let thermal_full = if par {
-                temperature_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            let thermal_reference_full =
+                thermal_reference_rhs_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
                     mesh,
                     material_ids,
                     material_table,
@@ -661,33 +1270,14 @@ where
                     material_orientation_angles,
                     formulation,
                     quadrature,
-                )
-            } else {
-                temperature_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                    mesh,
-                    material_ids,
-                    material_table,
-                    thermal_material_table,
-                    material_orientation_angles,
-                    formulation,
-                    quadrature,
-                )
-            }?;
+                )?;
             let reduced_reference_rhs = free_dofs
                 .iter()
-                .map(|&dof| thermal_full.reference_rhs[dof])
+                .map(|&dof| thermal_reference_full[dof])
                 .collect::<Vec<_>>();
-            (
-                reduce_operator(thermal_full.temperature_to_rhs)?,
-                reduced_reference_rhs,
-                nodes_rz.len(),
-            )
+            (reduced_reference_rhs, nodes_rz.len())
         } else {
-            (
-                csr_from_parts(ndof_reduced, 0, Vec::new(), Vec::new(), Vec::new())?,
-                vec![0.0; ndof_reduced],
-                0,
-            )
+            (vec![0.0; ndof_reduced], 0)
         };
     // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
     // reference-temperature contribution so all load-independent terms live in one vector.
@@ -695,115 +1285,13 @@ where
         *dst = *dst + *src;
     }
 
-    // These operators are stored directly in reduced row space because `build_rhs(...)` and
-    // `solve(...)` work only with the constrained system.
-    let body_force_operator = if par {
-        body_force_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            formulation,
-            quadrature,
-        )?
-    } else {
-        body_force_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            formulation,
-            quadrature,
-        )?
-    };
-    let body_force_to_rhs = reduce_operator(body_force_operator)?;
-    let pressure_operator = if par {
-        pressure_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            pressure_faces,
-            formulation,
-            quadrature,
-        )?
-    } else {
-        pressure_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            pressure_faces,
-            formulation,
-            quadrature,
-        )?
-    };
-    let pressure_to_rhs = reduce_operator(pressure_operator)?;
-    let traction_operator = if par {
-        traction_operator_for_family_par::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            traction_faces,
-            formulation,
-            quadrature,
-        )?
-    } else {
-        traction_operator_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            traction_faces,
-            formulation,
-            quadrature,
-        )?
-    };
-    let traction_to_rhs = reduce_operator(traction_operator)?;
-
-    // Recovery rows are disjoint by quadrature point, so assemble directly in reduced CSR form
-    // instead of building full-space triplets and reducing them afterwards.
-    let recovery_reduced = if par {
-        reduced_quadrature_field_operators_for_family_par::<
-            Family,
-            NODES_PER_ELEMENT,
-            DOF_PER_ELEMENT,
-        >(
-            mesh,
-            material_ids,
-            material_table,
-            thermal_material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-            &global_to_reduced,
-            &fixed_lookup,
-            ndof_reduced,
-        )
-    } else {
-        reduced_quadrature_field_operators_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            mesh,
-            material_ids,
-            material_table,
-            thermal_material_table,
-            material_orientation_angles,
-            formulation,
-            quadrature,
-            &global_to_reduced,
-            &fixed_lookup,
-            ndof_reduced,
-        )
-    }?;
-    let strain_operator = csr_from_canonical_parts(recovery_reduced.strain_operator);
-    let stress_operator = csr_from_canonical_parts(recovery_reduced.stress_operator);
-    let thermal_strain_operator =
-        csr_from_canonical_parts(recovery_reduced.thermal_strain_operator);
-    let thermal_stress_operator =
-        csr_from_canonical_parts(recovery_reduced.thermal_stress_operator);
-
     Ok(Structural2dModel {
         stiffness,
-        body_force_to_rhs,
-        pressure_to_rhs,
-        traction_to_rhs,
-        temperature_to_rhs,
+        load_ops: RefCell::new(LazyLoadOperators::default()),
         constant_rhs,
-        recovery: ReducedRecoveryOperators {
-            points: recovery_reduced.points,
-            strain_operator,
-            stress_operator,
-            thermal_strain_operator,
-            thermal_stress_operator,
-            strain_constant: recovery_reduced.strain_constant,
-            stress_constant: recovery_reduced.stress_constant,
-            thermal_strain_constant: recovery_reduced.thermal_strain_constant,
-            thermal_stress_constant: recovery_reduced.thermal_stress_constant,
-            nq_per_element: recovery_reduced.nq_per_element,
-            n_temperature_nodes,
-        },
+        recovery: RefCell::new(LazyRecovery::default()),
+        nq_per_element: quadrature.points_per_element(),
+        n_temperature_nodes,
         pressure_faces: pressure_faces
             .iter()
             .map(|face| [face.element, usize::from(face.local_face)])
@@ -824,6 +1312,15 @@ where
         free_dofs,
         fixed_dofs,
         fixed_values,
+        assembly: Structural2dAssemblyData {
+            material_ids: material_ids.to_vec(),
+            material_table: material_table.to_vec(),
+            thermal_material_table: thermal_material_table.map(|table| table.to_vec()),
+            material_orientation_angles: material_orientation_angles.map(|angles| angles.to_vec()),
+            global_to_reduced,
+            fixed_lookup,
+            par,
+        },
         lu: None,
     })
 }
@@ -1297,6 +1794,30 @@ fn element_coords_from_flat<const NODES_PER_ELEMENT: usize>(
     Ok(coords)
 }
 
+/// Reconstruct typed element connectivity from the stored flattened analysis connectivity.
+fn elements_from_flat<const NODES_PER_ELEMENT: usize>(
+    analysis_elements_flat: &[usize],
+    nelem: usize,
+    element_type: Structural2dElementType,
+) -> Result<Vec<[usize; NODES_PER_ELEMENT]>, String> {
+    let expected = nelem * NODES_PER_ELEMENT;
+    if analysis_elements_flat.len() != expected {
+        return Err(format!(
+            "{} analysis elements with element type {} require {expected} flattened node entries, got {}",
+            nelem,
+            element_type.as_str(),
+            analysis_elements_flat.len()
+        ));
+    }
+    let mut elements = Vec::with_capacity(nelem);
+    for chunk in analysis_elements_flat.chunks_exact(NODES_PER_ELEMENT) {
+        let mut conn = [0usize; NODES_PER_ELEMENT];
+        conn.copy_from_slice(chunk);
+        elements.push(conn);
+    }
+    Ok(elements)
+}
+
 /// Recompute physical quadrature points and mapped weights for one stored element family.
 fn element_quadrature_for_family<Family, const NODES_PER_ELEMENT: usize>(
     analysis_nodes: &[[f64; 2]],
@@ -1348,80 +1869,132 @@ where
     })
 }
 
-/// Multiply one CSR operator by a dense input vector.
-fn csr_matvec(operator: &SparseRowMat<usize, f64>, input: &[f64]) -> Vec<f64> {
-    let mut output = vec![0.0; operator.nrows()];
-    for row in 0..operator.nrows() {
-        let start = operator.row_ptr()[row];
-        let end = operator.row_ptr()[row + 1];
-        let mut sum = 0.0;
-        for index in start..end {
-            sum = sum + operator.val()[index] * input[operator.col_idx()[index]];
+#[cfg(test)]
+mod tests {
+    use super::{LoadApplication, Structural2dElements, Structural2dModel, assemble_structural_2d};
+    use crate::mesh::QuadratureRule;
+    use crate::physics::solenoid_stress::convenience::{
+        isotropic_axisymmetric_material, isotropic_axisymmetric_thermal_material,
+    };
+    use crate::physics::solenoid_stress::test_utils::{SINGLE_QUAD4_ELEMENTS, SINGLE_QUAD4_NODES};
+    use crate::physics::solenoid_stress::types::{
+        PressureLoad, Structural2dFormulation, TractionLoad,
+    };
+    use faer::sparse::SparseRowMat;
+
+    fn assert_allclose(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (&actual, &expected) in actual.iter().zip(expected) {
+            let scale = actual.abs().max(expected.abs()).max(1.0);
+            assert!(
+                (actual - expected).abs() <= 1.0e-12 * scale,
+                "actual {actual} != expected {expected}"
+            );
         }
-        output[row] = sum;
     }
-    output
-}
 
-/// Validate one optional temperature vector against the model's thermal operator width.
-fn normalize_temperature<'a>(
-    temperature: Option<&'a [f64]>,
-    expected_len: usize,
-    name: &str,
-) -> Result<&'a [f64], String> {
-    match (expected_len, temperature) {
-        (0, Some(values)) if !values.is_empty() => Err(format!(
-            "{name} was provided, but this model has no thermal operator"
-        )),
-        (0, _) => Ok(&[]),
-        (_, None) => Err(format!(
-            "{name} is required because this model includes thermal materials"
-        )),
-        (expected, Some(values)) if values.len() != expected => Err(format!(
-            "{name} has length {}, but thermal operators expect {expected} values",
-            values.len()
-        )),
-        (_, Some(values)) => Ok(values),
+    fn csr_matvec(operator: &SparseRowMat<usize, f64>, input: &[f64]) -> Vec<f64> {
+        assert_eq!(operator.ncols(), input.len());
+        let mut output = vec![0.0; operator.nrows()];
+        for row in 0..operator.nrows() {
+            for index in operator.row_ptr()[row]..operator.row_ptr()[row + 1] {
+                output[row] += operator.val()[index] * input[operator.col_idx()[index]];
+            }
+        }
+        output
     }
-}
 
-/// Add one constant vector to a dense field vector.
-fn add_constant(mut values: Vec<f64>, constant: &[f64]) -> Vec<f64> {
-    assert!(
-        values.len() == constant.len(),
-        "cannot add vectors of lengths {} and {}",
-        values.len(),
-        constant.len()
-    );
-    for (dst, src) in values.iter_mut().zip(constant) {
-        *dst = *dst + *src;
+    fn single_element_thermal_model() -> Structural2dModel {
+        let material = isotropic_axisymmetric_material(200.0e9, 0.27);
+        let thermal = isotropic_axisymmetric_thermal_material(1.2e-5, 293.15);
+        assemble_structural_2d(
+            &SINGLE_QUAD4_NODES,
+            Structural2dElements::Quad4(&SINGLE_QUAD4_ELEMENTS),
+            &[0],
+            &[material],
+            &[PressureLoad {
+                element: 0,
+                local_face: 1,
+            }],
+            &[TractionLoad {
+                element: 0,
+                local_face: 2,
+            }],
+            Some(&[thermal]),
+            None,
+            &[(0, 1.0e-6)],
+            Structural2dFormulation::Axisymmetric,
+            QuadratureRule::GaussLegendre3,
+            false,
+        )
+        .expect("single-element model assembly should succeed")
     }
-    values
-}
 
-/// Subtract one dense vector from another.
-fn subtract_vectors(lhs: &[f64], rhs: &[f64]) -> Result<Vec<f64>, String> {
-    if lhs.len() != rhs.len() {
-        return Err(format!(
-            "cannot subtract vectors of lengths {} and {}",
-            lhs.len(),
-            rhs.len()
-        ));
-    }
-    Ok(lhs.iter().zip(rhs).map(|(&a, &b)| a - b).collect())
-}
+    #[test]
+    fn build_rhs_matrix_free_matches_cached_without_populating_load_caches() {
+        let model = single_element_thermal_model();
+        assert_eq!(model.load_cache_status(), (false, false, false, false));
+        assert!(!model.recovery_cache_populated());
 
-/// Pack a flattened quadrature field into one `[rr, zz, tt, rz]` sample per point.
-fn pack_rank4_field(flat: Vec<f64>) -> Result<Vec<[f64; 4]>, String> {
-    if flat.len() % 4 != 0 {
-        return Err(format!(
-            "quadrature field has {} entries, which is not divisible by 4",
-            flat.len()
-        ));
+        let body_force = [1.25e3, -2.5e3];
+        let pressure = [3.0e5];
+        let traction = [4.0e4, -1.5e4];
+        let temperature = [296.0, 297.0, 298.0, 299.0];
+        let matrix_free = model
+            .build_rhs_with_application(
+                Some(&body_force),
+                Some(&pressure),
+                Some(&traction),
+                Some(&temperature),
+                LoadApplication::MatrixFree,
+            )
+            .expect("matrix-free RHS should build");
+        assert_eq!(model.load_cache_status(), (false, false, false, false));
+        assert!(!model.recovery_cache_populated());
+
+        let cached = model
+            .build_rhs_with_application(
+                Some(&body_force),
+                Some(&pressure),
+                Some(&traction),
+                Some(&temperature),
+                LoadApplication::Cached,
+            )
+            .expect("cached RHS should build");
+        assert_eq!(model.load_cache_status(), (true, true, true, true));
+        assert!(!model.recovery_cache_populated());
+        assert_allclose(&matrix_free, &cached);
     }
-    let mut packed = Vec::with_capacity(flat.len() / 4);
-    for chunk in flat.chunks_exact(4) {
-        packed.push([chunk[0], chunk[1], chunk[2], chunk[3]]);
+
+    #[test]
+    fn matrix_free_strain_matches_sparse_recovery_without_populating_recovery_cache() {
+        let model = single_element_thermal_model();
+        let displacements_full = [
+            1.0e-6, -2.0e-6, 2.0e-6, 1.0e-6, -1.5e-6, 2.5e-6, 3.0e-6, -3.5e-6,
+        ];
+        let matrix_free = model
+            .evaluate_quadrature_strain(&displacements_full)
+            .expect("matrix-free strain should evaluate");
+        assert!(!model.recovery_cache_populated());
+
+        let reduced = model
+            .free_dofs
+            .iter()
+            .map(|&dof| displacements_full[dof])
+            .collect::<Vec<_>>();
+        let expected = model
+            .with_recovery(|recovery| {
+                let mut values = csr_matvec(&recovery.strain_operator, &reduced);
+                for (value, constant) in values.iter_mut().zip(&recovery.strain_constant) {
+                    *value += *constant;
+                }
+                values
+            })
+            .expect("sparse strain recovery should build");
+        let actual = matrix_free
+            .into_iter()
+            .flat_map(|sample| sample.into_iter())
+            .collect::<Vec<_>>();
+        assert_allclose(&actual, &expected);
     }
-    Ok(packed)
 }

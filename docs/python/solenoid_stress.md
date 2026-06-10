@@ -27,6 +27,7 @@ The FEM path supports:
 - optional threaded stiffness assembly with `par=True`,
 - reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,
 - reduced quadrature-point recovery operators for strain and stress,
+- matrix-free quadrature-point total-strain recovery,
 - direct sparse-LU reduced-system solves,
 - `float64` numeric storage; floating input arrays must already have dtype `float64`,
 - model-owned Dirichlet constraints applied during assembly.
@@ -36,7 +37,9 @@ The intended workflow is:
 1. call `assemble_structural_2d(...)` once with mesh, materials, load topology, and prescribed Dirichlet values,
 2. build each reduced load vector with `model.build_rhs(...)` or the exposed sparse operators,
 3. solve with `model.solve(rhs)`, using the cached sparse-LU factorization,
-4. recover quadrature strain and stress with `model.evaluate_quadrature(...)`.
+4. recover quadrature total strain with `model.evaluate_quadrature_strain(...)`; access
+   `model.quadrature_points` or the explicit sparse recovery operators only when those arrays are
+   needed.
 
 By default, `model.solve(rhs)` uses the direct sparse-LU path and returns the full displacement
 array. The sparse-LU factorization is built lazily on the first solve and then cached on the model

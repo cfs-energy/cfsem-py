@@ -53,43 +53,6 @@ pub struct Structural2dElementMeasures {
     pub volumes: Vec<f64>,
 }
 
-/// Recovered quadrature-point fields in element-major flattened form.
-///
-/// Each field vector stores one `[rr, zz, tt, rz]` sample per quadrature point in element-major
-/// order. `points` has flattened shape `(nelem * nq_per_element, 2)`. Each tensor field has
-/// flattened shape `(nelem * nq_per_element, 4)`. `nq_per_element` records how many consecutive
-/// samples belong to each element.
-#[derive(Debug, Clone)]
-pub struct QuadratureFieldSamples {
-    /// Physical quadrature-point coordinates in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 2)`.
-    /// Units: `[length]`.
-    pub points: Vec<[f64; 2]>,
-    /// Total strain samples `[e_rr, e_zz, e_tt, g_rz]`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[strain]`.
-    pub strain: Vec<[f64; 4]>,
-    /// Thermal strain samples in the same ordering as `strain`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[strain]`.
-    pub thermal_strain: Vec<[f64; 4]>,
-    /// Elastic strain samples `strain - thermal_strain`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[strain]`.
-    pub elastic_strain: Vec<[f64; 4]>,
-    /// Stress samples `[sigma_rr, sigma_zz, sigma_tt, tau_rz]`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[stress]`.
-    pub stress: Vec<[f64; 4]>,
-    /// Number of quadrature points contributed by each element.
-    pub nq_per_element: usize,
-}
-
 /// Explicit 9-node analysis mesh inferred from a corner-only 4-node quadrilateral mesh.
 ///
 /// `input_nodes` has shape `(nnode, 2)`, `input_elements` has shape `(nelem, 4)`,

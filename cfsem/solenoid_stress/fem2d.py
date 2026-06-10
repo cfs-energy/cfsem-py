@@ -228,8 +228,8 @@ class Structural2DFEMModel:
       fields.
 
     `build_rhs(...)`, `solve(...)`, `element_quadrature()`, `element_measures()`, and
-    `evaluate_quadrature(...)` call the Rust backend directly and do not require these Python
-    sparse matrices to be materialized.
+    `evaluate_quadrature_strain(...)` call the Rust backend directly and do not require these
+    Python sparse matrices to be materialized.
 
     Key public array shapes and units:
     - `stiffness` has shape `(ndof_reduced, ndof_reduced)` with entry units
@@ -259,12 +259,6 @@ class Structural2DFEMModel:
         formulation: str,
         thickness: float,
         element_type: str,
-        constant_rhs: npt.NDArray[np.floating[Any]],
-        quadrature_points: npt.NDArray[np.floating[Any]],
-        strain_constant: npt.NDArray[np.floating[Any]],
-        stress_constant: npt.NDArray[np.floating[Any]],
-        thermal_strain_constant: npt.NDArray[np.floating[Any]],
-        thermal_stress_constant: npt.NDArray[np.floating[Any]],
         free_dofs: npt.NDArray[np.int64],
         fixed_dofs: npt.NDArray[np.int64],
         fixed_values: npt.NDArray[np.floating[Any]],
@@ -278,16 +272,10 @@ class Structural2DFEMModel:
         self._input_nodes = input_nodes
         self._input_elements = input_elements
         self._elevated = elevated
-        self.constant_rhs = constant_rhs
         self.pressure_faces = pressure_faces
         self.traction_faces = traction_faces
         self.analysis_nodes = analysis_nodes
         self.analysis_elements = analysis_elements
-        self.quadrature_points = quadrature_points
-        self.strain_constant = strain_constant
-        self.stress_constant = stress_constant
-        self.thermal_strain_constant = thermal_strain_constant
-        self.thermal_stress_constant = thermal_stress_constant
         self.free_dofs = free_dofs
         self.fixed_dofs = fixed_dofs
         self.fixed_values = fixed_values
@@ -312,6 +300,12 @@ class Structural2DFEMModel:
         self._element_quadrature_cache: ElementQuadrature | None = None
         self._element_measures_cache: ElementMeasures | None = None
         self._temperature_elevation_cache: sp.csr_matrix | None = None
+        self._constant_rhs_cache: npt.NDArray[np.float64] | None = None
+        self._quadrature_points_cache: npt.NDArray[np.float64] | None = None
+        self._strain_constant_cache: npt.NDArray[np.float64] | None = None
+        self._stress_constant_cache: npt.NDArray[np.float64] | None = None
+        self._thermal_strain_constant_cache: npt.NDArray[np.float64] | None = None
+        self._thermal_stress_constant_cache: npt.NDArray[np.float64] | None = None
         self._stiffness_cache: sp.csc_matrix | None = None
         self._body_force_to_rhs_cache: sp.csr_matrix | None = None
         self._pressure_to_rhs_cache: sp.csr_matrix | None = None
@@ -339,6 +333,73 @@ class Structural2DFEMModel:
         """Input mesh connectivity with shape `(nelem, 4)`."""
 
         return self._input_elements
+
+    @property
+    def constant_rhs(self) -> npt.NDArray[np.floating[Any]]:
+        """Load-independent reduced RHS contribution, exported from Rust on first access."""
+
+        cache = self._constant_rhs_cache
+        if cache is None:
+            cache = np.asarray(self._backend.constant_rhs(), dtype=np.float64)
+            self._constant_rhs_cache = cache
+        return cache
+
+    @property
+    def quadrature_points(self) -> npt.NDArray[np.floating[Any]]:
+        """Quadrature-point coordinates with shape `(nelem, nq_per_element, 2)`.
+
+        This property materializes point coordinates separately from field recovery so workflows
+        that only need matrix-free values do not allocate point arrays.
+        """
+
+        cache = self._quadrature_points_cache
+        if cache is None:
+            cache = np.asarray(
+                self._backend.quadrature_points_flat(),
+                dtype=np.float64,
+            ).reshape(self.analysis_elements.shape[0], self.nq_per_element, 2)
+            self._quadrature_points_cache = cache
+        return cache
+
+    @property
+    def strain_constant(self) -> npt.NDArray[np.floating[Any]]:
+        """Strain offset from prescribed displacement DOFs, exported on first access."""
+
+        cache = self._strain_constant_cache
+        if cache is None:
+            cache = np.asarray(self._backend.strain_constant(), dtype=np.float64)
+            self._strain_constant_cache = cache
+        return cache
+
+    @property
+    def stress_constant(self) -> npt.NDArray[np.floating[Any]]:
+        """Stress offset from prescribed displacement DOFs, exported on first access."""
+
+        cache = self._stress_constant_cache
+        if cache is None:
+            cache = np.asarray(self._backend.stress_constant(), dtype=np.float64)
+            self._stress_constant_cache = cache
+        return cache
+
+    @property
+    def thermal_strain_constant(self) -> npt.NDArray[np.floating[Any]]:
+        """Thermal-strain reference-temperature offset, exported on first access."""
+
+        cache = self._thermal_strain_constant_cache
+        if cache is None:
+            cache = np.asarray(self._backend.thermal_strain_constant(), dtype=np.float64)
+            self._thermal_strain_constant_cache = cache
+        return cache
+
+    @property
+    def thermal_stress_constant(self) -> npt.NDArray[np.floating[Any]]:
+        """Thermal-stress reference-temperature offset, exported on first access."""
+
+        cache = self._thermal_stress_constant_cache
+        if cache is None:
+            cache = np.asarray(self._backend.thermal_stress_constant(), dtype=np.float64)
+            self._thermal_stress_constant_cache = cache
+        return cache
 
     def _temperature_elevation(self) -> sp.csr_matrix:
         """Return the cached input-to-analysis temperature elevation operator.
@@ -578,6 +639,7 @@ class Structural2DFEMModel:
         pressure_values: ArrayLike | None = None,
         traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
+        load_application: str = "matrix_free",
     ) -> npt.NDArray[np.floating[Any]]:
         """Build one reduced structural right-hand side.
 
@@ -591,6 +653,8 @@ class Structural2DFEMModel:
                 `[force / area]`.
             nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
                 `[temperature]`. Required only when the model includes thermal materials.
+            load_application: Either `"matrix_free"` to apply loads without populating sparse load
+                caches, or `"cached"` to build/reuse sparse load operators.
 
         Returns:
             NDArray: Reduced right-hand side with shape `(ndof_reduced,)` and units
@@ -600,23 +664,30 @@ class Structural2DFEMModel:
             ValueError: If thermal materials are present but `nodal_temperature` is omitted.
         """
 
-        body_force_arr = (
-            np.zeros((self.nelem, 2), dtype=np.float64)
-            if body_force is None
-            else _normalize_body_force(body_force, self.nelem)
-        )
+        if load_application not in {"matrix_free", "cached"}:
+            raise ValueError(
+                f"unsupported load_application {load_application!r}; use 'matrix_free' or 'cached'"
+            )
+        body_force_arr = None if body_force is None else _normalize_body_force(body_force, self.nelem)
         npressure = int(self.pressure_faces.shape[0])
-        pressure_arr = _normalize_pressure_values(pressure_values, npressure)
-        traction_arr = _normalize_traction_values(
-            traction_values,
-            int(self.traction_faces.shape[0]),
+        pressure_arr = (
+            None if pressure_values is None else _normalize_pressure_values(pressure_values, npressure)
+        )
+        traction_arr = (
+            None
+            if traction_values is None
+            else _normalize_traction_values(
+                traction_values,
+                int(self.traction_faces.shape[0]),
+            )
         )
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
         rhs = self._backend.build_rhs(
-            body_force_arr.reshape(-1),
-            pressure_arr if pressure_arr.size else None,
-            traction_arr.reshape(-1) if traction_arr.size else None,
+            None if body_force_arr is None else body_force_arr.reshape(-1),
+            pressure_arr,
+            None if traction_arr is None else traction_arr.reshape(-1),
             temperature_arr,
+            load_application=load_application,
         )
         return np.asarray(rhs, dtype=np.float64)
 
@@ -659,30 +730,21 @@ class Structural2DFEMModel:
         full[self.free_dofs] = reduced_arr
         return full
 
-    def evaluate_quadrature(
+    def evaluate_quadrature_strain(
         self,
         displacements: ArrayLike,
-        nodal_temperature: ArrayLike | None = None,
-    ) -> QuadratureFieldSamples:
-        """Evaluate quadrature-point strain and stress fields.
+    ) -> npt.NDArray[np.floating[Any]]:
+        """Evaluate quadrature-point total strain without materializing recovery matrices.
 
         Args:
             displacements: Either the reduced displacement solution with shape
                 `(ndof_reduced,)`, or the full analysis displacement field with shape
                 `(2 * n_analysis_nodes,)` or `(n_analysis_nodes, 2)`. Displacement units are
                 `[length]`.
-            nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
-                `[temperature]`. Required only when the model includes thermal materials.
 
         Returns:
-            QuadratureFieldSamples: Recovered quadrature fields where:
-                `points` has shape `(nelem, nq_per_element, 2)` and units `[length]`,
-                `strain`, `thermal_strain`, and `elastic_strain` have shape
-                `(nelem, nq_per_element, 4)` and units `[strain]`,
-                `stress` has shape `(nelem, nq_per_element, 4)` and units `[stress]`.
-
-        Raises:
-            ValueError: If thermal materials are present but `nodal_temperature` is omitted.
+            NDArray: Total strain with shape `(nelem, nq_per_element, 4)` and component ordering
+            `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
         """
 
         arr = np.asarray(displacements)
@@ -692,47 +754,10 @@ class Structural2DFEMModel:
             displacements_full = _normalize_displacements(
                 displacements, self.analysis_nodes.shape[0]
             ).reshape(-1)
-        temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
-        (
-            points_flat,
-            strain_flat,
-            thermal_strain_flat,
-            elastic_strain_flat,
-            stress_flat,
-            nq,
-        ) = self._backend.evaluate_quadrature(displacements_full, temperature_arr)
+        strain_flat, nq = self._backend.evaluate_quadrature_strain(displacements_full)
         nelem = self.analysis_elements.shape[0]
         nq = int(nq)
-        return QuadratureFieldSamples(
-            points=np.asarray(points_flat, dtype=np.float64).reshape(nelem, nq, 2),
-            strain=np.asarray(strain_flat, dtype=np.float64).reshape(nelem, nq, 4),
-            thermal_strain=np.asarray(thermal_strain_flat, dtype=np.float64).reshape(nelem, nq, 4),
-            elastic_strain=np.asarray(elastic_strain_flat, dtype=np.float64).reshape(nelem, nq, 4),
-            stress=np.asarray(stress_flat, dtype=np.float64).reshape(nelem, nq, 4),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class QuadratureFieldSamples:
-    """Recovered strain and stress at element quadrature points.
-
-    Each field has shape `(nelem, nq_per_element, 4)` with component ordering
-    `[rr, zz, tt, rz]`. `points` has shape `(nelem, nq_per_element, 2)`.
-    `points` has units `[length]`, `strain`, `thermal_strain`, and `elastic_strain`
-    have units `[strain]`, and `stress` has units `[stress]`.
-    """
-
-    points: npt.NDArray[np.floating[Any]]
-    strain: npt.NDArray[np.floating[Any]]
-    thermal_strain: npt.NDArray[np.floating[Any]]
-    elastic_strain: npt.NDArray[np.floating[Any]]
-    stress: npt.NDArray[np.floating[Any]]
-
-    @property
-    def total_strain(self) -> npt.NDArray[np.floating[Any]]:
-        """Alias for `strain`, with shape `(nelem, nq_per_element, 4)` and units `[strain]`."""
-
-        return self.strain
+        return np.asarray(strain_flat, dtype=np.float64).reshape(nelem, nq, 4)
 
 
 def _quadrature_code(quadrature: str | int) -> int:
@@ -1538,15 +1563,6 @@ def assemble_structural_2d(
         formulation=normalized_formulation,
         thickness=thickness_value,
         element_type=normalized_element_type,
-        constant_rhs=np.asarray(backend.constant_rhs(), dtype=np.float64),
-        quadrature_points=np.asarray(
-            backend.quadrature_points_flat(),
-            dtype=np.float64,
-        ).reshape(analysis_elements.shape[0], int(backend.nq_per_element), 2),
-        strain_constant=np.asarray(backend.strain_constant(), dtype=np.float64),
-        stress_constant=np.asarray(backend.stress_constant(), dtype=np.float64),
-        thermal_strain_constant=np.asarray(backend.thermal_strain_constant(), dtype=np.float64),
-        thermal_stress_constant=np.asarray(backend.thermal_stress_constant(), dtype=np.float64),
         free_dofs=np.asarray(backend.free_dofs(), dtype=np.int64),
         fixed_dofs=np.asarray(backend.fixed_dofs(), dtype=np.int64),
         fixed_values=np.asarray(backend.fixed_values(), dtype=np.float64),
@@ -1714,7 +1730,6 @@ __all__ = [
     "ElevatedQuad9Mesh",
     "QuadMeshInterpolation",
     "QuadMeshQuery",
-    "QuadratureFieldSamples",
     "assemble_structural_2d",
     "cfsem_radial_material",
     "interpolate_quad_mesh_values",

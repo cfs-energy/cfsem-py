@@ -113,6 +113,52 @@ where
     ))
 }
 
+/// Apply body-force amplitudes directly to a reduced RHS without building a sparse operator.
+pub(crate) fn apply_body_force_rhs_for_family<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    values: &[f64],
+    global_to_reduced: &[usize],
+    rhs: &mut [f64],
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    let expected = 2 * mesh.num_elements();
+    if values.len() != expected {
+        return Err(format!(
+            "body_force has length {}, but operator expects {expected} values",
+            values.len()
+        ));
+    }
+    for element_index in 0..mesh.num_elements() {
+        let coords = mesh.element_coords(element_index)?;
+        let nodes = mesh.element_nodes(element_index)?;
+        let samples = Family::volume_samples(&coords, quadrature)?;
+        let local =
+            body_force_element_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        let radial = values[2 * element_index];
+        let axial = values[2 * element_index + 1];
+        for local_dof in 0..DOF_PER_ELEMENT {
+            let reduced_row = global_to_reduced[global_rows[local_dof]];
+            if reduced_row != usize::MAX {
+                rhs[reduced_row] += local[local_dof][0] * radial + local[local_dof][1] * axial;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn body_force_operator_range_for_family<
     Family,
     const NODES_PER_ELEMENT: usize,

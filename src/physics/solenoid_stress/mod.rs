@@ -499,15 +499,14 @@ mod types;
 pub use crate::mesh::QuadratureRule;
 pub(crate) use axisym::build_b_matrix;
 pub use convenience::{
-    ElevatedQuad9Mesh, QuadratureFieldSamples, Structural2dElementMeasures,
-    Structural2dElementQuadrature, cfsem_radial_material, infer_quad9_mesh,
-    isotropic_axisymmetric_material, isotropic_axisymmetric_thermal_material,
-    orthotropic_axisymmetric_thermal_material, rotate_material_in_plane,
-    rotate_thermal_expansion_in_plane, rotate_thermal_material_in_plane,
+    ElevatedQuad9Mesh, Structural2dElementMeasures, Structural2dElementQuadrature,
+    cfsem_radial_material, infer_quad9_mesh, isotropic_axisymmetric_material,
+    isotropic_axisymmetric_thermal_material, orthotropic_axisymmetric_thermal_material,
+    rotate_material_in_plane, rotate_thermal_expansion_in_plane, rotate_thermal_material_in_plane,
 };
 pub use model::{
-    ReducedRecoveryOperators, Structural2dElementType, Structural2dElements, Structural2dModel,
-    assemble_structural_2d,
+    LoadApplication, ReducedRecoveryOperators, Structural2dElementType, Structural2dElements,
+    Structural2dModel, assemble_structural_2d,
 };
 pub(crate) use types::validate_element_material_inputs;
 pub use types::{

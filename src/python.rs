@@ -433,12 +433,12 @@ macro_rules! impl_solenoid_stress_model_pyclass {
 
             #[getter]
             fn n_temperature_nodes(&self) -> usize {
-                self.inner.recovery.n_temperature_nodes
+                self.inner.n_temperature_nodes
             }
 
             #[getter]
             fn nq_per_element(&self) -> usize {
-                self.inner.recovery.nq_per_element
+                self.inner.nq_per_element
             }
 
             #[getter]
@@ -488,27 +488,48 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 PyArray1::from_vec(py, self.inner.constant_rhs.clone()).unbind()
             }
 
-            fn quadrature_points_flat<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, flatten_points(self.inner.recovery.points.clone()))
-                    .unbind()
+            fn quadrature_points_flat<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
+                let quadrature = self
+                    .inner
+                    .element_quadrature()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok(PyArray1::from_vec(py, flatten_points(quadrature.points)).unbind())
             }
 
-            fn strain_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery.strain_constant.clone()).unbind()
+            fn strain_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        PyArray1::from_vec(py, recovery.strain_constant.clone()).unbind()
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
-            fn stress_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery.stress_constant.clone()).unbind()
+            fn stress_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        PyArray1::from_vec(py, recovery.stress_constant.clone()).unbind()
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
-            fn thermal_strain_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery.thermal_strain_constant.clone())
-                    .unbind()
+            fn thermal_strain_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        PyArray1::from_vec(py, recovery.thermal_strain_constant.clone()).unbind()
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
-            fn thermal_stress_constant<'py>(&self, py: Python<'py>) -> Py<PyArray1<$ty>> {
-                PyArray1::from_vec(py, self.inner.recovery.thermal_stress_constant.clone())
-                    .unbind()
+            fn thermal_stress_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        PyArray1::from_vec(py, recovery.thermal_stress_constant.clone()).unbind()
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn stiffness_csc<'py>(
@@ -534,164 +555,200 @@ macro_rules! impl_solenoid_stress_model_pyclass {
             fn body_force_to_rhs_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.body_force_to_rhs;
-                (
+            )> {
+                self.inner
+                    .with_body_force_to_rhs(|operator| {
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn pressure_to_rhs_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.pressure_to_rhs;
-                (
+            )> {
+                self.inner
+                    .with_pressure_to_rhs(|operator| {
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn traction_to_rhs_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.traction_to_rhs;
-                (
+            )> {
+                self.inner
+                    .with_traction_to_rhs(|operator| {
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn temperature_to_rhs_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.temperature_to_rhs;
-                (
+            )> {
+                self.inner
+                    .with_temperature_to_rhs(|operator| {
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn strain_operator_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.recovery.strain_operator;
-                (
+            )> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        let operator = &recovery.strain_operator;
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn stress_operator_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.recovery.stress_operator;
-                (
+            )> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        let operator = &recovery.stress_operator;
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn thermal_strain_operator_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.recovery.thermal_strain_operator;
-                (
+            )> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        let operator = &recovery.thermal_strain_operator;
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
             fn thermal_stress_operator_csr<'py>(
                 &self,
                 py: Python<'py>,
-            ) -> (
+            ) -> PyResult<(
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<usize>>,
                 Py<PyArray1<usize>>,
                 usize,
                 usize,
-            ) {
-                let operator = &self.inner.recovery.thermal_stress_operator;
-                (
+            )> {
+                self.inner
+                    .with_recovery(|recovery| {
+                        let operator = &recovery.thermal_stress_operator;
+                        (
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                )
+                        )
+                    })
+                    .map_err(|msg| PyInteropError::ValueError { msg })
+                    .map_err(Into::into)
             }
 
-            #[pyo3(signature = (body_force=None, pressure_values=None, traction_values=None, nodal_temperature=None))]
+            #[pyo3(signature = (body_force=None, pressure_values=None, traction_values=None, nodal_temperature=None, load_application="matrix_free"))]
             fn build_rhs<'py>(
                 &self,
                 py: Python<'py>,
@@ -699,6 +756,7 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 pressure_values: Option<PyReadonlyArray1<'_, $ty>>,
                 traction_values: Option<PyReadonlyArray1<'_, $ty>>,
                 nodal_temperature: Option<PyReadonlyArray1<'_, $ty>>,
+                load_application: &str,
             ) -> PyResult<Py<PyArray1<$ty>>> {
                 let body_force = match &body_force {
                     Some(arr) => Some(arr.as_slice()?),
@@ -716,9 +774,27 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                     Some(arr) => Some(arr.as_slice()?),
                     None => None,
                 };
+                let load_application = match load_application {
+                    "matrix_free" => physics::solenoid_stress::LoadApplication::MatrixFree,
+                    "cached" => physics::solenoid_stress::LoadApplication::Cached,
+                    other => {
+                        return Err(PyInteropError::ValueError {
+                            msg: format!(
+                                "unsupported load_application {other:?}; use 'matrix_free' or 'cached'"
+                            ),
+                        }
+                        .into());
+                    }
+                };
                 let rhs = self
                     .inner
-                    .build_rhs(body_force, pressure_values, traction_values, nodal_temperature)
+                    .build_rhs_with_application(
+                        body_force,
+                        pressure_values,
+                        traction_values,
+                        nodal_temperature,
+                        load_application,
+                    )
                     .map_err(|msg| PyInteropError::ValueError { msg })?;
                 Ok(PyArray1::from_vec(py, rhs).unbind())
             }
@@ -771,38 +847,22 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 ))
             }
 
-            #[pyo3(signature = (displacements_full, nodal_temperature=None))]
-            fn evaluate_quadrature<'py>(
+            fn evaluate_quadrature_strain<'py>(
                 &self,
                 py: Python<'py>,
                 displacements_full: PyReadonlyArray1<'_, $ty>,
-                nodal_temperature: Option<PyReadonlyArray1<'_, $ty>>,
-            ) -> PyResult<(
-                Py<PyArray1<$ty>>,
-                Py<PyArray1<$ty>>,
-                Py<PyArray1<$ty>>,
-                Py<PyArray1<$ty>>,
-                Py<PyArray1<$ty>>,
-                usize,
-            )> {
+            ) -> PyResult<(Py<PyArray1<$ty>>, usize)> {
                 let displacements_full = displacements_full.as_slice()?;
-                let nodal_temperature = match &nodal_temperature {
-                    Some(arr) => Some(arr.as_slice()?),
-                    None => None,
-                };
-                let samples = self
+                let strain = self
                     .inner
-                    .evaluate_quadrature(displacements_full, nodal_temperature)
+                    .evaluate_quadrature_strain(displacements_full)
                     .map_err(|msg| PyInteropError::ValueError { msg })?;
                 Ok((
-                    PyArray1::from_vec(py, flatten_points(samples.points)).unbind(),
-                    PyArray1::from_vec(py, flatten_rank4_samples(samples.strain)).unbind(),
-                    PyArray1::from_vec(py, flatten_rank4_samples(samples.thermal_strain)).unbind(),
-                    PyArray1::from_vec(py, flatten_rank4_samples(samples.elastic_strain)).unbind(),
-                    PyArray1::from_vec(py, flatten_rank4_samples(samples.stress)).unbind(),
-                    samples.nq_per_element,
+                    PyArray1::from_vec(py, flatten_rank4_samples(strain)).unbind(),
+                    self.inner.nq_per_element,
                 ))
             }
+
         }
     };
 }

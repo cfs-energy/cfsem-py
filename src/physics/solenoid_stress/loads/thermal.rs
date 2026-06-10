@@ -189,6 +189,152 @@ where
     ))
 }
 
+/// Assemble only the thermal reference-temperature RHS offset for one quadrilateral family.
+///
+/// This is used during model assembly so the load-independent RHS constant can remain eager
+/// without also materializing the sparse temperature-to-RHS operator.
+pub(crate) fn thermal_reference_rhs_for_family<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    material_ids: &[usize],
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: &[ThermalMaterial],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+) -> Result<Vec<f64>, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
+    let mut reference_rhs = vec![0.0; mesh.num_nodes() * 2];
+    for element_index in 0..mesh.num_elements() {
+        let coords = mesh.element_coords(element_index)?;
+        let nodes = mesh.element_nodes(element_index)?;
+        let material_id = material_ids[element_index];
+        let material = material_table.get(material_id).ok_or_else(|| {
+            format!("material_id {material_id} on element {element_index} is out of range")
+        })?;
+        let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
+            format!("thermal material_id {material_id} on element {element_index} is out of range")
+        })?;
+        let material_storage;
+        let thermal_storage;
+        let (material, thermal) = if let Some(angles) = material_orientation_angles {
+            material_storage = rotate_material_in_plane(material, angles[element_index]);
+            thermal_storage = rotate_thermal_material_in_plane(thermal, angles[element_index]);
+            (&material_storage, &thermal_storage)
+        } else {
+            (material, thermal)
+        };
+        let samples = Family::volume_samples(&coords, quadrature)?;
+        let local = thermal_element_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            &samples,
+            material,
+            thermal,
+            formulation,
+        )?;
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        for dof in 0..DOF_PER_ELEMENT {
+            reference_rhs[global_rows[dof]] += local.reference_rhs[dof];
+        }
+    }
+    Ok(reference_rhs)
+}
+
+/// Apply nodal temperatures directly to a reduced RHS without building a sparse operator.
+///
+/// The material reference-temperature contribution is intentionally not included here; model
+/// assembly folds it into `constant_rhs` through [`thermal_reference_rhs_for_family`].
+pub(crate) fn apply_temperature_rhs_for_family<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    material_ids: &[usize],
+    material_table: &[[[f64; 4]; 4]],
+    thermal_material_table: &[ThermalMaterial],
+    material_orientation_angles: Option<&[f64]>,
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    values: &[f64],
+    global_to_reduced: &[usize],
+    rhs: &mut [f64],
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    validate_element_material_inputs(
+        mesh.num_elements(),
+        material_ids,
+        material_orientation_angles,
+    )?;
+    if values.len() != mesh.num_nodes() {
+        return Err(format!(
+            "nodal_temperature has length {}, but thermal operators expect {} values",
+            values.len(),
+            mesh.num_nodes()
+        ));
+    }
+    for element_index in 0..mesh.num_elements() {
+        let coords = mesh.element_coords(element_index)?;
+        let nodes = mesh.element_nodes(element_index)?;
+        let material_id = material_ids[element_index];
+        let material = material_table.get(material_id).ok_or_else(|| {
+            format!("material_id {material_id} on element {element_index} is out of range")
+        })?;
+        let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
+            format!("thermal material_id {material_id} on element {element_index} is out of range")
+        })?;
+        let material_storage;
+        let thermal_storage;
+        let (material, thermal) = if let Some(angles) = material_orientation_angles {
+            material_storage = rotate_material_in_plane(material, angles[element_index]);
+            thermal_storage = rotate_thermal_material_in_plane(thermal, angles[element_index]);
+            (&material_storage, &thermal_storage)
+        } else {
+            (material, thermal)
+        };
+        let samples = Family::volume_samples(&coords, quadrature)?;
+        let local = thermal_element_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+            &samples,
+            material,
+            thermal,
+            formulation,
+        )?;
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        for local_dof in 0..DOF_PER_ELEMENT {
+            let reduced_row = global_to_reduced[global_rows[local_dof]];
+            if reduced_row == usize::MAX {
+                continue;
+            }
+            let mut value = 0.0;
+            for local_temp_node in 0..NODES_PER_ELEMENT {
+                value += local.temperature_to_rhs[local_dof][local_temp_node]
+                    * values[nodes[local_temp_node]];
+            }
+            rhs[reduced_row] += value;
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn temperature_operator_range_for_family<
     Family,

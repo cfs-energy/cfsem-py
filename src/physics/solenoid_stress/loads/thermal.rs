@@ -254,6 +254,7 @@ where
 ///
 /// The material reference-temperature contribution is intentionally not included here; model
 /// assembly folds it into `constant_rhs` through [`thermal_reference_rhs_for_family`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_temperature_rhs_for_family<
     Family,
     const NODES_PER_ELEMENT: usize,

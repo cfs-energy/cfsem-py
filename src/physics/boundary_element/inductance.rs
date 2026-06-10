@@ -990,6 +990,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
 /// Returns:
 ///     Triangle-basis mutual-inductance entry `M_ij` (H).
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn triangle_basis_mutual_inductance(
     src0: [f64; 3],
     src1: [f64; 3],

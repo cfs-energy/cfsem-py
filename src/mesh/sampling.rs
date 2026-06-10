@@ -34,6 +34,8 @@ pub struct FaceSample<F: Scalar, const NODES_PER_ELEMENT: usize> {
     pub weight: F,
 }
 
+type FaceReferenceFn<F> = fn(u8, F) -> Result<(F, F, [F; 2]), String>;
+
 fn volume_samples_generic<F: Scalar, const NODES_PER_ELEMENT: usize>(
     coords: &[[F; 2]; NODES_PER_ELEMENT],
     quadrature: QuadratureRule,
@@ -66,7 +68,7 @@ fn face_samples_generic<F: Scalar, const NODES_PER_ELEMENT: usize>(
     quadrature: QuadratureRule,
     shape_fn: fn(F, F) -> [F; NODES_PER_ELEMENT],
     grad_ref_fn: fn(F, F) -> [[F; 2]; NODES_PER_ELEMENT],
-    face_ref_fn: fn(u8, F) -> Result<(F, F, [F; 2]), String>,
+    face_ref_fn: FaceReferenceFn<F>,
 ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String> {
     let samples = gauss_face::<F>(quadrature);
     let mut out = Vec::with_capacity(samples.len());

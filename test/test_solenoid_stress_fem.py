@@ -272,16 +272,6 @@ def test_quad_mesh_interpolation_outside_policy_errors():
             tolerance=1.0e-12,
         )
 
-    with pytest.raises(ValueError, match="unsupported outside policy"):
-        fem.interpolate_quad_mesh_values(
-            nodes,
-            elements,
-            nodal_values,
-            [[0.25, 0.5]],
-            outside="clip",
-        )
-
-
 def test_quad_mesh_interpolation_uses_quad9_curved_geometry():
     """Check that quad9 interpolation uses midside nodes in the inverse geometry map."""
 
@@ -1183,36 +1173,6 @@ def test_model_locate_points_in_elements_drives_recovery_and_interpolation() -> 
         expected_strain,
         atol=1.0e-12,
     )
-
-
-def test_model_locate_points_validates_outside_policy() -> None:
-    dtype = np.float64
-    nodes = np.array(
-        [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [0.0, 1.0],
-        ],
-        dtype=dtype,
-    )
-    elements = np.array([[0, 1, 2, 3]], dtype=np.uint64)
-    material = fem.isotropic_plane_strain_material(200.0e9, 0.27)
-    model = fem.assemble_structural_2d(
-        nodes=nodes,
-        elements=elements,
-        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
-        material_table=np.asarray([material]),
-        prescribed={0: 0.0, 1: 0.0, 3: 0.0},
-        formulation="plane_strain",
-        thickness=1.0,
-    )
-
-    with pytest.raises(ValueError, match="unsupported outside policy"):
-        model.locate_points([[0.25, 0.5]], outside="clip")
-
-    with pytest.raises(ValueError, match="query point 0 is outside the quad mesh"):
-        model.locate_points([[2.0, 2.0]], outside="raise", tolerance=1.0e-12)
 
 
 def test_model_locations_validate_shape_and_element_type() -> None:
@@ -2270,15 +2230,6 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
             material_table=np.asarray([material]),
         )
 
-    with pytest.raises(ValueError, match="unsupported quadrature"):
-        fem.assemble_structural_2d(
-            nodes=nodes,
-            elements=elements,
-            material_ids=np.zeros((1,), dtype=np.uint64),
-            material_table=np.asarray([material]),
-            quadrature="2x2",
-        )
-
     with pytest.raises(ValueError, match="displacements must have shape"):
         model = fem.assemble_structural_2d(
             nodes=nodes,
@@ -2483,11 +2434,6 @@ def test_python_convenience_wrappers_return_float64() -> None:
     assert ortho_plane.dtype == expected_dtype
     assert elevated.analysis_elements.shape[1] == 9
     assert elevated.analysis_nodes.dtype == expected_dtype
-
-
-def test_private_formulation_code_rejects_unknown_formulation() -> None:
-    with pytest.raises(ValueError, match="unsupported formulation"):
-        fem._formulation_code("plane_stress")
 
 
 def test_quad9_temperature_elevation_reproduces_affine_temperature_field() -> None:

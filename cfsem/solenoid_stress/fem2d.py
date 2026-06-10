@@ -376,8 +376,11 @@ class Structural2DFEMModel:
             max_iterations=max_iterations,
         )
         outside_policy = str(outside).strip().lower()
-        if outside_policy not in {"nearest", "raise", "error"}:
-            raise ValueError(f"unsupported outside policy {outside!r}; use 'nearest' or 'raise'")
+        assert outside_policy in {
+            "nearest",
+            "raise",
+            "error",
+        }, f"unsupported outside policy {outside!r}; use 'nearest' or 'raise'"
         tol = _normalize_query_tolerance(tolerance)
         inside = query.nearest_element_distances <= tol
         if outside_policy in {"raise", "error"} and not np.all(inside):
@@ -846,11 +849,10 @@ class Structural2DFEMModel:
 
 
 def _quadrature_code(quadrature: str | int) -> int:
-    if quadrature in (3, "3", "gl3", "GL3"):
-        return 3
-    if quadrature in (4, "4", "gl4", "GL4"):
-        return 4
-    raise ValueError(f"unsupported quadrature {quadrature!r}; use 'gl3' or 'gl4'")
+    normalized = str(quadrature).strip().lower()
+    codes = {"3": 3, "gl3": 3, "4": 4, "gl4": 4}
+    assert normalized in codes, f"unsupported quadrature {quadrature!r}; use 'gl3' or 'gl4'"
+    return codes[normalized]
 
 
 def _normalize_element_type(element_type: str) -> str:
@@ -872,11 +874,8 @@ def _normalize_formulation(formulation: str) -> str:
 
 
 def _formulation_code(formulation: str) -> int:
-    if formulation == "axisymmetric":
-        return 0
-    if formulation == "plane_strain":
-        return 1
-    raise ValueError(f"unsupported formulation {formulation!r}")
+    assert formulation in {"axisymmetric", "plane_strain"}, f"unsupported formulation {formulation!r}"
+    return 0 if formulation == "axisymmetric" else 1
 
 
 def _normalize_thickness(
@@ -899,8 +898,7 @@ def _normalize_material_orientation_angles(
     if material_orientation_angles is None:
         return np.zeros((0,), dtype=np.float64)
     angles = np.asarray(material_orientation_angles)
-    if angles.ndim == 0:
-        angles = np.broadcast_to(angles, (nelem,)).copy()
+    angles = np.broadcast_to(angles, (nelem,)).copy() if angles.ndim == 0 else angles
     assert angles.ndim == 1 and angles.shape[0] == nelem, (
         f"material_orientation_angles must be a scalar or have shape ({nelem},); " f"got {angles.shape}"
     )
@@ -975,11 +973,9 @@ def _normalize_query_points(
 def _normalize_query_tolerance(
     tolerance: float | None,
 ) -> float:
-    if tolerance is not None:
-        value = float(tolerance)
-        assert value >= 0.0, f"tolerance must be nonnegative; got {tolerance!r}"
-        return value
-    return 1.0e-10
+    value = 1.0e-10 if tolerance is None else float(tolerance)
+    assert value >= 0.0, f"tolerance must be nonnegative; got {tolerance!r}"
+    return value
 
 
 def _coo_operator_from_binding(
@@ -1153,13 +1149,17 @@ def interpolate_quad_mesh_values(
     values_shape = values_arr.shape[1:]
     values_2d = values_arr.reshape(query.nodes.shape[0], -1)
     outside_policy = str(outside).strip().lower()
+    assert outside_policy in {
+        "nearest",
+        "nan",
+        "raise",
+        "error",
+    }, f"unsupported outside policy {outside!r}; use 'raise', 'nan', or 'nearest'"
     tol = _normalize_query_tolerance(tolerance)
     inside = query.nearest_element_distances <= tol
     if outside_policy in {"raise", "error"} and not np.all(inside):
         first = int(np.flatnonzero(~inside)[0])
         raise ValueError(f"query point {first} is outside the quad mesh")
-    if outside_policy not in {"nearest", "nan", "raise", "error"}:
-        raise ValueError(f"unsupported outside policy {outside!r}; use 'raise', 'nan', or 'nearest'")
     operator = quad_mesh_interpolation_operator(query)
     values = np.asarray(operator @ values_2d).reshape((query.points.shape[0], *values_shape))
     if outside_policy == "nan" and np.any(~inside):
@@ -1380,9 +1380,7 @@ def _normalize_body_force(
 
 
 def _normalize_face_pairs(name: str, faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
-    if faces is None:
-        return np.zeros((0, 2), dtype=np.uint64)
-    faces = np.asarray(faces)
+    faces = np.zeros((0, 2), dtype=np.uint64) if faces is None else np.asarray(faces)
     assert faces.ndim == 2 and faces.shape[1] == 2, f"{name} must have shape (nload, 2); got {faces.shape}"
     return faces
 
@@ -1391,9 +1389,7 @@ def _normalize_pressure_values(
     pressure_values: ArrayLike | None,
     nload: int,
 ) -> npt.NDArray[np.floating[Any]]:
-    if pressure_values is None:
-        return np.zeros((nload,), dtype=np.float64)
-    values = np.asarray(pressure_values)
+    values = np.zeros((nload,), dtype=np.float64) if pressure_values is None else np.asarray(pressure_values)
     assert values.ndim == 1, f"pressure_values must have shape (nload,); got {values.shape}"
     assert values.shape[0] == nload, f"pressure_values has {values.shape[0]} entries, but expected {nload}"
     return values
@@ -1403,11 +1399,12 @@ def _normalize_traction_values(
     traction_values: ArrayLike | None,
     nload: int,
 ) -> npt.NDArray[np.floating[Any]]:
-    if traction_values is None:
-        return np.zeros((nload, 2), dtype=np.float64)
-    values = np.asarray(traction_values)
-    if values.ndim == 1 and values.shape == (2,):
-        values = np.broadcast_to(values, (nload, 2)).copy()
+    values = (
+        np.zeros((nload, 2), dtype=np.float64) if traction_values is None else np.asarray(traction_values)
+    )
+    values = (
+        np.broadcast_to(values, (nload, 2)).copy() if values.ndim == 1 and values.shape == (2,) else values
+    )
     assert values.ndim == 2 and values.shape == (
         nload,
         2,
@@ -1418,9 +1415,9 @@ def _normalize_traction_values(
 def _normalize_prescribed_dirichlet(
     prescribed: Mapping[int, float] | None,
 ) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
-    if prescribed is None:
-        return np.zeros((0,), dtype=np.uint64), np.zeros((0,), dtype=np.float64)
-    items = sorted((int(dof), float(value)) for dof, value in prescribed.items())
+    items = (
+        [] if prescribed is None else sorted((int(dof), float(value)) for dof, value in prescribed.items())
+    )
     return (
         np.asarray([dof for dof, _ in items], dtype=np.uint64),
         np.asarray([value for _, value in items], dtype=np.float64),

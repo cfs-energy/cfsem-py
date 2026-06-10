@@ -6,9 +6,7 @@ use std::collections::BinaryHeap;
 use faer::Col;
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::Lu;
-use faer::sparse::{
-    SparseColMat, SparseRowMat, SymbolicSparseColMat, SymbolicSparseRowMat, Triplet,
-};
+use faer::sparse::{SparseColMat, SparseRowMat, SymbolicSparseColMat, Triplet};
 use rayon::prelude::*;
 
 use crate::mesh::elements::quad2d::quadrature::gauss_volume;
@@ -20,8 +18,7 @@ use crate::physics::solenoid_stress::assembly::{
 };
 use crate::physics::solenoid_stress::axisym::{build_b_matrix, constitutive_times_strain};
 use crate::physics::solenoid_stress::convenience::{
-    Structural2dElementMeasures, Structural2dElementQuadrature, rotate_material_in_plane,
-    rotate_thermal_material_in_plane,
+    Structural2dElementMeasures, rotate_material_in_plane, rotate_thermal_material_in_plane,
 };
 use crate::physics::solenoid_stress::family::{Quad4Family, Quad9Family, QuadElementFamily};
 use crate::physics::solenoid_stress::loads::{
@@ -32,11 +29,6 @@ use crate::physics::solenoid_stress::loads::{
     temperature_operator_for_family, temperature_operator_for_family_par,
     thermal_reference_rhs_for_family, traction_operator_for_family,
     traction_operator_for_family_par,
-};
-use crate::physics::solenoid_stress::recovery::{
-    CsrOperatorParts, ReducedRecoverySelection, SelectedReducedQuadratureFieldOperators,
-    selected_reduced_quadrature_field_operators_for_family,
-    selected_reduced_quadrature_field_operators_for_family_par,
 };
 use crate::physics::solenoid_stress::types::{
     PressureLoad, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
@@ -90,20 +82,6 @@ impl Structural2dElementType {
     }
 }
 
-const fn empty_recovery_selection() -> ReducedRecoverySelection {
-    ReducedRecoverySelection {
-        points: false,
-        strain_operator: false,
-        stress_operator: false,
-        thermal_strain_operator: false,
-        thermal_stress_operator: false,
-        strain_constant: false,
-        stress_constant: false,
-        thermal_strain_constant: false,
-        thermal_stress_constant: false,
-    }
-}
-
 /// Borrowed element-connectivity input for model assembly.
 ///
 /// Each variant stores element-node connectivity in the node ordering expected by the
@@ -124,7 +102,6 @@ struct Structural2dAssemblyData {
     thermal_material_table: Option<Vec<ThermalMaterial>>,
     material_orientation_angles: Option<Vec<f64>>,
     global_to_reduced: Vec<usize>,
-    fixed_lookup: Vec<Option<f64>>,
     par: bool,
 }
 
@@ -558,167 +535,6 @@ impl Structural2dModel {
         }
     }
 
-    fn build_selected_recovery_for_family<
-        Family,
-        const NODES_PER_ELEMENT: usize,
-        const DOF_PER_ELEMENT: usize,
-    >(
-        &self,
-        selection: ReducedRecoverySelection,
-    ) -> Result<SelectedReducedQuadratureFieldOperators, String>
-    where
-        Family: QuadElementFamily<NODES_PER_ELEMENT>,
-    {
-        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
-        let mesh = QuadMeshView2d {
-            nodes_rz: &self.analysis_nodes,
-            elements: &elements,
-        };
-        if self.assembly.par {
-            selected_reduced_quadrature_field_operators_for_family_par::<
-                Family,
-                NODES_PER_ELEMENT,
-                DOF_PER_ELEMENT,
-            >(
-                mesh,
-                &self.assembly.material_ids,
-                &self.assembly.material_table,
-                self.assembly.thermal_material_table.as_deref(),
-                self.assembly.material_orientation_angles.as_deref(),
-                self.formulation,
-                self.quadrature,
-                &self.assembly.global_to_reduced,
-                &self.assembly.fixed_lookup,
-                self.ndof_reduced,
-                selection,
-            )
-        } else {
-            selected_reduced_quadrature_field_operators_for_family::<
-                Family,
-                NODES_PER_ELEMENT,
-                DOF_PER_ELEMENT,
-            >(
-                mesh,
-                &self.assembly.material_ids,
-                &self.assembly.material_table,
-                self.assembly.thermal_material_table.as_deref(),
-                self.assembly.material_orientation_angles.as_deref(),
-                self.formulation,
-                self.quadrature,
-                &self.assembly.global_to_reduced,
-                &self.assembly.fixed_lookup,
-                self.ndof_reduced,
-                selection,
-            )
-        }
-    }
-
-    fn build_selected_recovery(
-        &self,
-        selection: ReducedRecoverySelection,
-    ) -> Result<SelectedReducedQuadratureFieldOperators, String> {
-        match self.element_type {
-            Structural2dElementType::Quad4 => self.build_selected_recovery_for_family::<
-                Quad4Family,
-                { quad4::NODES_PER_ELEMENT },
-                { dof_per_element(quad4::NODES_PER_ELEMENT) },
-            >(selection),
-            Structural2dElementType::Quad9 => self.build_selected_recovery_for_family::<
-                Quad9Family,
-                { quad9::NODES_PER_ELEMENT },
-                { dof_per_element(quad9::NODES_PER_ELEMENT) },
-            >(selection),
-        }
-    }
-
-    pub fn strain_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
-        let selection = ReducedRecoverySelection {
-            strain_operator: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(csr_from_canonical_parts(
-            selected.strain_operator.expect("selected strain operator"),
-        ))
-    }
-
-    pub fn stress_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
-        let selection = ReducedRecoverySelection {
-            stress_operator: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(csr_from_canonical_parts(
-            selected.stress_operator.expect("selected stress operator"),
-        ))
-    }
-
-    pub fn thermal_strain_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
-        let selection = ReducedRecoverySelection {
-            thermal_strain_operator: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(csr_from_canonical_parts(
-            selected
-                .thermal_strain_operator
-                .expect("selected thermal strain operator"),
-        ))
-    }
-
-    pub fn thermal_stress_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
-        let selection = ReducedRecoverySelection {
-            thermal_stress_operator: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(csr_from_canonical_parts(
-            selected
-                .thermal_stress_operator
-                .expect("selected thermal stress operator"),
-        ))
-    }
-
-    pub fn strain_constant(&self) -> Result<Vec<f64>, String> {
-        let selection = ReducedRecoverySelection {
-            strain_constant: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(selected.strain_constant.expect("selected strain constant"))
-    }
-
-    pub fn stress_constant(&self) -> Result<Vec<f64>, String> {
-        let selection = ReducedRecoverySelection {
-            stress_constant: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(selected.stress_constant.expect("selected stress constant"))
-    }
-
-    pub fn thermal_strain_constant(&self) -> Result<Vec<f64>, String> {
-        let selection = ReducedRecoverySelection {
-            thermal_strain_constant: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(selected
-            .thermal_strain_constant
-            .expect("selected thermal strain constant"))
-    }
-
-    pub fn thermal_stress_constant(&self) -> Result<Vec<f64>, String> {
-        let selection = ReducedRecoverySelection {
-            thermal_stress_constant: true,
-            ..empty_recovery_selection()
-        };
-        let selected = self.build_selected_recovery(selection)?;
-        Ok(selected
-            .thermal_stress_constant
-            .expect("selected thermal stress constant"))
-    }
-
     fn evaluate_strain_for_locations_for_family<
         Family,
         const NODES_PER_ELEMENT: usize,
@@ -1073,24 +889,6 @@ impl Structural2dModel {
         full
     }
 
-    /// Recompute the physical quadrature points and mapped weights for the stored analysis mesh.
-    ///
-    /// Returns:
-    ///     Element-major quadrature data with:
-    ///     - `points` length `nelem * nq_per_element`, each entry `(r, z)` with units `[length]`
-    ///     - `weights_area` length `nelem * nq_per_element` with units `[area]`
-    ///     - `weights_volume` length `nelem * nq_per_element` with units `[volume]`
-    ///     - `nq_per_element` giving the number of consecutive quadrature entries per element
-    pub fn element_quadrature(&self) -> Result<Structural2dElementQuadrature, String> {
-        let locations = self.quadrature()?;
-        Ok(Structural2dElementQuadrature {
-            points: locations.points,
-            weights_area: locations.weights_area,
-            weights_volume: locations.weights_volume,
-            nq_per_element: locations.points_per_element,
-        })
-    }
-
     /// Return element-major quadrature locations and mapped weights.
     pub fn quadrature(&self) -> Result<Structural2dPointLocations, String> {
         match self.element_type {
@@ -1145,17 +943,17 @@ impl Structural2dModel {
     ///     - `areas` shape `(nelem,)` and units `[area]`
     ///     - `volumes` shape `(nelem,)` and units `[volume]`
     pub fn element_measures(&self) -> Result<Structural2dElementMeasures, String> {
-        let quadrature = self.element_quadrature()?;
+        let quadrature = self.quadrature()?;
         let mut areas = vec![0.0; self.nelem];
         let mut volumes = vec![0.0; self.nelem];
         for element in 0..self.nelem {
-            let start = element * quadrature.nq_per_element;
-            let end = start + quadrature.nq_per_element;
+            let start = element * quadrature.points_per_element;
+            let end = start + quadrature.points_per_element;
             for &weight in &quadrature.weights_area[start..end] {
-                areas[element] = areas[element] + weight;
+                areas[element] += weight;
             }
             for &weight in &quadrature.weights_volume[start..end] {
-                volumes[element] = volumes[element] + weight;
+                volumes[element] += weight;
             }
         }
         Ok(Structural2dElementMeasures { areas, volumes })
@@ -1464,7 +1262,6 @@ where
             thermal_material_table: thermal_material_table.map(|table| table.to_vec()),
             material_orientation_angles: material_orientation_angles.map(|angles| angles.to_vec()),
             global_to_reduced,
-            fixed_lookup,
             par,
         },
         lu: None,
@@ -1679,18 +1476,6 @@ fn csr_from_parts(
         .collect::<Vec<_>>();
     SparseRowMat::try_new_from_triplets(nrow, ncol, &triplets)
         .map_err(|err| format!("failed to build CSR operator: {err:?}"))
-}
-
-/// Build a CSR matrix from already canonical row pointers, column indices, and values.
-fn csr_from_canonical_parts(parts: CsrOperatorParts) -> SparseRowMat<usize, f64> {
-    let symbolic = SymbolicSparseRowMat::new_checked(
-        parts.nrow,
-        parts.ncol,
-        parts.row_ptr,
-        None,
-        parts.col_idx,
-    );
-    SparseRowMat::new(symbolic, parts.vals)
 }
 
 /// Compress stiffness triplets into the CSC format used by the cached sparse LU factorization.
@@ -1992,8 +1777,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Structural2dElements, Structural2dModel, assemble_structural_2d};
+    use super::{Structural2dElements, Structural2dModel, assemble_structural_2d, csr_from_parts};
+    use crate::mesh::QuadMeshView2d;
     use crate::mesh::QuadratureRule;
+    use crate::mesh::quad2d::{Quad4ReferenceElement, quad_mesh_strain_operator};
     use crate::physics::solenoid_stress::convenience::{
         isotropic_axisymmetric_material, isotropic_axisymmetric_thermal_material,
     };
@@ -2122,18 +1909,27 @@ mod tests {
             )
             .expect("matrix-free strain should evaluate");
 
-        let reduced = model
-            .free_dofs
-            .iter()
-            .map(|&dof| displacements_full[dof])
-            .collect::<Vec<_>>();
-        let mut expected = csr_matvec(&model.strain_operator().expect("strain operator"), &reduced);
-        for (value, constant) in expected
-            .iter_mut()
-            .zip(model.strain_constant().expect("strain constant"))
-        {
-            *value += constant;
-        }
+        let elements = model.analysis_elements::<4>().expect("analysis elements");
+        let mesh = QuadMeshView2d {
+            nodes_rz: &model.analysis_nodes,
+            elements: &elements,
+        };
+        let strain_operator = quad_mesh_strain_operator::<Quad4ReferenceElement, 4, 8>(
+            mesh,
+            &locations.element_indices,
+            &locations.reference_points,
+            model.formulation,
+        )
+        .expect("location-based sparse strain operator should build");
+        let strain_operator = csr_from_parts(
+            strain_operator.nrow,
+            strain_operator.ncol,
+            strain_operator.rows,
+            strain_operator.cols,
+            strain_operator.vals,
+        )
+        .expect("strain operator should convert to CSR");
+        let expected = csr_matvec(&strain_operator, &displacements_full);
         let actual = matrix_free
             .into_iter()
             .flat_map(|sample| sample.into_iter())

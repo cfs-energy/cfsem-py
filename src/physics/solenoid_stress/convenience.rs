@@ -9,33 +9,6 @@ use std::collections::HashMap;
 use crate::mesh::elements::quad2d::quad4;
 use crate::physics::solenoid_stress::types::ThermalMaterial;
 
-/// Per-element quadrature data in element-major flattened form.
-///
-/// `points`, `weights_area`, and `weights_volume` are stored in the same element-major order.
-/// `points` has flattened shape `(nelem * nq_per_element, 2)`,
-/// `weights_area` and `weights_volume` have flattened shape `(nelem * nq_per_element,)`, and
-/// `nq_per_element` gives the number of consecutive quadrature entries belonging to each element.
-#[derive(Debug, Clone)]
-pub struct Structural2dElementQuadrature {
-    /// Physical quadrature-point coordinates in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 2)`.
-    /// Units: `[length]`.
-    pub points: Vec<[f64; 2]>,
-    /// Mapped analysis-plane area weights `det(J) w` in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element,)`.
-    /// Units: `[area]`.
-    pub weights_area: Vec<f64>,
-    /// Mapped represented-volume weights in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element,)`.
-    /// Units: `[volume]`.
-    pub weights_volume: Vec<f64>,
-    /// Number of quadrature points contributed by each element.
-    pub nq_per_element: usize,
-}
-
 /// Per-element analysis-plane area and represented volume.
 ///
 /// Both vectors have shape `(nelem,)`.

@@ -143,14 +143,13 @@ pub struct ElevatedQuad9Mesh {
 ///     Elastic stress-strain matrix with shape `(4, 4)` in component order
 ///     `[rr, zz, tt, rz]`. Units are `[stress / strain] = [pressure]`.
 pub fn isotropic_axisymmetric_material(youngs_modulus: f64, poisson_ratio: f64) -> [[f64; 4]; 4] {
-    let two = 2.0;
     let lam =
-        youngs_modulus * poisson_ratio / ((1.0 + poisson_ratio) * (1.0 - two * poisson_ratio));
-    let mu = youngs_modulus / (two * (1.0 + poisson_ratio));
+        youngs_modulus * poisson_ratio / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio));
+    let mu = youngs_modulus / (2.0 * (1.0 + poisson_ratio));
     [
-        [lam + two * mu, lam, lam, 0.0],
-        [lam, lam + two * mu, lam, 0.0],
-        [lam, lam, lam + two * mu, 0.0],
+        [lam + 2.0 * mu, lam, lam, 0.0],
+        [lam, lam + 2.0 * mu, lam, 0.0],
+        [lam, lam, lam + 2.0 * mu, 0.0],
         [0.0, 0.0, 0.0, mu],
     ]
 }
@@ -213,19 +212,18 @@ pub fn rotate_material_in_plane(material: &[[f64; 4]; 4], angle: f64) -> [[f64; 
     let c2 = c * c;
     let s2 = s * s;
     let cs = c * s;
-    let two = 2.0;
 
     // local_strain = strain_to_local * global_strain
     let strain_to_local = [
         [c2, s2, 0.0, cs],
         [s2, c2, 0.0, -cs],
         [0.0, 0.0, 1.0, 0.0],
-        [-two * cs, two * cs, 0.0, c2 - s2],
+        [-2.0 * cs, 2.0 * cs, 0.0, c2 - s2],
     ];
     // global_stress = stress_to_global * local_stress
     let stress_to_global = [
-        [c2, s2, 0.0, -two * cs],
-        [s2, c2, 0.0, two * cs],
+        [c2, s2, 0.0, -2.0 * cs],
+        [s2, c2, 0.0, 2.0 * cs],
         [0.0, 0.0, 1.0, 0.0],
         [cs, -cs, 0.0, c2 - s2],
     ];
@@ -267,12 +265,11 @@ pub fn rotate_thermal_expansion_in_plane(alpha: &[f64; 4], angle: f64) -> [f64; 
     let c2 = c * c;
     let s2 = s * s;
     let cs = c * s;
-    let two = 2.0;
     [
         c2 * alpha[0] + s2 * alpha[1] - cs * alpha[3],
         s2 * alpha[0] + c2 * alpha[1] + cs * alpha[3],
         alpha[2],
-        two * cs * alpha[0] - two * cs * alpha[1] + (c2 - s2) * alpha[3],
+        2.0 * cs * alpha[0] - 2.0 * cs * alpha[1] + (c2 - s2) * alpha[3],
     ]
 }
 
@@ -375,10 +372,9 @@ pub fn infer_quad9_mesh(
             analysis_elements[element_index][4 + local_edge] = midpoint_index;
         }
 
-        let quarter = 0.25;
         let center = [
-            quarter * (coords[0][0] + coords[1][0] + coords[2][0] + coords[3][0]),
-            quarter * (coords[0][1] + coords[1][1] + coords[2][1] + coords[3][1]),
+            0.25 * (coords[0][0] + coords[1][0] + coords[2][0] + coords[3][0]),
+            0.25 * (coords[0][1] + coords[1][1] + coords[2][1] + coords[3][1]),
         ];
         let center_index = analysis_nodes.len();
         analysis_nodes.push(center);

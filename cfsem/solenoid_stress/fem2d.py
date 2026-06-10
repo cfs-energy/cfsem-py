@@ -136,19 +136,22 @@ class ElementMeasures:
 
 
 @dataclass(frozen=True, slots=True)
-class ElementQuadrature:
-    """Per-element physical quadrature points and mapped weights.
+class QuadPointLocations:
+    """Element-owned physical and reference point locations.
 
-    `points` has shape `(nelem, nq_per_element, 2)`.
-    `weights_area` and `weights_volume` have shape `(nelem, nq_per_element)`.
-    `points` has units `[length]`, `weights_area` has units `[area]`, and
-    `weights_volume` has units `[volume]`.
+    `points` has shape `(npoint, 2)`, `element_indices` has shape `(npoint,)`, and
+    `reference_points` has shape `(npoint, 2)`. Quadrature locations also carry flat
+    `weights_area` and `weights_volume` arrays with shape `(npoint,)`; non-quadrature locations
+    store empty weight arrays.
     """
 
     points: npt.NDArray[np.floating[Any]]
+    element_indices: npt.NDArray[np.int64]
+    reference_points: npt.NDArray[np.floating[Any]]
+    element_type: str
     weights_area: npt.NDArray[np.floating[Any]]
     weights_volume: npt.NDArray[np.floating[Any]]
-    nq_per_element: int
+    points_per_element: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,17 +223,12 @@ class Structural2DFEMModel:
 
     Structural FEM numeric arrays are `float64`; floating inputs must already use `float64` arrays.
 
-    The sparse operators are exported from the Rust backend on demand:
+    Load and stiffness operators are exported from the Rust backend on demand:
     - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
       map load amplitudes to the reduced structural right-hand side,
-    - `strain_operator`, `stress_operator`, `thermal_strain_operator`, and
-      `thermal_stress_operator` map solved displacements or nodal temperatures to quadrature-point
-      fields.
-
-    `build_rhs(...)`, `solve(...)`, `element_quadrature()`, `element_measures()`, and the
-    `evaluate_quadrature_*` field-recovery methods call the Rust backend directly and do not
-    materialize these sparse matrices. Sparse operator exports are user-owned artifacts; retain the
-    returned SciPy matrix explicitly when a workflow needs reuse.
+    Field recovery uses explicit `QuadPointLocations` objects. Use `quadrature()` for quadrature
+    locations, `locate_points(...)` for arbitrary physical points, or `locate_points_in_elements(...)`
+    when element ownership is already known.
 
     Key public array shapes and units:
     - `stiffness` has shape `(ndof_reduced, ndof_reduced)` with entry units
@@ -255,6 +253,10 @@ class Structural2DFEMModel:
         analysis_nodes: npt.NDArray[np.floating[Any]],
         analysis_elements: npt.NDArray[np.uint64],
         elevated: ElevatedQuad9Mesh | None,
+        material_ids: npt.NDArray[np.uint64],
+        material_table: npt.NDArray[np.floating[Any]],
+        thermal_material_table: npt.NDArray[np.floating[Any]] | None,
+        material_orientation_angles: npt.NDArray[np.floating[Any]],
         pressure_faces: npt.NDArray[np.uint64],
         traction_faces: npt.NDArray[np.uint64],
         formulation: str,
@@ -273,6 +275,10 @@ class Structural2DFEMModel:
         self._input_nodes = input_nodes
         self._input_elements = input_elements
         self._elevated = elevated
+        self._material_ids = material_ids
+        self._material_table = material_table
+        self._thermal_material_table = thermal_material_table
+        self._material_orientation_angles = material_orientation_angles
         self.pressure_faces = pressure_faces
         self.traction_faces = traction_faces
         self.analysis_nodes = analysis_nodes
@@ -298,15 +304,10 @@ class Structural2DFEMModel:
         self.nelem = int(nelem)
         self.nq_per_element = int(nq_per_element)
         self.n_temperature_nodes = int(n_temperature_nodes)
-        self._element_quadrature_cache: ElementQuadrature | None = None
+        self._quadrature_cache: QuadPointLocations | None = None
         self._element_measures_cache: ElementMeasures | None = None
         self._temperature_elevation_cache: sp.csr_matrix | None = None
         self._constant_rhs_cache: npt.NDArray[np.float64] | None = None
-        self._quadrature_points_cache: npt.NDArray[np.float64] | None = None
-        self._strain_constant_cache: npt.NDArray[np.float64] | None = None
-        self._stress_constant_cache: npt.NDArray[np.float64] | None = None
-        self._thermal_strain_constant_cache: npt.NDArray[np.float64] | None = None
-        self._thermal_stress_constant_cache: npt.NDArray[np.float64] | None = None
         self._stiffness_cache: sp.csc_matrix | None = None
 
     @property
@@ -337,62 +338,88 @@ class Structural2DFEMModel:
             self._constant_rhs_cache = cache
         return cache
 
-    @property
-    def quadrature_points(self) -> npt.NDArray[np.floating[Any]]:
-        """Quadrature-point coordinates with shape `(nelem, nq_per_element, 2)`.
+    def quadrature(self) -> QuadPointLocations:
+        """Return element-major quadrature locations and mapped weights."""
 
-        This property materializes point coordinates separately from field recovery so workflows
-        that only need matrix-free values do not allocate point arrays.
-        """
-
-        cache = self._quadrature_points_cache
+        cache = self._quadrature_cache
         if cache is None:
-            cache = np.asarray(
-                self._backend.quadrature_points_flat(),
-                dtype=np.float64,
-            ).reshape(self.analysis_elements.shape[0], self.nq_per_element, 2)
-            self._quadrature_points_cache = cache
+            points, element_indices, reference_points, weights_area, weights_volume, points_per_element = (
+                self._backend.quadrature()
+            )
+            cache = QuadPointLocations(
+                points=np.asarray(points, dtype=np.float64).reshape(-1, 2),
+                element_indices=np.asarray(element_indices, dtype=np.int64),
+                reference_points=np.asarray(reference_points, dtype=np.float64).reshape(-1, 2),
+                element_type=self.element_type,
+                weights_area=np.asarray(weights_area, dtype=np.float64),
+                weights_volume=np.asarray(weights_volume, dtype=np.float64),
+                points_per_element=int(points_per_element),
+            )
+            self._quadrature_cache = cache
         return cache
 
-    @property
-    def strain_constant(self) -> npt.NDArray[np.floating[Any]]:
-        """Strain offset from prescribed displacement DOFs, exported on first access."""
+    def locate_points(
+        self,
+        points: ArrayLike,
+        *,
+        outside: str = "nearest",
+        tolerance: float | None = None,
+        max_iterations: int = 20,
+    ) -> QuadPointLocations:
+        """Locate arbitrary physical points in this model's analysis mesh."""
 
-        cache = self._strain_constant_cache
-        if cache is None:
-            cache = np.asarray(self._backend.strain_constant(), dtype=np.float64)
-            self._strain_constant_cache = cache
-        return cache
+        query = query_quad_mesh(
+            self.analysis_nodes,
+            self.analysis_elements,
+            points,
+            element_type=self.element_type,
+            max_iterations=max_iterations,
+        )
+        outside_policy = str(outside).strip().lower()
+        if outside_policy not in {"nearest", "raise", "error"}:
+            raise ValueError(f"unsupported outside policy {outside!r}; use 'nearest' or 'raise'")
+        tol = _normalize_query_tolerance(tolerance)
+        inside = query.nearest_element_distances <= tol
+        if outside_policy in {"raise", "error"} and not np.all(inside):
+            first = int(np.flatnonzero(~inside)[0])
+            raise ValueError(f"query point {first} is outside the quad mesh")
+        return QuadPointLocations(
+            points=query.nearest_element_points,
+            element_indices=query.nearest_element_indices,
+            reference_points=query.nearest_element_reference_points,
+            element_type=self.element_type,
+            weights_area=np.zeros((0,), dtype=np.float64),
+            weights_volume=np.zeros((0,), dtype=np.float64),
+            points_per_element=0,
+        )
 
-    @property
-    def stress_constant(self) -> npt.NDArray[np.floating[Any]]:
-        """Stress offset from prescribed displacement DOFs, exported on first access."""
+    def locate_points_in_elements(
+        self,
+        points: ArrayLike,
+        element_indices: ArrayLike,
+        *,
+        max_iterations: int = 20,
+    ) -> QuadPointLocations:
+        """Project physical points into caller-supplied owning elements."""
 
-        cache = self._stress_constant_cache
-        if cache is None:
-            cache = np.asarray(self._backend.stress_constant(), dtype=np.float64)
-            self._stress_constant_cache = cache
-        return cache
-
-    @property
-    def thermal_strain_constant(self) -> npt.NDArray[np.floating[Any]]:
-        """Thermal-strain reference-temperature offset, exported on first access."""
-
-        cache = self._thermal_strain_constant_cache
-        if cache is None:
-            cache = np.asarray(self._backend.thermal_strain_constant(), dtype=np.float64)
-            self._thermal_strain_constant_cache = cache
-        return cache
-
-    @property
-    def thermal_stress_constant(self) -> npt.NDArray[np.floating[Any]]:
-        """Thermal-stress reference-temperature offset, exported on first access."""
-
-        cache = self._thermal_stress_constant_cache
-        if cache is None:
-            cache = np.asarray(self._backend.thermal_stress_constant(), dtype=np.float64)
-            self._thermal_stress_constant_cache = cache
-        return cache
+        points_arr = _normalize_query_points(points)
+        element_indices_arr = np.asarray(element_indices, dtype=np.uint64).reshape(-1)
+        projected_points, projected_elements, reference_points, points_per_element = (
+            self._backend.locate_points_in_elements(
+                points_arr,
+                element_indices_arr,
+                int(max_iterations),
+            )
+        )
+        return QuadPointLocations(
+            points=np.asarray(projected_points, dtype=np.float64).reshape(-1, 2),
+            element_indices=np.asarray(projected_elements, dtype=np.int64),
+            reference_points=np.asarray(reference_points, dtype=np.float64).reshape(-1, 2),
+            element_type=self.element_type,
+            weights_area=np.zeros((0,), dtype=np.float64),
+            weights_volume=np.zeros((0,), dtype=np.float64),
+            points_per_element=int(points_per_element),
+        )
 
     def _temperature_elevation(self) -> sp.csr_matrix:
         """Return the cached input-to-analysis temperature elevation operator.
@@ -491,76 +518,54 @@ class Structural2DFEMModel:
             self._backend.temperature_to_rhs_csr,
         )
 
-    @property
-    def strain_operator(self) -> sp.csr_matrix:
-        """Operator mapping reduced displacement to quadrature-point total strain.
+    def interpolation_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
+        """Operator mapping scalar analysis-node values to located points."""
 
-        Shape is `(4 * nelem * nq_per_element, ndof_reduced)`. Entries have units
-        `[strain / displacement] = [1 / length]`.
-        """
-
-        return _csr_matrix_from_binding(self._backend.strain_operator_csr())
-
-    @property
-    def stress_operator(self) -> sp.csr_matrix:
-        """Operator mapping reduced displacement to quadrature-point stress.
-
-        Shape is `(4 * nelem * nq_per_element, ndof_reduced)`. Entries have units
-        `[stress / displacement] = [pressure / length]`.
-        """
-
-        return _csr_matrix_from_binding(self._backend.stress_operator_csr())
-
-    @property
-    def thermal_strain_operator(self) -> sp.csr_matrix:
-        """Operator mapping input-node temperatures to quadrature-point thermal strain.
-
-        Shape is `(4 * nelem * nq_per_element, n_temperature_nodes)`. Entries have units
-        `[strain / temperature]`.
-        """
-
-        return self._temperature_csr_export(
-            self._backend.thermal_strain_operator_csr,
+        locations = self._validate_locations(locations)
+        return _coo_operator_from_binding(
+            _quad_mesh_interpolation_operator_f64(
+                self.analysis_nodes,
+                self.analysis_elements,
+                locations.element_indices.astype(np.uint64, copy=False),
+                locations.reference_points,
+                self.element_type,
+            ),
         )
 
-    @property
-    def thermal_stress_operator(self) -> sp.csr_matrix:
-        """Operator mapping input-node temperatures to quadrature-point thermal stress.
+    def strain_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
+        """Operator mapping full analysis displacements to located-point total strain."""
 
-        Shape is `(4 * nelem * nq_per_element, n_temperature_nodes)`. Entries have units
-        `[stress / temperature]`.
-        """
-
-        return self._temperature_csr_export(
-            self._backend.thermal_stress_operator_csr,
+        locations = self._validate_locations(locations)
+        return _coo_operator_from_binding(
+            _quad_mesh_strain_operator_f64(
+                self.analysis_nodes,
+                self.analysis_elements,
+                locations.element_indices.astype(np.uint64, copy=False),
+                locations.reference_points,
+                self.element_type,
+                _formulation_code(self.formulation),
+                self.thickness,
+            ),
         )
 
-    def element_quadrature(self) -> ElementQuadrature:
-        """Return physical quadrature points and mapped weights for each element.
+    def stress_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
+        """Operator mapping full analysis displacements to located-point stress."""
 
-        Returns:
-            ElementQuadrature: Quadrature data with:
-                `points` of shape `(nelem, nq_per_element, 2)` and units `[length]`,
-                `weights_area` of shape `(nelem, nq_per_element)` and units `[area]`,
-                `weights_volume` of shape `(nelem, nq_per_element)` and units `[volume]`.
-        """
-
-        cache = self._element_quadrature_cache
-        if cache is not None:
-            return cache
-        points_flat, weights_area_flat, weights_volume_flat, nq = self._backend.element_quadrature()
-        nelem = self.analysis_elements.shape[0]
-        points = np.asarray(points_flat, dtype=np.float64).reshape(nelem, int(nq), 2)
-        weights_area = np.asarray(weights_area_flat, dtype=np.float64).reshape(nelem, int(nq))
-        weights_volume = np.asarray(weights_volume_flat, dtype=np.float64).reshape(nelem, int(nq))
-        cache = ElementQuadrature(
-            points=points,
-            weights_area=weights_area,
-            weights_volume=weights_volume,
-            nq_per_element=int(nq),
+        locations = self._validate_locations(locations)
+        return _coo_operator_from_binding(
+            _quad_mesh_stress_operator_f64(
+                self.analysis_nodes,
+                self.analysis_elements,
+                locations.element_indices.astype(np.uint64, copy=False),
+                locations.reference_points,
+                self._material_ids,
+                self._material_table,
+                self._material_orientation_angles,
+                self.element_type,
+                _formulation_code(self.formulation),
+                self.thickness,
+            ),
         )
-        self._element_quadrature_cache = cache
-        return cache
 
     def element_measures(self) -> ElementMeasures:
         """Return cross-section area and represented volume for each element.
@@ -574,10 +579,12 @@ class Structural2DFEMModel:
         cache = self._element_measures_cache
         if cache is not None:
             return cache
-        areas, volumes = self._backend.element_measures()
+        quadrature = self.quadrature()
+        weights_area = quadrature.weights_area.reshape(self.nelem, quadrature.points_per_element)
+        weights_volume = quadrature.weights_volume.reshape(self.nelem, quadrature.points_per_element)
         cache = ElementMeasures(
-            areas=np.asarray(areas, dtype=np.float64),
-            volumes=np.asarray(volumes, dtype=np.float64),
+            areas=np.asarray(weights_area.sum(axis=1), dtype=np.float64),
+            volumes=np.asarray(weights_volume.sum(axis=1), dtype=np.float64),
         )
         self._element_measures_cache = cache
         return cache
@@ -601,6 +608,30 @@ class Structural2DFEMModel:
             self._input_nodes.shape[0],
             self._elevated,
         )
+
+    def _validate_locations(self, locations: QuadPointLocations) -> QuadPointLocations:
+        assert isinstance(locations, QuadPointLocations), "locations must be a QuadPointLocations object"
+        assert (
+            locations.element_type == self.element_type
+        ), f"locations use element_type {locations.element_type!r}, but model uses {self.element_type!r}"
+        assert (
+            locations.points.ndim == 2 and locations.points.shape[1] == 2
+        ), f"locations.points must have shape (npoint, 2); got {locations.points.shape}"
+        assert (
+            locations.reference_points.ndim == 2 and locations.reference_points.shape[1] == 2
+        ), f"locations.reference_points must have shape (npoint, 2); got {locations.reference_points.shape}"
+        assert (
+            locations.element_indices.ndim == 1
+        ), f"locations.element_indices must have shape (npoint,); got {locations.element_indices.shape}"
+        npoint = locations.element_indices.shape[0]
+        assert (
+            locations.points.shape[0] == npoint
+        ), f"locations.points has {locations.points.shape[0]} rows, but element_indices has {npoint}"
+        assert locations.reference_points.shape[0] == npoint, (
+            "locations.reference_points has "
+            f"{locations.reference_points.shape[0]} rows, but element_indices has {npoint}"
+        )
+        return locations
 
     def build_rhs(
         self,
@@ -699,13 +730,16 @@ class Structural2DFEMModel:
             return self.recover_full(arr)
         return _normalize_displacements(displacements, self.analysis_nodes.shape[0]).reshape(-1)
 
-    def evaluate_quadrature_strain(
+    def strain(
         self,
+        locations: QuadPointLocations,
         displacements: ArrayLike,
     ) -> npt.NDArray[np.floating[Any]]:
-        """Evaluate quadrature-point total strain without materializing recovery matrices.
+        """Evaluate total strain at located points without materializing recovery matrices.
 
         Args:
+            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
+                `locate_points_in_elements(...)`.
             displacements: Either the reduced displacement solution with shape
                 `(ndof_reduced,)`, or the full analysis displacement field with shape
                 `(2 * n_analysis_nodes,)` or `(n_analysis_nodes, 2)`. Displacement units are
@@ -716,19 +750,25 @@ class Structural2DFEMModel:
             `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
         """
 
+        locations = self._validate_locations(locations)
         displacements_full = self._full_displacement_for_backend(displacements)
-        strain_flat, nq = self._backend.evaluate_quadrature_strain(displacements_full)
-        nelem = self.analysis_elements.shape[0]
-        nq = int(nq)
-        return np.asarray(strain_flat, dtype=np.float64).reshape(nelem, nq, 4)
+        strain_flat = self._backend.strain(
+            locations.element_indices.astype(np.uint64, copy=False),
+            locations.reference_points,
+            displacements_full,
+        )
+        return np.asarray(strain_flat, dtype=np.float64).reshape(-1, 4)
 
-    def evaluate_quadrature_stress(
+    def stress(
         self,
+        locations: QuadPointLocations,
         displacements: ArrayLike,
     ) -> npt.NDArray[np.floating[Any]]:
-        """Evaluate quadrature-point stress without materializing recovery matrices.
+        """Evaluate stress at located points without materializing recovery matrices.
 
         Args:
+            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
+                `locate_points_in_elements(...)`.
             displacements: Either the reduced displacement solution with shape
                 `(ndof_reduced,)`, or the full analysis displacement field with shape
                 `(2 * n_analysis_nodes,)` or `(n_analysis_nodes, 2)`. Displacement units are
@@ -740,19 +780,25 @@ class Structural2DFEMModel:
             Units are `[stress]`.
         """
 
+        locations = self._validate_locations(locations)
         displacements_full = self._full_displacement_for_backend(displacements)
-        stress_flat, nq = self._backend.evaluate_quadrature_stress(displacements_full)
-        nelem = self.analysis_elements.shape[0]
-        nq = int(nq)
-        return np.asarray(stress_flat, dtype=np.float64).reshape(nelem, nq, 4)
+        stress_flat = self._backend.stress(
+            locations.element_indices.astype(np.uint64, copy=False),
+            locations.reference_points,
+            displacements_full,
+        )
+        return np.asarray(stress_flat, dtype=np.float64).reshape(-1, 4)
 
-    def evaluate_quadrature_thermal_strain(
+    def thermal_strain(
         self,
+        locations: QuadPointLocations,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        """Evaluate quadrature-point thermal strain without materializing recovery matrices.
+        """Evaluate thermal strain at located points without materializing recovery matrices.
 
         Args:
+            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
+                `locate_points_in_elements(...)`.
             nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
                 `[temperature]`. Required only when the model includes thermal materials.
 
@@ -761,19 +807,25 @@ class Structural2DFEMModel:
             `[rr, zz, tt, rz]` for axisymmetric models or `[xx, yy, zz, xy]` for plane strain.
         """
 
+        locations = self._validate_locations(locations)
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
-        thermal_strain_flat, nq = self._backend.evaluate_quadrature_thermal_strain(temperature_arr)
-        nelem = self.analysis_elements.shape[0]
-        nq = int(nq)
-        return np.asarray(thermal_strain_flat, dtype=np.float64).reshape(nelem, nq, 4)
+        thermal_strain_flat = self._backend.thermal_strain(
+            locations.element_indices.astype(np.uint64, copy=False),
+            locations.reference_points,
+            temperature_arr,
+        )
+        return np.asarray(thermal_strain_flat, dtype=np.float64).reshape(-1, 4)
 
-    def evaluate_quadrature_thermal_stress(
+    def thermal_stress(
         self,
+        locations: QuadPointLocations,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
-        """Evaluate quadrature-point thermal stress without materializing recovery matrices.
+        """Evaluate thermal stress at located points without materializing recovery matrices.
 
         Args:
+            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
+                `locate_points_in_elements(...)`.
             nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
                 `[temperature]`. Required only when the model includes thermal materials.
 
@@ -783,11 +835,14 @@ class Structural2DFEMModel:
             Units are `[stress]`.
         """
 
+        locations = self._validate_locations(locations)
         temperature_arr = self._normalize_temperature_for_backend(nodal_temperature)
-        thermal_stress_flat, nq = self._backend.evaluate_quadrature_thermal_stress(temperature_arr)
-        nelem = self.analysis_elements.shape[0]
-        nq = int(nq)
-        return np.asarray(thermal_stress_flat, dtype=np.float64).reshape(nelem, nq, 4)
+        thermal_stress_flat = self._backend.thermal_stress(
+            locations.element_indices.astype(np.uint64, copy=False),
+            locations.reference_points,
+            temperature_arr,
+        )
+        return np.asarray(thermal_stress_flat, dtype=np.float64).reshape(-1, 4)
 
 
 def _quadrature_code(quadrature: str | int) -> int:
@@ -1041,106 +1096,6 @@ def quad_mesh_interpolation_operator(
             np.asarray(query.nearest_element_indices, dtype=np.uint64),
             query.nearest_element_reference_points,
             query.element_type,
-        ),
-    )
-
-
-def quad_mesh_strain_operator(
-    query: QuadMeshQuery,
-    *,
-    formulation: str,
-    thickness: float | None = None,
-) -> sp.csr_matrix:
-    """Return a sparse operator mapping full nodal displacements to query-point strain.
-
-    The returned matrix has shape `(4 * npoint, 2 * nnode)`. Rows are grouped by query point and
-    use the same four-component strain ordering as the structural FEM formulation.
-
-    Args:
-        query: Mesh query data from `query_quad_mesh(...)`.
-        formulation: Symmetry reduction, either `"axisymmetric"` or `"plane_strain"`.
-        thickness: Plane-strain out-of-plane thickness with units `[length]`. Required only for
-            `formulation="plane_strain"`; must be omitted for `formulation="axisymmetric"`.
-
-    Returns:
-        Sparse strain-recovery operator with shape `(4 * npoint, 2 * nnode)`. Entries have units
-        `[1 / length]`, so multiplying by full nodal displacements with shape `(2 * nnode,)` and
-        units `[length]` returns unitless strain samples with shape `(4 * npoint,)`.
-    """
-
-    normalized_formulation = _normalize_formulation(formulation)
-    thickness_value = _normalize_thickness(normalized_formulation, thickness)
-    return _coo_operator_from_binding(
-        _quad_mesh_strain_operator_f64(
-            query.nodes,
-            query.elements,
-            np.asarray(query.nearest_element_indices, dtype=np.uint64),
-            query.nearest_element_reference_points,
-            query.element_type,
-            _formulation_code(normalized_formulation),
-            thickness_value,
-        ),
-    )
-
-
-def quad_mesh_stress_operator(
-    query: QuadMeshQuery,
-    material_ids: ArrayLike,
-    material_table: ArrayLike,
-    *,
-    formulation: str,
-    thickness: float | None = None,
-    material_orientation_angles: ArrayLike | None = None,
-) -> sp.csr_matrix:
-    """Return a sparse operator mapping full nodal displacements to query-point stress.
-
-    The returned matrix has shape `(4 * npoint, 2 * nnode)`. Rows are grouped by query point and
-    use the same four-component stress ordering as the structural FEM formulation. Each query point
-    uses the material row assigned to its nearest element; for points contained by the mesh, that is
-    the containing element. Optional `material_orientation_angles` follow assembly semantics and
-    rotate local anisotropic material axes into the global 2D frame per element.
-
-    Args:
-        query: Mesh query data from `query_quad_mesh(...)`.
-        material_ids: Per-element material row indices with shape `(nelem,)`. Entries are unitless
-            indices into `material_table`.
-        material_table: Elastic stress-strain matrices with shape `(nmat, 4, 4)`. Entries have
-            units `[stress / strain] = [pressure]`.
-        formulation: Symmetry reduction, either `"axisymmetric"` or `"plane_strain"`.
-        thickness: Plane-strain out-of-plane thickness with units `[length]`. Required only for
-            `formulation="plane_strain"`; must be omitted for `formulation="axisymmetric"`.
-        material_orientation_angles: Optional scalar or per-element angles with shape `(nelem,)`,
-            in radians. Angles are unitless and rotate local material axes into the global 2D frame.
-
-    Returns:
-        Sparse stress-recovery operator with shape `(4 * npoint, 2 * nnode)`. Entries have units
-        `[pressure / length]`, so multiplying by full nodal displacements with shape
-        `(2 * nnode,)` and units `[length]` returns stress samples with shape `(4 * npoint,)` and
-        units `[pressure]`.
-    """
-
-    material_ids_arr, material_table_arr = _normalize_materials(material_ids, material_table)
-    assert material_ids_arr.shape == (
-        query.elements.shape[0],
-    ), f"material_ids must have shape ({query.elements.shape[0]},); got {material_ids_arr.shape}"
-    material_orientation_angles_arr = _normalize_material_orientation_angles(
-        material_orientation_angles,
-        query.elements.shape[0],
-    )
-    normalized_formulation = _normalize_formulation(formulation)
-    thickness_value = _normalize_thickness(normalized_formulation, thickness)
-    return _coo_operator_from_binding(
-        _quad_mesh_stress_operator_f64(
-            query.nodes,
-            query.elements,
-            np.asarray(query.nearest_element_indices, dtype=np.uint64),
-            query.nearest_element_reference_points,
-            material_ids_arr,
-            material_table_arr,
-            material_orientation_angles_arr,
-            query.element_type,
-            _formulation_code(normalized_formulation),
-            thickness_value,
         ),
     )
 
@@ -1588,6 +1543,10 @@ def assemble_structural_2d(
         analysis_nodes=analysis_nodes,
         analysis_elements=analysis_elements,
         elevated=elevated,
+        material_ids=material_ids_arr,
+        material_table=material_table_arr,
+        thermal_material_table=thermal_material_table_arr,
+        material_orientation_angles=material_orientation_angles_arr,
         pressure_faces=pressure_faces_arr,
         traction_faces=traction_faces_arr,
         formulation=normalized_formulation,
@@ -1756,8 +1715,8 @@ def _normalize_displacements(
 __all__ = [
     "Structural2DFEMModel",
     "ElementMeasures",
-    "ElementQuadrature",
     "ElevatedQuad9Mesh",
+    "QuadPointLocations",
     "QuadMeshInterpolation",
     "QuadMeshQuery",
     "assemble_structural_2d",
@@ -1771,8 +1730,5 @@ __all__ = [
     "orthotropic_axisymmetric_thermal_material",
     "orthotropic_plane_strain_thermal_material",
     "pack_material_tables_from_tags",
-    "quad_mesh_interpolation_operator",
-    "quad_mesh_stress_operator",
-    "quad_mesh_strain_operator",
     "query_quad_mesh",
 ]

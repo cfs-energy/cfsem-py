@@ -94,11 +94,25 @@ def test_quad_mesh_query_and_interpolation_helpers_for_quad4():
     np.testing.assert_allclose(interpolation_operator @ nodal_values, [1.75, 2.0])
 
     displacements = np.column_stack([nodes[:, 0], 2.0 * nodes[:, 1]]).reshape(-1)
-    strain_operator = fem.quad_mesh_strain_operator(
-        query,
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([fem.isotropic_plane_strain_material(200.0e9, 0.27)]),
         formulation="plane_strain",
         thickness=1.0,
+        prescribed={0: 0.0, 1: 0.0, 3: 0.0},
     )
+    locations = fem.QuadPointLocations(
+        points=query.nearest_element_points,
+        element_indices=query.nearest_element_indices,
+        reference_points=query.nearest_element_reference_points,
+        element_type=model.element_type,
+        weights_area=np.zeros((0,), dtype=np.float64),
+        weights_volume=np.zeros((0,), dtype=np.float64),
+        points_per_element=0,
+    )
+    strain_operator = model.strain_operator(locations)
     strain = np.asarray(strain_operator @ displacements).reshape(-1, 4)
     np.testing.assert_allclose(strain[0], [1.0, 2.0, 0.0, 0.0], atol=1.0e-12)
     np.testing.assert_allclose(strain[1], [1.0, 2.0, 0.0, 0.0], atol=1.0e-12)
@@ -115,7 +129,7 @@ def test_quad_mesh_query_and_interpolation_helpers_for_quad4():
     assert np.isnan(outside.values[0])
 
 
-def test_quad_mesh_stress_operator_selects_material_by_query_element() -> None:
+def test_model_stress_operator_selects_material_by_location_element() -> None:
     """Query-point stress recovery should use the material assigned to each containing element."""
 
     nodes = np.array(
@@ -148,24 +162,25 @@ def test_quad_mesh_stress_operator_selects_material_by_query_element() -> None:
         ],
         dtype=np.float64,
     )
-    query = fem.query_quad_mesh(nodes, elements, [[0.25, 0.5], [1.75, 0.5]])
-    displacement = np.column_stack([nodes[:, 0], 2.0 * nodes[:, 1]]).reshape(-1)
-
-    stress_operator = fem.quad_mesh_stress_operator(
-        query,
-        material_ids,
-        material_table,
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
         formulation="plane_strain",
         thickness=1.0,
+        prescribed={0: 0.0, 1: 0.0, 3: 0.0},
     )
-    stress = np.asarray(stress_operator @ displacement).reshape(-1, 4)
+    locations = model.locate_points([[0.25, 0.5], [1.75, 0.5]])
+    displacement = np.column_stack([nodes[:, 0], 2.0 * nodes[:, 1]]).reshape(-1)
+    stress = np.asarray(model.stress_operator(locations) @ displacement).reshape(-1, 4)
 
     strain = np.asarray([1.0, 2.0, 0.0, 0.0])
     expected = np.vstack([material_table[0] @ strain, material_table[1] @ strain])
     np.testing.assert_allclose(stress, expected, atol=1.0e-12)
 
 
-def test_quad_mesh_stress_operator_applies_material_orientation() -> None:
+def test_model_stress_operator_applies_material_orientation() -> None:
     """Material orientation should rotate local anisotropic stiffness before stress recovery."""
 
     nodes = np.array(
@@ -180,31 +195,36 @@ def test_quad_mesh_stress_operator_applies_material_orientation() -> None:
     elements = np.array([[0, 1, 2, 3]], dtype=np.uint64)
     material_ids = np.array([0], dtype=np.uint64)
     material_table = np.diag([10.0, 20.0, 30.0, 40.0]).reshape(1, 4, 4)
-    query = fem.query_quad_mesh(nodes, elements, [[0.5, 0.5]])
     displacement = np.column_stack([nodes[:, 0], np.zeros(nodes.shape[0])]).reshape(-1)
 
-    unrotated_operator = fem.quad_mesh_stress_operator(
-        query,
-        material_ids,
-        material_table,
+    unrotated = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
         formulation="plane_strain",
         thickness=1.0,
+        prescribed={0: 0.0, 1: 0.0, 3: 0.0},
     )
-    rotated_operator = fem.quad_mesh_stress_operator(
-        query,
-        material_ids,
-        material_table,
+    rotated = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=material_ids,
+        material_table=material_table,
         formulation="plane_strain",
         thickness=1.0,
+        prescribed={0: 0.0, 1: 0.0, 3: 0.0},
         material_orientation_angles=np.pi / 2.0,
     )
+    unrotated_locations = unrotated.locate_points([[0.5, 0.5]])
+    rotated_locations = rotated.locate_points([[0.5, 0.5]])
 
     np.testing.assert_allclose(
-        np.asarray(unrotated_operator @ displacement).reshape(-1, 4),
+        np.asarray(unrotated.stress_operator(unrotated_locations) @ displacement).reshape(-1, 4),
         [[10.0, 0.0, 0.0, 0.0]],
     )
     np.testing.assert_allclose(
-        np.asarray(rotated_operator @ displacement).reshape(-1, 4),
+        np.asarray(rotated.stress_operator(rotated_locations) @ displacement).reshape(-1, 4),
         [[20.0, 0.0, 0.0, 0.0]],
         atol=1.0e-12,
     )
@@ -682,26 +702,28 @@ def evaluate_quadrature_samples(
     displacement: np.ndarray,
     nodal_temperature: np.ndarray | None = None,
 ) -> QuadratureSamples:
-    total_strain = model.evaluate_quadrature_strain(displacement)
-    stress_from_displacement = model.evaluate_quadrature_stress(displacement)
+    locations = model.quadrature()
+    shape = (model.nelem, locations.points_per_element, 4)
+    total_strain = model.strain(locations, displacement).reshape(shape)
+    stress_from_displacement = model.stress(locations, displacement).reshape(shape)
 
     if model.n_temperature_nodes == 0:
-        thermal_strain = model.evaluate_quadrature_thermal_strain()
-        thermal_stress = model.evaluate_quadrature_thermal_stress()
+        thermal_strain = model.thermal_strain(locations).reshape(shape)
+        thermal_stress = model.thermal_stress(locations).reshape(shape)
     else:
         if nodal_temperature is None:
             raise ValueError("nodal_temperature is required because this model includes thermal materials")
-        thermal_strain = model.evaluate_quadrature_thermal_strain(nodal_temperature)
-        thermal_stress = model.evaluate_quadrature_thermal_stress(nodal_temperature)
+        thermal_strain = model.thermal_strain(locations, nodal_temperature).reshape(shape)
+        thermal_stress = model.thermal_stress(locations, nodal_temperature).reshape(shape)
 
     return QuadratureSamples(
-        points=model.quadrature_points,
+        points=locations.points.reshape(model.nelem, locations.points_per_element, 2),
         total_strain=total_strain,
         strain=total_strain,
         thermal_strain=thermal_strain,
         elastic_strain=total_strain - thermal_strain,
         stress=stress_from_displacement - thermal_stress,
-        nq_per_element=model.nq_per_element,
+        nq_per_element=locations.points_per_element,
     )
 
 
@@ -876,9 +898,9 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
         quadrature=quadrature,
     )
     measures = model.element_measures()
-    quadrature_data = model.element_quadrature()
+    quadrature_data = model.quadrature()
     assert model.element_measures() is measures
-    assert model.element_quadrature() is quadrature_data
+    assert model.quadrature() is quadrature_data
 
     expected_area = dtype(1.0)
     expected_volume = dtype(np.pi * (2.0**2 - 1.0**2))
@@ -888,8 +910,10 @@ def test_element_measures_and_quadrature_match_exact_cylindrical_shell_values(
     assert np.all(measures.volumes > 0.0)
     assert np.allclose(measures.areas.sum(), expected_area, rtol=rtol, atol=atol)
     assert np.allclose(measures.volumes.sum(), expected_volume, rtol=rtol, atol=atol)
-    assert np.allclose(quadrature_data.weights_area.sum(axis=1), measures.areas, rtol=rtol, atol=atol)
-    assert np.allclose(quadrature_data.weights_volume.sum(axis=1), measures.volumes, rtol=rtol, atol=atol)
+    weights_area = quadrature_data.weights_area.reshape(model.nelem, quadrature_data.points_per_element)
+    weights_volume = quadrature_data.weights_volume.reshape(model.nelem, quadrature_data.points_per_element)
+    assert np.allclose(weights_area.sum(axis=1), measures.areas, rtol=rtol, atol=atol)
+    assert np.allclose(weights_volume.sum(axis=1), measures.volumes, rtol=rtol, atol=atol)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
@@ -1015,10 +1039,6 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
         "pressure_to_rhs",
         "traction_to_rhs",
         "temperature_to_rhs",
-        "strain_operator",
-        "stress_operator",
-        "thermal_strain_operator",
-        "thermal_stress_operator",
     ):
         assert_sparse_allclose(
             getattr(parallel, operator_name),
@@ -1027,14 +1047,29 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
             atol=atol,
         )
 
-    np.testing.assert_allclose(parallel.quadrature_points, serial.quadrature_points, rtol=rtol, atol=atol)
-    for array_name in (
-        "constant_rhs",
-        "strain_constant",
-        "stress_constant",
-        "thermal_strain_constant",
-        "thermal_stress_constant",
-    ):
+    parallel_locations = parallel.quadrature()
+    serial_locations = serial.quadrature()
+    np.testing.assert_allclose(parallel_locations.points, serial_locations.points, rtol=rtol, atol=atol)
+    np.testing.assert_allclose(
+        parallel_locations.reference_points,
+        serial_locations.reference_points,
+        rtol=rtol,
+        atol=atol,
+    )
+    np.testing.assert_array_equal(parallel_locations.element_indices, serial_locations.element_indices)
+    assert_sparse_allclose(
+        parallel.strain_operator(parallel_locations),
+        serial.strain_operator(serial_locations),
+        rtol=rtol,
+        atol=atol,
+    )
+    assert_sparse_allclose(
+        parallel.stress_operator(parallel_locations),
+        serial.stress_operator(serial_locations),
+        rtol=rtol,
+        atol=atol,
+    )
+    for array_name in ("constant_rhs",):
         assert_reduction_array_allclose(
             getattr(parallel, array_name),
             getattr(serial, array_name),
@@ -1069,10 +1104,6 @@ def test_structural_sparse_operators_are_user_owned_exports() -> None:
         "pressure_to_rhs",
         "traction_to_rhs",
         "temperature_to_rhs",
-        "strain_operator",
-        "stress_operator",
-        "thermal_strain_operator",
-        "thermal_stress_operator",
     )
     for name in sparse_operator_names:
         assert not hasattr(model, f"_{name}_cache")
@@ -1099,6 +1130,98 @@ def test_structural_sparse_operators_are_user_owned_exports() -> None:
         assert first is not second
         assert_sparse_allclose(first, second, rtol=1.0e-12, atol=1.0e-12)
 
+    locations = model.quadrature()
+    for build in (model.interpolation_operator, model.strain_operator, model.stress_operator):
+        first = build(locations)
+        second = build(locations)
+        assert first is not second
+        assert_sparse_allclose(first, second, rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_model_locate_points_in_elements_drives_recovery_and_interpolation() -> None:
+    dtype = np.float64
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+        ],
+        dtype=dtype,
+    )
+    elements = np.array([[0, 1, 4, 3], [1, 2, 5, 4]], dtype=np.uint64)
+    material = fem.isotropic_plane_strain_material(200.0e9, 0.27)
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+        prescribed={0: 0.0, 1: 0.0, 3: 0.0},
+        formulation="plane_strain",
+        thickness=0.25,
+    )
+    points = np.array([[0.25, 0.75], [1.75, 0.25]], dtype=dtype)
+    locations = model.locate_points_in_elements(points, np.array([0, 1], dtype=np.uint64))
+
+    np.testing.assert_array_equal(locations.element_indices, [0, 1])
+    np.testing.assert_allclose(locations.points, points, atol=1.0e-12)
+    assert locations.weights_area.shape == (0,)
+    assert locations.weights_volume.shape == (0,)
+    assert locations.points_per_element == 0
+
+    nodal_values = nodes[:, 0] + 2.0 * nodes[:, 1]
+    np.testing.assert_allclose(model.interpolation_operator(locations) @ nodal_values, [1.75, 2.25])
+
+    displacement = np.column_stack([nodes[:, 0], 2.0 * nodes[:, 1]])
+    strain = model.strain(locations, displacement).reshape(-1, 4)
+    expected_strain = np.tile(np.array([1.0, 2.0, 0.0, 0.0], dtype=dtype), (points.shape[0], 1))
+    np.testing.assert_allclose(strain, expected_strain, atol=1.0e-12)
+    np.testing.assert_allclose(
+        (model.strain_operator(locations) @ displacement.reshape(-1)).reshape(-1, 4),
+        expected_strain,
+        atol=1.0e-12,
+    )
+
+
+def test_model_locations_validate_shape_and_element_type() -> None:
+    dtype = np.float64
+    nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=1, nz=1, dtype=dtype)
+    material = isotropic_axisymmetric_material(200.0e9, 0.27)
+    model = fem.assemble_structural_2d(
+        nodes=nodes,
+        elements=elements,
+        material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
+        material_table=np.asarray([material]),
+    )
+    locations = model.quadrature()
+    displacement = np.zeros(model.ndof_full, dtype=dtype)
+
+    wrong_element_type = fem.QuadPointLocations(
+        points=locations.points,
+        element_indices=locations.element_indices,
+        reference_points=locations.reference_points,
+        element_type="quad9",
+        weights_area=locations.weights_area,
+        weights_volume=locations.weights_volume,
+        points_per_element=locations.points_per_element,
+    )
+    with pytest.raises(AssertionError, match="element_type"):
+        model.strain(wrong_element_type, displacement)
+
+    mismatched_lengths = fem.QuadPointLocations(
+        points=locations.points[:-1],
+        element_indices=locations.element_indices,
+        reference_points=locations.reference_points,
+        element_type=locations.element_type,
+        weights_area=locations.weights_area,
+        weights_volume=locations.weights_volume,
+        points_per_element=locations.points_per_element,
+    )
+    with pytest.raises(AssertionError, match="locations.points"):
+        model.stress(mismatched_lengths, displacement)
+
 
 def test_matrix_free_recovery_fields_match_sparse_exports() -> None:
     dtype = np.float64
@@ -1116,30 +1239,28 @@ def test_matrix_free_recovery_fields_match_sparse_exports() -> None:
     )
     displacement = np.linspace(-3.0e-6, 4.0e-6, model.ndof_full, dtype=dtype)
     displacement[model.fixed_dofs] = model.fixed_values
-    reduced = displacement[model.free_dofs]
     input_temperature = 293.15 + 8.0 * nodes[:, 0] - 3.0 * nodes[:, 1]
+    locations = model.quadrature()
     shape = (model.nelem, model.nq_per_element, 4)
 
     expected_stress = np.asarray(
-        model.stress_operator @ reduced + model.stress_constant,
+        model.stress_operator(locations) @ displacement,
         dtype=dtype,
     ).reshape(shape)
-    expected_thermal_strain = np.asarray(
-        model.thermal_strain_operator @ input_temperature + model.thermal_strain_constant,
-        dtype=dtype,
+    temperature_at_points = 293.15 + 8.0 * locations.points[:, 0] - 3.0 * locations.points[:, 1]
+    thermal_strain_unit = np.asarray([1.2e-5, 1.2e-5, 1.2e-5, 0.0], dtype=dtype)
+    expected_thermal_strain = (
+        (temperature_at_points - 293.15)[:, np.newaxis] * thermal_strain_unit[np.newaxis, :]
     ).reshape(shape)
-    expected_thermal_stress = np.asarray(
-        model.thermal_stress_operator @ input_temperature + model.thermal_stress_constant,
-        dtype=dtype,
-    ).reshape(shape)
+    expected_thermal_stress = (expected_thermal_strain.reshape(-1, 4) @ material.T).reshape(shape)
 
-    np.testing.assert_allclose(model.evaluate_quadrature_stress(displacement), expected_stress)
+    np.testing.assert_allclose(model.stress(locations, displacement).reshape(shape), expected_stress)
     np.testing.assert_allclose(
-        model.evaluate_quadrature_thermal_strain(input_temperature),
+        model.thermal_strain(locations, input_temperature).reshape(shape),
         expected_thermal_strain,
     )
     np.testing.assert_allclose(
-        model.evaluate_quadrature_thermal_stress(input_temperature),
+        model.thermal_stress(locations, input_temperature).reshape(shape),
         expected_thermal_stress,
     )
 
@@ -1155,9 +1276,10 @@ def test_matrix_free_thermal_recovery_without_thermal_materials_returns_zero() -
         material_table=np.asarray([material]),
     )
     shape = (model.nelem, model.nq_per_element, 4)
+    locations = model.quadrature()
 
-    thermal_strain = model.evaluate_quadrature_thermal_strain()
-    thermal_stress = model.evaluate_quadrature_thermal_stress()
+    thermal_strain = model.thermal_strain(locations).reshape(shape)
+    thermal_stress = model.thermal_stress(locations).reshape(shape)
     assert thermal_strain.shape == shape
     assert thermal_stress.shape == shape
     np.testing.assert_allclose(thermal_strain, 0.0)
@@ -2152,7 +2274,7 @@ def test_assembly_and_postprocessing_validation_branches() -> None:
             np.zeros((1,), dtype=np.uint64),
             np.asarray([isotropic_axisymmetric_material(200.0e9, 0.27)]),
         )
-        model.element_quadrature()
+        model.quadrature()
 
 
 def test_model_zero_load_and_empty_reduction_branches() -> None:
@@ -2671,20 +2793,7 @@ def test_plane_strain_circular_hole_matches_kirsch_stress_concentration(
     displacement = solve_with_factorized_model(model, model.build_rhs(traction_values=traction_values))
 
     points = np.asarray([[0.0, hole_radius]], dtype=dtype)
-    query = fem.query_quad_mesh(
-        model.analysis_nodes,
-        model.analysis_elements,
-        points,
-        element_type=element_type,
-    )
-    stress_operator = fem.quad_mesh_stress_operator(
-        query,
-        np.zeros(model.analysis_elements.shape[0], dtype=np.uint64),
-        np.asarray([material], dtype=dtype),
-        formulation="plane_strain",
-        thickness=1.0,
-    )
-    stress = np.asarray(stress_operator @ displacement, dtype=dtype).reshape(-1, 4)
+    stress = model.stress(model.locate_points(points), displacement).reshape(-1, 4)
 
     # The Kirsch stress concentration is a boundary value at r = a, theta = pi/2.
     hoop = hoop_stress_from_cartesian(stress, points) / remote_stress

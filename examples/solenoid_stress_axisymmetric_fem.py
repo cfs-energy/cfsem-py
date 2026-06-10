@@ -12,13 +12,10 @@ from scipy.interpolate import RegularGridInterpolator
 
 import cfsem
 from cfsem.solenoid_stress.fem2d import (
+    Structural2DFEMModel,
     assemble_structural_2d,
     cfsem_radial_material,
     infer_quad9_mesh,
-    quad_mesh_interpolation_operator,
-    quad_mesh_stress_operator,
-    quad_mesh_strain_operator,
-    query_quad_mesh,
 )
 from cfsem.solenoid_stress.solenoid_1d import (
     SolenoidStress1D,
@@ -401,32 +398,16 @@ def source_intersects_solenoid(
 
 
 def recover_axisymmetric_fields_at_points(
-    nodes: np.ndarray,
-    elements: np.ndarray,
+    model: Structural2DFEMModel,
     points: np.ndarray,
     displacement: np.ndarray,
-    material: np.ndarray,
-    element_type: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    query = query_quad_mesh(nodes, elements, points, element_type=element_type)
-    interpolation_operator = quad_mesh_interpolation_operator(query)
-    strain_operator = quad_mesh_strain_operator(query, formulation="axisymmetric")
-    stress_operator = quad_mesh_stress_operator(
-        query,
-        np.zeros(elements.shape[0], dtype=np.uint64),
-        np.asarray([material], dtype=np.float64),
-        formulation="axisymmetric",
-    )
-    displacement_2d = np.asarray(displacement, dtype=np.float64).reshape(nodes.shape[0], 2)
+    locations = model.locate_points(points)
+    interpolation_operator = model.interpolation_operator(locations)
+    displacement_2d = np.asarray(displacement, dtype=np.float64).reshape(model.analysis_nodes.shape[0], 2)
     displacement_at_points = np.asarray(interpolation_operator @ displacement_2d, dtype=np.float64)
-    strain_at_points = np.asarray(
-        strain_operator @ displacement_2d.reshape(-1),
-        dtype=np.float64,
-    ).reshape(-1, 4)
-    stress_at_points = np.asarray(
-        stress_operator @ displacement_2d.reshape(-1),
-        dtype=np.float64,
-    ).reshape(-1, 4)
+    strain_at_points = model.strain(locations, displacement_2d).reshape(-1, 4)
+    stress_at_points = model.stress(locations, displacement_2d).reshape(-1, 4)
     return displacement_at_points, strain_at_points, stress_at_points
 
 
@@ -455,9 +436,9 @@ def sample_loop_field(
     sample_z_arr = np.asarray(sample_z, dtype=np.float64)
     shape = sample_r_arr.shape
     br, bz = cfsem.flux_density_circular_filament(
-        [source_current],
-        [source_radius],
-        [source_z],
+        np.asarray([source_current], dtype=np.float64),
+        np.asarray([source_radius], dtype=np.float64),
+        np.asarray([source_z], dtype=np.float64),
         sample_r_arr.reshape(-1),
         sample_z_arr.reshape(-1),
         par=True,
@@ -683,15 +664,12 @@ def von_mises_stress(
 
 
 def build_section_comparisons(
-    nodes: np.ndarray,
-    elements: np.ndarray,
+    model: Structural2DFEMModel,
     radii: np.ndarray,
     zs: np.ndarray,
     nr: int,
     nz: int,
     displacement: np.ndarray,
-    material: np.ndarray,
-    element_type: str,
     self_field: SmoothSelfField,
     source_radius: float,
     source_z: float,
@@ -710,12 +688,9 @@ def build_section_comparisons(
         radius = elem_r_centers
         sample_points = np.column_stack([radius, np.full_like(radius, z_value)])
         displacement_at_points, strain_at_points, stress_at_points = recover_axisymmetric_fields_at_points(
-            nodes,
-            elements,
+            model,
             sample_points,
             displacement,
-            material,
-            element_type,
         )
         u_r_fe = displacement_at_points[:, 0]
         e_rr_fe = strain_at_points[:, 0]
@@ -769,15 +744,12 @@ def build_section_comparisons(
 
 
 def build_vm_stress_grids(
-    nodes: np.ndarray,
-    elements: np.ndarray,
+    model: Structural2DFEMModel,
     radii: np.ndarray,
     zs: np.ndarray,
     nr: int,
     nz: int,
     displacement: np.ndarray,
-    material: np.ndarray,
-    element_type: str,
     self_field: SmoothSelfField,
     source_radius: float,
     source_z: float,
@@ -791,12 +763,9 @@ def build_vm_stress_grids(
     elem_r_centers = 0.5 * (radii[:-1] + radii[1:])
     sample_r, sample_z = np.meshgrid(elem_r_centers, row_centers, indexing="xy")
     _u, _strain, stress = recover_axisymmetric_fields_at_points(
-        nodes,
-        elements,
+        model,
         np.column_stack([sample_r.reshape(-1), sample_z.reshape(-1)]),
         displacement,
-        material,
-        element_type,
     )
     vm_fem[:, :] = von_mises_stress(stress[:, 0], stress[:, 1], stress[:, 2], stress[:, 3]).reshape(nz, nr)
 
@@ -936,6 +905,8 @@ def solve_case(
 
     pressure_faces = None
     pressure_values = None
+    bottom_faces = np.empty((0, 2), dtype=np.uint64)
+    top_faces = np.empty((0, 2), dtype=np.uint64)
     if balance_axial_load:
         bottom_faces, top_faces = top_bottom_pressure_faces(nr, nz)
         pressure_faces = np.vstack([bottom_faces, top_faces])
@@ -950,8 +921,8 @@ def solve_case(
         quadrature=quadrature,
         element_type=element_type,
     )
-    quadrature_data = model.element_quadrature()
-    quadrature_points = quadrature_data.points.reshape(-1, 2)
+    quadrature_data = model.quadrature()
+    quadrature_points = quadrature_data.points
     br_loop_q, bz_loop_q = sample_loop_field(
         quadrature_points[:, 0],
         quadrature_points[:, 1],
@@ -965,8 +936,8 @@ def solve_case(
         quadrature_points[:, 1],
     )
     nelem = elements.shape[0]
-    nq = quadrature_data.nq_per_element
-    weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64)
+    nq = quadrature_data.points_per_element
+    weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64).reshape(nelem, nq)
     weights_sum = np.sum(weights, axis=1)
     br_weighted = np.asarray(br_loop_q + br_self_q, dtype=np.float64).reshape(nelem, nq) * weights
     bz_weighted = np.asarray(bz_loop_q + bz_self_q, dtype=np.float64).reshape(nelem, nq) * weights
@@ -994,15 +965,12 @@ def solve_case(
     body_force_z = body_force[:, 1].reshape(nz, nr)
     outline_r, outline_z = solenoid_outline(ri, ro, z_min, z_max)
     sections = build_section_comparisons(
-        nodes=analysis_nodes,
-        elements=analysis_elements,
+        model=model,
         radii=radii,
         zs=zs,
         nr=nr,
         nz=nz,
         displacement=displacement,
-        material=material,
-        element_type=element_type,
         self_field=self_field,
         source_radius=source_radius,
         source_z=source_z,
@@ -1013,15 +981,12 @@ def solve_case(
         reference_poisson_ratio=reference_poisson_ratio,
     )
     vm_stress_fem, vm_stress_1d = build_vm_stress_grids(
-        nodes=analysis_nodes,
-        elements=analysis_elements,
+        model=model,
         radii=radii,
         zs=zs,
         nr=nr,
         nz=nz,
         displacement=displacement,
-        material=material,
-        element_type=element_type,
         self_field=self_field,
         source_radius=source_radius,
         source_z=source_z,

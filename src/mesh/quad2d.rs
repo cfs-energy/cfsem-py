@@ -234,7 +234,7 @@ where
     mapping::map_point(coords, &shape)
 }
 
-fn closest_reference_point<E, F, const NODES_PER_ELEMENT: usize>(
+pub(crate) fn closest_reference_point<E, F, const NODES_PER_ELEMENT: usize>(
     coords: &[[F; 2]; NODES_PER_ELEMENT],
     target: [F; 2],
     max_iterations: usize,

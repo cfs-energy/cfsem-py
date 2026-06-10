@@ -92,16 +92,10 @@ def von_mises(stress: np.ndarray) -> np.ndarray:
 
 
 def recover_quadrature_stress(model, displacement: np.ndarray, nodal_temperature: np.ndarray) -> np.ndarray:
-    reduced = np.asarray(displacement, dtype=np.float64).reshape(-1)[model.free_dofs]
+    locations = model.quadrature()
     shape = (model.nelem, model.nq_per_element, 4)
-    stress_from_displacement = np.asarray(
-        model.stress_operator @ reduced + model.stress_constant,
-        dtype=np.float64,
-    ).reshape(shape)
-    thermal_stress = np.asarray(
-        model.thermal_stress_operator @ nodal_temperature + model.thermal_stress_constant,
-        dtype=np.float64,
-    ).reshape(shape)
+    stress_from_displacement = model.stress(locations, displacement).reshape(shape)
+    thermal_stress = model.thermal_stress(locations, nodal_temperature).reshape(shape)
     return stress_from_displacement - thermal_stress
 
 

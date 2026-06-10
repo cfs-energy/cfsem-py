@@ -11,7 +11,9 @@ use faer::sparse::{
 };
 use rayon::prelude::*;
 
-use crate::mesh::elements::quad2d::{quad4, quad9};
+use crate::mesh::elements::quad2d::quadrature::gauss_volume;
+use crate::mesh::elements::quad2d::{mapping, quad4, quad9};
+use crate::mesh::quad2d::{QuadReferenceElement, closest_reference_point};
 use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::assembly::{
     assemble_stiffness_chunks_for_family_par, assemble_stiffness_for_family,
@@ -40,6 +42,23 @@ use crate::physics::solenoid_stress::types::{
     PressureLoad, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
     dof_per_element,
 };
+
+/// Element-owned point locations for structural 2D recovery.
+#[derive(Debug, Clone)]
+pub struct Structural2dPointLocations {
+    /// Physical point coordinates in element-major or user-supplied order.
+    pub points: Vec<[f64; 2]>,
+    /// Owning element index for each point.
+    pub element_indices: Vec<usize>,
+    /// Reference coordinates for each point.
+    pub reference_points: Vec<[f64; 2]>,
+    /// Optional mapped analysis-plane quadrature weights.
+    pub weights_area: Vec<f64>,
+    /// Optional mapped represented-volume quadrature weights.
+    pub weights_volume: Vec<f64>,
+    /// Number of consecutive points contributed by each element for quadrature locations.
+    pub points_per_element: usize,
+}
 
 /// Public element-family selector for the 2D structural solver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -700,24 +719,27 @@ impl Structural2dModel {
             .expect("selected thermal stress constant"))
     }
 
-    fn evaluate_quadrature_strain_for_family<
+    fn evaluate_strain_for_locations_for_family<
         Family,
         const NODES_PER_ELEMENT: usize,
         const DOF_PER_ELEMENT: usize,
     >(
         &self,
+        element_indices: &[usize],
+        reference_points: &[[f64; 2]],
         displacements_full: &[f64],
     ) -> Result<Vec<[f64; 4]>, String>
     where
         Family: QuadElementFamily<NODES_PER_ELEMENT>,
     {
+        validate_location_lengths(element_indices, reference_points)?;
         let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
         let mesh = QuadMeshView2d {
             nodes_rz: &self.analysis_nodes,
             elements: &elements,
         };
-        let mut strain = Vec::with_capacity(self.nelem * self.nq_per_element);
-        for element_index in 0..mesh.num_elements() {
+        let mut strain = Vec::with_capacity(element_indices.len());
+        for (&element_index, &reference) in element_indices.iter().zip(reference_points) {
             let coords = mesh.element_coords(element_index)?;
             let nodes = mesh.element_nodes(element_index)?;
             let mut local_u = [0.0; DOF_PER_ELEMENT];
@@ -726,45 +748,52 @@ impl Structural2dModel {
                 local_u[2 * local_node] = displacements_full[2 * global_node];
                 local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
             }
-            for sample in Family::volume_samples(&coords, self.quadrature)? {
-                let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                    self.formulation,
-                    &sample.n,
-                    &sample.grad_phys,
-                    sample.point,
-                )?;
-                let mut sample_strain = [0.0; 4];
-                for component in 0..4 {
-                    let mut value = 0.0;
-                    for dof in 0..DOF_PER_ELEMENT {
-                        value += b[component][dof] * local_u[dof];
-                    }
-                    sample_strain[component] = value;
+            let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
+            let grad_ref = Family::ReferenceElement::grad_ref(reference[0], reference[1]);
+            let jac = mapping::jacobian(&coords, &grad_ref);
+            let inv_jac = mapping::inv_j(&jac)?;
+            let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
+            let point = mapping::map_point(&coords, &shape);
+            let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                self.formulation,
+                &shape,
+                &grad_phys,
+                point,
+            )?;
+            let mut sample_strain = [0.0; 4];
+            for component in 0..4 {
+                let mut value = 0.0;
+                for dof in 0..DOF_PER_ELEMENT {
+                    value += b[component][dof] * local_u[dof];
                 }
-                strain.push(sample_strain);
+                sample_strain[component] = value;
             }
+            strain.push(sample_strain);
         }
         Ok(strain)
     }
 
-    fn evaluate_quadrature_stress_for_family<
+    fn evaluate_stress_for_locations_for_family<
         Family,
         const NODES_PER_ELEMENT: usize,
         const DOF_PER_ELEMENT: usize,
     >(
         &self,
+        element_indices: &[usize],
+        reference_points: &[[f64; 2]],
         displacements_full: &[f64],
     ) -> Result<Vec<[f64; 4]>, String>
     where
         Family: QuadElementFamily<NODES_PER_ELEMENT>,
     {
+        validate_location_lengths(element_indices, reference_points)?;
         let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
         let mesh = QuadMeshView2d {
             nodes_rz: &self.analysis_nodes,
             elements: &elements,
         };
-        let mut stress = Vec::with_capacity(self.nelem * self.nq_per_element);
-        for element_index in 0..mesh.num_elements() {
+        let mut stress = Vec::with_capacity(element_indices.len());
+        for (&element_index, &reference) in element_indices.iter().zip(reference_points) {
             let coords = mesh.element_coords(element_index)?;
             let nodes = mesh.element_nodes(element_index)?;
             let material_id = self.assembly.material_ids[element_index];
@@ -789,40 +818,47 @@ impl Structural2dModel {
                 local_u[2 * local_node] = displacements_full[2 * global_node];
                 local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
             }
-            for sample in Family::volume_samples(&coords, self.quadrature)? {
-                let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                    self.formulation,
-                    &sample.n,
-                    &sample.grad_phys,
-                    sample.point,
-                )?;
-                let mut sample_strain = [0.0; 4];
-                for component in 0..4 {
-                    let mut value = 0.0;
-                    for dof in 0..DOF_PER_ELEMENT {
-                        value += b[component][dof] * local_u[dof];
-                    }
-                    sample_strain[component] = value;
+            let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
+            let grad_ref = Family::ReferenceElement::grad_ref(reference[0], reference[1]);
+            let jac = mapping::jacobian(&coords, &grad_ref);
+            let inv_jac = mapping::inv_j(&jac)?;
+            let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
+            let point = mapping::map_point(&coords, &shape);
+            let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                self.formulation,
+                &shape,
+                &grad_phys,
+                point,
+            )?;
+            let mut sample_strain = [0.0; 4];
+            for component in 0..4 {
+                let mut value = 0.0;
+                for dof in 0..DOF_PER_ELEMENT {
+                    value += b[component][dof] * local_u[dof];
                 }
-                stress.push(constitutive_times_strain(material, &sample_strain));
+                sample_strain[component] = value;
             }
+            stress.push(constitutive_times_strain(material, &sample_strain));
         }
         Ok(stress)
     }
 
-    fn evaluate_quadrature_thermal_for_family<
+    fn evaluate_thermal_for_locations_for_family<
         Family,
         const NODES_PER_ELEMENT: usize,
         const STRESS: bool,
     >(
         &self,
+        element_indices: &[usize],
+        reference_points: &[[f64; 2]],
         nodal_temperature: &[f64],
     ) -> Result<Vec<[f64; 4]>, String>
     where
         Family: QuadElementFamily<NODES_PER_ELEMENT>,
     {
+        validate_location_lengths(element_indices, reference_points)?;
         let Some(thermal_material_table) = self.assembly.thermal_material_table.as_ref() else {
-            return Ok(vec![[0.0; 4]; self.nelem * self.nq_per_element]);
+            return Ok(vec![[0.0; 4]; element_indices.len()]);
         };
         if nodal_temperature.len() != self.n_temperature_nodes {
             return Err(format!(
@@ -837,9 +873,8 @@ impl Structural2dModel {
             nodes_rz: &self.analysis_nodes,
             elements: &elements,
         };
-        let mut values = Vec::with_capacity(self.nelem * self.nq_per_element);
-        for element_index in 0..mesh.num_elements() {
-            let coords = mesh.element_coords(element_index)?;
+        let mut values = Vec::with_capacity(element_indices.len());
+        for (&element_index, &reference) in element_indices.iter().zip(reference_points) {
             let nodes = mesh.element_nodes(element_index)?;
             let material_id = self.assembly.material_ids[element_index];
             let material = self
@@ -868,27 +903,67 @@ impl Structural2dModel {
             let thermal_stress_unit =
                 STRESS.then(|| constitutive_times_strain(material, &thermal.alpha));
 
-            for sample in Family::volume_samples(&coords, self.quadrature)? {
-                let mut temperature_delta = -thermal.reference_temperature;
-                for local_node in 0..NODES_PER_ELEMENT {
-                    temperature_delta +=
-                        sample.n[local_node] * nodal_temperature[nodes[local_node]];
-                }
-                let mut sample_value = [0.0; 4];
-                if let Some(thermal_stress_unit) = thermal_stress_unit.as_ref() {
-                    for component in 0..4 {
-                        sample_value[component] =
-                            thermal_stress_unit[component] * temperature_delta;
-                    }
-                } else {
-                    for component in 0..4 {
-                        sample_value[component] = thermal.alpha[component] * temperature_delta;
-                    }
-                }
-                values.push(sample_value);
+            let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
+            let mut temperature_delta = -thermal.reference_temperature;
+            for local_node in 0..NODES_PER_ELEMENT {
+                temperature_delta += shape[local_node] * nodal_temperature[nodes[local_node]];
             }
+            let mut sample_value = [0.0; 4];
+            if let Some(thermal_stress_unit) = thermal_stress_unit.as_ref() {
+                for component in 0..4 {
+                    sample_value[component] = thermal_stress_unit[component] * temperature_delta;
+                }
+            } else {
+                for component in 0..4 {
+                    sample_value[component] = thermal.alpha[component] * temperature_delta;
+                }
+            }
+            values.push(sample_value);
         }
         Ok(values)
+    }
+
+    fn locate_points_in_elements_for_family<Family, const NODES_PER_ELEMENT: usize>(
+        &self,
+        points: &[[f64; 2]],
+        element_indices: &[usize],
+        max_iterations: usize,
+    ) -> Result<Structural2dPointLocations, String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        if points.len() != element_indices.len() {
+            return Err(format!(
+                "points has length {}, but element_indices has length {}",
+                points.len(),
+                element_indices.len()
+            ));
+        }
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let mesh = QuadMeshView2d {
+            nodes_rz: &self.analysis_nodes,
+            elements: &elements,
+        };
+        let mut projected_points = Vec::with_capacity(points.len());
+        let mut reference_points = Vec::with_capacity(points.len());
+        for (&point, &element_index) in points.iter().zip(element_indices) {
+            let coords = mesh.element_coords(element_index)?;
+            let (reference, projected, _distance) = closest_reference_point::<
+                Family::ReferenceElement,
+                f64,
+                NODES_PER_ELEMENT,
+            >(&coords, point, max_iterations);
+            projected_points.push(projected);
+            reference_points.push(reference);
+        }
+        Ok(Structural2dPointLocations {
+            points: projected_points,
+            element_indices: element_indices.to_vec(),
+            reference_points,
+            weights_area: Vec::new(),
+            weights_volume: Vec::new(),
+            points_per_element: 0,
+        })
     }
 
     /// Build one reduced structural right-hand side.
@@ -1007,9 +1082,20 @@ impl Structural2dModel {
     ///     - `weights_volume` length `nelem * nq_per_element` with units `[volume]`
     ///     - `nq_per_element` giving the number of consecutive quadrature entries per element
     pub fn element_quadrature(&self) -> Result<Structural2dElementQuadrature, String> {
+        let locations = self.quadrature()?;
+        Ok(Structural2dElementQuadrature {
+            points: locations.points,
+            weights_area: locations.weights_area,
+            weights_volume: locations.weights_volume,
+            nq_per_element: locations.points_per_element,
+        })
+    }
+
+    /// Return element-major quadrature locations and mapped weights.
+    pub fn quadrature(&self) -> Result<Structural2dPointLocations, String> {
         match self.element_type {
             Structural2dElementType::Quad4 => {
-                element_quadrature_for_family::<Quad4Family, { quad4::NODES_PER_ELEMENT }>(
+                quadrature_locations_for_family::<Quad4Family, { quad4::NODES_PER_ELEMENT }>(
                     &self.analysis_nodes,
                     &self.analysis_elements_flat,
                     self.nelem,
@@ -1018,7 +1104,7 @@ impl Structural2dModel {
                 )
             }
             Structural2dElementType::Quad9 => {
-                element_quadrature_for_family::<Quad9Family, { quad9::NODES_PER_ELEMENT }>(
+                quadrature_locations_for_family::<Quad9Family, { quad9::NODES_PER_ELEMENT }>(
                     &self.analysis_nodes,
                     &self.analysis_elements_flat,
                     self.nelem,
@@ -1026,6 +1112,29 @@ impl Structural2dModel {
                     self.quadrature,
                 )
             }
+        }
+    }
+
+    /// Locate physical points when their owning element indices are already known.
+    pub fn locate_points_in_elements(
+        &self,
+        points: &[[f64; 2]],
+        element_indices: &[usize],
+        max_iterations: usize,
+    ) -> Result<Structural2dPointLocations, String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self
+                .locate_points_in_elements_for_family::<Quad4Family, { quad4::NODES_PER_ELEMENT }>(
+                    points,
+                    element_indices,
+                    max_iterations,
+                ),
+            Structural2dElementType::Quad9 => self
+                .locate_points_in_elements_for_family::<Quad9Family, { quad9::NODES_PER_ELEMENT }>(
+                    points,
+                    element_indices,
+                    max_iterations,
+                ),
         }
     }
 
@@ -1052,12 +1161,11 @@ impl Structural2dModel {
         Ok(Structural2dElementMeasures { areas, volumes })
     }
 
-    /// Evaluate quadrature-point total strain without materializing sparse recovery operators.
-    ///
-    /// The returned samples are element-major and do not include quadrature-point coordinates.
-    /// Use [`Structural2dModel::element_quadrature`] when coordinates are explicitly needed.
-    pub fn evaluate_quadrature_strain(
+    /// Evaluate total strain at located element/reference points without sparse recovery matrices.
+    pub fn strain(
         &self,
+        element_indices: &[usize],
+        reference_points: &[[f64; 2]],
         displacements_full: &[f64],
     ) -> Result<Vec<[f64; 4]>, String> {
         if displacements_full.len() != self.ndof_full {
@@ -1068,25 +1176,24 @@ impl Structural2dModel {
             ));
         }
         match self.element_type {
-            Structural2dElementType::Quad4 => self.evaluate_quadrature_strain_for_family::<
+            Structural2dElementType::Quad4 => self.evaluate_strain_for_locations_for_family::<
                 Quad4Family,
                 { quad4::NODES_PER_ELEMENT },
                 { dof_per_element(quad4::NODES_PER_ELEMENT) },
-            >(displacements_full),
-            Structural2dElementType::Quad9 => self.evaluate_quadrature_strain_for_family::<
+            >(element_indices, reference_points, displacements_full),
+            Structural2dElementType::Quad9 => self.evaluate_strain_for_locations_for_family::<
                 Quad9Family,
                 { quad9::NODES_PER_ELEMENT },
                 { dof_per_element(quad9::NODES_PER_ELEMENT) },
-            >(displacements_full),
+            >(element_indices, reference_points, displacements_full),
         }
     }
 
-    /// Evaluate quadrature-point stress without materializing sparse recovery operators.
-    ///
-    /// The returned samples are element-major and do not include quadrature-point coordinates.
-    /// Use [`Structural2dModel::element_quadrature`] when coordinates are explicitly needed.
-    pub fn evaluate_quadrature_stress(
+    /// Evaluate stress at located element/reference points without sparse recovery matrices.
+    pub fn stress(
         &self,
+        element_indices: &[usize],
+        reference_points: &[[f64; 2]],
         displacements_full: &[f64],
     ) -> Result<Vec<[f64; 4]>, String> {
         if displacements_full.len() != self.ndof_full {
@@ -1097,60 +1204,58 @@ impl Structural2dModel {
             ));
         }
         match self.element_type {
-            Structural2dElementType::Quad4 => self.evaluate_quadrature_stress_for_family::<
+            Structural2dElementType::Quad4 => self.evaluate_stress_for_locations_for_family::<
                 Quad4Family,
                 { quad4::NODES_PER_ELEMENT },
                 { dof_per_element(quad4::NODES_PER_ELEMENT) },
-            >(displacements_full),
-            Structural2dElementType::Quad9 => self.evaluate_quadrature_stress_for_family::<
+            >(element_indices, reference_points, displacements_full),
+            Structural2dElementType::Quad9 => self.evaluate_stress_for_locations_for_family::<
                 Quad9Family,
                 { quad9::NODES_PER_ELEMENT },
                 { dof_per_element(quad9::NODES_PER_ELEMENT) },
-            >(displacements_full),
+            >(element_indices, reference_points, displacements_full),
         }
     }
 
-    /// Evaluate quadrature-point thermal strain without materializing recovery operators.
-    ///
-    /// The returned samples are element-major. Models without thermal materials return a zero field
-    /// with the correct quadrature shape.
-    pub fn evaluate_quadrature_thermal_strain(
+    /// Evaluate thermal strain at located element/reference points without sparse recovery matrices.
+    pub fn thermal_strain(
         &self,
+        element_indices: &[usize],
+        reference_points: &[[f64; 2]],
         nodal_temperature: &[f64],
     ) -> Result<Vec<[f64; 4]>, String> {
         match self.element_type {
-            Structural2dElementType::Quad4 => self.evaluate_quadrature_thermal_for_family::<
+            Structural2dElementType::Quad4 => self.evaluate_thermal_for_locations_for_family::<
                 Quad4Family,
                 { quad4::NODES_PER_ELEMENT },
                 false,
-            >(nodal_temperature),
-            Structural2dElementType::Quad9 => self.evaluate_quadrature_thermal_for_family::<
+            >(element_indices, reference_points, nodal_temperature),
+            Structural2dElementType::Quad9 => self.evaluate_thermal_for_locations_for_family::<
                 Quad9Family,
                 { quad9::NODES_PER_ELEMENT },
                 false,
-            >(nodal_temperature),
+            >(element_indices, reference_points, nodal_temperature),
         }
     }
 
-    /// Evaluate quadrature-point thermal stress without materializing recovery operators.
-    ///
-    /// The returned samples are element-major. Models without thermal materials return a zero field
-    /// with the correct quadrature shape.
-    pub fn evaluate_quadrature_thermal_stress(
+    /// Evaluate thermal stress at located element/reference points without sparse recovery matrices.
+    pub fn thermal_stress(
         &self,
+        element_indices: &[usize],
+        reference_points: &[[f64; 2]],
         nodal_temperature: &[f64],
     ) -> Result<Vec<[f64; 4]>, String> {
         match self.element_type {
-            Structural2dElementType::Quad4 => self.evaluate_quadrature_thermal_for_family::<
+            Structural2dElementType::Quad4 => self.evaluate_thermal_for_locations_for_family::<
                 Quad4Family,
                 { quad4::NODES_PER_ELEMENT },
                 true,
-            >(nodal_temperature),
-            Structural2dElementType::Quad9 => self.evaluate_quadrature_thermal_for_family::<
+            >(element_indices, reference_points, nodal_temperature),
+            Structural2dElementType::Quad9 => self.evaluate_thermal_for_locations_for_family::<
                 Quad9Family,
                 { quad9::NODES_PER_ELEMENT },
                 true,
-            >(nodal_temperature),
+            >(element_indices, reference_points, nodal_temperature),
         }
     }
 }
@@ -1822,54 +1927,66 @@ fn elements_from_flat<const NODES_PER_ELEMENT: usize>(
     Ok(elements)
 }
 
-/// Recompute physical quadrature points and mapped weights for one stored element family.
-fn element_quadrature_for_family<Family, const NODES_PER_ELEMENT: usize>(
+fn validate_location_lengths(
+    element_indices: &[usize],
+    reference_points: &[[f64; 2]],
+) -> Result<(), String> {
+    if element_indices.len() != reference_points.len() {
+        return Err(format!(
+            "element_indices has length {}, but reference_points has length {}",
+            element_indices.len(),
+            reference_points.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Recompute element-major quadrature locations and mapped weights for one stored element family.
+fn quadrature_locations_for_family<Family, const NODES_PER_ELEMENT: usize>(
     analysis_nodes: &[[f64; 2]],
     analysis_elements_flat: &[usize],
     nelem: usize,
     formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<Structural2dElementQuadrature, String>
+) -> Result<Structural2dPointLocations, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
-    let mut points = Vec::new();
-    let mut weights_area = Vec::new();
-    let mut weights_volume = Vec::new();
-    let mut nq_per_element = None;
+    let references = gauss_volume::<f64>(quadrature);
+    let nq_per_element = references.len();
+    let npoints = nelem * nq_per_element;
+    let mut points = Vec::with_capacity(npoints);
+    let mut element_indices = Vec::with_capacity(npoints);
+    let mut reference_points = Vec::with_capacity(npoints);
+    let mut weights_area = Vec::with_capacity(npoints);
+    let mut weights_volume = Vec::with_capacity(npoints);
     for element_index in 0..nelem {
         let coords = element_coords_from_flat::<NODES_PER_ELEMENT>(
             analysis_nodes,
             analysis_elements_flat,
             element_index,
         )?;
-        let samples = Family::volume_samples(&coords, quadrature)?;
-        if let Some(nq) = nq_per_element {
-            if samples.len() != nq {
-                return Err(format!(
-                    "element {element_index} produced {} quadrature points, expected {nq}",
-                    samples.len()
-                ));
-            }
-        } else {
-            nq_per_element = Some(samples.len());
-        }
-        for sample in samples {
-            let area_weight = sample.det_j * sample.weight;
-            points.push(sample.point);
+        for &(reference, weight) in &references {
+            let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
+            let grad_ref = Family::ReferenceElement::grad_ref(reference[0], reference[1]);
+            let jac = mapping::jacobian(&coords, &grad_ref);
+            let det_j = mapping::det_j(&jac);
+            let point = mapping::map_point(&coords, &shape);
+            let area_weight = det_j * weight;
+            element_indices.push(element_index);
+            reference_points.push(reference);
+            points.push(point);
             weights_area.push(area_weight);
-            weights_volume.push(formulation.volume_scale(
-                sample.point,
-                sample.det_j,
-                sample.weight,
-            )?);
+            weights_volume.push(formulation.volume_scale(point, det_j, weight)?);
         }
     }
-    Ok(Structural2dElementQuadrature {
+    Ok(Structural2dPointLocations {
         points,
+        element_indices,
+        reference_points,
         weights_area,
         weights_volume,
-        nq_per_element: nq_per_element.unwrap_or(0),
+        points_per_element: nq_per_element,
     })
 }
 
@@ -1996,8 +2113,13 @@ mod tests {
         let displacements_full = [
             1.0e-6, -2.0e-6, 2.0e-6, 1.0e-6, -1.5e-6, 2.5e-6, 3.0e-6, -3.5e-6,
         ];
+        let locations = model.quadrature().expect("quadrature should evaluate");
         let matrix_free = model
-            .evaluate_quadrature_strain(&displacements_full)
+            .strain(
+                &locations.element_indices,
+                &locations.reference_points,
+                &displacements_full,
+            )
             .expect("matrix-free strain should evaluate");
 
         let reduced = model

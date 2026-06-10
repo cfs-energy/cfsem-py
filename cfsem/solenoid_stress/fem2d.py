@@ -40,6 +40,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any, cast
 
 import numpy as np
@@ -308,7 +309,6 @@ class Structural2DFEMModel:
         self._element_measures_cache: ElementMeasures | None = None
         self._temperature_elevation_cache: sp.csr_matrix | None = None
         self._constant_rhs_cache: npt.NDArray[np.float64] | None = None
-        self._stiffness_cache: sp.csc_matrix | None = None
 
     @property
     def ndof(self) -> int:
@@ -441,19 +441,6 @@ class Structural2DFEMModel:
             self._temperature_elevation_cache = cache
         return cache
 
-    def _cached_csc_export(self, attr: str, export: Callable[[], Any]) -> sp.csc_matrix:
-        """Export one Rust-owned CSC operator to scipy on first access.
-
-        The model is treated as immutable after assembly, so the cached scipy matrix remains valid
-        for every later access to the corresponding read-only property.
-        """
-
-        cache = getattr(self, attr)
-        if cache is None:
-            cache = _csc_matrix_from_binding(export())
-            setattr(self, attr, cache)
-        return cast(sp.csc_matrix, cache)
-
     def _temperature_csr_export(
         self,
         export: Callable[[], Any],
@@ -472,7 +459,7 @@ class Structural2DFEMModel:
             else analysis_operator
         )
 
-    @property
+    @cached_property
     def stiffness(self) -> sp.csc_matrix:
         """Reduced stiffness matrix with shape `(ndof_reduced, ndof_reduced)`.
 
@@ -480,7 +467,7 @@ class Structural2DFEMModel:
         The SciPy matrix is exported from the Rust backend on first access and then cached.
         """
 
-        return self._cached_csc_export("_stiffness_cache", self._backend.stiffness_csc)
+        return _csc_matrix_from_binding(self._backend.stiffness_csc())
 
     @property
     def body_force_to_rhs(self) -> sp.csr_matrix:

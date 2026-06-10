@@ -1097,7 +1097,7 @@ def test_structural_sparse_operators_are_user_owned_exports() -> None:
     )
     for name in sparse_operator_names:
         assert not hasattr(model, f"_{name}_cache")
-    assert model._stiffness_cache is None
+    assert "stiffness" not in model.__dict__
 
     _rhs = model.build_rhs(
         body_force=np.array([1.0e3, -2.0e3], dtype=dtype),
@@ -1107,12 +1107,12 @@ def test_structural_sparse_operators_are_user_owned_exports() -> None:
     )
     for name in sparse_operator_names:
         assert not hasattr(model, f"_{name}_cache")
-    assert model._stiffness_cache is None
+    assert "stiffness" not in model.__dict__
 
     first_stiffness = model.stiffness
     second_stiffness = model.stiffness
     assert first_stiffness is second_stiffness
-    assert model._stiffness_cache is first_stiffness
+    assert model.__dict__["stiffness"] is first_stiffness
 
     for name in sparse_operator_names:
         first = getattr(model, name)

@@ -38,7 +38,7 @@ References:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, cast
@@ -74,18 +74,6 @@ ArrayLike = npt.ArrayLike
 _QUAD_FACE_NODE_PAIRS: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 3), (3, 0))
 
 
-def _to_csr_matrix(matrix: Any) -> sp.csr_matrix:
-    """Normalize sparse results to the matrix API expected by this module."""
-
-    return cast(sp.csr_matrix, sp.csr_matrix(matrix))
-
-
-def _to_csc_matrix(matrix: Any) -> sp.csc_matrix:
-    """Normalize sparse results to CSC matrices."""
-
-    return cast(sp.csc_matrix, sp.csc_matrix(matrix))
-
-
 def _as_float64_array(data: Any) -> npt.NDArray[np.float64]:
     """Convert binding output to a NumPy float64 array with an explicit static type."""
 
@@ -96,7 +84,8 @@ def _csr_matrix_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
 ) -> sp.csr_matrix:
     vals, indices, indptr, nrow, ncol = binding
-    return _to_csr_matrix(
+    return cast(
+        sp.csr_matrix,
         sp.csr_matrix(
             (
                 np.asarray(vals, dtype=np.float64),
@@ -104,7 +93,7 @@ def _csr_matrix_from_binding(
                 np.asarray(indptr, dtype=np.int64),
             ),
             shape=(int(nrow), int(ncol)),
-        )
+        ),
     )
 
 
@@ -112,7 +101,8 @@ def _csc_matrix_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
 ) -> sp.csc_matrix:
     vals, indices, indptr, nrow, ncol = binding
-    return _to_csc_matrix(
+    return cast(
+        sp.csc_matrix,
         sp.csc_matrix(
             (
                 np.asarray(vals, dtype=np.float64),
@@ -120,7 +110,7 @@ def _csc_matrix_from_binding(
                 np.asarray(indptr, dtype=np.int64),
             ),
             shape=(int(nrow), int(ncol)),
-        )
+        ),
     )
 
 
@@ -322,14 +312,6 @@ class Structural2DFEMModel:
         self.n_temperature_nodes = int(n_temperature_nodes)
         self._quadrature_cache: QuadPointLocations | None = None
         self._element_measures_cache: ElementMeasures | None = None
-        self._temperature_elevation_cache: sp.csr_matrix | None = None
-        self._constant_rhs_cache: npt.NDArray[np.float64] | None = None
-
-    @property
-    def ndof(self) -> int:
-        """Compatibility alias for `ndof_full`, the full displacement-vector length `(ndof_full,)`."""
-
-        return self.ndof_full
 
     @property
     def input_nodes(self) -> npt.NDArray[np.floating[Any]]:
@@ -343,15 +325,11 @@ class Structural2DFEMModel:
 
         return self._input_elements
 
-    @property
+    @cached_property
     def constant_rhs(self) -> npt.NDArray[np.floating[Any]]:
         """Load-independent reduced RHS contribution, exported from Rust on first access."""
 
-        cache = self._constant_rhs_cache
-        if cache is None:
-            cache = np.asarray(self._backend.constant_rhs(), dtype=np.float64)
-            self._constant_rhs_cache = cache
-        return cache
+        return np.asarray(self._backend.constant_rhs(), dtype=np.float64)
 
     def quadrature(self) -> QuadPointLocations:
         """Return element-major quadrature locations and mapped integration weights.
@@ -484,6 +462,7 @@ class Structural2DFEMModel:
             points_per_element=int(points_per_element),
         )
 
+    @cached_property
     def _temperature_elevation(self) -> sp.csr_matrix:
         """Return the cached input-to-analysis temperature elevation operator.
 
@@ -495,29 +474,7 @@ class Structural2DFEMModel:
 
         elevated = self._elevated
         assert elevated is not None, "temperature elevation is available only for inferred quad9 meshes"
-        cache = self._temperature_elevation_cache
-        if cache is None:
-            cache = _temperature_elevation_operator(elevated)
-            self._temperature_elevation_cache = cache
-        return cache
-
-    def _temperature_csr_export(
-        self,
-        export: Callable[[], Any],
-    ) -> sp.csr_matrix:
-        """Export a temperature-indexed CSR operator, including empty and elevated cases.
-
-        Models without thermal materials expose zero-column operators for shape consistency.
-        Inferred quad9 meshes export analysis-node operators from Rust, then postmultiply by the
-        cached elevation operator so the public SciPy matrix acts on the original input nodes.
-        """
-
-        analysis_operator = _csr_matrix_from_binding(export())
-        return (
-            _to_csr_matrix(analysis_operator @ self._temperature_elevation())
-            if self._elevated is not None and self.n_temperature_nodes > 0
-            else analysis_operator
-        )
+        return _temperature_elevation_operator(elevated)
 
     @cached_property
     def stiffness(self) -> sp.csc_matrix:
@@ -564,8 +521,11 @@ class Structural2DFEMModel:
         `[generalized force / temperature] = [energy / (distance * temperature)]`.
         """
 
-        return self._temperature_csr_export(
-            self._backend.temperature_to_rhs_csr,
+        analysis_operator = _csr_matrix_from_binding(self._backend.temperature_to_rhs_csr())
+        return (
+            cast(sp.csr_matrix, sp.csr_matrix(analysis_operator @ self._temperature_elevation))
+            if self._elevated is not None and self.n_temperature_nodes > 0
+            else analysis_operator
         )
 
     def interpolation_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
@@ -686,10 +646,11 @@ class Structural2DFEMModel:
             return None
         if nodal_temperature is None:
             raise ValueError("nodal_temperature is required because this model includes thermal materials")
-        return _analysis_temperature_for_element_type(
-            nodal_temperature,
-            self._input_nodes.shape[0],
-            self._elevated,
+        input_temperature = _normalize_nodal_temperature(nodal_temperature, self._input_nodes.shape[0])
+        return (
+            np.asarray(self._temperature_elevation @ input_temperature, dtype=np.float64)
+            if self._elevated is not None
+            else input_temperature
         )
 
     def _validate_locations(self, locations: QuadPointLocations) -> QuadPointLocations:
@@ -1068,7 +1029,8 @@ def _coo_operator_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
 ) -> sp.csr_matrix:
     vals, rows, cols, nrow, ncol = binding
-    return _to_csr_matrix(
+    return cast(
+        sp.csr_matrix,
         sp.coo_matrix(
             (
                 np.asarray(vals, dtype=np.float64),
@@ -1078,7 +1040,7 @@ def _coo_operator_from_binding(
                 ),
             ),
             shape=(int(nrow), int(ncol)),
-        ).tocsr()
+        ).tocsr(),
     )
 
 
@@ -1290,30 +1252,16 @@ def _temperature_elevation_operator(
         cols.extend([int(node) for node in conn])
         vals.extend([0.25] * 4)
 
-    return _to_csr_matrix(
+    return cast(
+        sp.csr_matrix,
         sp.coo_matrix(
             (
                 np.asarray(vals, dtype=np.float64),
                 (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64)),
             ),
             shape=(n_analysis_nodes, n_input_nodes),
-        )
+        ),
     )
-
-
-def _analysis_temperature_for_element_type(
-    nodal_temperature: ArrayLike,
-    n_input_nodes: int,
-    elevated: ElevatedQuad9Mesh | None,
-) -> npt.NDArray[np.floating[Any]]:
-    if elevated is None:
-        return _normalize_nodal_temperature(nodal_temperature, n_input_nodes)
-    input_temperature = _normalize_nodal_temperature(
-        nodal_temperature,
-        n_input_nodes,
-    )
-    elevation = _temperature_elevation_operator(elevated)
-    return np.asarray(elevation @ input_temperature, dtype=np.float64)
 
 
 def _normalize_materials(

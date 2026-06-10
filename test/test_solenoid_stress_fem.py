@@ -1346,7 +1346,7 @@ def test_radial_traction_on_outer_face_matches_expected_total_force(
         element_type=element_type,
     )
 
-    assert model.stiffness.shape == (model.ndof, model.ndof)
+    assert model.stiffness.shape == (model.ndof_reduced, model.ndof_reduced)
     rhs = rhs.reshape(-1, 2)
     expected_force = traction * 2.0 * np.pi * ro * height
     assert np.allclose(rhs[:, 1], 0.0)
@@ -1373,7 +1373,7 @@ def test_axial_traction_on_top_face_matches_expected_total_force(quadrature: str
         element_type=element_type,
     )
 
-    assert model.stiffness.shape == (model.ndof, model.ndof)
+    assert model.stiffness.shape == (model.ndof_reduced, model.ndof_reduced)
     rhs = rhs.reshape(-1, 2)
     expected_force = traction * np.pi * (ro**2 - ri**2)
     assert np.allclose(rhs[:, 0], 0.0)
@@ -2454,11 +2454,7 @@ def test_quad9_temperature_elevation_reproduces_affine_temperature_field() -> No
 
     a_r, b_z, c0 = 3.25, -1.75, 4.5
     corner_temperature = a_r * nodes[:, 0] + b_z * nodes[:, 1] + c0
-    analysis_temperature = fem._analysis_temperature_for_element_type(
-        corner_temperature,
-        nodes.shape[0],
-        elevated,
-    )
+    analysis_temperature = fem._temperature_elevation_operator(elevated) @ corner_temperature
     expected_temperature = a_r * elevated.analysis_nodes[:, 0] + b_z * elevated.analysis_nodes[:, 1] + c0
 
     assert np.allclose(analysis_temperature, expected_temperature, rtol=0.0, atol=1.0e-14)

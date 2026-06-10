@@ -277,7 +277,7 @@ def solve_fem_midplane_profile(
             0.5 * (nodes[:nr, 0] + nodes[1 : nr + 1, 0]),
             displacement,
         ),
-        model.ndof,
+        model.ndof_full,
         fem_build_seconds,
         fem_factorize_seconds,
         fem_solve_seconds,

@@ -74,11 +74,7 @@ def horizontal_faces_for_strip(nr: int, nz: int) -> tuple[np.ndarray, np.ndarray
 
 
 def prescribed_dofs(nodes: np.ndarray) -> dict[int, float]:
-    fixed = {
-        2 * node + 1: 0.0
-        for node, point in enumerate(nodes)
-        if np.isclose(point[1], 0.0)
-    }
+    fixed = {2 * node + 1: 0.0 for node, point in enumerate(nodes) if np.isclose(point[1], 0.0)}
     fixed[0] = 0.0
     return fixed
 
@@ -93,6 +89,20 @@ def von_mises(stress: np.ndarray) -> np.ndarray:
             + 6.0 * stress[..., 3] ** 2
         )
     )
+
+
+def recover_quadrature_stress(model, displacement: np.ndarray, nodal_temperature: np.ndarray) -> np.ndarray:
+    reduced = np.asarray(displacement, dtype=np.float64).reshape(-1)[model.free_dofs]
+    shape = (model.nelem, model.nq_per_element, 4)
+    stress_from_displacement = np.asarray(
+        model.stress_operator @ reduced + model.stress_constant,
+        dtype=np.float64,
+    ).reshape(shape)
+    thermal_stress = np.asarray(
+        model.thermal_stress_operator @ nodal_temperature + model.thermal_stress_constant,
+        dtype=np.float64,
+    ).reshape(shape)
+    return stress_from_displacement - thermal_stress
 
 
 def make_body_force(nelem: int, radial_scale: float, axial_scale: float) -> np.ndarray:
@@ -147,8 +157,8 @@ def summarize_case(
     )
     displacement = model.solve(rhs_reduced)
     scipy_displacement = model.recover_full(scipy_reduced)
-    samples = model.evaluate_quadrature(displacement, nodal_temperature=nodal_temperature)
-    vm = von_mises(samples.stress)
+    stress = recover_quadrature_stress(model, displacement, nodal_temperature)
+    vm = von_mises(stress)
     displacement_2d = displacement.reshape(-1, 2)
 
     if not np.allclose(rhs_manual, rhs_reduced):

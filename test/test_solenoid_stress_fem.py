@@ -961,6 +961,18 @@ def test_structural_rhs_rejects_float32_load_arrays() -> None:
         model.build_rhs(body_force=np.array([0.0, 0.0], dtype=np.float32))
 
 
+def test_load_value_normalizers_default_to_zero_arrays() -> None:
+    pressure = fem._normalize_pressure_values(None, 3)
+    traction = fem._normalize_traction_values(None, 2)
+
+    assert pressure.shape == (3,)
+    assert traction.shape == (2, 2)
+    assert pressure.dtype == np.float64
+    assert traction.dtype == np.float64
+    np.testing.assert_array_equal(pressure, 0.0)
+    np.testing.assert_array_equal(traction, 0.0)
+
+
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)
 @pytest.mark.parametrize("element_type", ELEMENT_TYPES)
 def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type: str) -> None:

@@ -29,10 +29,8 @@ fn pressure_face_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: u
         let normal_area = [sample.tangent[1], -sample.tangent[0]];
         let scale = -formulation.face_scale(sample.point, 1.0, sample.weight)?;
         for local_node in 0..NODES_PER_ELEMENT {
-            local[2 * local_node] =
-                local[2 * local_node] + scale * sample.n[local_node] * normal_area[0];
-            local[2 * local_node + 1] =
-                local[2 * local_node + 1] + scale * sample.n[local_node] * normal_area[1];
+            local[2 * local_node] += scale * sample.n[local_node] * normal_area[0];
+            local[2 * local_node + 1] += scale * sample.n[local_node] * normal_area[1];
         }
     }
 

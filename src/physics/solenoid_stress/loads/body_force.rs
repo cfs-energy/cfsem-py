@@ -30,9 +30,8 @@ fn body_force_element_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEME
         let scale = formulation.volume_scale(sample.point, sample.det_j, sample.weight)?;
         for local_node in 0..NODES_PER_ELEMENT {
             // Even-numbered rows act on radial DOFs and odd-numbered rows act on axial DOFs.
-            local[2 * local_node][0] = local[2 * local_node][0] + scale * sample.n[local_node];
-            local[2 * local_node + 1][1] =
-                local[2 * local_node + 1][1] + scale * sample.n[local_node];
+            local[2 * local_node][0] += scale * sample.n[local_node];
+            local[2 * local_node + 1][1] += scale * sample.n[local_node];
         }
     }
 

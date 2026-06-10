@@ -34,9 +34,8 @@ fn traction_face_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: u
         for local_node in 0..NODES_PER_ELEMENT {
             // The two columns encode independent unit tractions in the global radial and axial
             // directions, so the block is diagonal in those two traction components.
-            local[2 * local_node][0] = local[2 * local_node][0] + scale * sample.n[local_node];
-            local[2 * local_node + 1][1] =
-                local[2 * local_node + 1][1] + scale * sample.n[local_node];
+            local[2 * local_node][0] += scale * sample.n[local_node];
+            local[2 * local_node + 1][1] += scale * sample.n[local_node];
         }
     }
 

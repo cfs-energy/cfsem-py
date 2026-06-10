@@ -127,9 +127,9 @@ pub fn accumulate_stiffness<const DOF_PER_ELEMENT: usize>(
         for col in 0..DOF_PER_ELEMENT {
             let mut value = 0.0;
             for k in 0..4 {
-                value = value + b[k][row] * db[k][col];
+                value += b[k][row] * db[k][col];
             }
-            ke[row][col] = ke[row][col] + scale * value;
+            ke[row][col] += scale * value;
         }
     }
 }
@@ -151,7 +151,7 @@ pub fn constitutive_times_b<const DOF_PER_ELEMENT: usize>(
         for col in 0..DOF_PER_ELEMENT {
             let mut value = 0.0;
             for k in 0..4 {
-                value = value + d[row][k] * b[k][col];
+                value += d[row][k] * b[k][col];
             }
             db[row][col] = value;
         }
@@ -168,7 +168,7 @@ pub fn constitutive_times_strain(d: &[[f64; 4]; 4], strain: &[f64; 4]) -> [f64; 
     for row in 0..4 {
         let mut value = 0.0;
         for k in 0..4 {
-            value = value + d[row][k] * strain[k];
+            value += d[row][k] * strain[k];
         }
         out[row] = value;
     }
@@ -185,8 +185,8 @@ pub fn accumulate_b_transpose_vector<const DOF_PER_ELEMENT: usize>(
     for dof in 0..DOF_PER_ELEMENT {
         let mut value = 0.0;
         for component in 0..4 {
-            value = value + b[component][dof] * sigma[component];
+            value += b[component][dof] * sigma[component];
         }
-        fe[dof] = fe[dof] + scale * value;
+        fe[dof] += scale * value;
     }
 }

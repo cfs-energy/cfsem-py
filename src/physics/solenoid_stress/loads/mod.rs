@@ -103,7 +103,7 @@ fn concat_thermal_load_operators(
         .into_iter()
         .map(|chunk| {
             for (dst, src) in reference_rhs.iter_mut().zip(chunk.reference_rhs) {
-                *dst = *dst + src;
+                *dst += src;
             }
             chunk.temperature_to_rhs
         })

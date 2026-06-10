@@ -70,16 +70,13 @@ fn thermal_element_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT:
             // for a uniform `DeltaT` into one column per nodal temperature DOF.
             let scale_node = sample.n[local_temp_node];
             for dof in 0..DOF_PER_ELEMENT {
-                local.temperature_to_rhs[dof][local_temp_node] = local.temperature_to_rhs[dof]
-                    [local_temp_node]
-                    + local_unit_rhs[dof] * scale_node;
+                local.temperature_to_rhs[dof][local_temp_node] += local_unit_rhs[dof] * scale_node;
             }
         }
         // The reference-temperature term is a constant RHS offset because `T_ref` is prescribed
         // by the material model, not by a nodal unknown.
         for dof in 0..DOF_PER_ELEMENT {
-            local.reference_rhs[dof] =
-                local.reference_rhs[dof] - local_unit_rhs[dof] * thermal.reference_temperature;
+            local.reference_rhs[dof] -= local_unit_rhs[dof] * thermal.reference_temperature;
         }
     }
 
@@ -397,8 +394,7 @@ where
             &local.temperature_to_rhs,
         );
         for dof in 0..DOF_PER_ELEMENT {
-            reference_rhs[global_rows[dof]] =
-                reference_rhs[global_rows[dof]] + local.reference_rhs[dof];
+            reference_rhs[global_rows[dof]] += local.reference_rhs[dof];
         }
     }
 

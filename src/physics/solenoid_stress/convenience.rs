@@ -169,7 +169,7 @@ pub fn rotate_material_in_plane(material: &[[f64; 4]; 4], angle: f64) -> [[f64; 
         for col in 0..4 {
             let mut value = 0.0;
             for (k, strain_row) in strain_to_local.iter().enumerate() {
-                value = value + material[row][k] * strain_row[col];
+                value += material[row][k] * strain_row[col];
             }
             local_times_strain[row][col] = value;
         }
@@ -180,7 +180,7 @@ pub fn rotate_material_in_plane(material: &[[f64; 4]; 4], angle: f64) -> [[f64; 
         for col in 0..4 {
             let mut value = 0.0;
             for (k, local_row) in local_times_strain.iter().enumerate() {
-                value = value + stress_to_global[row][k] * local_row[col];
+                value += stress_to_global[row][k] * local_row[col];
             }
             rotated[row][col] = value;
         }

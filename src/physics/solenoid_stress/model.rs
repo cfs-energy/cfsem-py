@@ -1228,7 +1228,7 @@ where
     // `constant_rhs` already contains the Dirichlet offset from stiffness reduction. Add the
     // reference-temperature contribution so all load-independent terms live in one vector.
     for (dst, src) in constant_rhs.iter_mut().zip(&thermal_reference_rhs) {
-        *dst = *dst + *src;
+        *dst += *src;
     }
 
     Ok(Structural2dModel {
@@ -1334,7 +1334,7 @@ fn reduce_square_triplets(
         } else if reduced_row != usize::MAX
             && let Some(fixed_value) = fixed_lookup[col]
         {
-            constant_rhs[reduced_row] = constant_rhs[reduced_row] - value * fixed_value;
+            constant_rhs[reduced_row] -= value * fixed_value;
         }
     }
     triplets
@@ -1372,7 +1372,7 @@ fn reduce_sort_stiffness_chunks(
     let mut sorted_chunks = Vec::with_capacity(reduced_chunks.len());
     for (triplets, local_rhs) in reduced_chunks {
         for (dst, src) in constant_rhs.iter_mut().zip(local_rhs) {
-            *dst = *dst + src;
+            *dst += src;
         }
         sorted_chunks.push(triplets);
     }
@@ -1393,7 +1393,7 @@ fn sort_coalesce_triplets(
         }
         match pending {
             Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
-                current.val = current.val + triplet.val;
+                current.val += triplet.val;
                 pending = Some(current);
             }
             Some(current) => {
@@ -1425,8 +1425,8 @@ fn reduce_row_operator(
     for ((row, col), value) in operator
         .rows
         .into_iter()
-        .zip(operator.cols.into_iter())
-        .zip(operator.vals.into_iter())
+        .zip(operator.cols)
+        .zip(operator.vals)
     {
         let reduced_row = global_to_reduced[row];
         if reduced_row != usize::MAX {
@@ -1564,7 +1564,7 @@ impl CscPartsBuilder {
         }
         match self.pending {
             Some(mut current) if current.col == triplet.col && current.row == triplet.row => {
-                current.val = current.val + triplet.val;
+                current.val += triplet.val;
                 self.pending = Some(current);
             }
             Some(current) => {

@@ -1174,6 +1174,9 @@ def test_model_locate_points_in_elements_drives_recovery_and_interpolation() -> 
         atol=1.0e-12,
     )
 
+    with pytest.raises(ValueError, match="query point 0 is outside the quad mesh"):
+        model.locate_points(np.array([[3.0, 0.5]], dtype=dtype), outside="raise")
+
 
 def test_model_locations_validate_shape_and_element_type() -> None:
     dtype = np.float64

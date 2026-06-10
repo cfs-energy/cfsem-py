@@ -3,7 +3,7 @@
 This package includes three complementary layers:
 
 - a 1D finite-difference radial stress solver for winding-pack models with zero `rz` shear,
-- a 2D quadrilateral FEM solver with axisymmetric and plane-strain formulations, reusable sparse load operators, and cached Rust-side sparse-LU solves,
+- a 2D quadrilateral FEM solver with axisymmetric and plane-strain formulations, matrix-free load assembly, explicit sparse operator exports, and cached Rust-side sparse-LU solves,
 - analytic reference formulas used for validation and convergence studies.
 
 ## 1D Finite-Difference Solver
@@ -25,8 +25,8 @@ The FEM path supports:
 - `gl3` and `gl4` quadrature,
 - optional per-element in-plane material orientation angles,
 - optional threaded stiffness assembly with `par=True`,
-- reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,
-- reduced quadrature-point recovery operators for strain and stress,
+- explicit reduced-space operator exports for body force, pressure, traction, and nodal-temperature thermal strain,
+- explicit reduced quadrature-point recovery operator exports for strain and stress,
 - matrix-free quadrature-point total-strain recovery,
 - direct sparse-LU reduced-system solves,
 - `float64` numeric storage; floating input arrays must already have dtype `float64`,
@@ -35,10 +35,10 @@ The FEM path supports:
 The intended workflow is:
 
 1. call `assemble_structural_2d(...)` once with mesh, materials, load topology, and prescribed Dirichlet values,
-2. build each reduced load vector with `model.build_rhs(...)` or the exposed sparse operators,
+2. build each reduced load vector with matrix-free `model.build_rhs(...)` or user-owned sparse operator exports,
 3. solve with `model.solve(rhs)`, using the cached sparse-LU factorization,
 4. recover quadrature total strain with `model.evaluate_quadrature_strain(...)`; access
-   `model.quadrature_points` or the explicit sparse recovery operators only when those arrays are
+   `model.quadrature_points` or explicit sparse recovery operator exports only when those arrays are
    needed.
 
 By default, `model.solve(rhs)` uses the direct sparse-LU path and returns the full displacement

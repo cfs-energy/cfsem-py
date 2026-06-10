@@ -212,31 +212,47 @@ impl CsrPartsBuilder {
     }
 }
 
-/// Reduced-space quadrature recovery operators in direct CSR form.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReducedRecoverySelection {
+    pub points: bool,
+    pub strain_operator: bool,
+    pub stress_operator: bool,
+    pub thermal_strain_operator: bool,
+    pub thermal_stress_operator: bool,
+    pub strain_constant: bool,
+    pub stress_constant: bool,
+    pub thermal_strain_constant: bool,
+    pub thermal_stress_constant: bool,
+}
+
+impl ReducedRecoverySelection {
+    const fn needs_strain_rows(self) -> bool {
+        self.strain_operator || self.strain_constant
+    }
+
+    const fn needs_stress_rows(self) -> bool {
+        self.stress_operator || self.stress_constant
+    }
+
+    const fn needs_thermal_rows(self) -> bool {
+        self.thermal_strain_operator
+            || self.thermal_stress_operator
+            || self.thermal_strain_constant
+            || self.thermal_stress_constant
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct ReducedQuadratureFieldOperators {
-    /// Quadrature-point coordinates `(r, z)` in element-major order.
-    pub points: Vec<[f64; 2]>,
-    /// Reduced displacement-to-strain operator.
-    pub strain_operator: CsrOperatorParts,
-    /// Reduced displacement-to-stress operator.
-    pub stress_operator: CsrOperatorParts,
-    /// Input-temperature-to-thermal-strain operator.
-    pub thermal_strain_operator: CsrOperatorParts,
-    /// Input-temperature-to-thermal-stress operator.
-    pub thermal_stress_operator: CsrOperatorParts,
-    /// Strain contribution from prescribed displacement DOFs.
-    pub strain_constant: Vec<f64>,
-    /// Stress contribution from prescribed displacement DOFs.
-    pub stress_constant: Vec<f64>,
-    /// Thermal strain contribution from material reference temperatures.
-    pub thermal_strain_constant: Vec<f64>,
-    /// Thermal stress contribution from material reference temperatures.
-    pub thermal_stress_constant: Vec<f64>,
-    /// Number of quadrature points contributed by each element.
-    pub nq_per_element: usize,
-    /// Number of nodal temperature inputs, or zero when no thermal material table is present.
-    pub ntemp: usize,
+pub(crate) struct SelectedReducedQuadratureFieldOperators {
+    pub points: Option<Vec<[f64; 2]>>,
+    pub strain_operator: Option<CsrOperatorParts>,
+    pub stress_operator: Option<CsrOperatorParts>,
+    pub thermal_strain_operator: Option<CsrOperatorParts>,
+    pub thermal_stress_operator: Option<CsrOperatorParts>,
+    pub strain_constant: Option<Vec<f64>>,
+    pub stress_constant: Option<Vec<f64>>,
+    pub thermal_strain_constant: Option<Vec<f64>>,
+    pub thermal_stress_constant: Option<Vec<f64>>,
 }
 
 /// Dense thermal recovery operators for one quadrature point.
@@ -311,24 +327,25 @@ fn element_major_reference_points_range(
     (element_indices, reference_points)
 }
 
-fn append_reduced_displacement_entry(
+fn append_selected_reduced_displacement_entry(
     entries: &mut Vec<(usize, f64)>,
-    constant: &mut [f64],
+    collect_operator_entry: bool,
+    constant: Option<&mut [f64]>,
     row: usize,
     full_col: usize,
     value: f64,
     global_to_reduced: &[usize],
     fixed_lookup: &[Option<f64>],
 ) {
-    // Fixed displacement columns are eliminated from the operator and folded into the additive
-    // recovery constant. Free columns are remapped into reduced-system column indices.
     if value == 0.0 {
         return;
     }
     let reduced_col = global_to_reduced[full_col];
     if reduced_col != usize::MAX {
-        entries.push((reduced_col, value));
-    } else if let Some(fixed_value) = fixed_lookup[full_col] {
+        if collect_operator_entry {
+            entries.push((reduced_col, value));
+        }
+    } else if let (Some(fixed_value), Some(constant)) = (fixed_lookup[full_col], constant) {
         constant[row] = constant[row] + value * fixed_value;
     }
 }
@@ -367,62 +384,105 @@ fn concat_csr_chunks(chunks: Vec<CsrOperatorParts>, nrow: usize, ncol: usize) ->
     }
 }
 
-fn concat_reduced_quadrature_chunks(
-    chunks: Vec<ReducedQuadratureFieldOperators>,
+fn concat_selected_reduced_quadrature_chunks(
+    chunks: Vec<SelectedReducedQuadratureFieldOperators>,
+    selection: ReducedRecoverySelection,
+    nelem: usize,
     nq_per_element: usize,
-    ntemp: usize,
     ndof_reduced: usize,
     n_temperature_nodes: usize,
-) -> ReducedQuadratureFieldOperators {
-    // Reduced recovery chunks are independent by quadrature row.  Constants and points concatenate
-    // in the same row order as the CSR chunks, preserving element-major quadrature ordering.
-    let total_points = chunks.iter().map(|chunk| chunk.points.len()).sum::<usize>();
-    let nrow = total_points * 4;
+) -> SelectedReducedQuadratureFieldOperators {
+    let npoints = nelem * nq_per_element;
+    let nrow = npoints * 4;
 
-    let mut points = Vec::with_capacity(total_points);
-    let mut strain_chunks = Vec::with_capacity(chunks.len());
-    let mut stress_chunks = Vec::with_capacity(chunks.len());
-    let mut thermal_strain_chunks = Vec::with_capacity(chunks.len());
-    let mut thermal_stress_chunks = Vec::with_capacity(chunks.len());
-    let mut strain_constant = Vec::with_capacity(nrow);
-    let mut stress_constant = Vec::with_capacity(nrow);
-    let mut thermal_strain_constant = Vec::with_capacity(nrow);
-    let mut thermal_stress_constant = Vec::with_capacity(nrow);
+    let mut points = selection.points.then(|| Vec::with_capacity(npoints));
+    let mut strain_chunks = selection
+        .strain_operator
+        .then(|| Vec::with_capacity(chunks.len()));
+    let mut stress_chunks = selection
+        .stress_operator
+        .then(|| Vec::with_capacity(chunks.len()));
+    let mut thermal_strain_chunks = selection
+        .thermal_strain_operator
+        .then(|| Vec::with_capacity(chunks.len()));
+    let mut thermal_stress_chunks = selection
+        .thermal_stress_operator
+        .then(|| Vec::with_capacity(chunks.len()));
+    let mut strain_constant = selection.strain_constant.then(|| Vec::with_capacity(nrow));
+    let mut stress_constant = selection.stress_constant.then(|| Vec::with_capacity(nrow));
+    let mut thermal_strain_constant = selection
+        .thermal_strain_constant
+        .then(|| Vec::with_capacity(nrow));
+    let mut thermal_stress_constant = selection
+        .thermal_stress_constant
+        .then(|| Vec::with_capacity(nrow));
 
     for chunk in chunks {
-        debug_assert_eq!(chunk.nq_per_element, nq_per_element);
-        debug_assert_eq!(chunk.ntemp, ntemp);
-        points.extend(chunk.points);
-        strain_chunks.push(chunk.strain_operator);
-        stress_chunks.push(chunk.stress_operator);
-        thermal_strain_chunks.push(chunk.thermal_strain_operator);
-        thermal_stress_chunks.push(chunk.thermal_stress_operator);
-        strain_constant.extend(chunk.strain_constant);
-        stress_constant.extend(chunk.stress_constant);
-        thermal_strain_constant.extend(chunk.thermal_strain_constant);
-        thermal_stress_constant.extend(chunk.thermal_stress_constant);
+        if let Some(values) = points.as_mut() {
+            values.extend(chunk.points.expect("selected points chunk"));
+        }
+        if let Some(values) = strain_chunks.as_mut() {
+            values.push(chunk.strain_operator.expect("selected strain chunk"));
+        }
+        if let Some(values) = stress_chunks.as_mut() {
+            values.push(chunk.stress_operator.expect("selected stress chunk"));
+        }
+        if let Some(values) = thermal_strain_chunks.as_mut() {
+            values.push(
+                chunk
+                    .thermal_strain_operator
+                    .expect("selected thermal strain chunk"),
+            );
+        }
+        if let Some(values) = thermal_stress_chunks.as_mut() {
+            values.push(
+                chunk
+                    .thermal_stress_operator
+                    .expect("selected thermal stress chunk"),
+            );
+        }
+        if let Some(values) = strain_constant.as_mut() {
+            values.extend(
+                chunk
+                    .strain_constant
+                    .expect("selected strain constant chunk"),
+            );
+        }
+        if let Some(values) = stress_constant.as_mut() {
+            values.extend(
+                chunk
+                    .stress_constant
+                    .expect("selected stress constant chunk"),
+            );
+        }
+        if let Some(values) = thermal_strain_constant.as_mut() {
+            values.extend(
+                chunk
+                    .thermal_strain_constant
+                    .expect("selected thermal strain constant chunk"),
+            );
+        }
+        if let Some(values) = thermal_stress_constant.as_mut() {
+            values.extend(
+                chunk
+                    .thermal_stress_constant
+                    .expect("selected thermal stress constant chunk"),
+            );
+        }
     }
 
-    ReducedQuadratureFieldOperators {
+    SelectedReducedQuadratureFieldOperators {
         points,
-        strain_operator: concat_csr_chunks(strain_chunks, nrow, ndof_reduced),
-        stress_operator: concat_csr_chunks(stress_chunks, nrow, ndof_reduced),
-        thermal_strain_operator: concat_csr_chunks(
-            thermal_strain_chunks,
-            nrow,
-            n_temperature_nodes,
-        ),
-        thermal_stress_operator: concat_csr_chunks(
-            thermal_stress_chunks,
-            nrow,
-            n_temperature_nodes,
-        ),
+        strain_operator: strain_chunks.map(|chunks| concat_csr_chunks(chunks, nrow, ndof_reduced)),
+        stress_operator: stress_chunks.map(|chunks| concat_csr_chunks(chunks, nrow, ndof_reduced)),
+        thermal_strain_operator: thermal_strain_chunks
+            .map(|chunks| concat_csr_chunks(chunks, nrow, n_temperature_nodes)),
+        thermal_stress_operator: thermal_stress_chunks
+            .map(|chunks| concat_csr_chunks(chunks, nrow, n_temperature_nodes)),
         strain_constant,
         stress_constant,
         thermal_strain_constant,
         thermal_stress_constant,
-        nq_per_element,
-        ntemp,
     }
 }
 
@@ -477,7 +537,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn reduced_quadrature_field_operators_for_family<
+pub(crate) fn selected_reduced_quadrature_field_operators_for_family<
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
@@ -492,7 +552,8 @@ pub(crate) fn reduced_quadrature_field_operators_for_family<
     global_to_reduced: &[usize],
     fixed_lookup: &[Option<f64>],
     ndof_reduced: usize,
-) -> Result<ReducedQuadratureFieldOperators, String>
+    selection: ReducedRecoverySelection,
+) -> Result<SelectedReducedQuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -505,7 +566,11 @@ where
         material_ids,
         material_orientation_angles,
     )?;
-    reduced_quadrature_field_operators_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    selected_reduced_quadrature_field_operators_range_for_family::<
+        Family,
+        NODES_PER_ELEMENT,
+        DOF_PER_ELEMENT,
+    >(
         mesh,
         material_ids,
         material_table,
@@ -516,13 +581,14 @@ where
         global_to_reduced,
         fixed_lookup,
         ndof_reduced,
+        selection,
         0,
         mesh.num_elements(),
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn reduced_quadrature_field_operators_for_family_par<
+pub(crate) fn selected_reduced_quadrature_field_operators_for_family_par<
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
@@ -537,7 +603,8 @@ pub(crate) fn reduced_quadrature_field_operators_for_family_par<
     global_to_reduced: &[usize],
     fixed_lookup: &[Option<f64>],
     ndof_reduced: usize,
-) -> Result<ReducedQuadratureFieldOperators, String>
+    selection: ReducedRecoverySelection,
+) -> Result<SelectedReducedQuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -552,7 +619,6 @@ where
     )?;
     let nelem = mesh.num_elements();
     let nq_per_element = quadrature.points_per_element();
-    let ntemp = thermal_material_table.map_or(0, |_| mesh.num_nodes());
     let n_temperature_nodes = if thermal_material_table.is_some() {
         mesh.num_nodes()
     } else {
@@ -561,7 +627,7 @@ where
     let chunks = ranges_for_len(nelem, chunksize(nelem))
         .into_par_iter()
         .map(|(start, end)| {
-            reduced_quadrature_field_operators_range_for_family::<
+            selected_reduced_quadrature_field_operators_range_for_family::<
                 Family,
                 NODES_PER_ELEMENT,
                 DOF_PER_ELEMENT,
@@ -576,23 +642,25 @@ where
                 global_to_reduced,
                 fixed_lookup,
                 ndof_reduced,
+                selection,
                 start,
                 end,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(concat_reduced_quadrature_chunks(
+    Ok(concat_selected_reduced_quadrature_chunks(
         chunks,
+        selection,
+        nelem,
         nq_per_element,
-        ntemp,
         ndof_reduced,
         n_temperature_nodes,
     ))
 }
 
 #[allow(clippy::too_many_arguments)]
-fn reduced_quadrature_field_operators_range_for_family<
+fn selected_reduced_quadrature_field_operators_range_for_family<
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
@@ -607,9 +675,10 @@ fn reduced_quadrature_field_operators_range_for_family<
     global_to_reduced: &[usize],
     fixed_lookup: &[Option<f64>],
     ndof_reduced: usize,
+    selection: ReducedRecoverySelection,
     element_start: usize,
     element_end: usize,
-) -> Result<ReducedQuadratureFieldOperators, String>
+) -> Result<SelectedReducedQuadratureFieldOperators, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -621,15 +690,25 @@ where
     } else {
         0
     };
-    let mut points = Vec::with_capacity(n_elements * nq_per_element);
-    let mut strain_operator = CsrPartsBuilder::new(nrows, ndof_reduced);
-    let mut stress_operator = CsrPartsBuilder::new(nrows, ndof_reduced);
-    let mut thermal_strain_operator = CsrPartsBuilder::new(nrows, n_temperature_nodes);
-    let mut thermal_stress_operator = CsrPartsBuilder::new(nrows, n_temperature_nodes);
-    let mut strain_constant = vec![0.0; nrows];
-    let mut stress_constant = vec![0.0; nrows];
-    let mut thermal_strain_constant = vec![0.0; nrows];
-    let mut thermal_stress_constant = vec![0.0; nrows];
+    let mut points = selection
+        .points
+        .then(|| Vec::with_capacity(n_elements * nq_per_element));
+    let mut strain_operator = selection
+        .strain_operator
+        .then(|| CsrPartsBuilder::new(nrows, ndof_reduced));
+    let mut stress_operator = selection
+        .stress_operator
+        .then(|| CsrPartsBuilder::new(nrows, ndof_reduced));
+    let mut thermal_strain_operator = selection
+        .thermal_strain_operator
+        .then(|| CsrPartsBuilder::new(nrows, n_temperature_nodes));
+    let mut thermal_stress_operator = selection
+        .thermal_stress_operator
+        .then(|| CsrPartsBuilder::new(nrows, n_temperature_nodes));
+    let mut strain_constant = selection.strain_constant.then(|| vec![0.0; nrows]);
+    let mut stress_constant = selection.stress_constant.then(|| vec![0.0; nrows]);
+    let mut thermal_strain_constant = selection.thermal_strain_constant.then(|| vec![0.0; nrows]);
+    let mut thermal_stress_constant = selection.thermal_stress_constant.then(|| vec![0.0; nrows]);
     let mut row_entries = Vec::with_capacity(DOF_PER_ELEMENT);
 
     for element_index in element_start..element_end {
@@ -667,107 +746,144 @@ where
         {
             let local_element_index = element_index - element_start;
             let row_base = 4 * (local_element_index * nq_per_element + q_local);
-            points.push(sample.point);
-            let b = crate::physics::solenoid_stress::axisym::build_b_matrix::<
-                NODES_PER_ELEMENT,
-                DOF_PER_ELEMENT,
-            >(formulation, &sample.n, &sample.grad_phys, sample.point)?;
+            if let Some(points) = points.as_mut() {
+                points.push(sample.point);
+            }
+            let b = if selection.needs_strain_rows() || selection.needs_stress_rows() {
+                Some(crate::physics::solenoid_stress::axisym::build_b_matrix::<
+                    NODES_PER_ELEMENT,
+                    DOF_PER_ELEMENT,
+                >(
+                    formulation, &sample.n, &sample.grad_phys, sample.point
+                )?)
+            } else {
+                None
+            };
 
             for component in 0..4 {
-                row_entries.clear();
                 let row = row_base + component;
-                for local_node in 0..NODES_PER_ELEMENT {
-                    for dof_component in 0..DOF_PER_NODE {
-                        let local_dof = DOF_PER_NODE * local_node + dof_component;
-                        let full_col = DOF_PER_NODE * nodes[local_node] + dof_component;
-                        append_reduced_displacement_entry(
-                            &mut row_entries,
-                            &mut strain_constant,
-                            row,
-                            full_col,
-                            b[component][local_dof],
-                            global_to_reduced,
-                            fixed_lookup,
-                        );
-                    }
-                }
-                strain_operator.push_canonical_row(&mut row_entries);
-
-                row_entries.clear();
-                for local_node in 0..NODES_PER_ELEMENT {
-                    for dof_component in 0..DOF_PER_NODE {
-                        let local_dof = DOF_PER_NODE * local_node + dof_component;
-                        let full_col = DOF_PER_NODE * nodes[local_node] + dof_component;
-                        let mut value = 0.0;
-                        for strain_component in 0..4 {
-                            value = value
-                                + material[component][strain_component]
-                                    * b[strain_component][local_dof];
+                if selection.needs_strain_rows() {
+                    let b = b
+                        .as_ref()
+                        .expect("B matrix should be built for strain rows");
+                    row_entries.clear();
+                    for local_node in 0..NODES_PER_ELEMENT {
+                        for dof_component in 0..DOF_PER_NODE {
+                            let local_dof = DOF_PER_NODE * local_node + dof_component;
+                            let full_col = DOF_PER_NODE * nodes[local_node] + dof_component;
+                            append_selected_reduced_displacement_entry(
+                                &mut row_entries,
+                                strain_operator.is_some(),
+                                strain_constant.as_deref_mut(),
+                                row,
+                                full_col,
+                                b[component][local_dof],
+                                global_to_reduced,
+                                fixed_lookup,
+                            );
                         }
-                        append_reduced_displacement_entry(
-                            &mut row_entries,
-                            &mut stress_constant,
-                            row,
-                            full_col,
-                            value,
-                            global_to_reduced,
-                            fixed_lookup,
-                        );
+                    }
+                    if let Some(operator) = strain_operator.as_mut() {
+                        operator.push_canonical_row(&mut row_entries);
                     }
                 }
-                stress_operator.push_canonical_row(&mut row_entries);
+
+                if selection.needs_stress_rows() {
+                    let b = b
+                        .as_ref()
+                        .expect("B matrix should be built for stress rows");
+                    row_entries.clear();
+                    for local_node in 0..NODES_PER_ELEMENT {
+                        for dof_component in 0..DOF_PER_NODE {
+                            let local_dof = DOF_PER_NODE * local_node + dof_component;
+                            let full_col = DOF_PER_NODE * nodes[local_node] + dof_component;
+                            let mut value = 0.0;
+                            for strain_component in 0..4 {
+                                value = value
+                                    + material[component][strain_component]
+                                        * b[strain_component][local_dof];
+                            }
+                            append_selected_reduced_displacement_entry(
+                                &mut row_entries,
+                                stress_operator.is_some(),
+                                stress_constant.as_deref_mut(),
+                                row,
+                                full_col,
+                                value,
+                                global_to_reduced,
+                                fixed_lookup,
+                            );
+                        }
+                    }
+                    if let Some(operator) = stress_operator.as_mut() {
+                        operator.push_canonical_row(&mut row_entries);
+                    }
+                }
             }
 
-            if let (Some(thermal_material), Some(thermal_stress_unit)) =
-                (thermal_material, thermal_stress_unit.as_ref())
-            {
-                let local = thermal_sample_kernel(&sample, thermal_material, thermal_stress_unit);
-                for component in 0..4 {
-                    let row = row_base + component;
-                    thermal_strain_constant[row] = local.thermal_strain_constant[component];
-                    thermal_stress_constant[row] = local.thermal_stress_constant[component];
+            if selection.needs_thermal_rows() {
+                if let (Some(thermal_material), Some(thermal_stress_unit)) =
+                    (thermal_material, thermal_stress_unit.as_ref())
+                {
+                    let local =
+                        thermal_sample_kernel(&sample, thermal_material, thermal_stress_unit);
+                    for component in 0..4 {
+                        let row = row_base + component;
+                        if let Some(constant) = thermal_strain_constant.as_mut() {
+                            constant[row] = local.thermal_strain_constant[component];
+                        }
+                        if let Some(constant) = thermal_stress_constant.as_mut() {
+                            constant[row] = local.thermal_stress_constant[component];
+                        }
 
-                    row_entries.clear();
-                    for local_temp_node in 0..NODES_PER_ELEMENT {
-                        append_temperature_entry(
-                            &mut row_entries,
-                            nodes[local_temp_node],
-                            local.thermal_strain[component][local_temp_node],
-                        );
-                    }
-                    thermal_strain_operator.push_canonical_row(&mut row_entries);
+                        if let Some(operator) = thermal_strain_operator.as_mut() {
+                            row_entries.clear();
+                            for local_temp_node in 0..NODES_PER_ELEMENT {
+                                append_temperature_entry(
+                                    &mut row_entries,
+                                    nodes[local_temp_node],
+                                    local.thermal_strain[component][local_temp_node],
+                                );
+                            }
+                            operator.push_canonical_row(&mut row_entries);
+                        }
 
-                    row_entries.clear();
-                    for local_temp_node in 0..NODES_PER_ELEMENT {
-                        append_temperature_entry(
-                            &mut row_entries,
-                            nodes[local_temp_node],
-                            local.thermal_stress[component][local_temp_node],
-                        );
+                        if let Some(operator) = thermal_stress_operator.as_mut() {
+                            row_entries.clear();
+                            for local_temp_node in 0..NODES_PER_ELEMENT {
+                                append_temperature_entry(
+                                    &mut row_entries,
+                                    nodes[local_temp_node],
+                                    local.thermal_stress[component][local_temp_node],
+                                );
+                            }
+                            operator.push_canonical_row(&mut row_entries);
+                        }
                     }
-                    thermal_stress_operator.push_canonical_row(&mut row_entries);
-                }
-            } else {
-                for _ in 0..4 {
-                    thermal_strain_operator.push_empty_row();
-                    thermal_stress_operator.push_empty_row();
+                } else {
+                    for _ in 0..4 {
+                        if let Some(operator) = thermal_strain_operator.as_mut() {
+                            operator.push_empty_row();
+                        }
+                        if let Some(operator) = thermal_stress_operator.as_mut() {
+                            operator.push_empty_row();
+                        }
+                    }
                 }
             }
         }
     }
 
-    Ok(ReducedQuadratureFieldOperators {
+    Ok(SelectedReducedQuadratureFieldOperators {
         points,
-        strain_operator: strain_operator.finish(),
-        stress_operator: stress_operator.finish(),
-        thermal_strain_operator: thermal_strain_operator.finish(),
-        thermal_stress_operator: thermal_stress_operator.finish(),
+        strain_operator: strain_operator.map(CsrPartsBuilder::finish),
+        stress_operator: stress_operator.map(CsrPartsBuilder::finish),
+        thermal_strain_operator: thermal_strain_operator.map(CsrPartsBuilder::finish),
+        thermal_stress_operator: thermal_stress_operator.map(CsrPartsBuilder::finish),
         strain_constant,
         stress_constant,
         thermal_strain_constant,
         thermal_stress_constant,
-        nq_per_element,
-        ntemp: thermal_material_table.map_or(0, |_| mesh.num_nodes()),
     })
 }
 

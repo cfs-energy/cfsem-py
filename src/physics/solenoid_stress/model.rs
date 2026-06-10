@@ -1,6 +1,5 @@
 //! Reduced-model assembly and solve wrapper for the 2D structural FEM.
 
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -32,8 +31,9 @@ use crate::physics::solenoid_stress::loads::{
     traction_operator_for_family_par,
 };
 use crate::physics::solenoid_stress::recovery::{
-    CsrOperatorParts, reduced_quadrature_field_operators_for_family,
-    reduced_quadrature_field_operators_for_family_par,
+    CsrOperatorParts, ReducedRecoverySelection, SelectedReducedQuadratureFieldOperators,
+    selected_reduced_quadrature_field_operators_for_family,
+    selected_reduced_quadrature_field_operators_for_family_par,
 };
 use crate::physics::solenoid_stress::types::{
     PressureLoad, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
@@ -70,6 +70,20 @@ impl Structural2dElementType {
     }
 }
 
+const fn empty_recovery_selection() -> ReducedRecoverySelection {
+    ReducedRecoverySelection {
+        points: false,
+        strain_operator: false,
+        stress_operator: false,
+        thermal_strain_operator: false,
+        thermal_stress_operator: false,
+        strain_constant: false,
+        stress_constant: false,
+        thermal_strain_constant: false,
+        thermal_stress_constant: false,
+    }
+}
+
 /// Borrowed element-connectivity input for model assembly.
 ///
 /// Each variant stores element-node connectivity in the node ordering expected by the
@@ -82,16 +96,7 @@ pub enum Structural2dElements<'a> {
     Quad9(&'a [[usize; 9]]),
 }
 
-/// Load operator application strategy for one RHS build.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoadApplication {
-    /// Apply load vectors directly from element kernels without populating sparse load caches.
-    MatrixFree,
-    /// Build or reuse cached sparse load operators, then apply them with CSR matvecs.
-    Cached,
-}
-
-/// Inputs retained so lazy operators can be rebuilt after initial model assembly.
+/// Inputs retained so sparse exports and matrix-free operations can be built after assembly.
 #[derive(Debug, Clone)]
 struct Structural2dAssemblyData {
     material_ids: Vec<usize>,
@@ -103,83 +108,11 @@ struct Structural2dAssemblyData {
     par: bool,
 }
 
-/// Lazily populated reduced load operators.
-#[derive(Debug, Default)]
-struct LazyLoadOperators {
-    body_force_to_rhs: Option<SparseRowMat<usize, f64>>,
-    pressure_to_rhs: Option<SparseRowMat<usize, f64>>,
-    traction_to_rhs: Option<SparseRowMat<usize, f64>>,
-    temperature_to_rhs: Option<SparseRowMat<usize, f64>>,
-}
-
-/// Lazily populated quadrature recovery bundle.
-#[derive(Debug, Default)]
-struct LazyRecovery {
-    operators: Option<ReducedRecoveryOperators>,
-}
-
-/// Reduced-space recovery operators and constants stored on the assembled model.
-///
-/// All sparse operators in this struct act on the reduced displacement vector produced by the
-/// constrained solve, except for the thermal operators, which act on the nodal temperature field.
-/// `points` has flattened shape `(nelem * nq_per_element, 2)`. Each operator and constant
-/// vector acts on or stores flattened quadrature-point blocks with row ordering
-/// `[rr, zz, tt, rz]`, so those arrays have flattened shape `(4 * nelem * nq_per_element,)`.
-#[derive(Debug, Clone)]
-pub struct ReducedRecoveryOperators {
-    /// Quadrature-point coordinates `(r, z)` in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 2)`.
-    /// Units: `[length]`.
-    pub points: Vec<[f64; 2]>,
-    /// CSR operator mapping reduced displacements `[length]` to quadrature-point strains
-    /// `[dimensionless]`.
-    ///
-    /// Entry units: `[strain / displacement] = [1 / length]`.
-    pub strain_operator: SparseRowMat<usize, f64>,
-    /// CSR operator mapping reduced displacements `[length]` to quadrature-point stresses.
-    ///
-    /// Entry units: `[stress / displacement] = [pressure / length]`.
-    pub stress_operator: SparseRowMat<usize, f64>,
-    /// CSR operator mapping nodal temperatures `[temperature]` to quadrature-point thermal strain.
-    ///
-    /// Entry units: `[strain / temperature]`.
-    pub thermal_strain_operator: SparseRowMat<usize, f64>,
-    /// CSR operator mapping nodal temperatures `[temperature]` to quadrature-point thermal stress.
-    ///
-    /// Entry units: `[stress / temperature]`.
-    pub thermal_stress_operator: SparseRowMat<usize, f64>,
-    /// Constant strain offset induced by nonzero prescribed Dirichlet values.
-    ///
-    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
-    /// Units: `[strain]`.
-    pub strain_constant: Vec<f64>,
-    /// Constant stress offset induced by nonzero prescribed Dirichlet values.
-    ///
-    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
-    /// Units: `[stress]`.
-    pub stress_constant: Vec<f64>,
-    /// Constant thermal-strain offset induced by per-material reference temperature.
-    ///
-    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
-    /// Units: `[strain]`.
-    pub thermal_strain_constant: Vec<f64>,
-    /// Constant thermal-stress offset induced by per-material reference temperature.
-    ///
-    /// Flattened shape: `(4 * nelem * nq_per_element,)`.
-    /// Units: `[stress]`.
-    pub thermal_stress_constant: Vec<f64>,
-    /// Number of quadrature points contributed by each element.
-    pub nq_per_element: usize,
-    /// Number of nodal temperatures expected by the thermal recovery operators.
-    pub n_temperature_nodes: usize,
-}
-
 /// Fully assembled reduced 2D structural model.
 ///
-/// The public system stored here is the Dirichlet-reduced system.  `stiffness`, the load
-/// operators, and `constant_rhs` all live in reduced displacement space, while the recovery
-/// operators map reduced displacements back to quadrature-point strain and stress fields.
+/// The public system stored here is the Dirichlet-reduced system. `stiffness` and `constant_rhs`
+/// live in reduced displacement space. Sparse load and recovery operators are computed on demand
+/// for explicit exports and are not retained by the model.
 /// `analysis_nodes` has shape `(n_analysis_nodes, 2)`, `analysis_elements_flat` has shape
 /// `(nelem * nodes_per_element,)`, `pressure_faces` has shape `(n_pressure_faces, 2)`, and
 /// `traction_faces` has shape `(n_traction_faces, 2)`.
@@ -192,15 +125,11 @@ pub struct Structural2dModel {
     ///
     /// Entry units: `[generalized force / displacement] = [energy / distance^2]`.
     pub stiffness: SparseColMat<usize, f64>,
-    /// Lazily populated reduced load operators.
-    load_ops: RefCell<LazyLoadOperators>,
     /// Constant reduced RHS contribution from prescribed displacements and thermal reference state.
     ///
     /// Shape: `(ndof_reduced,)`.
     /// Units: `[energy / distance]`.
     pub constant_rhs: Vec<f64>,
-    /// Lazily populated quadrature-point recovery operators and constants.
-    recovery: RefCell<LazyRecovery>,
     /// Number of quadrature points contributed by each element.
     pub nq_per_element: usize,
     /// Number of nodal temperatures expected by thermal operators.
@@ -226,7 +155,7 @@ pub struct Structural2dModel {
     pub nodes_per_element: usize,
     /// Analysis element family used by the backend.
     pub element_type: Structural2dElementType,
-    /// Volume and face quadrature rule used to assemble the stored operators.
+    /// Volume and face quadrature rule used for assembly, matrix-free loads, and sparse exports.
     pub quadrature: QuadratureRule,
     /// Structural 2D formulation used by the backend.
     pub formulation: Structural2dFormulation,
@@ -249,7 +178,7 @@ pub struct Structural2dModel {
     /// Shape: `(n_fixed,)`.
     /// Units: `[length]`.
     pub fixed_values: Vec<f64>,
-    /// Assembly inputs retained for lazy load/recovery construction.
+    /// Assembly inputs retained for matrix-free operations and sparse exports.
     assembly: Structural2dAssemblyData,
     lu: Option<Lu<usize, f64>>,
 }
@@ -437,7 +366,7 @@ impl Structural2dModel {
         self.reduce_load_operator(operator.temperature_to_rhs)
     }
 
-    fn build_body_force_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+    pub fn body_force_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
         match self.element_type {
             Structural2dElementType::Quad4 => self.build_body_force_to_rhs_for_family::<
                 Quad4Family,
@@ -452,7 +381,7 @@ impl Structural2dModel {
         }
     }
 
-    fn build_pressure_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+    pub fn pressure_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
         match self.element_type {
             Structural2dElementType::Quad4 => self.build_pressure_to_rhs_for_family::<
                 Quad4Family,
@@ -467,7 +396,7 @@ impl Structural2dModel {
         }
     }
 
-    fn build_traction_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+    pub fn traction_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
         match self.element_type {
             Structural2dElementType::Quad4 => self.build_traction_to_rhs_for_family::<
                 Quad4Family,
@@ -482,7 +411,7 @@ impl Structural2dModel {
         }
     }
 
-    fn build_temperature_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
+    pub fn temperature_to_rhs(&self) -> Result<SparseRowMat<usize, f64>, String> {
         match self.element_type {
             Structural2dElementType::Quad4 => self.build_temperature_to_rhs_for_family::<
                 Quad4Family,
@@ -495,102 +424,6 @@ impl Structural2dModel {
                 { dof_per_element(quad9::NODES_PER_ELEMENT) },
             >(),
         }
-    }
-
-    fn ensure_body_force_to_rhs(&self) -> Result<(), String> {
-        if self.load_ops.borrow().body_force_to_rhs.is_none() {
-            let operator = self.build_body_force_to_rhs()?;
-            self.load_ops.borrow_mut().body_force_to_rhs = Some(operator);
-        }
-        Ok(())
-    }
-
-    fn ensure_pressure_to_rhs(&self) -> Result<(), String> {
-        if self.load_ops.borrow().pressure_to_rhs.is_none() {
-            let operator = self.build_pressure_to_rhs()?;
-            self.load_ops.borrow_mut().pressure_to_rhs = Some(operator);
-        }
-        Ok(())
-    }
-
-    fn ensure_traction_to_rhs(&self) -> Result<(), String> {
-        if self.load_ops.borrow().traction_to_rhs.is_none() {
-            let operator = self.build_traction_to_rhs()?;
-            self.load_ops.borrow_mut().traction_to_rhs = Some(operator);
-        }
-        Ok(())
-    }
-
-    fn ensure_temperature_to_rhs(&self) -> Result<(), String> {
-        if self.load_ops.borrow().temperature_to_rhs.is_none() {
-            let operator = self.build_temperature_to_rhs()?;
-            self.load_ops.borrow_mut().temperature_to_rhs = Some(operator);
-        }
-        Ok(())
-    }
-
-    pub fn with_body_force_to_rhs<R>(
-        &self,
-        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
-    ) -> Result<R, String> {
-        self.ensure_body_force_to_rhs()?;
-        let load_ops = self.load_ops.borrow();
-        Ok(f(load_ops
-            .body_force_to_rhs
-            .as_ref()
-            .expect("body-force cache should be populated")))
-    }
-
-    pub fn with_pressure_to_rhs<R>(
-        &self,
-        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
-    ) -> Result<R, String> {
-        self.ensure_pressure_to_rhs()?;
-        let load_ops = self.load_ops.borrow();
-        Ok(f(load_ops
-            .pressure_to_rhs
-            .as_ref()
-            .expect("pressure cache should be populated")))
-    }
-
-    pub fn with_traction_to_rhs<R>(
-        &self,
-        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
-    ) -> Result<R, String> {
-        self.ensure_traction_to_rhs()?;
-        let load_ops = self.load_ops.borrow();
-        Ok(f(load_ops
-            .traction_to_rhs
-            .as_ref()
-            .expect("traction cache should be populated")))
-    }
-
-    pub fn with_temperature_to_rhs<R>(
-        &self,
-        f: impl FnOnce(&SparseRowMat<usize, f64>) -> R,
-    ) -> Result<R, String> {
-        self.ensure_temperature_to_rhs()?;
-        let load_ops = self.load_ops.borrow();
-        Ok(f(load_ops
-            .temperature_to_rhs
-            .as_ref()
-            .expect("temperature cache should be populated")))
-    }
-
-    #[cfg(test)]
-    fn load_cache_status(&self) -> (bool, bool, bool, bool) {
-        let load_ops = self.load_ops.borrow();
-        (
-            load_ops.body_force_to_rhs.is_some(),
-            load_ops.pressure_to_rhs.is_some(),
-            load_ops.traction_to_rhs.is_some(),
-            load_ops.temperature_to_rhs.is_some(),
-        )
-    }
-
-    #[cfg(test)]
-    fn recovery_cache_populated(&self) -> bool {
-        self.recovery.borrow().operators.is_some()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -705,52 +538,14 @@ impl Structural2dModel {
         }
     }
 
-    fn apply_cached_loads(
-        &self,
-        body_force: Option<&[f64]>,
-        pressure_values: Option<&[f64]>,
-        traction_values: Option<&[f64]>,
-        nodal_temperature: Option<&[f64]>,
-        rhs: &mut [f64],
-    ) -> Result<(), String> {
-        self.with_body_force_to_rhs(|operator| {
-            apply_csr_operator(operator, body_force, "body_force", rhs)
-        })??;
-        self.with_pressure_to_rhs(|operator| {
-            apply_csr_operator(operator, pressure_values, "pressure_values", rhs)
-        })??;
-        self.with_traction_to_rhs(|operator| {
-            apply_csr_operator(operator, traction_values, "traction_values", rhs)
-        })??;
-        self.with_temperature_to_rhs(|operator| {
-            if operator.ncols() > 0 {
-                let nodal_temperature = nodal_temperature.ok_or_else(|| {
-                    "nodal_temperature is required because this model includes thermal materials"
-                        .to_string()
-                })?;
-                apply_csr_operator(operator, Some(nodal_temperature), "nodal_temperature", rhs)
-            } else if let Some(nodal_temperature) = nodal_temperature {
-                if !nodal_temperature.is_empty() {
-                    return Err(
-                        "nodal_temperature was provided, but this model has no thermal operator"
-                            .to_string(),
-                    );
-                }
-                Ok(())
-            } else {
-                Ok(())
-            }
-        })??;
-        Ok(())
-    }
-
-    fn build_recovery_for_family<
+    fn build_selected_recovery_for_family<
         Family,
         const NODES_PER_ELEMENT: usize,
         const DOF_PER_ELEMENT: usize,
     >(
         &self,
-    ) -> Result<ReducedRecoveryOperators, String>
+        selection: ReducedRecoverySelection,
+    ) -> Result<SelectedReducedQuadratureFieldOperators, String>
     where
         Family: QuadElementFamily<NODES_PER_ELEMENT>,
     {
@@ -759,8 +554,8 @@ impl Structural2dModel {
             nodes_rz: &self.analysis_nodes,
             elements: &elements,
         };
-        let recovery_reduced = if self.assembly.par {
-            reduced_quadrature_field_operators_for_family_par::<
+        if self.assembly.par {
+            selected_reduced_quadrature_field_operators_for_family_par::<
                 Family,
                 NODES_PER_ELEMENT,
                 DOF_PER_ELEMENT,
@@ -775,9 +570,10 @@ impl Structural2dModel {
                 &self.assembly.global_to_reduced,
                 &self.assembly.fixed_lookup,
                 self.ndof_reduced,
+                selection,
             )
         } else {
-            reduced_quadrature_field_operators_for_family::<
+            selected_reduced_quadrature_field_operators_for_family::<
                 Family,
                 NODES_PER_ELEMENT,
                 DOF_PER_ELEMENT,
@@ -792,60 +588,115 @@ impl Structural2dModel {
                 &self.assembly.global_to_reduced,
                 &self.assembly.fixed_lookup,
                 self.ndof_reduced,
+                selection,
             )
-        }?;
-        Ok(ReducedRecoveryOperators {
-            points: recovery_reduced.points,
-            strain_operator: csr_from_canonical_parts(recovery_reduced.strain_operator),
-            stress_operator: csr_from_canonical_parts(recovery_reduced.stress_operator),
-            thermal_strain_operator: csr_from_canonical_parts(
-                recovery_reduced.thermal_strain_operator,
-            ),
-            thermal_stress_operator: csr_from_canonical_parts(
-                recovery_reduced.thermal_stress_operator,
-            ),
-            strain_constant: recovery_reduced.strain_constant,
-            stress_constant: recovery_reduced.stress_constant,
-            thermal_strain_constant: recovery_reduced.thermal_strain_constant,
-            thermal_stress_constant: recovery_reduced.thermal_stress_constant,
-            nq_per_element: recovery_reduced.nq_per_element,
-            n_temperature_nodes: self.n_temperature_nodes,
-        })
+        }
     }
 
-    fn build_recovery(&self) -> Result<ReducedRecoveryOperators, String> {
+    fn build_selected_recovery(
+        &self,
+        selection: ReducedRecoverySelection,
+    ) -> Result<SelectedReducedQuadratureFieldOperators, String> {
         match self.element_type {
-            Structural2dElementType::Quad4 => self.build_recovery_for_family::<
+            Structural2dElementType::Quad4 => self.build_selected_recovery_for_family::<
                 Quad4Family,
                 { quad4::NODES_PER_ELEMENT },
                 { dof_per_element(quad4::NODES_PER_ELEMENT) },
-            >(),
-            Structural2dElementType::Quad9 => self.build_recovery_for_family::<
+            >(selection),
+            Structural2dElementType::Quad9 => self.build_selected_recovery_for_family::<
                 Quad9Family,
                 { quad9::NODES_PER_ELEMENT },
                 { dof_per_element(quad9::NODES_PER_ELEMENT) },
-            >(),
+            >(selection),
         }
     }
 
-    fn ensure_recovery(&self) -> Result<(), String> {
-        if self.recovery.borrow().operators.is_none() {
-            let recovery = self.build_recovery()?;
-            self.recovery.borrow_mut().operators = Some(recovery);
-        }
-        Ok(())
+    pub fn strain_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        let selection = ReducedRecoverySelection {
+            strain_operator: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(csr_from_canonical_parts(
+            selected.strain_operator.expect("selected strain operator"),
+        ))
     }
 
-    pub fn with_recovery<R>(
-        &self,
-        f: impl FnOnce(&ReducedRecoveryOperators) -> R,
-    ) -> Result<R, String> {
-        self.ensure_recovery()?;
-        let recovery = self.recovery.borrow();
-        Ok(f(recovery
-            .operators
-            .as_ref()
-            .expect("recovery cache should be populated")))
+    pub fn stress_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        let selection = ReducedRecoverySelection {
+            stress_operator: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(csr_from_canonical_parts(
+            selected.stress_operator.expect("selected stress operator"),
+        ))
+    }
+
+    pub fn thermal_strain_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        let selection = ReducedRecoverySelection {
+            thermal_strain_operator: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(csr_from_canonical_parts(
+            selected
+                .thermal_strain_operator
+                .expect("selected thermal strain operator"),
+        ))
+    }
+
+    pub fn thermal_stress_operator(&self) -> Result<SparseRowMat<usize, f64>, String> {
+        let selection = ReducedRecoverySelection {
+            thermal_stress_operator: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(csr_from_canonical_parts(
+            selected
+                .thermal_stress_operator
+                .expect("selected thermal stress operator"),
+        ))
+    }
+
+    pub fn strain_constant(&self) -> Result<Vec<f64>, String> {
+        let selection = ReducedRecoverySelection {
+            strain_constant: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(selected.strain_constant.expect("selected strain constant"))
+    }
+
+    pub fn stress_constant(&self) -> Result<Vec<f64>, String> {
+        let selection = ReducedRecoverySelection {
+            stress_constant: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(selected.stress_constant.expect("selected stress constant"))
+    }
+
+    pub fn thermal_strain_constant(&self) -> Result<Vec<f64>, String> {
+        let selection = ReducedRecoverySelection {
+            thermal_strain_constant: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(selected
+            .thermal_strain_constant
+            .expect("selected thermal strain constant"))
+    }
+
+    pub fn thermal_stress_constant(&self) -> Result<Vec<f64>, String> {
+        let selection = ReducedRecoverySelection {
+            thermal_stress_constant: true,
+            ..empty_recovery_selection()
+        };
+        let selected = self.build_selected_recovery(selection)?;
+        Ok(selected
+            .thermal_stress_constant
+            .expect("selected thermal stress constant"))
     }
 
     fn evaluate_quadrature_strain_for_family<
@@ -917,40 +768,14 @@ impl Structural2dModel {
         traction_values: Option<&[f64]>,
         nodal_temperature: Option<&[f64]>,
     ) -> Result<Vec<f64>, String> {
-        self.build_rhs_with_application(
+        let mut rhs = self.constant_rhs.clone();
+        self.apply_matrix_free_loads(
             body_force,
             pressure_values,
             traction_values,
             nodal_temperature,
-            LoadApplication::MatrixFree,
-        )
-    }
-
-    pub fn build_rhs_with_application(
-        &self,
-        body_force: Option<&[f64]>,
-        pressure_values: Option<&[f64]>,
-        traction_values: Option<&[f64]>,
-        nodal_temperature: Option<&[f64]>,
-        load_application: LoadApplication,
-    ) -> Result<Vec<f64>, String> {
-        let mut rhs = self.constant_rhs.clone();
-        match load_application {
-            LoadApplication::MatrixFree => self.apply_matrix_free_loads(
-                body_force,
-                pressure_values,
-                traction_values,
-                nodal_temperature,
-                &mut rhs,
-            )?,
-            LoadApplication::Cached => self.apply_cached_loads(
-                body_force,
-                pressure_values,
-                traction_values,
-                nodal_temperature,
-                &mut rhs,
-            )?,
-        }
+            &mut rhs,
+        )?;
         Ok(rhs)
     }
 
@@ -1287,9 +1112,7 @@ where
 
     Ok(Structural2dModel {
         stiffness,
-        load_ops: RefCell::new(LazyLoadOperators::default()),
         constant_rhs,
-        recovery: RefCell::new(LazyRecovery::default()),
         nq_per_element: quadrature.points_per_element(),
         n_temperature_nodes,
         pressure_faces: pressure_faces
@@ -1734,43 +1557,6 @@ fn pack_sorted_triplets_to_csc(
     builder.finish()
 }
 
-/// Apply one reduced CSR load operator to a dense load-amplitude vector and accumulate the result.
-fn apply_csr_operator(
-    operator: &SparseRowMat<usize, f64>,
-    input: Option<&[f64]>,
-    name: &str,
-    output: &mut [f64],
-) -> Result<(), String> {
-    if operator.ncols() == 0 {
-        if let Some(input) = input {
-            if !input.is_empty() {
-                return Err(format!(
-                    "{name} was provided, but this model has no corresponding operator"
-                ));
-            }
-        }
-        return Ok(());
-    }
-    let input = input.unwrap_or(&[]);
-    if input.len() != operator.ncols() {
-        return Err(format!(
-            "{name} has length {}, but operator expects {} values",
-            input.len(),
-            operator.ncols()
-        ));
-    }
-    for row in 0..operator.nrows() {
-        let start = operator.row_ptr()[row];
-        let end = operator.row_ptr()[row + 1];
-        let mut sum = 0.0;
-        for index in start..end {
-            sum = sum + operator.val()[index] * input[operator.col_idx()[index]];
-        }
-        output[row] = output[row] + sum;
-    }
-    Ok(())
-}
-
 /// Gather one element's node coordinates from the flattened analysis connectivity.
 fn element_coords_from_flat<const NODES_PER_ELEMENT: usize>(
     analysis_nodes: &[[f64; 2]],
@@ -1871,7 +1657,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{LoadApplication, Structural2dElements, Structural2dModel, assemble_structural_2d};
+    use super::{Structural2dElements, Structural2dModel, assemble_structural_2d};
     use crate::mesh::QuadratureRule;
     use crate::physics::solenoid_stress::convenience::{
         isotropic_axisymmetric_material, isotropic_axisymmetric_thermal_material,
@@ -1904,6 +1690,13 @@ mod tests {
         output
     }
 
+    fn add_assign(dst: &mut [f64], src: &[f64]) {
+        assert_eq!(dst.len(), src.len());
+        for (dst, src) in dst.iter_mut().zip(src) {
+            *dst += *src;
+        }
+    }
+
     fn single_element_thermal_model() -> Structural2dModel {
         let material = isotropic_axisymmetric_material(200.0e9, 0.27);
         let thermal = isotropic_axisymmetric_thermal_material(1.2e-5, 293.15);
@@ -1931,43 +1724,56 @@ mod tests {
     }
 
     #[test]
-    fn build_rhs_matrix_free_matches_cached_without_populating_load_caches() {
+    fn build_rhs_matrix_free_matches_sparse_export_assembly() {
         let model = single_element_thermal_model();
-        assert_eq!(model.load_cache_status(), (false, false, false, false));
-        assert!(!model.recovery_cache_populated());
 
         let body_force = [1.25e3, -2.5e3];
         let pressure = [3.0e5];
         let traction = [4.0e4, -1.5e4];
         let temperature = [296.0, 297.0, 298.0, 299.0];
         let matrix_free = model
-            .build_rhs_with_application(
+            .build_rhs(
                 Some(&body_force),
                 Some(&pressure),
                 Some(&traction),
                 Some(&temperature),
-                LoadApplication::MatrixFree,
             )
             .expect("matrix-free RHS should build");
-        assert_eq!(model.load_cache_status(), (false, false, false, false));
-        assert!(!model.recovery_cache_populated());
 
-        let cached = model
-            .build_rhs_with_application(
-                Some(&body_force),
-                Some(&pressure),
-                Some(&traction),
-                Some(&temperature),
-                LoadApplication::Cached,
-            )
-            .expect("cached RHS should build");
-        assert_eq!(model.load_cache_status(), (true, true, true, true));
-        assert!(!model.recovery_cache_populated());
-        assert_allclose(&matrix_free, &cached);
+        let mut sparse = model.constant_rhs.clone();
+        add_assign(
+            &mut sparse,
+            &csr_matvec(
+                &model.body_force_to_rhs().expect("body-force operator"),
+                &body_force,
+            ),
+        );
+        add_assign(
+            &mut sparse,
+            &csr_matvec(
+                &model.pressure_to_rhs().expect("pressure operator"),
+                &pressure,
+            ),
+        );
+        add_assign(
+            &mut sparse,
+            &csr_matvec(
+                &model.traction_to_rhs().expect("traction operator"),
+                &traction,
+            ),
+        );
+        add_assign(
+            &mut sparse,
+            &csr_matvec(
+                &model.temperature_to_rhs().expect("temperature operator"),
+                &temperature,
+            ),
+        );
+        assert_allclose(&matrix_free, &sparse);
     }
 
     #[test]
-    fn matrix_free_strain_matches_sparse_recovery_without_populating_recovery_cache() {
+    fn matrix_free_strain_matches_sparse_recovery_exports() {
         let model = single_element_thermal_model();
         let displacements_full = [
             1.0e-6, -2.0e-6, 2.0e-6, 1.0e-6, -1.5e-6, 2.5e-6, 3.0e-6, -3.5e-6,
@@ -1975,22 +1781,19 @@ mod tests {
         let matrix_free = model
             .evaluate_quadrature_strain(&displacements_full)
             .expect("matrix-free strain should evaluate");
-        assert!(!model.recovery_cache_populated());
 
         let reduced = model
             .free_dofs
             .iter()
             .map(|&dof| displacements_full[dof])
             .collect::<Vec<_>>();
-        let expected = model
-            .with_recovery(|recovery| {
-                let mut values = csr_matvec(&recovery.strain_operator, &reduced);
-                for (value, constant) in values.iter_mut().zip(&recovery.strain_constant) {
-                    *value += *constant;
-                }
-                values
-            })
-            .expect("sparse strain recovery should build");
+        let mut expected = csr_matvec(&model.strain_operator().expect("strain operator"), &reduced);
+        for (value, constant) in expected
+            .iter_mut()
+            .zip(model.strain_constant().expect("strain constant"))
+        {
+            *value += constant;
+        }
         let actual = matrix_free
             .into_iter()
             .flat_map(|sample| sample.into_iter())

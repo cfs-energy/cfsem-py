@@ -505,8 +505,7 @@ pub use convenience::{
     rotate_material_in_plane, rotate_thermal_expansion_in_plane, rotate_thermal_material_in_plane,
 };
 pub use model::{
-    LoadApplication, ReducedRecoveryOperators, Structural2dElementType, Structural2dElements,
-    Structural2dModel, assemble_structural_2d,
+    Structural2dElementType, Structural2dElements, Structural2dModel, assemble_structural_2d,
 };
 pub(crate) use types::validate_element_material_inputs;
 pub use types::{

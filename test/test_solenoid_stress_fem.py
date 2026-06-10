@@ -1054,7 +1054,7 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
     np.testing.assert_allclose(parallel.fixed_values, serial.fixed_values, rtol=rtol, atol=atol)
 
 
-def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:
+def test_structural_sparse_operators_are_user_owned_exports() -> None:
     dtype = np.float64
     nodes, elements = build_annulus_strip_mesh(0.5, 1.0, 0.2, nr=2, nz=1, dtype=dtype)
     _inner_faces, outer_faces = pressure_faces_for_strip(nr=2, nz=1)
@@ -1071,19 +1071,19 @@ def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:
         thermal_material_table=np.asarray([thermal]),
         element_type="quad9",
     )
-    cache_names = (
-        "_stiffness_cache",
-        "_body_force_to_rhs_cache",
-        "_pressure_to_rhs_cache",
-        "_traction_to_rhs_cache",
-        "_temperature_to_rhs_cache",
-        "_strain_operator_cache",
-        "_stress_operator_cache",
-        "_thermal_strain_operator_cache",
-        "_thermal_stress_operator_cache",
+    sparse_operator_names = (
+        "body_force_to_rhs",
+        "pressure_to_rhs",
+        "traction_to_rhs",
+        "temperature_to_rhs",
+        "strain_operator",
+        "stress_operator",
+        "thermal_strain_operator",
+        "thermal_stress_operator",
     )
-    for name in cache_names:
-        assert getattr(model, name) is None
+    for name in sparse_operator_names:
+        assert not hasattr(model, f"_{name}_cache")
+    assert model._stiffness_cache is None
 
     _rhs = model.build_rhs(
         body_force=np.array([1.0e3, -2.0e3], dtype=dtype),
@@ -1091,24 +1091,20 @@ def test_structural_sparse_operators_export_lazily_and_are_cached() -> None:
         traction_values=np.full((top_faces.shape[0], 2), [1.0e4, -3.0e4], dtype=dtype),
         nodal_temperature=np.full(nodes.shape[0], 300.0, dtype=dtype),
     )
-    for name in cache_names:
-        assert getattr(model, name) is None
+    for name in sparse_operator_names:
+        assert not hasattr(model, f"_{name}_cache")
+    assert model._stiffness_cache is None
 
-    for public_name, cache_name in (
-        ("stiffness", "_stiffness_cache"),
-        ("body_force_to_rhs", "_body_force_to_rhs_cache"),
-        ("pressure_to_rhs", "_pressure_to_rhs_cache"),
-        ("traction_to_rhs", "_traction_to_rhs_cache"),
-        ("temperature_to_rhs", "_temperature_to_rhs_cache"),
-        ("strain_operator", "_strain_operator_cache"),
-        ("stress_operator", "_stress_operator_cache"),
-        ("thermal_strain_operator", "_thermal_strain_operator_cache"),
-        ("thermal_stress_operator", "_thermal_stress_operator_cache"),
-    ):
-        first = getattr(model, public_name)
-        second = getattr(model, public_name)
-        assert first is second
-        assert getattr(model, cache_name) is first
+    first_stiffness = model.stiffness
+    second_stiffness = model.stiffness
+    assert first_stiffness is second_stiffness
+    assert model._stiffness_cache is first_stiffness
+
+    for name in sparse_operator_names:
+        first = getattr(model, name)
+        second = getattr(model, name)
+        assert first is not second
+        assert_sparse_allclose(first, second, rtol=1.0e-12, atol=1.0e-12)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=lambda dtype: dtype.__name__)

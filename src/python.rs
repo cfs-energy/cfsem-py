@@ -497,39 +497,35 @@ macro_rules! impl_solenoid_stress_model_pyclass {
             }
 
             fn strain_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        PyArray1::from_vec(py, recovery.strain_constant.clone()).unbind()
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                let values = self
+                    .inner
+                    .strain_constant()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok(PyArray1::from_vec(py, values).unbind())
             }
 
             fn stress_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        PyArray1::from_vec(py, recovery.stress_constant.clone()).unbind()
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                let values = self
+                    .inner
+                    .stress_constant()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok(PyArray1::from_vec(py, values).unbind())
             }
 
             fn thermal_strain_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        PyArray1::from_vec(py, recovery.thermal_strain_constant.clone()).unbind()
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                let values = self
+                    .inner
+                    .thermal_strain_constant()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok(PyArray1::from_vec(py, values).unbind())
             }
 
             fn thermal_stress_constant<'py>(&self, py: Python<'py>) -> PyResult<Py<PyArray1<$ty>>> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        PyArray1::from_vec(py, recovery.thermal_stress_constant.clone()).unbind()
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                let values = self
+                    .inner
+                    .thermal_stress_constant()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok(PyArray1::from_vec(py, values).unbind())
             }
 
             fn stiffness_csc<'py>(
@@ -562,18 +558,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_body_force_to_rhs(|operator| {
-                        (
+                let operator = self
+                    .inner
+                    .body_force_to_rhs()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
             fn pressure_to_rhs_csr<'py>(
@@ -586,18 +581,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_pressure_to_rhs(|operator| {
-                        (
+                let operator = self
+                    .inner
+                    .pressure_to_rhs()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
             fn traction_to_rhs_csr<'py>(
@@ -610,18 +604,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_traction_to_rhs(|operator| {
-                        (
+                let operator = self
+                    .inner
+                    .traction_to_rhs()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
             fn temperature_to_rhs_csr<'py>(
@@ -634,18 +627,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_temperature_to_rhs(|operator| {
-                        (
+                let operator = self
+                    .inner
+                    .temperature_to_rhs()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
             fn strain_operator_csr<'py>(
@@ -658,19 +650,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        let operator = &recovery.strain_operator;
-                        (
+                let operator = self
+                    .inner
+                    .strain_operator()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
             fn stress_operator_csr<'py>(
@@ -683,19 +673,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        let operator = &recovery.stress_operator;
-                        (
+                let operator = self
+                    .inner
+                    .stress_operator()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
             fn thermal_strain_operator_csr<'py>(
@@ -708,19 +696,17 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        let operator = &recovery.thermal_strain_operator;
-                        (
+                let operator = self
+                    .inner
+                    .thermal_strain_operator()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
             fn thermal_stress_operator_csr<'py>(
@@ -733,22 +719,20 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 usize,
                 usize,
             )> {
-                self.inner
-                    .with_recovery(|recovery| {
-                        let operator = &recovery.thermal_stress_operator;
-                        (
+                let operator = self
+                    .inner
+                    .thermal_stress_operator()
+                    .map_err(|msg| PyInteropError::ValueError { msg })?;
+                Ok((
                     PyArray1::from_vec(py, operator.val().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.col_idx().to_vec()).unbind(),
                     PyArray1::from_vec(py, operator.row_ptr().to_vec()).unbind(),
                     operator.nrows(),
                     operator.ncols(),
-                        )
-                    })
-                    .map_err(|msg| PyInteropError::ValueError { msg })
-                    .map_err(Into::into)
+                ))
             }
 
-            #[pyo3(signature = (body_force=None, pressure_values=None, traction_values=None, nodal_temperature=None, load_application="matrix_free"))]
+            #[pyo3(signature = (body_force=None, pressure_values=None, traction_values=None, nodal_temperature=None))]
             fn build_rhs<'py>(
                 &self,
                 py: Python<'py>,
@@ -756,7 +740,6 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 pressure_values: Option<PyReadonlyArray1<'_, $ty>>,
                 traction_values: Option<PyReadonlyArray1<'_, $ty>>,
                 nodal_temperature: Option<PyReadonlyArray1<'_, $ty>>,
-                load_application: &str,
             ) -> PyResult<Py<PyArray1<$ty>>> {
                 let body_force = match &body_force {
                     Some(arr) => Some(arr.as_slice()?),
@@ -774,27 +757,9 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                     Some(arr) => Some(arr.as_slice()?),
                     None => None,
                 };
-                let load_application = match load_application {
-                    "matrix_free" => physics::solenoid_stress::LoadApplication::MatrixFree,
-                    "cached" => physics::solenoid_stress::LoadApplication::Cached,
-                    other => {
-                        return Err(PyInteropError::ValueError {
-                            msg: format!(
-                                "unsupported load_application {other:?}; use 'matrix_free' or 'cached'"
-                            ),
-                        }
-                        .into());
-                    }
-                };
                 let rhs = self
                     .inner
-                    .build_rhs_with_application(
-                        body_force,
-                        pressure_values,
-                        traction_values,
-                        nodal_temperature,
-                        load_application,
-                    )
+                    .build_rhs(body_force, pressure_values, traction_values, nodal_temperature)
                     .map_err(|msg| PyInteropError::ValueError { msg })?;
                 Ok(PyArray1::from_vec(py, rhs).unbind())
             }

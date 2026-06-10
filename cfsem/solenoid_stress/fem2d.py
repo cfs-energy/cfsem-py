@@ -1,8 +1,8 @@
 """2D structural elasticity finite-element assembly.
 
 This module provides a small displacement-based quadrilateral FEM solver for axisymmetric and
-plane-strain structural reductions. The backend stores sparse load operators, sparse
-quadrature-recovery operators, and a reduced stiffness matrix for repeated load solves.
+plane-strain structural reductions. The backend stores the reduced stiffness matrix and evaluates
+loads and quadrature recovery matrix-free unless sparse operators are explicitly exported.
 
 The element formulation follows the standard small-strain Galerkin construction
 
@@ -220,7 +220,7 @@ class Structural2DFEMModel:
 
     Structural FEM numeric arrays are `float64`; floating inputs must already use `float64` arrays.
 
-    The sparse operators are exported from the Rust backend lazily:
+    The sparse operators are exported from the Rust backend on demand:
     - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
       map load amplitudes to the reduced structural right-hand side,
     - `strain_operator`, `stress_operator`, `thermal_strain_operator`, and
@@ -228,8 +228,9 @@ class Structural2DFEMModel:
       fields.
 
     `build_rhs(...)`, `solve(...)`, `element_quadrature()`, `element_measures()`, and
-    `evaluate_quadrature_strain(...)` call the Rust backend directly and do not require these
-    Python sparse matrices to be materialized.
+    `evaluate_quadrature_strain(...)` call the Rust backend directly and do not materialize these
+    sparse matrices. Sparse operator exports are user-owned artifacts; retain the returned SciPy
+    matrix explicitly when a workflow needs reuse.
 
     Key public array shapes and units:
     - `stiffness` has shape `(ndof_reduced, ndof_reduced)` with entry units
@@ -307,14 +308,6 @@ class Structural2DFEMModel:
         self._thermal_strain_constant_cache: npt.NDArray[np.float64] | None = None
         self._thermal_stress_constant_cache: npt.NDArray[np.float64] | None = None
         self._stiffness_cache: sp.csc_matrix | None = None
-        self._body_force_to_rhs_cache: sp.csr_matrix | None = None
-        self._pressure_to_rhs_cache: sp.csr_matrix | None = None
-        self._traction_to_rhs_cache: sp.csr_matrix | None = None
-        self._temperature_to_rhs_cache: sp.csr_matrix | None = None
-        self._strain_operator_cache: sp.csr_matrix | None = None
-        self._stress_operator_cache: sp.csr_matrix | None = None
-        self._thermal_strain_operator_cache: sp.csr_matrix | None = None
-        self._thermal_stress_operator_cache: sp.csr_matrix | None = None
 
     @property
     def ndof(self) -> int:
@@ -431,39 +424,23 @@ class Structural2DFEMModel:
             setattr(self, attr, cache)
         return cast(sp.csc_matrix, cache)
 
-    def _cached_csr_export(self, attr: str, export: Callable[[], Any]) -> sp.csr_matrix:
-        """Export one Rust-owned CSR operator to scipy on first access."""
-
-        cache = getattr(self, attr)
-        if cache is None:
-            cache = _csr_matrix_from_binding(export())
-            setattr(self, attr, cache)
-        return cast(sp.csr_matrix, cache)
-
-    def _cached_temperature_csr_export(
+    def _temperature_csr_export(
         self,
-        attr: str,
-        nrow: int,
         export: Callable[[], Any],
     ) -> sp.csr_matrix:
         """Export a temperature-indexed CSR operator, including empty and elevated cases.
 
         Models without thermal materials expose zero-column operators for shape consistency.
         Inferred quad9 meshes export analysis-node operators from Rust, then postmultiply by the
-        cached elevation operator so the public scipy matrix acts on the original input nodes.
+        cached elevation operator so the public SciPy matrix acts on the original input nodes.
         """
 
-        cache = getattr(self, attr)
-        if cache is not None:
-            return cast(sp.csr_matrix, cache)
         analysis_operator = _csr_matrix_from_binding(export())
-        cache = (
+        return (
             _to_csr_matrix(analysis_operator @ self._temperature_elevation())
             if self._elevated is not None and self.n_temperature_nodes > 0
             else analysis_operator
         )
-        setattr(self, attr, cache)
-        return cache
 
     @property
     def stiffness(self) -> sp.csc_matrix:
@@ -482,7 +459,7 @@ class Structural2DFEMModel:
         Shape is `(ndof_reduced, 2 * nelem)`. Entries have units `[volume]`.
         """
 
-        return self._cached_csr_export("_body_force_to_rhs_cache", self._backend.body_force_to_rhs_csr)
+        return _csr_matrix_from_binding(self._backend.body_force_to_rhs_csr())
 
     @property
     def pressure_to_rhs(self) -> sp.csr_matrix:
@@ -491,7 +468,7 @@ class Structural2DFEMModel:
         Shape is `(ndof_reduced, n_pressure_faces)`. Entries have units `[area]`.
         """
 
-        return self._cached_csr_export("_pressure_to_rhs_cache", self._backend.pressure_to_rhs_csr)
+        return _csr_matrix_from_binding(self._backend.pressure_to_rhs_csr())
 
     @property
     def traction_to_rhs(self) -> sp.csr_matrix:
@@ -500,7 +477,7 @@ class Structural2DFEMModel:
         Shape is `(ndof_reduced, 2 * n_traction_faces)`. Entries have units `[area]`.
         """
 
-        return self._cached_csr_export("_traction_to_rhs_cache", self._backend.traction_to_rhs_csr)
+        return _csr_matrix_from_binding(self._backend.traction_to_rhs_csr())
 
     @property
     def temperature_to_rhs(self) -> sp.csr_matrix:
@@ -510,9 +487,7 @@ class Structural2DFEMModel:
         `[generalized force / temperature] = [energy / (distance * temperature)]`.
         """
 
-        return self._cached_temperature_csr_export(
-            "_temperature_to_rhs_cache",
-            self.ndof_reduced,
+        return self._temperature_csr_export(
             self._backend.temperature_to_rhs_csr,
         )
 
@@ -524,7 +499,7 @@ class Structural2DFEMModel:
         `[strain / displacement] = [1 / length]`.
         """
 
-        return self._cached_csr_export("_strain_operator_cache", self._backend.strain_operator_csr)
+        return _csr_matrix_from_binding(self._backend.strain_operator_csr())
 
     @property
     def stress_operator(self) -> sp.csr_matrix:
@@ -534,7 +509,7 @@ class Structural2DFEMModel:
         `[stress / displacement] = [pressure / length]`.
         """
 
-        return self._cached_csr_export("_stress_operator_cache", self._backend.stress_operator_csr)
+        return _csr_matrix_from_binding(self._backend.stress_operator_csr())
 
     @property
     def thermal_strain_operator(self) -> sp.csr_matrix:
@@ -544,10 +519,7 @@ class Structural2DFEMModel:
         `[strain / temperature]`.
         """
 
-        nrow = self.nelem * self.nq_per_element * 4
-        return self._cached_temperature_csr_export(
-            "_thermal_strain_operator_cache",
-            nrow,
+        return self._temperature_csr_export(
             self._backend.thermal_strain_operator_csr,
         )
 
@@ -559,10 +531,7 @@ class Structural2DFEMModel:
         `[stress / temperature]`.
         """
 
-        nrow = self.nelem * self.nq_per_element * 4
-        return self._cached_temperature_csr_export(
-            "_thermal_stress_operator_cache",
-            nrow,
+        return self._temperature_csr_export(
             self._backend.thermal_stress_operator_csr,
         )
 
@@ -639,7 +608,6 @@ class Structural2DFEMModel:
         pressure_values: ArrayLike | None = None,
         traction_values: ArrayLike | None = None,
         nodal_temperature: ArrayLike | None = None,
-        load_application: str = "matrix_free",
     ) -> npt.NDArray[np.floating[Any]]:
         """Build one reduced structural right-hand side.
 
@@ -653,8 +621,6 @@ class Structural2DFEMModel:
                 `[force / area]`.
             nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
                 `[temperature]`. Required only when the model includes thermal materials.
-            load_application: Either `"matrix_free"` to apply loads without populating sparse load
-                caches, or `"cached"` to build/reuse sparse load operators.
 
         Returns:
             NDArray: Reduced right-hand side with shape `(ndof_reduced,)` and units
@@ -664,10 +630,6 @@ class Structural2DFEMModel:
             ValueError: If thermal materials are present but `nodal_temperature` is omitted.
         """
 
-        if load_application not in {"matrix_free", "cached"}:
-            raise ValueError(
-                f"unsupported load_application {load_application!r}; use 'matrix_free' or 'cached'"
-            )
         body_force_arr = None if body_force is None else _normalize_body_force(body_force, self.nelem)
         npressure = int(self.pressure_faces.shape[0])
         pressure_arr = (
@@ -687,7 +649,6 @@ class Structural2DFEMModel:
             pressure_arr,
             None if traction_arr is None else traction_arr.reshape(-1),
             temperature_arr,
-            load_application=load_application,
         )
         return np.asarray(rhs, dtype=np.float64)
 
@@ -1489,11 +1450,11 @@ def assemble_structural_2d(
             value. Displacement units are `[length]`.
         quadrature: Quadrature rule selector, either `gl3`, `gl4`, `3`, or `4`.
         element_type: Analysis element family, either `quad4` or `quad9`.
-        par: Whether to assemble stiffness, load, and recovery operators using threaded
+        par: Whether to assemble stiffness and computed-on-call sparse exports using threaded
             element batches.
 
     Returns:
-        Structural2DFEMModel: Reusable model with backend solve state and lazy Python sparse
+        Structural2DFEMModel: Reusable model with backend solve state and user-owned sparse
         operator exports.
 
     Raises:

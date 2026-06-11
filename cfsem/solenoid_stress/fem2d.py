@@ -127,13 +127,13 @@ class ElementMeasures:
 
 
 @dataclass(frozen=True, slots=True)
-class QuadPointLocations:
+class PointLocations:
     """Element-owned physical and reference point locations.
 
-    A location is a physical point together with the quadrilateral element that owns or is nearest
-    to that point and the corresponding element-local reference coordinates. Recovery and sparse
-    operator construction use `element_indices` and `reference_points` as the source of truth;
-    `points` is included for caller inspection and plotting.
+    A location is a physical point together with the element that owns or is nearest to that point
+    and the corresponding element-local reference coordinates. Recovery and sparse operator
+    construction use `element_indices` and `reference_points` as the source of truth; `points` is
+    included for caller inspection, plotting, and compatibility with mesh-query outputs.
 
     `points` has shape `(npoint, 2)` and units `[length]`. `element_indices` has shape
     `(npoint,)` and stores unitless analysis-element indices. `reference_points` has shape
@@ -141,15 +141,25 @@ class QuadPointLocations:
     `element_type` records the element family that produced the locations so model methods can
     reject locations from an incompatible mesh.
 
-    Quadrature locations also carry flat `weights_area` and `weights_volume` arrays with shape
-    `(npoint,)`; reshape them as `(nelem, points_per_element)` for element-major reductions.
-    Non-quadrature locations store empty weight arrays and `points_per_element == 0`.
     """
 
     points: npt.NDArray[np.floating[Any]]
     element_indices: npt.NDArray[np.int64]
     reference_points: npt.NDArray[np.floating[Any]]
     element_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class Quadrature:
+    """Element-major quadrature locations and mapped integration weights.
+
+    `locations` stores the physical points, owning elements, and reference coordinates used by
+    recovery and sparse operator methods. `weights_area` and `weights_volume` have shape
+    `(npoint,)`; reshape them as `(nelem, points_per_element)` for integrating quantities over
+    elements.
+    """
+
+    locations: PointLocations
     weights_area: npt.NDArray[np.floating[Any]]
     weights_volume: npt.NDArray[np.floating[Any]]
     points_per_element: int
@@ -218,6 +228,25 @@ class QuadMeshQuery:
     nearest_face_points: npt.NDArray[np.floating[Any]]
     nearest_face_distances: npt.NDArray[np.floating[Any]]
 
+    def point_locations(self) -> PointLocations:
+        """Return nearest-element locations for recovery and sparse operators.
+
+        The returned locations reuse the element ownership and reference coordinates already found
+        by the mesh query. No additional mesh search or point projection is performed. Query points
+        outside the mesh are represented by their nearest projected element points; callers that
+        need strict containment should check `nearest_element_distances` before using the locations.
+
+        Returns:
+            PointLocations: Element-owned nearest-element locations.
+        """
+
+        return PointLocations(
+            points=self.nearest_element_points,
+            element_indices=self.nearest_element_indices,
+            reference_points=self.nearest_element_reference_points,
+            element_type=self.element_type,
+        )
+
 
 class Structural2DFEMModel:
     """Reusable 2D structural FEM model with sparse operators and reduced solve state.
@@ -227,9 +256,10 @@ class Structural2DFEMModel:
     Load and stiffness operators are exported from the Rust backend on demand:
     - `body_force_to_rhs`, `pressure_to_rhs`, `traction_to_rhs`, and `temperature_to_rhs`
       map load amplitudes to the reduced structural right-hand side,
-    Field recovery uses explicit `QuadPointLocations` objects. Use `quadrature()` for quadrature
-    locations, `locate_points(...)` for arbitrary physical points, or `locate_points_in_elements(...)`
-    when element ownership is already known.
+    Field recovery uses explicit `PointLocations` objects. Use `quadrature().locations` for quadrature
+    locations, `locate_points(...)` for arbitrary physical points,
+    `locate_points_in_elements(...)` when element ownership is already known, or
+    `QuadMeshQuery.point_locations()` to reuse an existing mesh query.
 
     Matrix-free field methods (`strain`, `stress`, `thermal_strain`, `thermal_stress`) evaluate
     values directly at supplied locations. Sparse operator methods (`interpolation_operator`,
@@ -310,7 +340,7 @@ class Structural2DFEMModel:
         self.nelem = int(nelem)
         self.nq_per_element = int(nq_per_element)
         self.n_temperature_nodes = int(n_temperature_nodes)
-        self._quadrature_cache: QuadPointLocations | None = None
+        self._quadrature_cache: Quadrature | None = None
         self._element_measures_cache: ElementMeasures | None = None
 
     @property
@@ -331,7 +361,7 @@ class Structural2DFEMModel:
 
         return np.asarray(self._backend.constant_rhs(), dtype=np.float64)
 
-    def quadrature(self) -> QuadPointLocations:
+    def quadrature(self) -> Quadrature:
         """Return element-major quadrature locations and mapped integration weights.
 
         The returned locations are built directly from the model's quadrature rule and element
@@ -339,10 +369,9 @@ class Structural2DFEMModel:
         because the model mesh, quadrature rule, and geometry are immutable after assembly.
 
         Returns:
-            QuadPointLocations: Flat element-major locations with `nelem * nq_per_element` rows.
-            `points` has shape `(npoint, 2)`, `element_indices` repeats each element index
-            `nq_per_element` times, `reference_points` stores the reference quadrature
-            coordinates, and `weights_area` / `weights_volume` have shape `(npoint,)`.
+            Quadrature: Flat element-major locations with `nelem * nq_per_element` rows plus
+            mapped area and volume integration weights. Pass `quadrature.locations` to recovery
+            and sparse operator methods.
         """
 
         cache = self._quadrature_cache
@@ -350,12 +379,14 @@ class Structural2DFEMModel:
             points, element_indices, reference_points, weights_area, weights_volume, points_per_element = (
                 self._backend.quadrature()
             )
-            # Quadrature locations are the only located points that carry integration weights.
-            cache = QuadPointLocations(
+            locations = PointLocations(
                 points=np.asarray(points, dtype=np.float64).reshape(-1, 2),
                 element_indices=np.asarray(element_indices, dtype=np.int64),
                 reference_points=np.asarray(reference_points, dtype=np.float64).reshape(-1, 2),
                 element_type=self.element_type,
+            )
+            cache = Quadrature(
+                locations=locations,
                 weights_area=np.asarray(weights_area, dtype=np.float64),
                 weights_volume=np.asarray(weights_volume, dtype=np.float64),
                 points_per_element=int(points_per_element),
@@ -370,7 +401,7 @@ class Structural2DFEMModel:
         outside: str = "nearest",
         tolerance: float | None = None,
         max_iterations: int = 20,
-    ) -> QuadPointLocations:
+    ) -> PointLocations:
         """Locate arbitrary physical points in this model's analysis mesh.
 
         This uses the current brute-force quadrilateral mesh query and returns the nearest element
@@ -386,7 +417,7 @@ class Structural2DFEMModel:
             max_iterations: Maximum local inverse-map iterations per element during the query.
 
         Returns:
-            QuadPointLocations: Located points with empty weight arrays and `points_per_element=0`.
+            PointLocations: Located points for recovery and sparse operator construction.
 
         Raises:
             ValueError: If `outside` requests an error and at least one point is outside the mesh.
@@ -410,14 +441,11 @@ class Structural2DFEMModel:
         if outside_policy in {"raise", "error"} and not np.all(inside):
             first = int(np.flatnonzero(~inside)[0])
             raise ValueError(f"query point {first} is outside the quad mesh")
-        return QuadPointLocations(
+        return PointLocations(
             points=query.nearest_element_points,
             element_indices=query.nearest_element_indices,
             reference_points=query.nearest_element_reference_points,
             element_type=self.element_type,
-            weights_area=np.zeros((0,), dtype=np.float64),
-            weights_volume=np.zeros((0,), dtype=np.float64),
-            points_per_element=0,
         )
 
     def locate_points_in_elements(
@@ -426,7 +454,7 @@ class Structural2DFEMModel:
         element_indices: ArrayLike,
         *,
         max_iterations: int = 20,
-    ) -> QuadPointLocations:
+    ) -> PointLocations:
         """Project physical points into caller-supplied owning elements.
 
         This is the fast path when the caller already knows element ownership, such as when
@@ -439,27 +467,24 @@ class Structural2DFEMModel:
             max_iterations: Maximum inverse-map iterations for each local element projection.
 
         Returns:
-            QuadPointLocations: Projected physical points, caller-supplied element indices, and
-            reference coordinates. Weight arrays are empty and `points_per_element=0`.
+            PointLocations: Projected physical points, caller-supplied element indices, and
+            reference coordinates.
         """
 
         points_arr = _normalize_query_points(points)
         element_indices_arr = np.asarray(element_indices, dtype=np.uint64).reshape(-1)
-        projected_points, projected_elements, reference_points, points_per_element = (
+        projected_points, projected_elements, reference_points, _points_per_element = (
             self._backend.locate_points_in_elements(
                 points_arr,
                 element_indices_arr,
                 int(max_iterations),
             )
         )
-        return QuadPointLocations(
+        return PointLocations(
             points=np.asarray(projected_points, dtype=np.float64).reshape(-1, 2),
             element_indices=np.asarray(projected_elements, dtype=np.int64),
             reference_points=np.asarray(reference_points, dtype=np.float64).reshape(-1, 2),
             element_type=self.element_type,
-            weights_area=np.zeros((0,), dtype=np.float64),
-            weights_volume=np.zeros((0,), dtype=np.float64),
-            points_per_element=int(points_per_element),
         )
 
     @cached_property
@@ -528,12 +553,13 @@ class Structural2DFEMModel:
             else analysis_operator
         )
 
-    def interpolation_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
+    def interpolation_operator(self, locations: PointLocations) -> sp.csr_matrix:
         """Build a sparse interpolation operator for located points.
 
         Args:
-            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
-                `locate_points_in_elements(...)`.
+            locations: Element-owned point locations from `quadrature().locations`,
+                `locate_points(...)`, `locate_points_in_elements(...)`, or
+                `QuadMeshQuery.point_locations()`.
 
         Returns:
             csr_matrix: Sparse operator with shape `(npoint, n_analysis_nodes)`. Multiplying by a
@@ -553,12 +579,13 @@ class Structural2DFEMModel:
             ),
         )
 
-    def strain_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
+    def strain_operator(self, locations: PointLocations) -> sp.csr_matrix:
         """Build a sparse total-strain recovery operator for located points.
 
         Args:
-            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
-                `locate_points_in_elements(...)`.
+            locations: Element-owned point locations from `quadrature().locations`,
+                `locate_points(...)`, `locate_points_in_elements(...)`, or
+                `QuadMeshQuery.point_locations()`.
 
         Returns:
             csr_matrix: Sparse operator with shape `(4 * npoint, 2 * n_analysis_nodes)`. Rows are
@@ -580,12 +607,13 @@ class Structural2DFEMModel:
             ),
         )
 
-    def stress_operator(self, locations: QuadPointLocations) -> sp.csr_matrix:
+    def stress_operator(self, locations: PointLocations) -> sp.csr_matrix:
         """Build a sparse elastic-stress recovery operator for located points.
 
         Args:
-            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
-                `locate_points_in_elements(...)`.
+            locations: Element-owned point locations from `quadrature().locations`,
+                `locate_points(...)`, `locate_points_in_elements(...)`, or
+                `QuadMeshQuery.point_locations()`.
 
         Returns:
             csr_matrix: Sparse operator with shape `(4 * npoint, 2 * n_analysis_nodes)`. Rows are
@@ -653,8 +681,8 @@ class Structural2DFEMModel:
             else input_temperature
         )
 
-    def _validate_locations(self, locations: QuadPointLocations) -> QuadPointLocations:
-        assert isinstance(locations, QuadPointLocations), "locations must be a QuadPointLocations object"
+    def _validate_locations(self, locations: PointLocations) -> PointLocations:
+        assert isinstance(locations, PointLocations), "locations must be a PointLocations object"
         assert (
             locations.element_type == self.element_type
         ), f"locations use element_type {locations.element_type!r}, but model uses {self.element_type!r}"
@@ -776,14 +804,15 @@ class Structural2DFEMModel:
 
     def strain(
         self,
-        locations: QuadPointLocations,
+        locations: PointLocations,
         displacements: ArrayLike,
     ) -> npt.NDArray[np.floating[Any]]:
         """Evaluate total strain at located points without materializing recovery matrices.
 
         Args:
-            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
-                `locate_points_in_elements(...)`.
+            locations: Element-owned point locations from `quadrature().locations`,
+                `locate_points(...)`, `locate_points_in_elements(...)`, or
+                `QuadMeshQuery.point_locations()`.
             displacements: Either the reduced displacement solution with shape
                 `(ndof_reduced,)`, or the full analysis displacement field with shape
                 `(2 * n_analysis_nodes,)` or `(n_analysis_nodes, 2)`. Displacement units are
@@ -807,14 +836,15 @@ class Structural2DFEMModel:
 
     def stress(
         self,
-        locations: QuadPointLocations,
+        locations: PointLocations,
         displacements: ArrayLike,
     ) -> npt.NDArray[np.floating[Any]]:
         """Evaluate stress at located points without materializing recovery matrices.
 
         Args:
-            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
-                `locate_points_in_elements(...)`.
+            locations: Element-owned point locations from `quadrature().locations`,
+                `locate_points(...)`, `locate_points_in_elements(...)`, or
+                `QuadMeshQuery.point_locations()`.
             displacements: Either the reduced displacement solution with shape
                 `(ndof_reduced,)`, or the full analysis displacement field with shape
                 `(2 * n_analysis_nodes,)` or `(n_analysis_nodes, 2)`. Displacement units are
@@ -838,14 +868,15 @@ class Structural2DFEMModel:
 
     def thermal_strain(
         self,
-        locations: QuadPointLocations,
+        locations: PointLocations,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
         """Evaluate thermal strain at located points without materializing recovery matrices.
 
         Args:
-            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
-                `locate_points_in_elements(...)`.
+            locations: Element-owned point locations from `quadrature().locations`,
+                `locate_points(...)`, `locate_points_in_elements(...)`, or
+                `QuadMeshQuery.point_locations()`.
             nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
                 `[temperature]`. Required only when the model includes thermal materials.
 
@@ -867,14 +898,15 @@ class Structural2DFEMModel:
 
     def thermal_stress(
         self,
-        locations: QuadPointLocations,
+        locations: PointLocations,
         nodal_temperature: ArrayLike | None = None,
     ) -> npt.NDArray[np.floating[Any]]:
         """Evaluate thermal stress at located points without materializing recovery matrices.
 
         Args:
-            locations: Element-owned point locations from `quadrature()`, `locate_points(...)`, or
-                `locate_points_in_elements(...)`.
+            locations: Element-owned point locations from `quadrature().locations`,
+                `locate_points(...)`, `locate_points_in_elements(...)`, or
+                `QuadMeshQuery.point_locations()`.
             nodal_temperature: Input-node temperatures with shape `(n_input_nodes,)` and units
                 `[temperature]`. Required only when the model includes thermal materials.
 
@@ -1747,7 +1779,8 @@ __all__ = [
     "Structural2DFEMModel",
     "ElementMeasures",
     "ElevatedQuad9Mesh",
-    "QuadPointLocations",
+    "PointLocations",
+    "Quadrature",
     "QuadMeshInterpolation",
     "QuadMeshQuery",
     "assemble_structural_2d",

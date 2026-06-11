@@ -23,7 +23,8 @@ from .thick_wall_cylinder_handcalc import (
 from .fem2d import (
     ElementMeasures,
     ElevatedQuad9Mesh,
-    QuadPointLocations,
+    PointLocations,
+    Quadrature,
     QuadMeshInterpolation,
     QuadMeshQuery,
     Structural2DFEMModel,
@@ -44,7 +45,8 @@ from .fem2d import (
 __all__ = [
     "ElementMeasures",
     "ElevatedQuad9Mesh",
-    "QuadPointLocations",
+    "PointLocations",
+    "Quadrature",
     "QuadMeshInterpolation",
     "QuadMeshQuery",
     "SolenoidStress1D",

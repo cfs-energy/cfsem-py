@@ -39,19 +39,21 @@ The intended workflow is:
 3. solve with `model.solve(rhs)`, using the cached sparse-LU factorization,
 4. recover fields with `model.strain(locations, displacement)`,
    `model.stress(locations, displacement)`, `model.thermal_strain(locations, temperature)`, or
-   `model.thermal_stress(locations, temperature)`, using locations from `model.quadrature()`,
-   `model.locate_points(...)`, or `model.locate_points_in_elements(...)`.
+   `model.thermal_stress(locations, temperature)`, using locations from
+   `model.quadrature().locations`, `model.locate_points(...)`, or
+   `model.locate_points_in_elements(...)`.
 
 By default, `model.solve(rhs)` uses the direct sparse-LU path and returns the full displacement
 array. The sparse-LU factorization is built lazily on the first solve and then cached on the model
 for repeated right-hand sides.
 
-Location-based recovery returns flat point-major arrays. `model.quadrature()` returns
-`QuadPointLocations` with `nelem * nq_per_element` points plus flat `weights_area` and
-`weights_volume` arrays; reshape those arrays as `(nelem, nq_per_element, ...)` when element-major
-quadrature output is needed. `model.locate_points(...)` performs a mesh query for arbitrary
-physical points, while `model.locate_points_in_elements(...)` is the cheaper path when element
-ownership is already known. Sparse recovery exports use the same locations:
+Location-based recovery returns flat point-major arrays. `model.quadrature()` returns `Quadrature`;
+pass `quadrature.locations` to recovery methods, and use `quadrature.weights_area`,
+`quadrature.weights_volume`, and `quadrature.points_per_element` for integrating quantities over
+elements. `model.locate_points(...)` performs a mesh query for arbitrary physical points, while
+`model.locate_points_in_elements(...)` is the cheaper path when element ownership is already known.
+Existing `QuadMeshQuery` results can be converted with `query.point_locations()` and passed to the
+same recovery methods. Sparse recovery exports use the same locations:
 `model.interpolation_operator(locations)`, `model.strain_operator(locations)`, and
 `model.stress_operator(locations)`.
 

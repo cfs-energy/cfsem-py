@@ -103,19 +103,14 @@ def test_quad_mesh_query_and_interpolation_helpers_for_quad4():
         thickness=1.0,
         prescribed={0: 0.0, 1: 0.0, 3: 0.0},
     )
-    locations = fem.QuadPointLocations(
-        points=query.nearest_element_points,
-        element_indices=query.nearest_element_indices,
-        reference_points=query.nearest_element_reference_points,
-        element_type=model.element_type,
-        weights_area=np.zeros((0,), dtype=np.float64),
-        weights_volume=np.zeros((0,), dtype=np.float64),
-        points_per_element=0,
-    )
+    locations = query.point_locations()
+    assert isinstance(locations, fem.PointLocations)
     strain_operator = model.strain_operator(locations)
     strain = np.asarray(strain_operator @ displacements).reshape(-1, 4)
     np.testing.assert_allclose(strain[0], [1.0, 2.0, 0.0, 0.0], atol=1.0e-12)
     np.testing.assert_allclose(strain[1], [1.0, 2.0, 0.0, 0.0], atol=1.0e-12)
+    matrix_free_strain = model.strain(locations, displacements).reshape(-1, 4)
+    np.testing.assert_allclose(matrix_free_strain, strain, atol=1.0e-12)
 
     outside = fem.interpolate_quad_mesh_values(
         nodes,
@@ -271,6 +266,7 @@ def test_quad_mesh_interpolation_outside_policy_errors():
             [[2.0, 2.0]],
             tolerance=1.0e-12,
         )
+
 
 def test_quad_mesh_interpolation_uses_quad9_curved_geometry():
     """Check that quad9 interpolation uses midside nodes in the inverse geometry map."""
@@ -692,8 +688,9 @@ def evaluate_quadrature_samples(
     displacement: np.ndarray,
     nodal_temperature: np.ndarray | None = None,
 ) -> QuadratureSamples:
-    locations = model.quadrature()
-    shape = (model.nelem, locations.points_per_element, 4)
+    quadrature = model.quadrature()
+    locations = quadrature.locations
+    shape = (model.nelem, quadrature.points_per_element, 4)
     total_strain = model.strain(locations, displacement).reshape(shape)
     stress_from_displacement = model.stress(locations, displacement).reshape(shape)
 
@@ -707,13 +704,13 @@ def evaluate_quadrature_samples(
         thermal_stress = model.thermal_stress(locations, nodal_temperature).reshape(shape)
 
     return QuadratureSamples(
-        points=locations.points.reshape(model.nelem, locations.points_per_element, 2),
+        points=locations.points.reshape(model.nelem, quadrature.points_per_element, 2),
         total_strain=total_strain,
         strain=total_strain,
         thermal_strain=thermal_strain,
         elastic_strain=total_strain - thermal_strain,
         stress=stress_from_displacement - thermal_stress,
-        nq_per_element=locations.points_per_element,
+        nq_per_element=quadrature.points_per_element,
     )
 
 
@@ -1037,8 +1034,8 @@ def test_parallel_structural_assembly_matches_serial(dtype: DType, element_type:
             atol=atol,
         )
 
-    parallel_locations = parallel.quadrature()
-    serial_locations = serial.quadrature()
+    parallel_locations = parallel.quadrature().locations
+    serial_locations = serial.quadrature().locations
     np.testing.assert_allclose(parallel_locations.points, serial_locations.points, rtol=rtol, atol=atol)
     np.testing.assert_allclose(
         parallel_locations.reference_points,
@@ -1120,7 +1117,7 @@ def test_structural_sparse_operators_are_user_owned_exports() -> None:
         assert first is not second
         assert_sparse_allclose(first, second, rtol=1.0e-12, atol=1.0e-12)
 
-    locations = model.quadrature()
+    locations = model.quadrature().locations
     for build in (model.interpolation_operator, model.strain_operator, model.stress_operator):
         first = build(locations)
         second = build(locations)
@@ -1157,9 +1154,6 @@ def test_model_locate_points_in_elements_drives_recovery_and_interpolation() -> 
 
     np.testing.assert_array_equal(locations.element_indices, [0, 1])
     np.testing.assert_allclose(locations.points, points, atol=1.0e-12)
-    assert locations.weights_area.shape == (0,)
-    assert locations.weights_volume.shape == (0,)
-    assert locations.points_per_element == 0
 
     nodal_values = nodes[:, 0] + 2.0 * nodes[:, 1]
     np.testing.assert_allclose(model.interpolation_operator(locations) @ nodal_values, [1.75, 2.25])
@@ -1188,29 +1182,23 @@ def test_model_locations_validate_shape_and_element_type() -> None:
         material_ids=np.zeros(elements.shape[0], dtype=np.uint64),
         material_table=np.asarray([material]),
     )
-    locations = model.quadrature()
+    locations = model.quadrature().locations
     displacement = np.zeros(model.ndof_full, dtype=dtype)
 
-    wrong_element_type = fem.QuadPointLocations(
+    wrong_element_type = fem.PointLocations(
         points=locations.points,
         element_indices=locations.element_indices,
         reference_points=locations.reference_points,
         element_type="quad9",
-        weights_area=locations.weights_area,
-        weights_volume=locations.weights_volume,
-        points_per_element=locations.points_per_element,
     )
     with pytest.raises(AssertionError, match="element_type"):
         model.strain(wrong_element_type, displacement)
 
-    mismatched_lengths = fem.QuadPointLocations(
+    mismatched_lengths = fem.PointLocations(
         points=locations.points[:-1],
         element_indices=locations.element_indices,
         reference_points=locations.reference_points,
         element_type=locations.element_type,
-        weights_area=locations.weights_area,
-        weights_volume=locations.weights_volume,
-        points_per_element=locations.points_per_element,
     )
     with pytest.raises(AssertionError, match="locations.points"):
         model.stress(mismatched_lengths, displacement)
@@ -1233,8 +1221,9 @@ def test_matrix_free_recovery_fields_match_sparse_exports() -> None:
     displacement = np.linspace(-3.0e-6, 4.0e-6, model.ndof_full, dtype=dtype)
     displacement[model.fixed_dofs] = model.fixed_values
     input_temperature = 293.15 + 8.0 * nodes[:, 0] - 3.0 * nodes[:, 1]
-    locations = model.quadrature()
-    shape = (model.nelem, model.nq_per_element, 4)
+    quadrature = model.quadrature()
+    locations = quadrature.locations
+    shape = (model.nelem, quadrature.points_per_element, 4)
 
     expected_stress = np.asarray(
         model.stress_operator(locations) @ displacement,
@@ -1269,7 +1258,7 @@ def test_matrix_free_thermal_recovery_without_thermal_materials_returns_zero() -
         material_table=np.asarray([material]),
     )
     shape = (model.nelem, model.nq_per_element, 4)
-    locations = model.quadrature()
+    locations = model.quadrature().locations
 
     thermal_strain = model.thermal_strain(locations).reshape(shape)
     thermal_stress = model.thermal_stress(locations).reshape(shape)

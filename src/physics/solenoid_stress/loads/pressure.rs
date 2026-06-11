@@ -29,10 +29,8 @@ fn pressure_face_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: u
         let normal_area = [sample.tangent[1], -sample.tangent[0]];
         let scale = -formulation.face_scale(sample.point, 1.0, sample.weight)?;
         for local_node in 0..NODES_PER_ELEMENT {
-            local[2 * local_node] =
-                local[2 * local_node] + scale * sample.n[local_node] * normal_area[0];
-            local[2 * local_node + 1] =
-                local[2 * local_node + 1] + scale * sample.n[local_node] * normal_area[1];
+            local[2 * local_node] += scale * sample.n[local_node] * normal_area[0];
+            local[2 * local_node + 1] += scale * sample.n[local_node] * normal_area[1];
         }
     }
 
@@ -115,6 +113,97 @@ where
     ))
 }
 
+/// Apply pressure amplitudes directly to a reduced RHS without building a sparse operator.
+pub(crate) fn apply_pressure_rhs_for_family<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    pressure_faces: &[PressureLoad],
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    values: &[f64],
+    global_to_reduced: &[usize],
+    rhs: &mut [f64],
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    if values.len() != pressure_faces.len() {
+        return Err(format!(
+            "pressure_values has length {}, but operator expects {} values",
+            values.len(),
+            pressure_faces.len()
+        ));
+    }
+    for_pressure_face_vectors::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        pressure_faces,
+        formulation,
+        quadrature,
+        0,
+        pressure_faces.len(),
+        |load_index, global_rows, local| {
+            let value = values[load_index];
+            for local_dof in 0..DOF_PER_ELEMENT {
+                let reduced_row = global_to_reduced[global_rows[local_dof]];
+                if reduced_row != usize::MAX {
+                    rhs[reduced_row] += local[local_dof] * value;
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn for_pressure_face_vectors<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+    Consume,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    pressure_faces: &[PressureLoad],
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    load_start: usize,
+    load_end: usize,
+    mut consume: Consume,
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    Consume: FnMut(usize, [usize; DOF_PER_ELEMENT], [f64; DOF_PER_ELEMENT]) -> Result<(), String>,
+{
+    let nloads = load_end - load_start;
+    for (load_index, load) in pressure_faces
+        .iter()
+        .enumerate()
+        .skip(load_start)
+        .take(nloads)
+    {
+        if load.element >= mesh.num_elements() {
+            return Err(format!(
+                "pressure load references element {}, but mesh has only {} elements",
+                load.element,
+                mesh.num_elements()
+            ));
+        }
+        let coords = mesh.element_coords(load.element)?;
+        let nodes = mesh.element_nodes(load.element)?;
+        let samples = Family::face_samples(&coords, load.local_face, quadrature)?;
+        let local =
+            pressure_face_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        consume(load_index, global_rows, local)?;
+    }
+    Ok(())
+}
+
 fn pressure_operator_range_for_family<
     Family,
     const NODES_PER_ELEMENT: usize,
@@ -137,34 +226,25 @@ where
     let mut cols = Vec::with_capacity(nloads * DOF_PER_ELEMENT);
     let mut vals = Vec::with_capacity(nloads * DOF_PER_ELEMENT);
 
-    for (load_index, load) in pressure_faces
-        .iter()
-        .enumerate()
-        .skip(load_start)
-        .take(nloads)
-    {
-        if load.element >= mesh.num_elements() {
-            return Err(format!(
-                "pressure load references element {}, but mesh has only {} elements",
-                load.element,
-                mesh.num_elements()
-            ));
-        }
-        let coords = mesh.element_coords(load.element)?;
-        let nodes = mesh.element_nodes(load.element)?;
-        let samples = Family::face_samples(&coords, load.local_face, quadrature)?;
-        let local =
-            pressure_face_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
-        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
-        scatter_local_vector(
-            &mut rows,
-            &mut cols,
-            &mut vals,
-            &global_rows,
-            load_index,
-            &local,
-        );
-    }
+    for_pressure_face_vectors::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        pressure_faces,
+        formulation,
+        quadrature,
+        load_start,
+        load_end,
+        |load_index, global_rows, local| {
+            scatter_local_vector(
+                &mut rows,
+                &mut cols,
+                &mut vals,
+                &global_rows,
+                load_index,
+                &local,
+            );
+            Ok(())
+        },
+    )?;
 
     Ok(SparseOperator {
         rows,

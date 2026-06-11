@@ -33,12 +33,10 @@ if os.getenv("CFSEM_TESTING"):
 from matplotlib import pyplot as plt
 
 from cfsem.solenoid_stress.fem2d import (
+    Structural2DFEMModel,
     assemble_structural_2d,
     cfsem_radial_material,
     infer_quad9_mesh,
-    quad_mesh_interpolation_operator,
-    quad_mesh_stress_operator,
-    query_quad_mesh,
 )
 from cfsem.solenoid_stress.solenoid_handcalc import s_long_solenoid
 from cfsem.solenoid_stress.solenoid_1d import (
@@ -167,28 +165,16 @@ def analytic_stress_profile(sample_r: np.ndarray) -> Profile:
 
 
 def recover_axisymmetric_midplane_profile(
-    nodes: np.ndarray,
-    elements: np.ndarray,
+    model: Structural2DFEMModel,
     sample_radius: np.ndarray,
     displacement: np.ndarray,
-    material: np.ndarray,
-    element_type: str,
 ) -> Profile:
     points = np.column_stack([sample_radius, np.full_like(sample_radius, 0.5 * HEIGHT)])
-    query = query_quad_mesh(nodes, elements, points, element_type=element_type)
-    interpolation_operator = quad_mesh_interpolation_operator(query)
-    stress_operator = quad_mesh_stress_operator(
-        query,
-        np.zeros(elements.shape[0], dtype=np.uint64),
-        np.asarray([material], dtype=np.float64),
-        formulation="axisymmetric",
-    )
-    displacement_2d = np.asarray(displacement, dtype=np.float64).reshape(nodes.shape[0], 2)
+    locations = model.locate_points(points)
+    interpolation_operator = model.interpolation_operator(locations)
+    displacement_2d = np.asarray(displacement, dtype=np.float64).reshape(model.analysis_nodes.shape[0], 2)
     displacement_at_points = np.asarray(interpolation_operator @ displacement_2d, dtype=np.float64)
-    stress = np.asarray(
-        stress_operator @ displacement_2d.reshape(-1),
-        dtype=np.float64,
-    ).reshape(-1, 4)
+    stress = model.stress(locations, displacement_2d).reshape(-1, 4)
     return Profile(
         radius=np.asarray(sample_radius, dtype=np.float64),
         u_r=displacement_at_points[:, 0],
@@ -255,7 +241,6 @@ def solve_fem_midplane_profile(
     nodes, elements = build_annulus_strip_mesh(RI, RO, HEIGHT, nr=nr, nz=1)
     elevated = infer_quad9_mesh(nodes, elements) if element_type == "quad9" else None
     analysis_nodes = elevated.analysis_nodes if elevated is not None else nodes
-    analysis_elements = elevated.analysis_elements if elevated is not None else elements
     nelem = elements.shape[0]
     material = cfsem_radial_material(ELASTICITY_MODULUS, POISSON_RATIO)
     prescribed = prescribed_z_dofs(analysis_nodes.shape[0])
@@ -268,10 +253,10 @@ def solve_fem_midplane_profile(
         quadrature=QUADRATURE,
         element_type=element_type,
     )
-    quadrature_data = model.element_quadrature()
-    points = quadrature_data.points.reshape(-1, 2)
-    nq = quadrature_data.nq_per_element
-    weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64)
+    quadrature_data = model.quadrature()
+    points = quadrature_data.locations.points
+    nq = quadrature_data.points_per_element
+    weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64).reshape(nelem, nq)
     bz_weighted = linear_bz_profile(points[:, 0]).reshape(nelem, nq) * weights
     bz_mean = np.sum(bz_weighted, axis=1) / np.sum(weights, axis=1)
     body_force = np.column_stack((CURRENT_DENSITY * bz_mean, np.zeros(nelem, dtype=np.float64)))
@@ -288,14 +273,11 @@ def solve_fem_midplane_profile(
 
     return (
         recover_axisymmetric_midplane_profile(
-            analysis_nodes,
-            analysis_elements,
+            model,
             0.5 * (nodes[:nr, 0] + nodes[1 : nr + 1, 0]),
             displacement,
-            material,
-            element_type,
         ),
-        model.ndof,
+        model.ndof_full,
         fem_build_seconds,
         fem_factorize_seconds,
         fem_solve_seconds,
@@ -363,8 +345,8 @@ def plot_discretization_panel(ax, nr: int, nz: int, element_type: str) -> None:
         quadrature=QUADRATURE,
         element_type=element_type,
     )
-    quadrature_data = model.element_quadrature()
-    quadrature_points = quadrature_data.points.reshape(-1, 2)
+    quadrature_data = model.quadrature()
+    quadrature_points = quadrature_data.locations.points
     fd_grid = build_1d_grid((RO - RI) / nr)[1:-1]
 
     if quadrature_points.shape[0] <= 1_000:
@@ -536,7 +518,7 @@ def build_figure(results_by_type: dict[str, list[SweepResult]]):
         f"z-DOFs fixed, radial body force only, QUAD4/QUAD9 + {QUADRATURE} Gauss",
         y=0.98,
     )
-    fig.tight_layout(rect=[0.0, 0.0, layout_right, 0.94])
+    fig.tight_layout(rect=(0.0, 0.0, layout_right, 0.94))
     return fig
 
 

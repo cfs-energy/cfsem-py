@@ -460,7 +460,7 @@ where
 
     out.fill(0.0); // [H] or source-dependent interaction units
     for partial in partials {
-        for (dst, val) in out.iter_mut().zip(partial.into_iter()) {
+        for (dst, val) in out.iter_mut().zip(partial) {
             *dst += val;
         }
     }
@@ -595,7 +595,7 @@ pub fn triangle_mesh_inductance_matrix_par(
 
     out.fill(0.0); // [H]
     for partial in partials {
-        for (dst, val) in out.iter_mut().zip(partial.into_iter()) {
+        for (dst, val) in out.iter_mut().zip(partial) {
             *dst += val; // [H]
         }
     }
@@ -990,6 +990,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
 /// Returns:
 ///     Triangle-basis mutual-inductance entry `M_ij` (H).
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn triangle_basis_mutual_inductance(
     src0: [f64; 3],
     src1: [f64; 3],

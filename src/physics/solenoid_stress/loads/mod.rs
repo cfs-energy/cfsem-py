@@ -103,7 +103,7 @@ fn concat_thermal_load_operators(
         .into_iter()
         .map(|chunk| {
             for (dst, src) in reference_rhs.iter_mut().zip(chunk.reference_rhs) {
-                *dst = *dst + src;
+                *dst += src;
             }
             chunk.temperature_to_rhs
         })
@@ -139,7 +139,17 @@ fn collect_thermal_load_operator_chunks(
         .collect()
 }
 
-pub(crate) use body_force::{body_force_operator_for_family, body_force_operator_for_family_par};
-pub(crate) use pressure::{pressure_operator_for_family, pressure_operator_for_family_par};
-pub(crate) use thermal::{temperature_operator_for_family, temperature_operator_for_family_par};
-pub(crate) use traction::{traction_operator_for_family, traction_operator_for_family_par};
+pub(crate) use body_force::{
+    apply_body_force_rhs_for_family, body_force_operator_for_family,
+    body_force_operator_for_family_par,
+};
+pub(crate) use pressure::{
+    apply_pressure_rhs_for_family, pressure_operator_for_family, pressure_operator_for_family_par,
+};
+pub(crate) use thermal::{
+    apply_temperature_rhs_for_family, temperature_operator_for_family,
+    temperature_operator_for_family_par, thermal_reference_rhs_for_family,
+};
+pub(crate) use traction::{
+    apply_traction_rhs_for_family, traction_operator_for_family, traction_operator_for_family_par,
+};

@@ -9,33 +9,6 @@ use std::collections::HashMap;
 use crate::mesh::elements::quad2d::quad4;
 use crate::physics::solenoid_stress::types::ThermalMaterial;
 
-/// Per-element quadrature data in element-major flattened form.
-///
-/// `points`, `weights_area`, and `weights_volume` are stored in the same element-major order.
-/// `points` has flattened shape `(nelem * nq_per_element, 2)`,
-/// `weights_area` and `weights_volume` have flattened shape `(nelem * nq_per_element,)`, and
-/// `nq_per_element` gives the number of consecutive quadrature entries belonging to each element.
-#[derive(Debug, Clone)]
-pub struct Structural2dElementQuadrature {
-    /// Physical quadrature-point coordinates in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 2)`.
-    /// Units: `[length]`.
-    pub points: Vec<[f64; 2]>,
-    /// Mapped analysis-plane area weights `det(J) w` in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element,)`.
-    /// Units: `[area]`.
-    pub weights_area: Vec<f64>,
-    /// Mapped represented-volume weights in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element,)`.
-    /// Units: `[volume]`.
-    pub weights_volume: Vec<f64>,
-    /// Number of quadrature points contributed by each element.
-    pub nq_per_element: usize,
-}
-
 /// Per-element analysis-plane area and represented volume.
 ///
 /// Both vectors have shape `(nelem,)`.
@@ -51,43 +24,6 @@ pub struct Structural2dElementMeasures {
     /// Shape: `(nelem,)`.
     /// Units: `[volume]`.
     pub volumes: Vec<f64>,
-}
-
-/// Recovered quadrature-point fields in element-major flattened form.
-///
-/// Each field vector stores one `[rr, zz, tt, rz]` sample per quadrature point in element-major
-/// order. `points` has flattened shape `(nelem * nq_per_element, 2)`. Each tensor field has
-/// flattened shape `(nelem * nq_per_element, 4)`. `nq_per_element` records how many consecutive
-/// samples belong to each element.
-#[derive(Debug, Clone)]
-pub struct QuadratureFieldSamples {
-    /// Physical quadrature-point coordinates in element-major order.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 2)`.
-    /// Units: `[length]`.
-    pub points: Vec<[f64; 2]>,
-    /// Total strain samples `[e_rr, e_zz, e_tt, g_rz]`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[strain]`.
-    pub strain: Vec<[f64; 4]>,
-    /// Thermal strain samples in the same ordering as `strain`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[strain]`.
-    pub thermal_strain: Vec<[f64; 4]>,
-    /// Elastic strain samples `strain - thermal_strain`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[strain]`.
-    pub elastic_strain: Vec<[f64; 4]>,
-    /// Stress samples `[sigma_rr, sigma_zz, sigma_tt, tau_rz]`.
-    ///
-    /// Flattened shape: `(nelem * nq_per_element, 4)`.
-    /// Units: `[stress]`.
-    pub stress: Vec<[f64; 4]>,
-    /// Number of quadrature points contributed by each element.
-    pub nq_per_element: usize,
 }
 
 /// Explicit 9-node analysis mesh inferred from a corner-only 4-node quadrilateral mesh.
@@ -233,7 +169,7 @@ pub fn rotate_material_in_plane(material: &[[f64; 4]; 4], angle: f64) -> [[f64; 
         for col in 0..4 {
             let mut value = 0.0;
             for (k, strain_row) in strain_to_local.iter().enumerate() {
-                value = value + material[row][k] * strain_row[col];
+                value += material[row][k] * strain_row[col];
             }
             local_times_strain[row][col] = value;
         }
@@ -244,7 +180,7 @@ pub fn rotate_material_in_plane(material: &[[f64; 4]; 4], angle: f64) -> [[f64; 
         for col in 0..4 {
             let mut value = 0.0;
             for (k, local_row) in local_times_strain.iter().enumerate() {
-                value = value + stress_to_global[row][k] * local_row[col];
+                value += stress_to_global[row][k] * local_row[col];
             }
             rotated[row][col] = value;
         }

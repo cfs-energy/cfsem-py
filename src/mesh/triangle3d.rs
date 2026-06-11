@@ -114,6 +114,12 @@ impl<'a> TriangleMeshView<'a> {
         self.triangles.0.len()
     }
 
+    /// Whether the view contains no triangles.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Triangle-node indices for one triangle.
     #[inline]
     pub fn triangle_indices(&self, i: usize) -> [usize; 3] {

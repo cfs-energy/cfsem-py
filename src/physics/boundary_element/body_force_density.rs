@@ -133,6 +133,7 @@ where
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn triangle_mesh_force_mapping_row(
     mesh_src: &TriangleMeshView<'_>,
     tgt_nodes: [[f64; 3]; 3],

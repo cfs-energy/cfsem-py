@@ -60,10 +60,12 @@
 //! form
 //! - `[ N_1  0    N_2  0   ...  N_n  0 ]`,
 //! - `[ 0    N_1  0    N_2 ...  0    N_n ]`,
+//!
 //! where the scalar shape functions `N_i(r, z)` are evaluated at the point of interest.
 //! Multiplying by `u_e` gives
 //! - `u_r(r, z) = N_1 u_r1 + N_2 u_r2 + ... + N_n u_rn`,
 //! - `u_z(r, z) = N_1 u_z1 + N_2 u_z2 + ... + N_n u_zn`.
+//!
 //! In other words, the element displacement field is an interpolation of the nodal displacements.
 //! The shape functions are chosen so that `N_i = 1` at node `i` and `N_i = 0` at the other element
 //! nodes, which guarantees that the interpolated field reproduces the nodal values exactly at the
@@ -103,6 +105,7 @@
 //! `integral((delta epsilon)^T sigma 2*pi*r dA)
 //!  - integral((delta u)^T b 2*pi*r dA)
 //!  - integral((delta u)^T t 2*pi*r ds) = 0`.
+//!
 //! Here `b` is body-force density, `t` is an applied traction on the traction boundary, and
 //! `sigma = D (epsilon - epsilon_th)` if thermal strain is active.  When no traction or pressure
 //! load is prescribed on a boundary segment, that boundary is traction-free in this weak sense.
@@ -112,10 +115,12 @@
 //! - `delta u = N delta u_e`,
 //! - `epsilon = B u_e`,
 //! - `delta epsilon = B delta u_e`,
+//!
 //! where `u_e` collects the element nodal displacement degrees of freedom.  Substituting these
 //! into the virtual-work statement gives
 //! - `delta W_int = delta u_e^T [integral(B^T D B 2*pi*r dA)] u_e`,
 //! - `delta W_ext = delta u_e^T f_e`.
+//!
 //! Since `delta u_e` is arbitrary, the bracketed quantity defines the element equations
 //! `K_e u_e = f_e`.  After assembling the element contributions over the whole mesh, this becomes
 //! the global linear system `K u = f`.
@@ -192,6 +197,7 @@
 //! - `e_zz = du_z/dz`,
 //! - `e_tt = u_r / r`,
 //! - `g_rz = du_r/dz + du_z/dr`.
+//!
 //! In the implementation this kinematic map is written as
 //! `epsilon = B u_e`,
 //! where `u_e` is the vector of element nodal displacements and `B` is the strain-displacement
@@ -233,9 +239,11 @@
 //! - the local radius `r_q`,
 //! - the elastic stress-strain matrix `D`,
 //! - and the axisymmetric scale `scale_q = 2*pi*r_q det(J_q) w_q`.
+//!
 //! From these it builds the strain-displacement matrix `B_q` and then forms the dense
 //! quadrature-point kernel
 //! `scale_q B_q^T D B_q`.
+//!
 //! The important implementation detail is that `D` is applied only as this local `4 x 4`
 //! contribution.  There is no assembled global stress-strain matrix; the backend computes `D B_q`
 //! directly for each quadrature point and accumulates the resulting `B_q^T (D B_q)` contribution
@@ -261,12 +269,12 @@
 //! from neighboring elements sum into the same global matrix entries, which is how the assembled
 //! matrix enforces compatibility and equilibrium across the mesh.
 //!
-//! The stress and strain recovery operators in [`recovery`] use the same quadrature-point objects.
-//! The strain operator stores the action of `B_q`, while the stress operator stores the action of
-//! the local stress product `D B_q`.  As in stiffness assembly, this is done matrix-free
-//! with the individual per-material `4 x 4` elastic stress-strain matrix at each quadrature point
-//! rather than through any assembled global `D` operator.  Applying those operators to the global
-//! displacement vector therefore recovers
+//! Stress and strain recovery use the same element-owned point locations.  Matrix-free recovery on
+//! [`Structural2dModel`] evaluates `B_q u_e` or `D B_q u_e` directly at each location; sparse
+//! recovery operators store the same row actions for workflows that want reusable matrices.  As in
+//! stiffness assembly, stress recovery uses the individual per-material `4 x 4` elastic
+//! stress-strain matrix at each quadrature point rather than through any assembled global `D`
+//! operator.  Applying those evaluations to the global displacement vector therefore recovers
 //! `epsilon_q = B_q u_e` and `sigma_q = D epsilon_q`, or `sigma_q = D (epsilon_q - epsilon_th,q)`
 //! when thermal strain is present.
 //!
@@ -368,9 +376,11 @@
 //! - compute `epsilon_th = alpha * DeltaT`,
 //! - assemble `f_thermal = integral(B^T D epsilon_th 2*pi*r dA)`,
 //! - then solve the structural system for `u`.
+//!
 //! In other words, the temperature field is an input to the structural problem, not one of its
 //! unknowns.  The solver does not need to guess `epsilon_th`; it computes `epsilon_th` directly
 //! from the supplied thermal state before it begins solving for displacement.
+//!
 //! This makes the current formulation one-way coupled: temperature drives mechanics, but the
 //! structural solve does not solve for temperature itself.
 //!
@@ -396,6 +406,7 @@
 //! `2i + 1`, then the corresponding operator column entries receive
 //! - `scale_q N_i(q)` in the radial row for the unit-radial-body-force column,
 //! - `scale_q N_i(q)` in the axial row for the unit-axial-body-force column.
+//!
 //! Multiplying those columns by the actual per-element `b_r` and `b_z` values reproduces
 //! `integral(N^T b 2*pi*r dA)`.
 //!
@@ -405,6 +416,7 @@
 //! The relevant operator column entries then receive
 //! - `scale_q N_i(q) (-normal_area_r)` in the radial row,
 //! - `scale_q N_i(q) (-normal_area_z)` in the axial row.
+//!
 //! The line-Jacobian is already embedded in `normal_area`, so pressure is represented as a normal
 //! traction without separately dividing by or multiplying by `|dx/ds|`.
 //!
@@ -414,6 +426,7 @@
 //! The corresponding column entries receive
 //! - `scale_q N_i(q)` in the radial row for the unit-radial-traction column,
 //! - `scale_q N_i(q)` in the axial row for the unit-axial-traction column.
+//!
 //! This is the face analogue of the body-force operator: the shape functions distribute the
 //! continuous boundary load into equivalent nodal generalized forces.
 //!
@@ -447,6 +460,7 @@
 //!   physical tangent `dx/ds`,
 //! - evaluates the physical face point `(r, z)`, and
 //! - multiplies by the axisymmetric surface measure `2*pi*r`.
+//!
 //! The same quadrature setting that selects the tensor-product volume rule also selects the 1D face
 //! rule: `GaussLegendre3`/`gl3` and `GaussLegendre4`/`gl4` correspond to 3-point and 4-point
 //! Gauss-Legendre quadrature along each
@@ -468,13 +482,15 @@
 //! - [`crate::mesh::quadrature`] provides the shared 1D Gauss-Legendre rules on an interval.
 //! - [`crate::mesh::elements::quad2d::quadrature`] builds the quadrilateral tensor-product square
 //!   and face rules from that 1D basis.
-//! - [`geometry`] adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
+//! - `geometry` adds axisymmetric validation and evaluates the `2*pi*r`-weighted element
 //!   summaries needed by the structural solver.
-//! - [`axisym`] constructs the axisymmetric strain operator and local stiffness kernel.
-//! - [`loads`] builds sparse linear maps from load amplitudes or nodal temperatures to the global
-//!   right-hand side.
-//! - [`assembly`] assembles the stiffness matrix into sparse triplets.
-//! - [`recovery`] builds sparse operators for quadrature-point strain and stress recovery.
+//! - `axisym` constructs the axisymmetric strain operator and local stiffness kernel.
+//! - `loads` applies distributed loads matrix-free and builds sparse linear maps from load
+//!   amplitudes or nodal temperatures to the global right-hand side.
+//! - `assembly` assembles the stiffness matrix into sparse triplets.
+//! - `model` owns structural solve assembly and matrix-free recovery at located element points.
+//! - [`crate::mesh::quad2d`] builds sparse interpolation, strain, and stress recovery operators for
+//!   quadrilateral meshes.
 //!
 //! References:
 //! - Allan F. Bower, *Applied Mechanics of Solids*, CRC Press, 2009.  See especially Section 8.1
@@ -491,7 +507,6 @@ mod family;
 mod geometry;
 mod loads;
 mod model;
-mod recovery;
 #[cfg(test)]
 mod test_utils;
 mod types;
@@ -499,15 +514,13 @@ mod types;
 pub use crate::mesh::QuadratureRule;
 pub(crate) use axisym::build_b_matrix;
 pub use convenience::{
-    ElevatedQuad9Mesh, QuadratureFieldSamples, Structural2dElementMeasures,
-    Structural2dElementQuadrature, cfsem_radial_material, infer_quad9_mesh,
+    ElevatedQuad9Mesh, Structural2dElementMeasures, cfsem_radial_material, infer_quad9_mesh,
     isotropic_axisymmetric_material, isotropic_axisymmetric_thermal_material,
     orthotropic_axisymmetric_thermal_material, rotate_material_in_plane,
     rotate_thermal_expansion_in_plane, rotate_thermal_material_in_plane,
 };
 pub use model::{
-    ReducedRecoveryOperators, Structural2dElementType, Structural2dElements, Structural2dModel,
-    assemble_structural_2d,
+    Structural2dElementType, Structural2dElements, Structural2dModel, assemble_structural_2d,
 };
 pub(crate) use types::validate_element_material_inputs;
 pub use types::{

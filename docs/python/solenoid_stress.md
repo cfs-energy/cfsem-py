@@ -3,7 +3,7 @@
 This package includes three complementary layers:
 
 - a 1D finite-difference radial stress solver for winding-pack models with zero `rz` shear,
-- a 2D quadrilateral FEM solver with axisymmetric and plane-strain formulations, reusable sparse load operators, cached Rust-side LU solves, and optional BiCGSTAB iterative solves,
+- a 2D quadrilateral FEM solver with axisymmetric and plane-strain formulations, matrix-free load assembly, explicit sparse operator exports, and cached Rust-side sparse-LU solves,
 - analytic reference formulas used for validation and convergence studies.
 
 ## 1D Finite-Difference Solver
@@ -25,27 +25,37 @@ The FEM path supports:
 - `gl3` and `gl4` quadrature,
 - optional per-element in-plane material orientation angles,
 - optional threaded stiffness assembly with `par=True`,
-- reusable reduced-space operators for body force, pressure, traction, and nodal-temperature thermal strain,
-- reduced quadrature-point recovery operators for strain and stress,
-- direct sparse-LU or BiCGSTAB reduced-system solves,
+- explicit reduced-space operator exports for body force, pressure, traction, and nodal-temperature thermal strain,
+- explicit location-based sparse operator exports for interpolation, strain, and stress,
+- matrix-free location-based strain, stress, thermal-strain, and thermal-stress recovery,
+- direct sparse-LU reduced-system solves,
+- `float64` numeric storage; floating input arrays must already have dtype `float64`,
 - model-owned Dirichlet constraints applied during assembly.
 
 The intended workflow is:
 
 1. call `assemble_structural_2d(...)` once with mesh, materials, load topology, and prescribed Dirichlet values,
-2. build each reduced load vector with `model.build_rhs(...)` or the exposed sparse operators,
-3. solve with `model.solve(rhs)`, using the default cached LU factorization or
-   `model.solve(rhs, method="bicgstab", ...)` for an iterative solve,
-4. recover quadrature strain and stress with `model.evaluate_quadrature(...)`.
+2. build each reduced load vector with matrix-free `model.build_rhs(...)` or user-owned sparse operator exports,
+3. solve with `model.solve(rhs)`, using the cached sparse-LU factorization,
+4. recover fields with `model.strain(locations, displacement)`,
+   `model.stress(locations, displacement)`, `model.thermal_strain(locations, temperature)`, or
+   `model.thermal_stress(locations, temperature)`, using locations from
+   `model.quadrature().locations`, `model.locate_points(...)`, or
+   `model.locate_points_in_elements(...)`.
 
 By default, `model.solve(rhs)` uses the direct sparse-LU path and returns the full displacement
-array. Passing `method="bicgstab"` selects the iterative solver; this path supports diagonal
-preconditioning, Ruiz-style row/column equilibration, optional reuse of the previous converged
-iterative solution as the initial guess, and optional diagnostics via `return_diagnostics=True`.
-Equilibration scales and the scaled stiffness matrix are cached on the model for repeated
-right-hand sides. The BiCGSTAB tolerance is passed unchanged to the system being solved. With
-equilibration enabled, this means the tolerance applies to the equilibrated residual rather than
-being rescaled to original reduced-RHS units.
+array. The sparse-LU factorization is built lazily on the first solve and then cached on the model
+for repeated right-hand sides.
+
+Location-based recovery returns flat point-major arrays. `model.quadrature()` returns `Quadrature`;
+pass `quadrature.locations` to recovery methods, and use `quadrature.weights_area`,
+`quadrature.weights_volume`, and `quadrature.points_per_element` for integrating quantities over
+elements. `model.locate_points(...)` performs a mesh query for arbitrary physical points, while
+`model.locate_points_in_elements(...)` is the cheaper path when element ownership is already known.
+Existing `QuadMeshQuery` results can be converted with `query.point_locations()` and passed to the
+same recovery methods. Sparse recovery exports use the same locations:
+`model.interpolation_operator(locations)`, `model.strain_operator(locations)`, and
+`model.stress_operator(locations)`.
 
 ### Formulation Notes
 

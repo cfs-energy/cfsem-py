@@ -1,45 +1,27 @@
-//! Shared numeric traits and constants for the solenoid-stress backend.
+//! Shared constants and structural types for the solenoid-stress backend.
 
-use crate::math::Scalar;
-use faer_traits::RealField;
-
-/// Floating-point trait bound used throughout the solenoid-stress backend.
-///
-/// Keeping the bound in one place makes it easier to support both `f32` and `f64` entry points
-/// without duplicating generic constraints everywhere else.
-pub trait Real: Scalar + RealField {}
-
-impl<T> Real for T where T: Scalar + RealField {}
-
-/// Cast a literal `f64` constant into the active floating-point type.
-pub fn cast<F: Real>(value: f64) -> F {
-    crate::math::cast(value)
-}
-
-/// Return the constant `2*pi` in the active floating-point type.
-pub fn two_pi<F: Real>() -> F {
-    cast(2.0 * core::f64::consts::PI)
-}
+/// Axisymmetric revolution factor.
+pub const TWO_PI: f64 = 2.0 * core::f64::consts::PI;
 
 /// Structural 2D reduction used by the quadrilateral FEM backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Structural2dFormulation<F: Real> {
+pub enum Structural2dFormulation {
     /// Axisymmetric reduction in `(r, z)` with hoop strain `e_tt = u_r / r`.
     Axisymmetric,
     /// Plane-strain reduction in `(x, y)` with `e_zz = 0` and finite model thickness.
     PlaneStrain {
         /// Out-of-plane thickness used to convert analysis-plane integrals into 3D volume.
-        thickness: F,
+        thickness: f64,
     },
 }
 
-impl<F: Real> Structural2dFormulation<F> {
+impl Structural2dFormulation {
     /// Parse the compact formulation code used by the low-level Python binding.
-    pub fn from_code(code: u8, thickness: F) -> Result<Self, String> {
+    pub fn from_code(code: u8, thickness: f64) -> Result<Self, String> {
         match code {
             0 => Ok(Self::Axisymmetric),
             1 => {
-                if thickness <= F::zero() {
+                if thickness <= 0.0 {
                     return Err(format!(
                         "plane-strain thickness must be positive; got {thickness:?}"
                     ));
@@ -61,32 +43,37 @@ impl<F: Real> Structural2dFormulation<F> {
     }
 
     /// Return the axisymmetric swept-volume or planar-thickness measure for one volume sample.
-    pub fn volume_scale(self, point: [F; 2], det_j: F, weight: F) -> Result<F, String> {
+    pub fn volume_scale(self, point: [f64; 2], det_j: f64, weight: f64) -> Result<f64, String> {
         match self {
             Self::Axisymmetric => {
-                if point[0] < F::zero() {
+                if point[0] < 0.0 {
                     return Err(format!(
                         "quadrature point has negative radius {:?}; axisymmetric radius must be nonnegative",
                         point[0]
                     ));
                 }
-                Ok(two_pi::<F>() * point[0] * det_j * weight)
+                Ok(TWO_PI * point[0] * det_j * weight)
             }
             Self::PlaneStrain { thickness } => Ok(thickness * det_j * weight),
         }
     }
 
     /// Return the axisymmetric swept-surface or planar-thickness measure for one face sample.
-    pub fn face_scale(self, point: [F; 2], line_jacobian: F, weight: F) -> Result<F, String> {
+    pub fn face_scale(
+        self,
+        point: [f64; 2],
+        line_jacobian: f64,
+        weight: f64,
+    ) -> Result<f64, String> {
         match self {
             Self::Axisymmetric => {
-                if point[0] < F::zero() {
+                if point[0] < 0.0 {
                     return Err(format!(
                         "face quadrature point has negative radius {:?}; axisymmetric radius must be nonnegative",
                         point[0]
                     ));
                 }
-                Ok(two_pi::<F>() * point[0] * line_jacobian * weight)
+                Ok(TWO_PI * point[0] * line_jacobian * weight)
             }
             Self::PlaneStrain { thickness } => Ok(thickness * line_jacobian * weight),
         }
@@ -119,10 +106,10 @@ pub fn local_dofs<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
 }
 
 /// Validate per-element material-index arrays shared by assembly and recovery code.
-pub(crate) fn validate_element_material_inputs<F: Real>(
+pub(crate) fn validate_element_material_inputs(
     nelem: usize,
     material_ids: &[usize],
-    material_orientation_angles: Option<&[F]>,
+    material_orientation_angles: Option<&[f64]>,
 ) -> Result<(), String> {
     if material_ids.len() != nelem {
         return Err(format!(
@@ -144,17 +131,17 @@ pub(crate) fn validate_element_material_inputs<F: Real>(
 }
 
 /// Scatter one local vector into sparse triplet storage.
-pub(crate) fn scatter_local_vector<F: Real, const NROW: usize>(
+pub(crate) fn scatter_local_vector<const NROW: usize>(
     rows: &mut Vec<usize>,
     cols: &mut Vec<usize>,
-    vals: &mut Vec<F>,
+    vals: &mut Vec<f64>,
     global_rows: &[usize; NROW],
     global_col: usize,
-    local: &[F; NROW],
+    local: &[f64; NROW],
 ) {
     for row in 0..NROW {
         let value = local[row];
-        if value != F::zero() {
+        if value != 0.0 {
             rows.push(global_rows[row]);
             cols.push(global_col);
             vals.push(value);
@@ -163,18 +150,18 @@ pub(crate) fn scatter_local_vector<F: Real, const NROW: usize>(
 }
 
 /// Scatter one local dense block into sparse triplet storage.
-pub(crate) fn scatter_local_matrix<F: Real, const NROW: usize, const NCOL: usize>(
+pub(crate) fn scatter_local_matrix<const NROW: usize, const NCOL: usize>(
     rows: &mut Vec<usize>,
     cols: &mut Vec<usize>,
-    vals: &mut Vec<F>,
+    vals: &mut Vec<f64>,
     global_rows: &[usize; NROW],
     global_cols: &[usize; NCOL],
-    local: &[[F; NCOL]; NROW],
+    local: &[[f64; NCOL]; NROW],
 ) {
     for row in 0..NROW {
         for col in 0..NCOL {
             let value = local[row][col];
-            if value != F::zero() {
+            if value != 0.0 {
                 rows.push(global_rows[row]);
                 cols.push(global_cols[col]);
                 vals.push(value);
@@ -209,17 +196,17 @@ pub struct TractionLoad {
 
 /// Per-material thermal-expansion data for the 2D thermoelastic model.
 #[derive(Clone, Copy, Debug)]
-pub struct ThermalMaterial<F: Real> {
+pub struct ThermalMaterial {
     /// Thermal strain coefficients in the active four-component strain order.
     ///
     /// Axisymmetric models use `[rr, zz, tt, rz]`; plane-strain models use `[xx, yy, zz, xy]`.
     ///
     /// Units: `[strain / temperature]`.
-    pub alpha: [F; 4],
+    pub alpha: [f64; 4],
     /// Stress-free reference temperature for this material.
     ///
     /// Units: `[temperature]`.
-    pub reference_temperature: F,
+    pub reference_temperature: f64,
 }
 
 /// Sparse triplets for the assembled structural stiffness matrix before CSC compression.
@@ -228,11 +215,11 @@ pub struct ThermalMaterial<F: Real> {
 /// `[generalized nodal force / displacement] = [energy / distance^2]`,
 /// which is the axisymmetric analogue of stiffness.
 #[derive(Debug, Clone)]
-pub struct StiffnessTriplets<F: Real> {
+pub struct StiffnessTriplets {
     /// Sparse row indices for the assembled stiffness-operator triplets.
     pub rows: Vec<usize>,
     /// Sparse column indices for the assembled stiffness-operator triplets.
     pub cols: Vec<usize>,
     /// Sparse values for the assembled stiffness-operator triplets.
-    pub vals: Vec<F>,
+    pub vals: Vec<f64>,
 }

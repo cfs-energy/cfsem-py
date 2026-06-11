@@ -1,6 +1,6 @@
 # Changelog
 
-## 10.0.0 2026-06-05
+## 11.0.0 2026-06-11
 
 * Rust
     * !Consolidate math helper functions and use consistent array argument format
@@ -27,6 +27,22 @@
     * Add `MU_0` and `inductance_matrix_axisymmetric_coaxial_rectangular_coils` to public exports
     * Correct wrapper type hints for sparse triplets and circular-to-linear mutual inductance
     * Use ty instead of pyright
+
+## 10.0.0 2026-06-09
+
+* Rust
+    * 2D FEM solver
+        * !Remove f32 and iterative solve support
+            * Field testing showed only ~25% speedup for each on a problem with >1M elements
+            * This is not enough to justify the complexity and maintenance overhead
+        * !Replace quadrature-specific recovery path with arbitrary-point interface
+        * Add matrix-free operator interface for loads and recovery alongside sparse matrix operators
+            * Use common row producer for loads operators that don't require reduction permutation
+                * Matrix-free: consume row into matrix-vector product immediately
+                * Sparse matrix: store row directly in CSR format
+            * Use common kernels between matrix-free and sparse interfaces
+* Python
+    * !Update bindings for changed FEM API
 
 ## 9.1.0 2026-06-08
 

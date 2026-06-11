@@ -2,7 +2,7 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{VolumeSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, local_dofs, scatter_local_matrix,
+    DOF_PER_NODE, Structural2dFormulation, local_dofs, scatter_local_matrix,
 };
 
 use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operators};
@@ -17,26 +17,21 @@ use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operat
 /// `[energy / distance]`, which is force-like in the virtual-work sense.
 ///
 /// Each block entry therefore has units of volume.
-fn body_force_element_kernel<
-    F: Real,
-    const NODES_PER_ELEMENT: usize,
-    const DOF_PER_ELEMENT: usize,
->(
-    samples: &[VolumeSample<F, NODES_PER_ELEMENT>],
-    formulation: Structural2dFormulation<F>,
-) -> Result<[[F; 2]; DOF_PER_ELEMENT], String> {
+fn body_force_element_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    samples: &[VolumeSample<f64, NODES_PER_ELEMENT>],
+    formulation: Structural2dFormulation,
+) -> Result<[[f64; 2]; DOF_PER_ELEMENT], String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    let mut local = [[F::zero(); 2]; DOF_PER_ELEMENT];
+    let mut local = [[0.0; 2]; DOF_PER_ELEMENT];
 
     for sample in samples {
         let scale = formulation.volume_scale(sample.point, sample.det_j, sample.weight)?;
         for local_node in 0..NODES_PER_ELEMENT {
             // Even-numbered rows act on radial DOFs and odd-numbered rows act on axial DOFs.
-            local[2 * local_node][0] = local[2 * local_node][0] + scale * sample.n[local_node];
-            local[2 * local_node + 1][1] =
-                local[2 * local_node + 1][1] + scale * sample.n[local_node];
+            local[2 * local_node][0] += scale * sample.n[local_node];
+            local[2 * local_node + 1][1] += scale * sample.n[local_node];
         }
     }
 
@@ -57,15 +52,14 @@ fn body_force_element_kernel<
 ///
 /// Entry units: `[volume]`.
 pub(crate) fn body_force_operator_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
-    formulation: Structural2dFormulation<F>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String>
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -73,7 +67,7 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    body_force_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    body_force_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         formulation,
         quadrature,
@@ -84,15 +78,14 @@ where
 
 /// Assemble the global body-force-to-RHS operator using element ranges split across Rayon workers.
 pub(crate) fn body_force_operator_for_family_par<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
-    formulation: Structural2dFormulation<F>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String>
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -102,7 +95,7 @@ where
     validate_structural_2d_mesh(mesh, formulation)?;
     let nelem = mesh.num_elements();
     let chunks = collect_sparse_operator_chunks(nelem, |start, end| {
-        body_force_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        body_force_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             formulation,
             quadrature,
@@ -119,18 +112,94 @@ where
     ))
 }
 
-fn body_force_operator_range_for_family<
-    F: Real,
+/// Apply body-force amplitudes directly to a reduced RHS without building a sparse operator.
+pub(crate) fn apply_body_force_rhs_for_family<
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
-    formulation: Structural2dFormulation<F>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    values: &[f64],
+    global_to_reduced: &[usize],
+    rhs: &mut [f64],
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    let expected = 2 * mesh.num_elements();
+    if values.len() != expected {
+        return Err(format!(
+            "body_force has length {}, but operator expects {expected} values",
+            values.len()
+        ));
+    }
+    for_body_force_element_blocks::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        formulation,
+        quadrature,
+        0,
+        mesh.num_elements(),
+        |element_index, global_rows, local| {
+            let radial = values[2 * element_index];
+            let axial = values[2 * element_index + 1];
+            for local_dof in 0..DOF_PER_ELEMENT {
+                let reduced_row = global_to_reduced[global_rows[local_dof]];
+                if reduced_row != usize::MAX {
+                    rhs[reduced_row] += local[local_dof][0] * radial + local[local_dof][1] * axial;
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn for_body_force_element_blocks<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+    Consume,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
     element_start: usize,
     element_end: usize,
-) -> Result<SparseOperator<F>, String>
+    mut consume: Consume,
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    Consume:
+        FnMut(usize, [usize; DOF_PER_ELEMENT], [[f64; 2]; DOF_PER_ELEMENT]) -> Result<(), String>,
+{
+    for element_index in element_start..element_end {
+        let coords = mesh.element_coords(element_index)?;
+        let nodes = mesh.element_nodes(element_index)?;
+        let samples = Family::volume_samples(&coords, quadrature)?;
+        let local =
+            body_force_element_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
+        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
+        consume(element_index, global_rows, local)?;
+    }
+    Ok(())
+}
+
+fn body_force_operator_range_for_family<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    element_start: usize,
+    element_end: usize,
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -141,25 +210,25 @@ where
     let mut cols = Vec::with_capacity(nelem * DOF_PER_ELEMENT * 2);
     let mut vals = Vec::with_capacity(nelem * DOF_PER_ELEMENT * 2);
 
-    for element_index in element_start..element_end {
-        let coords = mesh.element_coords(element_index)?;
-        let nodes = mesh.element_nodes(element_index)?;
-        let samples = Family::volume_samples::<F>(&coords, quadrature)?;
-        let local = body_force_element_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-            &samples,
-            formulation,
-        )?;
-        let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
-        let global_cols = [2 * element_index, 2 * element_index + 1];
-        scatter_local_matrix(
-            &mut rows,
-            &mut cols,
-            &mut vals,
-            &global_rows,
-            &global_cols,
-            &local,
-        );
-    }
+    for_body_force_element_blocks::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        formulation,
+        quadrature,
+        element_start,
+        element_end,
+        |element_index, global_rows, local| {
+            let global_cols = [2 * element_index, 2 * element_index + 1];
+            scatter_local_matrix(
+                &mut rows,
+                &mut cols,
+                &mut vals,
+                &global_rows,
+                &global_cols,
+                &local,
+            );
+            Ok(())
+        },
+    )?;
 
     Ok(SparseOperator {
         rows,

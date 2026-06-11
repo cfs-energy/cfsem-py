@@ -5,7 +5,6 @@ use crate::mesh::quad2d::{Quad4ReferenceElement, Quad9ReferenceElement, QuadRefe
 use crate::mesh::{QuadratureRule, sampling};
 use crate::physics::solenoid_stress::geometry::{FaceSample, VolumeSample};
 use crate::physics::solenoid_stress::model::Structural2dElementType;
-use crate::physics::solenoid_stress::types::Real;
 
 /// Family-specific differences that remain after stiffness, load, and recovery assembly have been
 /// written once generically.
@@ -32,17 +31,17 @@ pub(crate) trait QuadElementFamily<const NODES_PER_ELEMENT: usize> {
     }
 
     /// Evaluate the family-specific volume quadrature samples for one element.
-    fn volume_samples<F: Real>(
-        coords: &[[F; 2]; NODES_PER_ELEMENT],
+    fn volume_samples(
+        coords: &[[f64; 2]; NODES_PER_ELEMENT],
         quadrature: QuadratureRule,
-    ) -> Result<Vec<VolumeSample<F, NODES_PER_ELEMENT>>, String>;
+    ) -> Result<Vec<VolumeSample<f64, NODES_PER_ELEMENT>>, String>;
 
     /// Evaluate the family-specific face quadrature samples for one element face.
-    fn face_samples<F: Real>(
-        coords: &[[F; 2]; NODES_PER_ELEMENT],
+    fn face_samples(
+        coords: &[[f64; 2]; NODES_PER_ELEMENT],
         local_face: u8,
         quadrature: QuadratureRule,
-    ) -> Result<Vec<FaceSample<F, NODES_PER_ELEMENT>>, String>;
+    ) -> Result<Vec<FaceSample<f64, NODES_PER_ELEMENT>>, String>;
 }
 
 /// Marker type for the bilinear four-node quadrilateral family.
@@ -57,19 +56,19 @@ impl QuadElementFamily<{ quad4::NODES_PER_ELEMENT }> for Quad4Family {
     }
 
     /// Delegate `quad4` volume sampling to the generic mesh sampling layer.
-    fn volume_samples<F: Real>(
-        coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
+    fn volume_samples(
+        coords: &[[f64; 2]; quad4::NODES_PER_ELEMENT],
         quadrature: QuadratureRule,
-    ) -> Result<Vec<VolumeSample<F, { quad4::NODES_PER_ELEMENT }>>, String> {
+    ) -> Result<Vec<VolumeSample<f64, { quad4::NODES_PER_ELEMENT }>>, String> {
         sampling::volume_samples_quad4(coords, quadrature)
     }
 
     /// Delegate `quad4` face sampling to the generic mesh sampling layer.
-    fn face_samples<F: Real>(
-        coords: &[[F; 2]; quad4::NODES_PER_ELEMENT],
+    fn face_samples(
+        coords: &[[f64; 2]; quad4::NODES_PER_ELEMENT],
         local_face: u8,
         quadrature: QuadratureRule,
-    ) -> Result<Vec<FaceSample<F, { quad4::NODES_PER_ELEMENT }>>, String> {
+    ) -> Result<Vec<FaceSample<f64, { quad4::NODES_PER_ELEMENT }>>, String> {
         sampling::face_samples_quad4(coords, local_face, quadrature)
     }
 }
@@ -86,19 +85,19 @@ impl QuadElementFamily<{ quad9::NODES_PER_ELEMENT }> for Quad9Family {
     }
 
     /// Delegate `quad9` volume sampling to the generic mesh sampling layer.
-    fn volume_samples<F: Real>(
-        coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
+    fn volume_samples(
+        coords: &[[f64; 2]; quad9::NODES_PER_ELEMENT],
         quadrature: QuadratureRule,
-    ) -> Result<Vec<VolumeSample<F, { quad9::NODES_PER_ELEMENT }>>, String> {
+    ) -> Result<Vec<VolumeSample<f64, { quad9::NODES_PER_ELEMENT }>>, String> {
         sampling::volume_samples_quad9(coords, quadrature)
     }
 
     /// Delegate `quad9` face sampling to the generic mesh sampling layer.
-    fn face_samples<F: Real>(
-        coords: &[[F; 2]; quad9::NODES_PER_ELEMENT],
+    fn face_samples(
+        coords: &[[f64; 2]; quad9::NODES_PER_ELEMENT],
         local_face: u8,
         quadrature: QuadratureRule,
-    ) -> Result<Vec<FaceSample<F, { quad9::NODES_PER_ELEMENT }>>, String> {
+    ) -> Result<Vec<FaceSample<f64, { quad9::NODES_PER_ELEMENT }>>, String> {
         sampling::face_samples_quad9(coords, local_face, quadrature)
     }
 }

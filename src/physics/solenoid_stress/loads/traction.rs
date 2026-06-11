@@ -2,7 +2,7 @@ use crate::mesh::{QuadMeshView2d, QuadratureRule};
 use crate::physics::solenoid_stress::family::QuadElementFamily;
 use crate::physics::solenoid_stress::geometry::{FaceSample, validate_structural_2d_mesh};
 use crate::physics::solenoid_stress::types::{
-    DOF_PER_NODE, Real, Structural2dFormulation, TractionLoad, local_dofs, scatter_local_matrix,
+    DOF_PER_NODE, Structural2dFormulation, TractionLoad, local_dofs, scatter_local_matrix,
 };
 
 use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operators};
@@ -17,14 +17,14 @@ use super::{SparseOperator, collect_sparse_operator_chunks, concat_sparse_operat
 /// `[energy / distance]`.
 ///
 /// Each block entry therefore has units of area.
-fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
-    samples: &[FaceSample<F, NODES_PER_ELEMENT>],
-    formulation: Structural2dFormulation<F>,
-) -> Result<[[F; 2]; DOF_PER_ELEMENT], String> {
+fn traction_face_kernel<const NODES_PER_ELEMENT: usize, const DOF_PER_ELEMENT: usize>(
+    samples: &[FaceSample<f64, NODES_PER_ELEMENT>],
+    formulation: Structural2dFormulation,
+) -> Result<[[f64; 2]; DOF_PER_ELEMENT], String> {
     const {
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
-    let mut local = [[F::zero(); 2]; DOF_PER_ELEMENT];
+    let mut local = [[0.0; 2]; DOF_PER_ELEMENT];
 
     for sample in samples {
         // `|dx/ds|` is the physical line Jacobian for the face quadrature parameter.
@@ -34,9 +34,8 @@ fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
         for local_node in 0..NODES_PER_ELEMENT {
             // The two columns encode independent unit tractions in the global radial and axial
             // directions, so the block is diagonal in those two traction components.
-            local[2 * local_node][0] = local[2 * local_node][0] + scale * sample.n[local_node];
-            local[2 * local_node + 1][1] =
-                local[2 * local_node + 1][1] + scale * sample.n[local_node];
+            local[2 * local_node][0] += scale * sample.n[local_node];
+            local[2 * local_node + 1][1] += scale * sample.n[local_node];
         }
     }
 
@@ -57,16 +56,15 @@ fn traction_face_kernel<F: Real, const NODES_PER_ELEMENT: usize, const DOF_PER_E
 ///
 /// Entry units: `[area]`.
 pub(crate) fn traction_operator_for_family<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     traction_faces: &[TractionLoad],
-    formulation: Structural2dFormulation<F>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String>
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -74,7 +72,7 @@ where
         assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
     }
     validate_structural_2d_mesh(mesh, formulation)?;
-    traction_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+    traction_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
         mesh,
         traction_faces,
         formulation,
@@ -86,16 +84,15 @@ where
 
 /// Assemble traction loads using traction-face ranges split across Rayon workers.
 pub(crate) fn traction_operator_for_family_par<
-    F: Real,
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     traction_faces: &[TractionLoad],
-    formulation: Structural2dFormulation<F>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<SparseOperator<F>, String>
+) -> Result<SparseOperator, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -104,7 +101,7 @@ where
     }
     validate_structural_2d_mesh(mesh, formulation)?;
     let chunks = collect_sparse_operator_chunks(traction_faces.len(), |start, end| {
-        traction_operator_range_for_family::<F, Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+        traction_operator_range_for_family::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
             mesh,
             traction_faces,
             formulation,
@@ -122,29 +119,75 @@ where
     ))
 }
 
-fn traction_operator_range_for_family<
-    F: Real,
+/// Apply traction amplitudes directly to a reduced RHS without building a sparse operator.
+pub(crate) fn apply_traction_rhs_for_family<
     Family,
     const NODES_PER_ELEMENT: usize,
     const DOF_PER_ELEMENT: usize,
 >(
-    mesh: QuadMeshView2d<'_, F, NODES_PER_ELEMENT>,
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
     traction_faces: &[TractionLoad],
-    formulation: Structural2dFormulation<F>,
+    formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-    load_start: usize,
-    load_end: usize,
-) -> Result<SparseOperator<F>, String>
+    values: &[f64],
+    global_to_reduced: &[usize],
+    rhs: &mut [f64],
+) -> Result<(), String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
-    let ndof = mesh.num_nodes() * 2;
-    let ncol = 2 * traction_faces.len();
-    let nloads = load_end - load_start;
-    let mut rows = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
-    let mut cols = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
-    let mut vals = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
+    const {
+        assert!(DOF_PER_ELEMENT == DOF_PER_NODE * NODES_PER_ELEMENT);
+    }
+    validate_structural_2d_mesh(mesh, formulation)?;
+    let expected = 2 * traction_faces.len();
+    if values.len() != expected {
+        return Err(format!(
+            "traction_values has length {}, but operator expects {expected} values",
+            values.len()
+        ));
+    }
+    for_traction_face_blocks::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        traction_faces,
+        formulation,
+        quadrature,
+        0,
+        traction_faces.len(),
+        |load_index, global_rows, local| {
+            let radial = values[2 * load_index];
+            let axial = values[2 * load_index + 1];
+            for local_dof in 0..DOF_PER_ELEMENT {
+                let reduced_row = global_to_reduced[global_rows[local_dof]];
+                if reduced_row != usize::MAX {
+                    rhs[reduced_row] += local[local_dof][0] * radial + local[local_dof][1] * axial;
+                }
+            }
+            Ok(())
+        },
+    )
+}
 
+fn for_traction_face_blocks<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+    Consume,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    traction_faces: &[TractionLoad],
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    load_start: usize,
+    load_end: usize,
+    mut consume: Consume,
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    Consume:
+        FnMut(usize, [usize; DOF_PER_ELEMENT], [[f64; 2]; DOF_PER_ELEMENT]) -> Result<(), String>,
+{
+    let nloads = load_end - load_start;
     for (load_index, load) in traction_faces
         .iter()
         .enumerate()
@@ -160,20 +203,57 @@ where
         }
         let coords = mesh.element_coords(load.element)?;
         let nodes = mesh.element_nodes(load.element)?;
-        let samples = Family::face_samples::<F>(&coords, load.local_face, quadrature)?;
+        let samples = Family::face_samples(&coords, load.local_face, quadrature)?;
         let local =
-            traction_face_kernel::<F, NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
+            traction_face_kernel::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&samples, formulation)?;
         let global_rows = local_dofs::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(&nodes);
-        let global_cols = [2 * load_index, 2 * load_index + 1];
-        scatter_local_matrix(
-            &mut rows,
-            &mut cols,
-            &mut vals,
-            &global_rows,
-            &global_cols,
-            &local,
-        );
+        consume(load_index, global_rows, local)?;
     }
+    Ok(())
+}
+
+fn traction_operator_range_for_family<
+    Family,
+    const NODES_PER_ELEMENT: usize,
+    const DOF_PER_ELEMENT: usize,
+>(
+    mesh: QuadMeshView2d<'_, f64, NODES_PER_ELEMENT>,
+    traction_faces: &[TractionLoad],
+    formulation: Structural2dFormulation,
+    quadrature: QuadratureRule,
+    load_start: usize,
+    load_end: usize,
+) -> Result<SparseOperator, String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    let ndof = mesh.num_nodes() * 2;
+    let ncol = 2 * traction_faces.len();
+    let nloads = load_end - load_start;
+    let mut rows = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
+    let mut cols = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
+    let mut vals = Vec::with_capacity(nloads * DOF_PER_ELEMENT * 2);
+
+    for_traction_face_blocks::<Family, NODES_PER_ELEMENT, DOF_PER_ELEMENT, _>(
+        mesh,
+        traction_faces,
+        formulation,
+        quadrature,
+        load_start,
+        load_end,
+        |load_index, global_rows, local| {
+            let global_cols = [2 * load_index, 2 * load_index + 1];
+            scatter_local_matrix(
+                &mut rows,
+                &mut cols,
+                &mut vals,
+                &global_rows,
+                &global_cols,
+                &local,
+            );
+            Ok(())
+        },
+    )?;
 
     Ok(SparseOperator {
         rows,

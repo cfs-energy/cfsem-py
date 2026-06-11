@@ -41,7 +41,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -79,19 +79,13 @@ _QUAD_FACE_NODE_PAIRS: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 3), (3
 def _as_float64_array(data: Any) -> Float64Array:
     """Convert binding output to a NumPy float64 array with an explicit static type."""
 
-    return cast(npt.NDArray[np.float64], np.asarray(data, dtype=np.float64))
+    return np.asarray(data, dtype=np.float64)
 
 
-def _as_uint64_array(data: Any, name: str) -> UInt64Array:
-    """Convert index-like input to uint64 without signed wraparound."""
+def _as_uint64_array(data: Any) -> UInt64Array:
+    """Give static type checkers the binding dtype without changing runtime dtype."""
 
-    raw = np.asarray(data)
-    if raw.size == 0:
-        return np.asarray(raw, dtype=np.uint64)
-    assert np.issubdtype(raw.dtype, np.integer), f"{name} must contain integer indices"
-    if np.issubdtype(raw.dtype, np.signedinteger):
-        assert not np.any(raw < 0), f"{name} must contain nonnegative indices"
-    return np.asarray(raw, dtype=np.uint64)
+    return np.asarray(data)
 
 
 def _csr_matrix_from_binding(
@@ -982,7 +976,7 @@ def _normalize_material_orientation_angles(
 ) -> Float64Array:
     if material_orientation_angles is None:
         return np.zeros((0,), dtype=np.float64)
-    angles = np.asarray(material_orientation_angles, dtype=np.float64)
+    angles = np.asarray(material_orientation_angles)
     angles = np.broadcast_to(angles, (nelem,)).copy() if angles.ndim == 0 else angles
     assert angles.ndim == 1 and angles.shape[0] == nelem, (
         f"material_orientation_angles must be a scalar or have shape ({nelem},); " f"got {angles.shape}"
@@ -991,7 +985,7 @@ def _normalize_material_orientation_angles(
 
 
 def _normalize_nodes(nodes: ArrayLike) -> Float64Array:
-    arr = np.asarray(nodes, dtype=np.float64)
+    arr = np.asarray(nodes)
     assert arr.ndim == 2 and arr.shape[1] == 2, f"nodes must have shape (nnode, 2); got {arr.shape}"
     return arr
 
@@ -1000,7 +994,7 @@ def _normalize_elements(
     elements: ArrayLike,
     nodes_per_element: int | tuple[int, ...] = 4,
 ) -> npt.NDArray[np.uint64]:
-    arr = _as_uint64_array(elements, "elements")
+    arr = _as_uint64_array(elements)
     expected = (nodes_per_element,) if isinstance(nodes_per_element, int) else nodes_per_element
     expected_text = " or ".join(f"(nelem, {count})" for count in expected)
     assert (
@@ -1050,7 +1044,7 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
 def _normalize_query_points(
     points: ArrayLike,
 ) -> Float64Array:
-    arr = np.asarray(points, dtype=np.float64)
+    arr = np.asarray(points)
     assert arr.ndim == 2 and arr.shape[1] == 2, f"points must have shape (npoint, 2); got {arr.shape}"
     return arr
 
@@ -1067,19 +1061,16 @@ def _coo_operator_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
 ) -> sp.csr_matrix:
     vals, rows, cols, nrow, ncol = binding
-    return cast(
-        sp.csr_matrix,
-        sp.coo_matrix(
+    return sp.coo_matrix(
+        (
+            np.asarray(vals, dtype=np.float64),
             (
-                np.asarray(vals, dtype=np.float64),
-                (
-                    np.asarray(rows, dtype=np.int64),
-                    np.asarray(cols, dtype=np.int64),
-                ),
+                np.asarray(rows, dtype=np.int64),
+                np.asarray(cols, dtype=np.int64),
             ),
-            shape=(int(nrow), int(ncol)),
-        ).tocsr(),
-    )
+        ),
+        shape=(int(nrow), int(ncol)),
+    ).tocsr()
 
 
 def query_quad_mesh(
@@ -1290,28 +1281,25 @@ def _temperature_elevation_operator(
         cols.extend([int(node) for node in conn])
         vals.extend([0.25] * 4)
 
-    return cast(
-        sp.csr_matrix,
-        sp.coo_matrix(
-            (
-                np.asarray(vals, dtype=np.float64),
-                (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64)),
-            ),
-            shape=(n_analysis_nodes, n_input_nodes),
+    return sp.coo_matrix(
+        (
+            np.asarray(vals, dtype=np.float64),
+            (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64)),
         ),
-    )
+        shape=(n_analysis_nodes, n_input_nodes),
+    ).tocsr()
 
 
 def _normalize_materials(
     material_ids: ArrayLike,
     material_table: ArrayLike,
 ) -> tuple[UInt64Array, Float64Array]:
-    ids = _as_uint64_array(material_ids, "material_ids")
+    ids = _as_uint64_array(material_ids)
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     assert not isinstance(
         material_table, Mapping
     ), "material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
-    table = np.asarray(material_table, dtype=np.float64)
+    table = np.asarray(material_table)
     assert table.ndim == 3 and table.shape[1:] == (
         4,
         4,
@@ -1328,7 +1316,7 @@ def _normalize_thermal_material_table(
         "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) "
         "for tagged inputs"
     )
-    table = np.asarray(thermal_material_table, dtype=np.float64)
+    table = np.asarray(thermal_material_table)
     assert (
         table.ndim == 2 and table.shape[1] == 5
     ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
@@ -1382,19 +1370,13 @@ def pack_material_tables_from_tags(
 
     material_rows = []
     for tag in material_tags:
-        matrix = cast(
-            npt.NDArray[np.floating[Any]],
-            np.asarray(material_table_by_tag[tag], dtype=resolved_dtype),
-        )
+        matrix = np.asarray(material_table_by_tag[tag], dtype=resolved_dtype)
         assert matrix.shape == (
             4,
             4,
         ), f"material_table_by_tag[{tag}] must have shape (4, 4); got {matrix.shape}"
         material_rows.append(matrix)
-    packed_material_table = cast(
-        npt.NDArray[np.floating[Any]],
-        np.ascontiguousarray(np.stack(material_rows, axis=0), dtype=resolved_dtype),
-    )
+    packed_material_table = np.ascontiguousarray(np.stack(material_rows, axis=0), dtype=resolved_dtype)
 
     packed_thermal_table: npt.NDArray[np.floating[Any]] | None
     if thermal_material_table_by_tag is None:
@@ -1407,18 +1389,12 @@ def pack_material_tables_from_tags(
             )
         thermal_rows = []
         for tag in material_tags:
-            row = cast(
-                npt.NDArray[np.floating[Any]],
-                np.asarray(thermal_material_table_by_tag[tag], dtype=resolved_dtype),
-            )
+            row = np.asarray(thermal_material_table_by_tag[tag], dtype=resolved_dtype)
             assert row.shape == (
                 5,
             ), f"thermal_material_table_by_tag[{tag}] must have shape (5,); got {row.shape}"
             thermal_rows.append(row)
-        packed_thermal_table = cast(
-            npt.NDArray[np.floating[Any]],
-            np.ascontiguousarray(np.stack(thermal_rows, axis=0), dtype=resolved_dtype),
-        )
+        packed_thermal_table = np.ascontiguousarray(np.stack(thermal_rows, axis=0), dtype=resolved_dtype)
         assert not np.any(
             packed_thermal_table[:, 3] != 0.0
         ), "shear thermal expansion (alpha_rz) is not yet supported"
@@ -1452,7 +1428,7 @@ def _normalize_body_force(
 
 
 def _normalize_face_pairs(name: str, faces: ArrayLike | None) -> UInt64Array:
-    faces = np.zeros((0, 2), dtype=np.uint64) if faces is None else _as_uint64_array(faces, name)
+    faces = np.zeros((0, 2), dtype=np.uint64) if faces is None else _as_uint64_array(faces)
     assert faces.ndim == 2 and faces.shape[1] == 2, f"{name} must have shape (nload, 2); got {faces.shape}"
     return faces
 
@@ -1491,7 +1467,7 @@ def _normalize_prescribed_dirichlet(
         [] if prescribed is None else sorted((int(dof), float(value)) for dof, value in prescribed.items())
     )
     return (
-        _as_uint64_array([dof for dof, _ in items], "prescribed"),
+        np.asarray([dof for dof, _ in items], dtype=np.uint64),
         np.asarray([value for _, value in items], dtype=np.float64),
     )
 

@@ -657,10 +657,7 @@ def von_mises_stress(
     s_tt: np.ndarray | float,
     tau_rz: np.ndarray | float = 0.0,
 ) -> np.ndarray:
-    return np.sqrt(
-        0.5 * ((s_rr - s_zz) ** 2 + (s_zz - s_tt) ** 2 + (s_tt - s_rr) ** 2)
-        + 3.0 * tau_rz**2
-    )
+    return np.sqrt(0.5 * ((s_rr - s_zz) ** 2 + (s_zz - s_tt) ** 2 + (s_tt - s_rr) ** 2) + 3.0 * tau_rz**2)
 
 
 def build_section_comparisons(
@@ -922,7 +919,7 @@ def solve_case(
         element_type=element_type,
     )
     quadrature_data = model.quadrature()
-    quadrature_points = quadrature_data.points
+    quadrature_points = quadrature_data.locations.points
     br_loop_q, bz_loop_q = sample_loop_field(
         quadrature_points[:, 0],
         quadrature_points[:, 1],
@@ -1120,9 +1117,7 @@ def build_heatmap_figure(
         contour_start = float(zmin) if zmin is not None else float(np.nanmin(contour_finite))
         contour_end = float(zmax) if zmax is not None else float(np.nanmax(contour_finite))
         contour_field = np.clip(contour_field, contour_start, contour_end)
-        contour_size = (
-            (contour_end - contour_start) / float(contour_count - 1) if contour_count > 1 else 1.0
-        )
+        contour_size = (contour_end - contour_start) / float(contour_count - 1) if contour_count > 1 else 1.0
         if contour_end > contour_start:
             fig.add_trace(
                 go.Contour(
@@ -2145,9 +2140,7 @@ def create_app():
         bmag_zmax = float(np.nanpercentile(bmag_finite, 99.0)) if bmag_finite.size else 0.0
         bmag_zmax = bmag_zmax if bmag_zmax > 0.0 else 1.0
         bz_clip = (
-            float(np.nanpercentile(np.abs(case.bz_field), 99.0))
-            if np.isfinite(case.bz_field).any()
-            else 1.0
+            float(np.nanpercentile(np.abs(case.bz_field), 99.0)) if np.isfinite(case.bz_field).any() else 1.0
         )
         force_r_clip = float(np.nanpercentile(np.abs(case.body_force_r), 99.0))
         force_z_clip = float(np.nanpercentile(np.abs(case.body_force_z), 99.0))

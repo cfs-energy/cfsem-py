@@ -254,7 +254,7 @@ def solve_fem_midplane_profile(
         element_type=element_type,
     )
     quadrature_data = model.quadrature()
-    points = quadrature_data.points
+    points = quadrature_data.locations.points
     nq = quadrature_data.points_per_element
     weights = np.asarray(quadrature_data.weights_volume, dtype=np.float64).reshape(nelem, nq)
     bz_weighted = linear_bz_profile(points[:, 0]).reshape(nelem, nq) * weights
@@ -346,7 +346,7 @@ def plot_discretization_panel(ax, nr: int, nz: int, element_type: str) -> None:
         element_type=element_type,
     )
     quadrature_data = model.quadrature()
-    quadrature_points = quadrature_data.points
+    quadrature_points = quadrature_data.locations.points
     fd_grid = build_1d_grid((RO - RI) / nr)[1:-1]
 
     if quadrature_points.shape[0] <= 1_000:

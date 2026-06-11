@@ -473,12 +473,10 @@ class Structural2DFEMModel:
 
         points_arr = _normalize_query_points(points)
         element_indices_arr = np.asarray(element_indices, dtype=np.uint64).reshape(-1)
-        projected_points, projected_elements, reference_points, _points_per_element = (
-            self._backend.locate_points_in_elements(
-                points_arr,
-                element_indices_arr,
-                int(max_iterations),
-            )
+        projected_points, projected_elements, reference_points = self._backend.locate_points_in_elements(
+            points_arr,
+            element_indices_arr,
+            int(max_iterations),
         )
         return PointLocations(
             points=np.asarray(projected_points, dtype=np.float64).reshape(-1, 2),

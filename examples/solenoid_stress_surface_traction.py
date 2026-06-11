@@ -92,8 +92,9 @@ def von_mises(stress: np.ndarray) -> np.ndarray:
 
 
 def recover_quadrature_stress(model, displacement: np.ndarray, nodal_temperature: np.ndarray) -> np.ndarray:
-    locations = model.quadrature()
-    shape = (model.nelem, model.nq_per_element, 4)
+    quadrature = model.quadrature()
+    locations = quadrature.locations
+    shape = (model.nelem, quadrature.points_per_element, 4)
     stress_from_displacement = model.stress(locations, displacement).reshape(shape)
     thermal_stress = model.thermal_stress(locations, nodal_temperature).reshape(shape)
     return stress_from_displacement - thermal_stress

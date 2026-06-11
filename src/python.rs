@@ -677,17 +677,19 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                     .quadrature()
                     .map_err(|msg| PyInteropError::ValueError { msg })?;
                 Ok((
-                    PyArray1::from_vec(py, flatten_points(quadrature.points)).unbind(),
+                    PyArray1::from_vec(py, flatten_points(quadrature.locations.points)).unbind(),
                     PyArray1::from_vec(
                         py,
                         quadrature
+                            .locations
                             .element_indices
                             .into_iter()
                             .map(|index| index as u64)
                             .collect(),
                     )
                     .unbind(),
-                    PyArray1::from_vec(py, flatten_points(quadrature.reference_points)).unbind(),
+                    PyArray1::from_vec(py, flatten_points(quadrature.locations.reference_points))
+                        .unbind(),
                     PyArray1::from_vec(py, quadrature.weights_area).unbind(),
                     PyArray1::from_vec(py, quadrature.weights_volume).unbind(),
                     quadrature.points_per_element,
@@ -704,7 +706,6 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                 Py<PyArray1<$ty>>,
                 Py<PyArray1<u64>>,
                 Py<PyArray1<$ty>>,
-                usize,
             )> {
                 let points = read_axisym_nodes("points", points)?;
                 let element_indices = read_usize_indices("element_indices", element_indices)?;
@@ -724,7 +725,6 @@ macro_rules! impl_solenoid_stress_model_pyclass {
                     )
                     .unbind(),
                     PyArray1::from_vec(py, flatten_points(locations.reference_points)).unbind(),
-                    locations.points_per_element,
                 ))
             }
 

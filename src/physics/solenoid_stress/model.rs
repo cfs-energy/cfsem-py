@@ -44,9 +44,16 @@ pub struct Structural2dPointLocations {
     pub element_indices: Vec<usize>,
     /// Reference coordinates for each point.
     pub reference_points: Vec<[f64; 2]>,
-    /// Optional mapped analysis-plane quadrature weights.
+}
+
+/// Element-major quadrature locations and mapped integration weights.
+#[derive(Debug, Clone)]
+pub struct Structural2dQuadrature {
+    /// Locations at the model's quadrature points.
+    pub locations: Structural2dPointLocations,
+    /// Mapped analysis-plane quadrature weights.
     pub weights_area: Vec<f64>,
-    /// Optional mapped represented-volume quadrature weights.
+    /// Mapped represented-volume quadrature weights.
     pub weights_volume: Vec<f64>,
     /// Number of consecutive points contributed by each element for quadrature locations.
     pub points_per_element: usize,
@@ -776,9 +783,6 @@ impl Structural2dModel {
             points: projected_points,
             element_indices: element_indices.to_vec(),
             reference_points,
-            weights_area: Vec::new(),
-            weights_volume: Vec::new(),
-            points_per_element: 0,
         })
     }
 
@@ -890,7 +894,7 @@ impl Structural2dModel {
     }
 
     /// Return element-major quadrature locations and mapped weights.
-    pub fn quadrature(&self) -> Result<Structural2dPointLocations, String> {
+    pub fn quadrature(&self) -> Result<Structural2dQuadrature, String> {
         match self.element_type {
             Structural2dElementType::Quad4 => {
                 quadrature_locations_for_family::<Quad4Family, { quad4::NODES_PER_ELEMENT }>(
@@ -1733,7 +1737,7 @@ fn quadrature_locations_for_family<Family, const NODES_PER_ELEMENT: usize>(
     nelem: usize,
     formulation: Structural2dFormulation,
     quadrature: QuadratureRule,
-) -> Result<Structural2dPointLocations, String>
+) -> Result<Structural2dQuadrature, String>
 where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
@@ -1765,10 +1769,12 @@ where
             weights_volume.push(formulation.volume_scale(point, det_j, weight)?);
         }
     }
-    Ok(Structural2dPointLocations {
-        points,
-        element_indices,
-        reference_points,
+    Ok(Structural2dQuadrature {
+        locations: Structural2dPointLocations {
+            points,
+            element_indices,
+            reference_points,
+        },
         weights_area,
         weights_volume,
         points_per_element: nq_per_element,
@@ -1900,7 +1906,10 @@ mod tests {
         let displacements_full = [
             1.0e-6, -2.0e-6, 2.0e-6, 1.0e-6, -1.5e-6, 2.5e-6, 3.0e-6, -3.5e-6,
         ];
-        let locations = model.quadrature().expect("quadrature should evaluate");
+        let locations = model
+            .quadrature()
+            .expect("quadrature should evaluate")
+            .locations;
         let matrix_free = model
             .strain(
                 &locations.element_indices,

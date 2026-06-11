@@ -694,6 +694,7 @@ def solenoid_stress_fem_assemble_model_2d_f64(
     formulation: int,
     thickness: float,
     quadrature: int,
+    par: bool,
 ) -> SolenoidStress2dModelF64: ...
 def solenoid_stress_fem_assemble_model_2d_f32(
     nodes: Float32Matrix,
@@ -710,6 +711,7 @@ def solenoid_stress_fem_assemble_model_2d_f32(
     formulation: int,
     thickness: float,
     quadrature: int,
+    par: bool,
 ) -> SolenoidStress2dModelF32: ...
 def solenoid_stress_fem_cfsem_radial_material_f64(
     youngs_modulus: float, poisson_ratio: float

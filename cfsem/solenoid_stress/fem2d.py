@@ -71,29 +71,40 @@ _orthotropic_axisymmetric_thermal_material_f64 = (
 )
 
 ArrayLike = npt.ArrayLike
+Float64Array = npt.NDArray[np.float64]
+UInt64Array = npt.NDArray[np.uint64]
 _QUAD_FACE_NODE_PAIRS: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 3), (3, 0))
 
 
-def _as_float64_array(data: Any) -> npt.NDArray[np.float64]:
+def _as_float64_array(data: Any) -> Float64Array:
     """Convert binding output to a NumPy float64 array with an explicit static type."""
 
     return cast(npt.NDArray[np.float64], np.asarray(data, dtype=np.float64))
+
+
+def _as_uint64_array(data: Any, name: str) -> UInt64Array:
+    """Convert index-like input to uint64 without signed wraparound."""
+
+    raw = np.asarray(data)
+    if raw.size == 0:
+        return np.asarray(raw, dtype=np.uint64)
+    assert np.issubdtype(raw.dtype, np.integer), f"{name} must contain integer indices"
+    if np.issubdtype(raw.dtype, np.signedinteger):
+        assert not np.any(raw < 0), f"{name} must contain nonnegative indices"
+    return np.asarray(raw, dtype=np.uint64)
 
 
 def _csr_matrix_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
 ) -> sp.csr_matrix:
     vals, indices, indptr, nrow, ncol = binding
-    return cast(
-        sp.csr_matrix,
-        sp.csr_matrix(
-            (
-                np.asarray(vals, dtype=np.float64),
-                np.asarray(indices, dtype=np.int64),
-                np.asarray(indptr, dtype=np.int64),
-            ),
-            shape=(int(nrow), int(ncol)),
+    return sp.csr_matrix(
+        (
+            np.asarray(vals, dtype=np.float64),
+            np.asarray(indices, dtype=np.int64),
+            np.asarray(indptr, dtype=np.int64),
         ),
+        shape=(int(nrow), int(ncol)),
     )
 
 
@@ -101,16 +112,13 @@ def _csc_matrix_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
 ) -> sp.csc_matrix:
     vals, indices, indptr, nrow, ncol = binding
-    return cast(
-        sp.csc_matrix,
-        sp.csc_matrix(
-            (
-                np.asarray(vals, dtype=np.float64),
-                np.asarray(indices, dtype=np.int64),
-                np.asarray(indptr, dtype=np.int64),
-            ),
-            shape=(int(nrow), int(ncol)),
+    return sp.csc_matrix(
+        (
+            np.asarray(vals, dtype=np.float64),
+            np.asarray(indices, dtype=np.int64),
+            np.asarray(indptr, dtype=np.int64),
         ),
+        shape=(int(nrow), int(ncol)),
     )
 
 
@@ -122,8 +130,8 @@ class ElementMeasures:
     `areas` has units `[area]` and `volumes` has units `[volume]`.
     """
 
-    areas: npt.NDArray[np.floating[Any]]
-    volumes: npt.NDArray[np.floating[Any]]
+    areas: Float64Array
+    volumes: Float64Array
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,9 +151,9 @@ class PointLocations:
 
     """
 
-    points: npt.NDArray[np.floating[Any]]
+    points: Float64Array
     element_indices: npt.NDArray[np.int64]
-    reference_points: npt.NDArray[np.floating[Any]]
+    reference_points: Float64Array
     element_type: str
 
 
@@ -160,8 +168,8 @@ class Quadrature:
     """
 
     locations: PointLocations
-    weights_area: npt.NDArray[np.floating[Any]]
-    weights_volume: npt.NDArray[np.floating[Any]]
+    weights_area: Float64Array
+    weights_volume: Float64Array
     points_per_element: int
 
 
@@ -177,10 +185,10 @@ class ElevatedQuad9Mesh:
     `input_nodes` and `analysis_nodes` have units `[length]`.
     """
 
-    input_nodes: npt.NDArray[np.floating[Any]]
-    input_elements: npt.NDArray[np.uint64]
-    analysis_nodes: npt.NDArray[np.floating[Any]]
-    analysis_elements: npt.NDArray[np.uint64]
+    input_nodes: Float64Array
+    input_elements: UInt64Array
+    analysis_nodes: Float64Array
+    analysis_elements: UInt64Array
     corner_node_indices: npt.NDArray[np.int64]
     midside_node_indices: npt.NDArray[np.int64]
     center_node_indices: npt.NDArray[np.int64]
@@ -195,9 +203,9 @@ class QuadMeshInterpolation:
     the nearest-element distance was within the containment tolerance.
     """
 
-    values: npt.NDArray[np.floating[Any]]
+    values: Float64Array
     element_indices: npt.NDArray[np.int64]
-    reference_points: npt.NDArray[np.floating[Any]]
+    reference_points: Float64Array
     inside: npt.NDArray[np.bool_]
 
 
@@ -211,22 +219,22 @@ class QuadMeshQuery:
     `nearest_element_distances` is zero to numerical tolerance.
     """
 
-    nodes: npt.NDArray[np.floating[Any]]
-    elements: npt.NDArray[np.uint64]
-    points: npt.NDArray[np.floating[Any]]
+    nodes: Float64Array
+    elements: UInt64Array
+    points: Float64Array
     element_type: str
     nearest_node_indices: npt.NDArray[np.int64]
-    nearest_node_points: npt.NDArray[np.floating[Any]]
-    nearest_node_distances: npt.NDArray[np.floating[Any]]
+    nearest_node_points: Float64Array
+    nearest_node_distances: Float64Array
     nearest_element_indices: npt.NDArray[np.int64]
-    nearest_element_reference_points: npt.NDArray[np.floating[Any]]
-    nearest_element_points: npt.NDArray[np.floating[Any]]
-    nearest_element_distances: npt.NDArray[np.floating[Any]]
+    nearest_element_reference_points: Float64Array
+    nearest_element_points: Float64Array
+    nearest_element_distances: Float64Array
     nearest_face_element_indices: npt.NDArray[np.int64]
     nearest_face_local_faces: npt.NDArray[np.int64]
-    nearest_face_reference_coordinates: npt.NDArray[np.floating[Any]]
-    nearest_face_points: npt.NDArray[np.floating[Any]]
-    nearest_face_distances: npt.NDArray[np.floating[Any]]
+    nearest_face_reference_coordinates: Float64Array
+    nearest_face_points: Float64Array
+    nearest_face_distances: Float64Array
 
     def point_locations(self) -> PointLocations:
         """Return nearest-element locations for recovery and sparse operators.
@@ -284,23 +292,23 @@ class Structural2DFEMModel:
         self,
         *,
         backend: Any,
-        input_nodes: npt.NDArray[np.floating[Any]],
-        input_elements: npt.NDArray[np.uint64],
-        analysis_nodes: npt.NDArray[np.floating[Any]],
-        analysis_elements: npt.NDArray[np.uint64],
+        input_nodes: Float64Array,
+        input_elements: UInt64Array,
+        analysis_nodes: Float64Array,
+        analysis_elements: UInt64Array,
         elevated: ElevatedQuad9Mesh | None,
-        material_ids: npt.NDArray[np.uint64],
-        material_table: npt.NDArray[np.floating[Any]],
-        thermal_material_table: npt.NDArray[np.floating[Any]] | None,
-        material_orientation_angles: npt.NDArray[np.floating[Any]],
-        pressure_faces: npt.NDArray[np.uint64],
-        traction_faces: npt.NDArray[np.uint64],
+        material_ids: UInt64Array,
+        material_table: Float64Array,
+        thermal_material_table: Float64Array | None,
+        material_orientation_angles: Float64Array,
+        pressure_faces: UInt64Array,
+        traction_faces: UInt64Array,
         formulation: str,
         thickness: float,
         element_type: str,
         free_dofs: npt.NDArray[np.int64],
         fixed_dofs: npt.NDArray[np.int64],
-        fixed_values: npt.NDArray[np.floating[Any]],
+        fixed_values: Float64Array,
         ndof_full: int,
         ndof_reduced: int,
         nelem: int,
@@ -344,7 +352,7 @@ class Structural2DFEMModel:
         self._element_measures_cache: ElementMeasures | None = None
 
     @property
-    def input_nodes(self) -> npt.NDArray[np.floating[Any]]:
+    def input_nodes(self) -> Float64Array:
         """Corner-node input mesh coordinates with shape `(nnode, 2)` and units `[length]`."""
 
         return self._input_nodes
@@ -356,7 +364,7 @@ class Structural2DFEMModel:
         return self._input_elements
 
     @cached_property
-    def constant_rhs(self) -> npt.NDArray[np.floating[Any]]:
+    def constant_rhs(self) -> Float64Array:
         """Load-independent reduced RHS contribution, exported from Rust on first access."""
 
         return np.asarray(self._backend.constant_rhs(), dtype=np.float64)
@@ -546,7 +554,7 @@ class Structural2DFEMModel:
 
         analysis_operator = _csr_matrix_from_binding(self._backend.temperature_to_rhs_csr())
         return (
-            cast(sp.csr_matrix, sp.csr_matrix(analysis_operator @ self._temperature_elevation))
+            sp.csr_matrix(analysis_operator @ self._temperature_elevation)
             if self._elevated is not None and self.n_temperature_nodes > 0
             else analysis_operator
         )
@@ -971,10 +979,10 @@ def _normalize_thickness(
 def _normalize_material_orientation_angles(
     material_orientation_angles: ArrayLike | None,
     nelem: int,
-) -> npt.NDArray[np.floating[Any]]:
+) -> Float64Array:
     if material_orientation_angles is None:
         return np.zeros((0,), dtype=np.float64)
-    angles = np.asarray(material_orientation_angles)
+    angles = np.asarray(material_orientation_angles, dtype=np.float64)
     angles = np.broadcast_to(angles, (nelem,)).copy() if angles.ndim == 0 else angles
     assert angles.ndim == 1 and angles.shape[0] == nelem, (
         f"material_orientation_angles must be a scalar or have shape ({nelem},); " f"got {angles.shape}"
@@ -982,8 +990,8 @@ def _normalize_material_orientation_angles(
     return angles
 
 
-def _normalize_nodes(nodes: ArrayLike) -> npt.NDArray[np.floating[Any]]:
-    arr = np.asarray(nodes)
+def _normalize_nodes(nodes: ArrayLike) -> Float64Array:
+    arr = np.asarray(nodes, dtype=np.float64)
     assert arr.ndim == 2 and arr.shape[1] == 2, f"nodes must have shape (nnode, 2); got {arr.shape}"
     return arr
 
@@ -992,7 +1000,7 @@ def _normalize_elements(
     elements: ArrayLike,
     nodes_per_element: int | tuple[int, ...] = 4,
 ) -> npt.NDArray[np.uint64]:
-    arr = np.asarray(elements)
+    arr = _as_uint64_array(elements, "elements")
     expected = (nodes_per_element,) if isinstance(nodes_per_element, int) else nodes_per_element
     expected_text = " or ".join(f"(nelem, {count})" for count in expected)
     assert (
@@ -1041,8 +1049,8 @@ def infer_quad9_mesh(nodes: ArrayLike, elements: ArrayLike) -> ElevatedQuad9Mesh
 
 def _normalize_query_points(
     points: ArrayLike,
-) -> npt.NDArray[np.floating[Any]]:
-    arr = np.asarray(points)
+) -> Float64Array:
+    arr = np.asarray(points, dtype=np.float64)
     assert arr.ndim == 2 and arr.shape[1] == 2, f"points must have shape (npoint, 2); got {arr.shape}"
     return arr
 
@@ -1297,13 +1305,13 @@ def _temperature_elevation_operator(
 def _normalize_materials(
     material_ids: ArrayLike,
     material_table: ArrayLike,
-) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
-    ids = np.asarray(material_ids)
+) -> tuple[UInt64Array, Float64Array]:
+    ids = _as_uint64_array(material_ids, "material_ids")
     assert ids.ndim == 1, f"material_ids must have shape (nelem,); got {ids.shape}"
     assert not isinstance(
         material_table, Mapping
     ), "material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
-    table = np.asarray(material_table)
+    table = np.asarray(material_table, dtype=np.float64)
     assert table.ndim == 3 and table.shape[1:] == (
         4,
         4,
@@ -1313,14 +1321,14 @@ def _normalize_materials(
 
 def _normalize_thermal_material_table(
     thermal_material_table: ArrayLike | None,
-) -> npt.NDArray[np.floating[Any]] | None:
+) -> Float64Array | None:
     if thermal_material_table is None:
         return None
     assert not isinstance(thermal_material_table, Mapping), (
         "thermal_material_table must be a dense array; use pack_material_tables_from_tags(...) "
         "for tagged inputs"
     )
-    table = np.asarray(thermal_material_table)
+    table = np.asarray(thermal_material_table, dtype=np.float64)
     assert (
         table.ndim == 2 and table.shape[1] == 5
     ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
@@ -1443,8 +1451,8 @@ def _normalize_body_force(
     return arr
 
 
-def _normalize_face_pairs(name: str, faces: ArrayLike | None) -> npt.NDArray[np.uint64]:
-    faces = np.zeros((0, 2), dtype=np.uint64) if faces is None else np.asarray(faces)
+def _normalize_face_pairs(name: str, faces: ArrayLike | None) -> UInt64Array:
+    faces = np.zeros((0, 2), dtype=np.uint64) if faces is None else _as_uint64_array(faces, name)
     assert faces.ndim == 2 and faces.shape[1] == 2, f"{name} must have shape (nload, 2); got {faces.shape}"
     return faces
 
@@ -1478,12 +1486,12 @@ def _normalize_traction_values(
 
 def _normalize_prescribed_dirichlet(
     prescribed: Mapping[int, float] | None,
-) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.floating[Any]]]:
+) -> tuple[UInt64Array, Float64Array]:
     items = (
         [] if prescribed is None else sorted((int(dof), float(value)) for dof, value in prescribed.items())
     )
     return (
-        np.asarray([dof for dof, _ in items], dtype=np.uint64),
+        _as_uint64_array([dof for dof, _ in items], "prescribed"),
         np.asarray([value for _, value in items], dtype=np.float64),
     )
 

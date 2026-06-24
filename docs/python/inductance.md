@@ -29,3 +29,5 @@
 ::: cfsem.inductance_piecewise_linear_filaments
 
 ::: cfsem.inductance_linear_filaments
+
+::: cfsem.inductance_matrix_axisymmetric_coaxial_rectangular_coils

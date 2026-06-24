@@ -8,7 +8,7 @@ use rayon::{
 use crate::{
     chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{cross3, dot3, ellipe, ellipk, rss3},
+    math::{cross3, dot3, ellipe, ellipk, norm3},
 };
 
 use crate::{MU_0, MU0_OVER_4PI};
@@ -44,7 +44,7 @@ use crate::{MU_0, MU0_OVER_4PI};
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -97,7 +97,7 @@ pub fn flux_circular_filament_par(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -162,7 +162,7 @@ pub fn flux_circular_filament(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
     // Unpack
@@ -210,7 +210,7 @@ pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64))
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_density_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -271,7 +271,7 @@ pub fn flux_density_circular_filament_par(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn flux_density_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -349,7 +349,7 @@ pub fn flux_density_circular_filament(
 ///
 ///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn flux_density_circular_filament_scalar(
     rzifil: (f64, f64, f64),
@@ -402,7 +402,7 @@ pub fn flux_density_circular_filament_cartesian_scalar(
     // Unpack
     let (x, y, z) = xyzobs;
     // Convert cartesian point to cylindrical
-    let (robs, phiobs, zobs) = crate::math::cartesian_to_cylindrical(x, y, z);
+    let [robs, phiobs, zobs] = crate::math::cartesian_to_cylindrical([x, y, z]);
     // Get axisymmetric B-field
     let (br, bz) = flux_density_circular_filament_scalar(rzifil, (robs, zobs));
     // Convert axisymmetric B-field to cartesian
@@ -505,7 +505,7 @@ pub fn flux_density_circular_filament_cartesian_par(
 ///
 ///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn vector_potential_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -548,7 +548,7 @@ pub fn vector_potential_circular_filament_par(
 ///
 ///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 pub fn vector_potential_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -601,7 +601,7 @@ pub fn vector_potential_circular_filament(
 ///
 ///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn vector_potential_circular_filament_scalar(
     rzifil: (f64, f64, f64),
@@ -648,11 +648,11 @@ pub fn vector_potential_circular_filament_scalar(
 /// # References
 ///
 /// \[1\] E. M. Purcell and D. J. Morin, “Electricity and Magnetism,”
-///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C
+///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C>
 ///
-/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential
+/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential>
 ///
 /// # Arguments
 ///
@@ -675,8 +675,8 @@ pub fn mutual_inductance_circular_to_linear_scalar(
     let dlzfil = xyzfil1.2 - xyzfil0.2;
     // Next, we need to map the linear filament into cylindrical coordinates
     //    r = (x^2 + y^2)^0.5 in cylindrical
-    let path_r = rss3(xyzfil0.0, xyzfil0.1, 0.0); // [m]
-    let path_dr = rss3(dlxfil, dlyfil, 0.0); // [m]
+    let path_r = norm3([xyzfil0.0, xyzfil0.1, 0.0]); // [m]
+    let path_dr = norm3([dlxfil, dlyfil, 0.0]); // [m]
 
     //    phi = tan^-1(y/x)
     let path_phi0 = libm::atan2(xyzfil0.1, xyzfil0.0);
@@ -702,7 +702,7 @@ pub fn mutual_inductance_circular_to_linear_scalar(
 
     // Recover mutual inductance as dot(A, dL)/I
 
-    dot3(a_x_per_A, a_y_per_A, a_z_per_A, dlxfil, dlyfil, dlzfil)
+    dot3([a_x_per_A, a_y_per_A, a_z_per_A], [dlxfil, dlyfil, dlzfil])
 }
 
 /// Mutual inductance between a collection of circular filaments and a piecewise-linear filament.
@@ -716,11 +716,11 @@ pub fn mutual_inductance_circular_to_linear_scalar(
 /// # References
 ///
 /// \[1\] E. M. Purcell and D. J. Morin, “Electricity and Magnetism,”
-///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C
+///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C>
 ///
-/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential
+/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential>
 ///
 /// # Arguments
 ///
@@ -783,11 +783,11 @@ pub fn mutual_inductance_circular_to_linear(
 /// # References
 ///
 /// \[1\] E. M. Purcell and D. J. Morin, “Electricity and Magnetism,”
-///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C
+///     Higher Education from Cambridge University Press. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://www.cambridge.org/highereducation/books/electricity-and-magnetism/0F97BB6C5D3A56F19B9835EDBEAB087C>
 ///
-/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. [Online].
-///     Available: https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential
+/// \[2\] “Magnetic vector potential,” Wikipedia. Nov. 26, 2024. Accessed: Feb. 10, 2025. \[Online\].
+///     Available: <https://en.wikipedia.org/w/index.php?title=Magnetic_vector_potential&oldid=1259654939#Magnetic_vector_potential>
 ///
 /// # Arguments
 ///
@@ -846,7 +846,8 @@ pub fn body_force_density_circular_filament_cartesian_scalar(
     let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(rzifil, xyzobs);
 
     // Take JxB Lorentz force
-    cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
+    let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
+    (out[0], out[1], out[2])
 }
 
 /// JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current

@@ -14,7 +14,9 @@ from cfsem.bindings import (
     flux_density_circular_filament,
     flux_density_circular_filament_cartesian,
     flux_density_dipole,
+    flux_density_dipole_hierarchical,
     flux_density_linear_filament,
+    flux_density_linear_filament_hierarchical,
     flux_density_triangle_mesh_mapping,
     triangle_mesh_current_density,
     triangle_mesh_force_mapping,
@@ -28,19 +30,25 @@ from cfsem.bindings import (
     triangle_mesh_quadrature_points,
     triangle_mesh_self_force_mapping,
     flux_density_triangle_mesh,
+    flux_density_triangle_mesh_hierarchical,
     flux_density_point_segment,
     gs_operator_order2,
     gs_operator_order4,
+    HierarchicalDiagnostics,
     inductance_linear_filaments,
     inductance_piecewise_linear_filaments,
     mutual_inductance_circular_to_linear,
     rotate_filaments_about_path,
     vector_potential_circular_filament,
     vector_potential_linear_filament,
+    vector_potential_linear_filament_hierarchical,
     vector_potential_triangle_mesh_mapping,
     vector_potential_triangle_mesh,
+    vector_potential_triangle_mesh_hierarchical,
     vector_potential_point_segment,
     vector_potential_dipole,
+    vector_potential_dipole_hierarchical,
+    SolveResult,
 )
 from cfsem.flux_solver import (
     calc_flux_density_from_flux,
@@ -62,6 +70,7 @@ https://www.physics.nist.gov/cuu/pdf/wall_2018.pdf .
 __all__ = [
     "flux_circular_filament",
     "flux_density_linear_filament",
+    "flux_density_linear_filament_hierarchical",
     "flux_density_triangle_mesh_mapping",
     "triangle_mesh_current_density",
     "triangle_mesh_force_mapping",
@@ -75,6 +84,7 @@ __all__ = [
     "triangle_mesh_quadrature_points",
     "triangle_mesh_self_force_mapping",
     "flux_density_triangle_mesh",
+    "flux_density_triangle_mesh_hierarchical",
     "flux_density_circular_filament",
     "gs_operator_order2",
     "gs_operator_order4",
@@ -84,6 +94,7 @@ __all__ = [
     "solve_flux_axisymmetric",
     "filament_helix_path",
     "inductance_linear_filaments",
+    "inductance_matrix_axisymmetric_coaxial_rectangular_coils",
     "inductance_piecewise_linear_filaments",
     "self_inductance_piecewise_linear_filaments",
     "self_inductance_axisymmetric_coil",
@@ -100,15 +111,22 @@ __all__ = [
     "ellipk",
     "rotate_filaments_about_path",
     "vector_potential_linear_filament",
+    "vector_potential_linear_filament_hierarchical",
     "vector_potential_triangle_mesh_mapping",
     "vector_potential_triangle_mesh",
+    "vector_potential_triangle_mesh_hierarchical",
     "vector_potential_circular_filament",
     "flux_density_circular_filament_cartesian",
     "mutual_inductance_circular_to_linear",
     "flux_density_dipole",
+    "flux_density_dipole_hierarchical",
     "vector_potential_dipole",
+    "vector_potential_dipole_hierarchical",
     "flux_density_point_segment",
     "vector_potential_point_segment",
+    "HierarchicalDiagnostics",
+    "SolveResult",
+    "MU_0",
     "body_force_density_circular_filament_cartesian",
     "body_force_density_linear_filament",
     "DimensionalityError",
@@ -142,17 +160,15 @@ def self_inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar self-inductance
     """
-    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
-    # erroneously in the pyright output as of pyright 1.1.393.
-    x, y, z = xyzp  # type: ignore
-    xyzfil = (x[:-1], y[:-1], z[:-1])  # type: ignore
-    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])  # type: ignore
+    x, y, z = xyzp
+    xyzfil = (x[:-1], y[:-1], z[:-1])
+    dlxyzfil = (x[1:] - x[:-1], y[1:] - y[:-1], z[1:] - z[:-1])
 
     self_inductance = inductance_piecewise_linear_filaments(
-        xyzfil,  # type: ignore
-        dlxyzfil,  # type: ignore
-        xyzfil,  # type: ignore
-        dlxyzfil,  # type: ignore
+        xyzfil,
+        dlxyzfil,
+        xyzfil,
+        dlxyzfil,
         wire_radius=wire_radius,
     )
 
@@ -187,21 +203,19 @@ def mutual_inductance_piecewise_linear_filaments(
     Returns:
         [H] Scalar mutual inductance between the two filaments
     """
-    # Indexing numpy arrays here produces some `Any`-type hints and strips the element type
-    # erroneously in the pyright output as of pyright 1.1.393.
-    x0, y0, z0 = xyz0  # type: ignore
-    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])  # type: ignore
-    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])  # type: ignore
+    x0, y0, z0 = xyz0
+    xyzfil0 = (x0[:-1], y0[:-1], z0[:-1])
+    dlxyzfil0 = (x0[1:] - x0[:-1], y0[1:] - y0[:-1], z0[1:] - z0[:-1])
 
-    x1, y1, z1 = xyz1  # type: ignore
-    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])  # type: ignore
-    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])  # type: ignore
+    x1, y1, z1 = xyz1
+    xyzfil1 = (x1[:-1], y1[:-1], z1[:-1])
+    dlxyzfil1 = (x1[1:] - x1[:-1], y1[1:] - y1[:-1], z1[1:] - z1[:-1])
 
     inductance = inductance_piecewise_linear_filaments(
-        xyzfil0,  # type: ignore
-        dlxyzfil0,  # type: ignore
-        xyzfil1,  # type: ignore
-        dlxyzfil1,  # type: ignore
+        xyzfil0,
+        dlxyzfil0,
+        xyzfil1,
+        dlxyzfil1,
         wire_radius=wire_radius,
     )
 

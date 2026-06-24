@@ -380,14 +380,7 @@ where
             let a = eval_a(obs);
             let w = qp[0] * tri_area;
             for ibasis in 0..3 {
-                out[idx[ibasis]] += dot3(
-                    ktgt[ibasis][0],
-                    ktgt[ibasis][1],
-                    ktgt[ibasis][2],
-                    a[0],
-                    a[1],
-                    a[2],
-                ) * w;
+                out[idx[ibasis]] += dot3(ktgt[ibasis], a) * w;
             }
         }
     }
@@ -632,11 +625,11 @@ fn explicit_force_on_target_triangle_from_source_mesh(
             (&mut bx, &mut by, &mut bz),
         )
         .unwrap();
-        let jf = cross3(k_tgt[0], k_tgt[1], k_tgt[2], bx[0], by[0], bz[0]);
+        let jf = cross3(k_tgt, [bx[0], by[0], bz[0]]);
         let w = qp[0] * tri_area;
-        out[0] += jf.0 * w;
-        out[1] += jf.1 * w;
-        out[2] += jf.2 * w;
+        out[0] += jf[0] * w;
+        out[1] += jf[1] * w;
+        out[2] += jf[2] * w;
     }
     out
 }
@@ -1092,7 +1085,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
         let mut a_scale: f64 = 0.0;
 
         for s_basis in basis_vectors {
-            let b = flux_density_triangle(
+            let b: [f64; 3] = flux_density_triangle(
                 tri[0],
                 tri[1],
                 tri[2],
@@ -1100,7 +1093,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
                 obs,
                 QuadratureKind::Dunavant3,
             );
-            let a = vector_potential_triangle(
+            let a: [f64; 3] = vector_potential_triangle(
                 tri[0],
                 tri[1],
                 tri[2],
@@ -1220,7 +1213,7 @@ fn assert_triangle_rule_integrates_monomials(
                 .iter()
                 .map(|qp| qp[0] * qp[1].powi(p as i32) * qp[2].powi(q as i32))
                 .sum::<f64>();
-            let exact_int = reference_triangle_monomial_integral(p, q);
+            let exact_int = 2.0 * reference_triangle_monomial_integral(p, q);
             assert!(
                 approx(approx_int, exact_int, 0.0, 1e-14),
                 "{name} failed for u^{p} v^{q}: approx={approx_int:.16e}, exact={exact_int:.16e}"
@@ -1229,9 +1222,9 @@ fn assert_triangle_rule_integrates_monomials(
     }
 }
 
-/// Checks that the Dunavant rules integrate reference-triangle monomials to their exact degree.
+/// Checks that normalized Dunavant rules integrate reference-triangle monomial averages.
 #[test]
-fn test_dunavant_rules_integrate_reference_triangle_monomials_to_expected_degree() {
+fn test_dunavant_rules_integrate_normalized_reference_triangle_monomial_averages() {
     assert_triangle_rule_integrates_monomials("Dunavant1", QuadratureKind::Dunavant1, 1, 1);
     assert_triangle_rule_integrates_monomials("Dunavant2", QuadratureKind::Dunavant2, 2, 3);
     assert_triangle_rule_integrates_monomials("Dunavant3", QuadratureKind::Dunavant3, 3, 4);
@@ -1270,11 +1263,7 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
                     obs,
                     quad_kind,
                 );
-                via_a_dot_k += qp[0]
-                    * tri_area_tgt
-                    * dot3(
-                        a_src[0], a_src[1], a_src[2], ktgt[j][0], ktgt[j][1], ktgt[j][2],
-                    );
+                via_a_dot_k += qp[0] * tri_area_tgt * dot3(a_src, ktgt[j]);
             }
 
             assert!(
@@ -1631,7 +1620,7 @@ fn test_triangle_mesh_inductance_mapping_from_circular_filaments_matches_direct_
             .unwrap();
 
     let psi_ref = explicit_nodal_flux_linkage_from_vector_potential_fn(&mesh_tgt, |obs| {
-        let (robs, phiobs, zobs) = cartesian_to_cylindrical(obs[0], obs[1], obs[2]);
+        let [robs, phiobs, zobs] = cartesian_to_cylindrical(obs);
         let mut out = [0.0; 3];
         for i in 0..coeffs.len() {
             let a_phi = vector_potential_circular_filament_scalar(
@@ -1870,11 +1859,11 @@ fn test_triangle_basis_force_block_matches_direct_contraction() {
     for qp in triangle_quadrature_points(QuadratureKind::Dunavant3) {
         let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
         let b = flux_density_triangle(src0, src1, src2, s_src, obs, QuadratureKind::Dunavant3);
-        let jf = cross3(k_tgt[0], k_tgt[1], k_tgt[2], b[0], b[1], b[2]);
+        let jf = cross3(k_tgt, b);
         let w = qp[0] * tri_area;
-        direct[0] += jf.0 * w;
-        direct[1] += jf.1 * w;
-        direct[2] += jf.2 * w;
+        direct[0] += jf[0] * w;
+        direct[1] += jf[1] * w;
+        direct[2] += jf[2] * w;
     }
 
     for axis in 0..3 {
@@ -2242,7 +2231,7 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
         b_loop.push([b_ref.0, b_ref.1, b_ref.2]);
 
         a_strip.push(strip_vector_potential(&strip, point));
-        let (r_obs, phi_obs, z_obs) = cartesian_to_cylindrical(point[0], point[1], point[2]);
+        let [r_obs, phi_obs, z_obs] = cartesian_to_cylindrical(point);
         let a_phi =
             vector_potential_circular_filament_scalar((radius, 0.0, loop_current), (r_obs, z_obs));
         a_loop.push([-a_phi * libm::sin(phi_obs), a_phi * libm::cos(phi_obs), 0.0]);

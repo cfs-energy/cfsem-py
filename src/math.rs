@@ -1,5 +1,74 @@
 //! Pure-math functions supporting physics calculations.
 
+use core::ops::{Add, Div, Mul, Sub};
+use num_traits::{Float, FromPrimitive};
+
+/// Scalar type shared by generic math, mesh, field, and FEM infrastructure.
+pub trait Scalar:
+    Float
+    + FromPrimitive
+    + Copy
+    + Clone
+    + Default
+    + std::fmt::Debug
+    + PartialOrd
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + Send
+    + Sync
+    + 'static
+{
+    const ZERO: Self;
+    const ONE: Self;
+
+    /// Return the smallest positive finite value for this scalar type.
+    fn min_positive() -> Self;
+    /// Convert this scalar value to `f64` for diagnostics and tolerances.
+    fn to_f64(self) -> f64;
+}
+
+/// Cast a finite `f64` literal into the active scalar type.
+#[inline]
+pub(crate) fn cast<T: Scalar>(value: f64) -> T {
+    T::from_f64(value).expect("finite f64 literal should cast to target scalar")
+}
+
+impl Scalar for f32 {
+    const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
+
+    #[inline]
+    /// Return the smallest positive finite value for this scalar type.
+    fn min_positive() -> Self {
+        f32::MIN_POSITIVE
+    }
+
+    #[inline]
+    /// Convert this scalar value to `f64` for diagnostics and tolerances.
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+}
+
+impl Scalar for f64 {
+    const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
+
+    #[inline]
+    /// Return the smallest positive finite value for this scalar type.
+    fn min_positive() -> Self {
+        f64::MIN_POSITIVE
+    }
+
+    #[inline]
+    /// Convert this scalar value to `f64` for diagnostics and tolerances.
+    fn to_f64(self) -> f64 {
+        self
+    }
+}
+
 // Curvefit coeffs for elliptic integrals
 const ELLIPK_A: [f64; 5] = [
     1.38629436112,
@@ -86,63 +155,63 @@ pub fn ellipe(m: f64) -> f64 {
 
 /// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to reduce roundoff error.
 #[inline]
-pub fn rss3(x: f64, y: f64, z: f64) -> f64 {
-    x.mul_add(x, y.mul_add(y, z.powi(2))).sqrt()
+pub fn norm3<T: Scalar>(v: [T; 3]) -> T {
+    dot3(v, v).sqrt()
+}
+
+/// Normalize a fixed-size 3D vector.
+#[inline]
+pub fn normalize3<T: Scalar>(v: [T; 3]) -> [T; 3] {
+    scale3(v, T::ONE / norm3(v))
 }
 
 /// Evaluate the cross products for each axis component
 /// separately using `mul_add` which would not be assumed usable
 /// in a more general implementation.
 #[inline]
-pub fn cross3(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> (f64, f64, f64) {
-    let xy = -x1 * y0;
-    let yz = -y1 * z0;
-    let zx = -z1 * x0;
-    let cx = y0.mul_add(z1, yz);
-    let cy = z0.mul_add(x1, zx);
-    let cz = x0.mul_add(y1, xy);
-
-    (cx, cy, cz)
-}
-
-/// Evaluate the cross products for each axis component
-/// separately using `mul_add` which would not be assumed usable
-/// in a more general implementation.
-/// 32-bit float variant.
-#[inline]
-pub fn cross3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> (f32, f32, f32) {
-    let xy = -x1 * y0;
-    let yz = -y1 * z0;
-    let zx = -z1 * x0;
-    let cx = y0.mul_add(z1, yz);
-    let cy = z0.mul_add(x1, zx);
-    let cz = x0.mul_add(y1, xy);
-
-    (cx, cy, cz)
+pub fn cross3<T: Scalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+    [
+        a[1].mul_add(b[2], (T::ZERO - b[1]) * a[2]),
+        a[2].mul_add(b[0], (T::ZERO - b[2]) * a[0]),
+        a[0].mul_add(b[1], (T::ZERO - b[0]) * a[1]),
+    ]
 }
 
 /// Scalar dot product using `mul_add`.
 #[inline]
-pub fn dot3(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> f64 {
-    x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
-}
-
-/// Scalar dot product using `mul_add`.
-/// 32-bit float variant.
-#[inline]
-pub fn dot3f(x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32) -> f32 {
-    x0.mul_add(x1, y0.mul_add(y1, z0 * z1))
+pub fn dot3<T: Scalar>(a: [T; 3], b: [T; 3]) -> T {
+    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
 }
 
 /// Elementwise subtraction of fixed-size 3D vectors.
 #[inline]
-pub(crate) fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub fn sub3<T: Scalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/// Elementwise addition of fixed-size 3D vectors.
+#[inline]
+pub fn add3<T: Scalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+/// In-place elementwise addition of fixed-size 3D vectors.
+#[inline]
+pub fn add3_in_place<T: Scalar>(out: &mut [T; 3], value: [T; 3]) {
+    for axis in 0..3 {
+        out[axis] = out[axis] + value[axis];
+    }
+}
+
+/// Scale a fixed-size 3D vector.
+#[inline]
+pub fn scale3<T: Scalar>(value: [T; 3], scale: T) -> [T; 3] {
+    [value[0] * scale, value[1] * scale, value[2] * scale]
 }
 
 /// Affine combination `a + scale * b` of fixed-size 3D vectors using `mul_add`.
 #[inline]
-pub(crate) fn add_scaled3(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
+pub fn add_scaled3<T: Scalar>(a: [T; 3], b: [T; 3], scale: T) -> [T; 3] {
     [
         scale.mul_add(b[0], a[0]),
         scale.mul_add(b[1], a[1]),
@@ -150,43 +219,22 @@ pub(crate) fn add_scaled3(a: [f64; 3], b: [f64; 3], scale: f64) -> [f64; 3] {
     ]
 }
 
-/// Fixed-size 3D dot product wrapper around [`dot3`].
-#[inline]
-pub(crate) fn dot3_arr(a: [f64; 3], b: [f64; 3]) -> f64 {
-    dot3(a[0], a[1], a[2], b[0], b[1], b[2])
-}
-
 /// Convert a point from cartesian to cylindrical coordinates.
 #[inline]
-pub fn cartesian_to_cylindrical(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
-    let r = rss3(x, y, 0.0);
+pub fn cartesian_to_cylindrical(point: [f64; 3]) -> [f64; 3] {
+    let [x, y, z] = point;
+    let r = norm3([x, y, 0.0]);
     let phi = libm::atan2(y, x);
-    (r, phi, z)
+    [r, phi, z]
 }
 
 /// Convert a point in cylindrical coordinates to cartesian.
 #[inline]
-pub fn cylindrical_to_cartesian(r: f64, phi: f64, z: f64) -> (f64, f64, f64) {
+pub fn cylindrical_to_cartesian(point: [f64; 3]) -> [f64; 3] {
+    let [r, phi, z] = point;
     let x = r * libm::cos(phi);
     let y = r * libm::sin(phi);
-    (x, y, z)
-}
-
-/// Decompose two filament endpoints into a midpoint and a length vector
-#[inline]
-pub(crate) fn decompose_filament(
-    start: (f64, f64, f64),
-    end: (f64, f64, f64),
-) -> ((f64, f64, f64), (f64, f64, f64)) {
-    // Evaluate
-    let dl = (end.0 - start.0, end.1 - start.1, end.2 - start.2); // [m] filament vector
-    let midpoint = (
-        dl.0.mul_add(0.5, start.0),
-        dl.1.mul_add(0.5, start.1),
-        dl.2.mul_add(0.5, start.2),
-    ); // [m] filament midpoint
-
-    (midpoint, dl)
+    [x, y, z]
 }
 
 /// Geometric components of the system of a filament and an observation point
@@ -202,32 +250,32 @@ pub(crate) fn decompose_filament(
 ///   /    |    \
 ///  a-----m-----b  -> I  
 ///```
-pub(crate) struct PointLineDistance {
+pub(crate) struct PointLineDistance<T: Scalar> {
     /// Perpendicular distance from the infinite line defined by segment `ab` to the point `p`,
     /// clamped to the wire radius.
-    pub(crate) perp: f64,
+    pub(crate) perp: T,
 
     /// The normalized direction of the perpendicular distance.
-    pub(crate) perp_hat: (f64, f64, f64),
+    pub(crate) perp_hat: [T; 3],
 
     /// Length of segment `ap` using clamped perpendicular distance.
-    pub(crate) dist_a: f64,
+    pub(crate) dist_a: T,
 
     /// Length of segment `bp` using clamped perpendicular distance.
-    pub(crate) dist_b: f64,
+    pub(crate) dist_b: T,
 
     /// Fraction of perpendicular distance of point `p` from the filament axis to the wire radius,
     /// before clamping of the perpendicular distance.
-    pub(crate) frac: f64,
+    pub(crate) frac: T,
 
     /// Length of segment `am` using unclamped perpendicular distance.
-    pub(crate) para_a: f64,
+    pub(crate) para_a: T,
 
     /// Length of segment `bm` using unclamped perpendicular distance.
-    pub(crate) para_b: f64,
+    pub(crate) para_b: T,
 
     /// Length of the filament, segment `ab`.
-    pub(crate) ab_norm: (f64, f64, f64),
+    pub(crate) ab_norm: [T; 3],
 }
 
 /// Minimum perpendicular distance of point p to the infinite line defined by endpoints a and b,
@@ -237,76 +285,72 @@ pub(crate) struct PointLineDistance {
 /// Finite-thickness clamping is based only on wire radius and does not
 /// taper outside segment endpoint projections.
 #[inline]
-pub(crate) fn point_line_distance_with_endpoints(
-    a: (f64, f64, f64),
-    b: (f64, f64, f64),
-    p: (f64, f64, f64),
-    r_min: f64,
-) -> PointLineDistance {
+pub(crate) fn point_line_distance_with_endpoints<T: Scalar>(
+    a: [T; 3],
+    b: [T; 3],
+    p: [T; 3],
+    r_min: T,
+) -> PointLineDistance<T> {
     // Vectors and distances between points.
-    let ab = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
-    let ap = (p.0 - a.0, p.1 - a.1, p.2 - a.2);
-    let bp = (p.0 - b.0, p.1 - b.1, p.2 - b.2);
+    let ab = sub3(b, a);
+    let ap = sub3(p, a);
+    let bp = sub3(p, b);
 
     // Normalized segment vector.
     // This might be zero, and that will be handled as late as possible to avoid disrupting
     // calculations in nominal non-zero-length cases.
-    let ab2 = dot3(ab.0, ab.1, ab.2, ab.0, ab.1, ab.2); // (m^2) squared length.
+    let ab2 = dot3(ab, ab); // (m^2) squared length.
     // Handle zero-length special case before any division by segment length.
-    if ab2 == 0.0 {
-        let r_min = r_min.max(0.0);
-        let r_min_frac = r_min.max(f64::MIN_POSITIVE);
-        let dist_a = rss3(ap.0, ap.1, ap.2);
-        let dist_b = rss3(bp.0, bp.1, bp.2);
-        let frac = (dist_a / r_min_frac).min(1.0);
-        let dist_a = dist_a.max(r_min);
-        let dist_b = dist_b.max(r_min);
+    if ab2 == T::ZERO {
+        let r_min = max_scalar(r_min, T::ZERO);
+        let r_min_frac = max_scalar(r_min, T::min_positive());
+        let dist_a = norm3(ap);
+        let dist_b = norm3(bp);
+        let frac = min_scalar(dist_a / r_min_frac, T::ONE);
+        let dist_a = max_scalar(dist_a, r_min);
+        let dist_b = max_scalar(dist_b, r_min);
         let perp = dist_a;
         return PointLineDistance {
             perp,
-            perp_hat: (0.0, 0.0, 0.0),
+            perp_hat: [T::ZERO; 3],
             dist_a,
             dist_b,
             frac,
-            para_a: 0.0,
-            para_b: 0.0,
-            ab_norm: (0.0, 0.0, 0.0),
+            para_a: T::ZERO,
+            para_b: T::ZERO,
+            ab_norm: [T::ZERO; 3],
         };
     }
 
     // Filament vector, length, and normalized direction
     let ab_len = ab2.sqrt();
-    let ab_len_inv = ab_len.recip();
-    let ab_norm = (ab.0 * ab_len_inv, ab.1 * ab_len_inv, ab.2 * ab_len_inv);
+    let ab_len_inv = T::ONE / ab_len;
+    let ab_norm = scale3(ab, ab_len_inv);
 
     // Find the closest point on the infinite line defined by this segment to the target point.
-    let t = dot3(ap.0, ap.1, ap.2, ab.0, ab.1, ab.2) / ab2; // Normed projected location
-    let closest = (
-        t.mul_add(ab.0, a.0),
-        t.mul_add(ab.1, a.1),
-        t.mul_add(ab.2, a.2),
-    ); // (m) closest point on infinite line
-    let dp = (p.0 - closest.0, p.1 - closest.1, p.2 - closest.2); // (m) Vector from target to infinite line.
-    let perp_raw = rss3(dp.0, dp.1, dp.2); // (m) Un-clamped perpendicular distance.
-    let perp_hat = if perp_raw > 0.0 {
-        let inv = perp_raw.recip();
-        (dp.0 * inv, dp.1 * inv, dp.2 * inv)
+    let t = dot3(ap, ab) / ab2; // Normed projected location
+    let closest = add_scaled3(a, ab, t); // (m) closest point on infinite line
+    let dp = sub3(p, closest); // (m) Vector from target to infinite line.
+    let perp_raw = norm3(dp); // (m) Un-clamped perpendicular distance.
+    let perp_hat = if perp_raw > T::ZERO {
+        let inv = T::ONE / perp_raw;
+        scale3(dp, inv)
     } else {
-        (0.0, 0.0, 0.0)
+        [T::ZERO; 3]
     };
 
     // Clamp r_min to prevent div/0
-    let r_min = r_min.max(f64::MIN_POSITIVE);
+    let r_min = max_scalar(r_min, T::min_positive());
 
     // Parallel distances from each endpoint to the target
-    let para_a = dot3(ap.0, ap.1, ap.2, ab_norm.0, ab_norm.1, ab_norm.2);
+    let para_a = dot3(ap, ab_norm);
     let para_b = para_a - ab_len;
 
     // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.
-    let frac = (perp_raw / r_min).min(1.0);
+    let frac = min_scalar(perp_raw / r_min, T::ONE);
 
     // Clamp distances only if we are inside the minimum radius.
-    let perp = perp_raw.max(r_min);
+    let perp = max_scalar(perp_raw, r_min);
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
     let dist_a = perp.mul_add(perp, para_a * para_a).sqrt();
@@ -322,6 +366,18 @@ pub(crate) fn point_line_distance_with_endpoints(
         para_b,
         ab_norm,
     }
+}
+
+#[inline]
+/// Return the smaller of two scalar values.
+fn min_scalar<T: Scalar>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+#[inline]
+/// Return the larger of two scalar values.
+pub(crate) fn max_scalar<T: Scalar>(a: T, b: T) -> T {
+    if a > b { a } else { b }
 }
 
 /// Clip NaN values to the provided value.

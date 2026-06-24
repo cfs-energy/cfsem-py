@@ -28,7 +28,7 @@ dev = [
     "pytest == 9.0.2",
     "pytest-cov == 7.1.0",
     "ruff == 0.6.2",
-    "pyright == 1.1.402",
+    "ty == 0.0.42",
     # Docs
     "mkdocs == 1.6.0",
     "mkdocs-material == 9.5.25",
@@ -44,6 +44,7 @@ dev = [
 features = ["python"]
 module-name = "cfsem.cfsem"
 version = "cargo"
+profile = "release"
 
 [tool.ruff]
 line-length = 110

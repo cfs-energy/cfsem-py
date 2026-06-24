@@ -2,18 +2,31 @@
 
 use crate::mesh::elements::tri::mapping as tri3;
 
+#[derive(Clone, Copy, Debug)]
+enum NodeStorage<'a> {
+    Columns((&'a [f64], &'a [f64], &'a [f64])),
+    RowMajor(&'a [f64]),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TriangleStorage<'a> {
+    Columns((&'a [usize], &'a [usize], &'a [usize])),
+    RowMajorI64(&'a [i64]),
+}
+
 /// Borrowed view of triangle surface-mesh geometry.
 #[derive(Clone, Copy, Debug)]
 pub struct TriangleMeshView<'a> {
-    nodes: (&'a [f64], &'a [f64], &'a [f64]),
-    triangles: (&'a [usize], &'a [usize], &'a [usize]),
+    nodes: NodeStorage<'a>,
+    triangles: TriangleStorage<'a>,
+    nnode: usize,
+    ntri: usize,
 }
 
 #[inline]
-fn triangle_area_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) -> f64 {
-    let n0 = [nodes.0[idx[0]], nodes.1[idx[0]], nodes.2[idx[0]]];
-    let n1 = [nodes.0[idx[1]], nodes.1[idx[1]], nodes.2[idx[1]]];
-    let n2 = [nodes.0[idx[2]], nodes.1[idx[2]], nodes.2[idx[2]]];
+/// Compute the area of one 3D triangle from its node coordinates.
+fn triangle_area_from_nodes(nodes: [[f64; 3]; 3]) -> f64 {
+    let [n0, n1, n2] = nodes;
     tri3::area(n0, n1, n2)
 }
 
@@ -24,10 +37,8 @@ fn triangle_area_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) 
 /// `4 * sqrt(3) * area / sum(edge^2)`.
 /// It equals `1` for an equilateral triangle and tends to `0` for degenerate or
 /// sliver triangles, so it is a cheap way to detect extremely poor aspect ratio.
-fn triangle_quality_from_indices(nodes: (&[f64], &[f64], &[f64]), idx: [usize; 3]) -> f64 {
-    let n0 = [nodes.0[idx[0]], nodes.1[idx[0]], nodes.2[idx[0]]];
-    let n1 = [nodes.0[idx[1]], nodes.1[idx[1]], nodes.2[idx[1]]];
-    let n2 = [nodes.0[idx[2]], nodes.1[idx[2]], nodes.2[idx[2]]];
+fn triangle_quality_from_nodes(nodes: [[f64; 3]; 3]) -> f64 {
+    let [n0, n1, n2] = nodes;
 
     let edge_sq = |a: [f64; 3], b: [f64; 3]| -> f64 {
         let dx = a[0] - b[0];
@@ -68,11 +79,12 @@ fn validate_triangle_mesh_geometry(
     let mut low_quality_triangles = Vec::new();
     for i in 0..ntri {
         let idx = [triangles.0[i], triangles.1[i], triangles.2[i]];
-        let area = triangle_area_from_indices(nodes, idx);
+        let tri_nodes = idx.map(|k| [nodes.0[k], nodes.1[k], nodes.2[k]]);
+        let area = triangle_area_from_nodes(tri_nodes);
         if area < 1e-14 {
             return Err("Triangle has zero area");
         }
-        let quality = triangle_quality_from_indices(nodes, idx);
+        let quality = triangle_quality_from_nodes(tri_nodes);
         if quality < 1e-3 {
             low_quality_triangles.push((i, quality, idx));
         }
@@ -98,20 +110,48 @@ impl<'a> TriangleMeshView<'a> {
         nodes: (&'a [f64], &'a [f64], &'a [f64]),
         triangles: (&'a [usize], &'a [usize], &'a [usize]),
     ) -> Result<Self, &'static str> {
-        validate_triangle_mesh_geometry(nodes, triangles)?;
-        Ok(Self { nodes, triangles })
+        let (nnode, ntri) = validate_triangle_mesh_geometry(nodes, triangles)?;
+        Ok(Self {
+            nodes: NodeStorage::Columns(nodes),
+            triangles: TriangleStorage::Columns(triangles),
+            nnode,
+            ntri,
+        })
+    }
+
+    /// Validate dimensions and construct a borrowed row-major mesh view.
+    pub fn from_row_major_i64(
+        nodes: &'a [f64],
+        triangles: &'a [i64],
+    ) -> Result<Self, &'static str> {
+        if !nodes.len().is_multiple_of(3) {
+            return Err("nodes must have shape (nnode, 3)");
+        }
+        if !triangles.len().is_multiple_of(3) {
+            return Err("triangles must have shape (ntri, 3)");
+        }
+        let nnode = nodes.len() / 3;
+        let ntri = triangles.len() / 3;
+        let view = Self {
+            nodes: NodeStorage::RowMajor(nodes),
+            triangles: TriangleStorage::RowMajorI64(triangles),
+            nnode,
+            ntri,
+        };
+        view.validate_geometry()?;
+        Ok(view)
     }
 
     /// Number of nodes in the view.
     #[inline]
     pub fn nnode(&self) -> usize {
-        self.nodes.0.len()
+        self.nnode
     }
 
     /// Number of triangles in the view.
     #[inline]
     pub fn len(&self) -> usize {
-        self.triangles.0.len()
+        self.ntri
     }
 
     /// Whether the view contains no triangles.
@@ -123,25 +163,31 @@ impl<'a> TriangleMeshView<'a> {
     /// Triangle-node indices for one triangle.
     #[inline]
     pub fn triangle_indices(&self, i: usize) -> [usize; 3] {
-        [
-            self.triangles.0[i],
-            self.triangles.1[i],
-            self.triangles.2[i],
-        ]
+        match self.triangles {
+            TriangleStorage::Columns(triangles) => [triangles.0[i], triangles.1[i], triangles.2[i]],
+            TriangleStorage::RowMajorI64(triangles) => {
+                let start = 3 * i;
+                [
+                    triangles[start] as usize,
+                    triangles[start + 1] as usize,
+                    triangles[start + 2] as usize,
+                ]
+            }
+        }
     }
 
     /// Node coordinates for one triangle.
     #[inline]
     pub fn triangle_nodes(&self, i: usize) -> [[f64; 3]; 3] {
         let idx = self.triangle_indices(i);
-        idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]])
+        idx.map(|k| self.node(k))
     }
 
     /// Node coordinates and indices for one triangle.
     #[inline]
     pub fn triangle_nodes_and_indices(&self, i: usize) -> ([[f64; 3]; 3], [usize; 3]) {
         let idx = self.triangle_indices(i);
-        let nodes = idx.map(|k| [self.nodes.0[k], self.nodes.1[k], self.nodes.2[k]]);
+        let nodes = idx.map(|k| self.node(k));
         (nodes, idx)
     }
 
@@ -159,6 +205,64 @@ impl<'a> TriangleMeshView<'a> {
     pub fn triangle_scalars(&self, i: usize, s: &[f64]) -> [f64; 3] {
         let idx = self.triangle_indices(i);
         idx.map(|k| s[k])
+    }
+
+    #[inline]
+    /// Return the coordinates for one node by local index.
+    fn node(&self, i: usize) -> [f64; 3] {
+        match self.nodes {
+            NodeStorage::Columns(nodes) => [nodes.0[i], nodes.1[i], nodes.2[i]],
+            NodeStorage::RowMajor(nodes) => {
+                let start = 3 * i;
+                [nodes[start], nodes[start + 1], nodes[start + 2]]
+            }
+        }
+    }
+
+    /// Validate that the mesh arrays describe finite, nondegenerate triangles.
+    fn validate_geometry(&self) -> Result<(), &'static str> {
+        let mut low_quality_triangles = Vec::new();
+        for i in 0..self.ntri {
+            let idx = match self.triangles {
+                TriangleStorage::Columns(triangles) => {
+                    [triangles.0[i], triangles.1[i], triangles.2[i]]
+                }
+                TriangleStorage::RowMajorI64(triangles) => {
+                    let start = 3 * i;
+                    let idx0 = triangles[start];
+                    let idx1 = triangles[start + 1];
+                    let idx2 = triangles[start + 2];
+                    if idx0 < 0 || idx1 < 0 || idx2 < 0 {
+                        return Err("Triangle refers to non-existent node");
+                    }
+                    [idx0 as usize, idx1 as usize, idx2 as usize]
+                }
+            };
+            if idx[0] >= self.nnode || idx[1] >= self.nnode || idx[2] >= self.nnode {
+                return Err("Triangle refers to non-existent node");
+            }
+            let tri_nodes = idx.map(|k| self.node(k));
+            let area = triangle_area_from_nodes(tri_nodes);
+            if area < 1e-14 {
+                return Err("Triangle has zero area");
+            }
+            let quality = triangle_quality_from_nodes(tri_nodes);
+            if quality < 1e-3 {
+                low_quality_triangles.push((i, quality, idx));
+            }
+        }
+        if !low_quality_triangles.is_empty() {
+            let entries = low_quality_triangles
+                .iter()
+                .map(|(i, quality, idx)| format!("{i} (quality={quality:.3e}, indices={idx:?})"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!(
+                "warning: {} triangles have very poor aspect ratio: {entries}",
+                low_quality_triangles.len()
+            );
+        }
+        Ok(())
     }
 }
 

@@ -6,8 +6,12 @@ use rayon::{
 };
 
 use crate::mesh::quadrature::{GaussLegendreRule, gauss_legendre_unit_interval_table};
-use crate::{chunksize, math::cross3};
+use crate::{
+    chunksize,
+    math::{PointLineDistance, cross3, point_line_distance_with_endpoints},
+};
 
+use crate::math::Scalar;
 use crate::{MU0_OVER_4PI, macros::*};
 
 /// (m) minimum representable nonzero wire thickness.
@@ -597,10 +601,10 @@ pub fn flux_density_linear_filament_matrix(
 /// ## References
 ///
 /// * \[1\] D. J. Griffiths, Introduction to electrodynamics, Fourth edition. Boston: Pearson, 2014.
-/// * \[2\] J. van Nugteren and N. Deelen, “rat-mlfmm,” GitLab repository. Accessed: Jan. 16, 2026. [Online].
-///         Available: https://gitlab.com/Project-Rat/rat-mlfmm/-/tree/1e1d387522fafac50c0540af1ebb15d1d506d33d
-/// * \[3\] M. Zahn, “5.4: The Vector Potential,” Engineering LibreTexts. Accessed: Jan. 20, 2026. [Online].
-///         Available: https://eng.libretexts.org/Bookshelves/Electrical_Engineering/Electro-Optics/Electromagnetic_Field_Theory%3A_A_Problem_Solving_Approach_(Zahn)/05%3A_The_Magnetic_Field/5.04%3A_The_Vector_Potential
+/// * \[2\] J. van Nugteren and N. Deelen, “rat-mlfmm,” GitLab repository. Accessed: Jan. 16, 2026. \[Online\].
+///         Available: <https://gitlab.com/Project-Rat/rat-mlfmm/-/tree/1e1d387522fafac50c0540af1ebb15d1d506d33d>
+/// * \[3\] M. Zahn, “5.4: The Vector Potential,” Engineering LibreTexts. Accessed: Jan. 20, 2026. \[Online\].
+///         Available: <https://eng.libretexts.org/Bookshelves/Electrical_Engineering/Electro-Optics/Electromagnetic_Field_Theory%3A_A_Problem_Solving_Approach_(Zahn)/05%3A_The_Magnetic_Field/5.04%3A_The_Vector_Potential>
 ///
 /// # Arguments
 ///
@@ -611,13 +615,12 @@ pub fn flux_density_linear_filament_matrix(
 /// # Returns
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
-pub fn flux_density_linear_filament_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    wire_radius: f64,
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
-    use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
-
+#[inline]
+pub fn flux_density_linear_filament_scalar<T: Scalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    wire_radius: T,
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
     // Unpack
     let (start, end, ifil) = xyzifil;
 
@@ -633,7 +636,12 @@ pub fn flux_density_linear_filament_scalar(
         para_a,
         para_b,
         ab_norm: dlhat,
-    } = point_line_distance_with_endpoints(start, end, xyzobs, wire_radius);
+    } = point_line_distance_with_endpoints(
+        [start.0, start.1, start.2],
+        [end.0, end.1, end.2],
+        [xyzobs.0, xyzobs.1, xyzobs.2],
+        wire_radius,
+    );
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
@@ -642,26 +650,27 @@ pub fn flux_density_linear_filament_scalar(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let kappa = -MU0_OVER_4PI * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
+    let kappa =
+        (T::ZERO - crate::math::cast::<T>(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
 
     // This factor is constant across all x, y, and z components.
     let c = frac * kappa / perp; // (A/m)
 
     // Direction of cross(dL, r), the direction of the field.
-    let (cx, cy, cz) = cross3(
-        dlhat.0, dlhat.1, dlhat.2, perp_hat.0, perp_hat.1, perp_hat.2,
-    ); // (dimensionless)
+    let cxyz = cross3(dlhat, perp_hat); // (dimensionless)
 
     // Assemble final B-field components.
-    let bx = c * cx; // [T]
-    let by = c * cy; // [T]
-    let bz = c * cz; // [T]
+    let bx = c * cxyz[0]; // [T]
+    let by = c * cxyz[1]; // [T]
+    let bz = c * cxyz[2]; // [T]
 
     // Finally, determine whether we are clipping to zero.
-    if frac > 1e6 * f64::EPSILON && perp > MIN_WIRE_THICKNESS {
+    if frac > crate::math::cast::<T>(1e6 * f64::EPSILON)
+        && perp > crate::math::cast::<T>(MIN_WIRE_THICKNESS)
+    {
         (bx, by, bz)
     } else {
-        (0.0, 0.0, 0.0)
+        (T::ZERO, T::ZERO, T::ZERO)
     }
 }
 
@@ -923,7 +932,7 @@ pub fn vector_potential_linear_filament_matrix(
 /// Uses the formula for finite segment length and finite wire thickness.
 ///
 /// Because an infinitesimally-thick wire produces a nonphysical singularity
-/// at the axis, a minimum wire radius of [MIN_WIRE_THICKNESS] is imposed.
+/// at the axis, a minimum wire radius of `MIN_WIRE_THICKNESS` is imposed.
 ///
 /// The base formula implemented here is:
 ///
@@ -956,18 +965,18 @@ pub fn vector_potential_linear_filament_matrix(
 ///
 /// * `a`:        (V-s/m) Vector potential x, y, z components
 #[inline]
-pub fn vector_potential_linear_filament_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    wire_radius: f64,
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
-    use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
+pub fn vector_potential_linear_filament_scalar<T: Scalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    wire_radius: T,
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
+    use crate::math::{PointLineDistance, max_scalar, point_line_distance_with_endpoints};
 
     // Unpack
     let (start, end, ifil) = xyzifil;
 
     // Regularize the line-filament singularity with a minimum core radius.
-    let core_radius = wire_radius.max(MIN_WIRE_THICKNESS);
+    let core_radius = max_scalar(wire_radius, crate::math::cast::<T>(MIN_WIRE_THICKNESS));
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing finite-thickness blending:
@@ -981,7 +990,12 @@ pub fn vector_potential_linear_filament_scalar(
         para_b,
         ab_norm: dlhat,
         perp_hat: _,
-    } = point_line_distance_with_endpoints(start, end, xyzobs, core_radius);
+    } = point_line_distance_with_endpoints(
+        [start.0, start.1, start.2],
+        [end.0, end.1, end.2],
+        [xyzobs.0, xyzobs.1, xyzobs.2],
+        core_radius,
+    );
 
     // Sine of the angle formed by the lines from the target to each endpoint
     // and the line of the filament.
@@ -990,7 +1004,8 @@ pub fn vector_potential_linear_filament_scalar(
 
     // Geometric component of B-field magnitude,
     // including linear falloff inside finite-thickness wire.
-    let kappa = -MU0_OVER_4PI * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
+    let kappa =
+        (T::ZERO - crate::math::cast::<T>(MU0_OVER_4PI)) * ifil * (sin_theta_b - sin_theta_a); // (V-s/m)
 
     // NOTE: up to this point, this has been the same as the B-field calculation.
 
@@ -1001,7 +1016,7 @@ pub fn vector_potential_linear_filament_scalar(
     // The field shape inside the conductor is handled later; this separation
     // is necessary due to the discontinuity in the current density vector field.
     let perp2 = perp * perp;
-    let k1 = if para_b >= 0.0 {
+    let k1 = if para_b >= T::ZERO {
         // Each branch is equal, but numerically stable in different regimes.
         //
         // To keep the argument of the log term from going to zero near the
@@ -1035,13 +1050,15 @@ pub fn vector_potential_linear_filament_scalar(
         // `log(k1/k2)` is nonsingular everywhere.
         dist_b - para_b
     }; // (m)
-    let k2 = if para_a >= 0.0 {
+    let k2 = if para_a >= T::ZERO {
         // Each branch is equal, but numerically stable in different regimes
         perp2 / (dist_a + para_a)
     } else {
         dist_a - para_a
     }; // (m)
-    let a_edge = MU0_OVER_4PI * ifil * libm::log((k1 / k2).max(0.0)); // (V-s/m)
+    let a_edge = crate::math::cast::<T>(MU0_OVER_4PI)
+        * ifil
+        * crate::math::cast::<T>(libm::log(max_scalar(k1 / k2, T::ZERO).to_f64())); // (V-s/m)
 
     // Finite-thickness effect for points inside the conductor or near the endpoints.
     //
@@ -1064,13 +1081,13 @@ pub fn vector_potential_linear_filament_scalar(
     // both inside and outside the conductor.
 
     // (dimensionless) Quadratic fall-off (vs. linear for B-field)
-    let blend = 0.5 * frac.mul_add(-frac, 1.0); //  1/2 (1 - frac^2)
+    let blend = crate::math::cast::<T>(0.5) * frac.mul_add(T::ZERO - frac, T::ONE); //  1/2 (1 - frac^2)
     // (V-s/m) a_mag = a_edge + 0.5 * kappa * (1 - frac^2), reworked for mul_add
     let a_mag = kappa.mul_add(blend, a_edge); // (V-s/m) Gauge-shifted magnitude
 
     // Direction is always aligned with the segment.
     // (V-s) final vector potential
-    let (ax, ay, az) = (a_mag * dlhat.0, a_mag * dlhat.1, a_mag * dlhat.2);
+    let (ax, ay, az) = (a_mag * dlhat[0], a_mag * dlhat[1], a_mag * dlhat[2]);
 
     // Return continuous vector potential; avoid hard clipping at small radius.
     (ax, ay, az)
@@ -1101,7 +1118,8 @@ pub fn body_force_density_linear_filament_scalar(
     let (bx, by, bz) = flux_density_linear_filament_scalar(xyzifil, wire_radius, xyzobs); // [T]
 
     // Take JxB Lorentz force
-    cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
+    let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
+    (out[0], out[1], out[2])
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current
@@ -1240,7 +1258,7 @@ mod test {
     use std::f64::consts::{E, PI};
 
     use super::*;
-    use crate::math::rss3;
+    use crate::math::norm3;
     use crate::physics::point_source::segment::{
         flux_density_point_segment, vector_potential_point_segment,
     };
@@ -1355,9 +1373,9 @@ mod test {
             // Make sure jxb points outward everywhere
             for j in 0..ndiscr - 1 {
                 let r: (f64, f64, f64) = (x[j], y[j], 0.0);
-                let rxjxb = cross3(r.0, r.1, r.2, jxbx[j], jxby[j], jxbz[j]);
+                let rxjxb = cross3([r.0, r.1, r.2], [jxbx[j], jxby[j], jxbz[j]]);
                 // Linear filaments aren't perfectly aligned, so we need a slighter wider tolerance here
-                assert!(approx(0.0, rss3(rxjxb.0, rxjxb.1, rxjxb.2), rtol, 1e-8));
+                assert!(approx(0.0, norm3(rxjxb), rtol, 1e-8));
             }
         }
 
@@ -1638,8 +1656,8 @@ mod test {
         let mut abs_err_axis = Vec::with_capacity(axis_z.len());
         let mut rel_err_outside = Vec::with_capacity(outside_x.len());
         for i in 0..xp.len() {
-            let b = rss3(bx[i], by[i], bz[i]);
-            let b_ref = rss3(bx_ref[i], by_ref[i], bz_ref[i]);
+            let b = norm3([bx[i], by[i], bz[i]]);
+            let b_ref = norm3([bx_ref[i], by_ref[i], bz_ref[i]]);
             if i < axis_z.len() {
                 let err = (b - b_ref).abs();
                 assert!(err.is_finite());
@@ -1687,20 +1705,32 @@ mod test {
         let x = 0.02;
 
         // At the endpoint plane, behavior should match in-segment clamping.
-        let at_endpoint =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2), wire_radius);
+        let at_endpoint = point_line_distance_with_endpoints(
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [x, 0.0, end.2],
+            wire_radius,
+        );
         assert!(approx(0.1, at_endpoint.perp, rtol, atol));
         assert!(approx(0.2, at_endpoint.frac, rtol, atol));
 
         // Outside endpoint projection, clamping behavior is unchanged without endpoint blending.
-        let halfway =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.05), wire_radius);
+        let halfway = point_line_distance_with_endpoints(
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [x, 0.0, end.2 + 0.05],
+            wire_radius,
+        );
         assert!(approx(0.1, halfway.perp, rtol, atol));
         assert!(approx(0.2, halfway.frac, rtol, atol));
 
         // One wire radius beyond the endpoint projection remains clamped the same way.
-        let outside =
-            point_line_distance_with_endpoints(start, end, (x, 0.0, end.2 + 0.1), wire_radius);
+        let outside = point_line_distance_with_endpoints(
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [x, 0.0, end.2 + 0.1],
+            wire_radius,
+        );
         assert!(approx(0.1, outside.perp, rtol, atol));
         assert!(approx(0.2, outside.frac, rtol, atol));
     }
@@ -1714,18 +1744,18 @@ mod test {
         let x = 0.02;
         let overhangs = [0.0, 0.02, 0.05, 0.1, 0.2];
 
-        let mut diff = Vec::with_capacity(overhangs.len());
+        let mut diff: Vec<f64> = Vec::with_capacity(overhangs.len());
 
         for &overhang in &overhangs {
             let obs = (x, 0.0, end.2 + overhang);
             let b_finite =
                 flux_density_linear_filament_scalar((start, end, ifil), wire_radius, obs);
             let b_thin = flux_density_linear_filament_scalar((start, end, ifil), 0.0, obs);
-            diff.push(rss3(
+            diff.push(norm3([
                 b_finite.0 - b_thin.0,
                 b_finite.1 - b_thin.1,
                 b_finite.2 - b_thin.2,
-            ));
+            ]));
         }
 
         assert!(diff[0] > 0.0);
@@ -1776,10 +1806,10 @@ mod test {
     /// Explicitly check axis evaluations at both endpoints and midpoint are non-singular.
     #[test]
     fn test_flux_density_axis_endpoint_midpoint_nonsingular_scalar() {
-        let start = (0.0, 0.0, -0.5);
-        let end = (0.0, 0.0, 0.5);
+        let start = (0.0_f64, 0.0, -0.5);
+        let end = (0.0_f64, 0.0, 0.5);
         let midpoint = (0.0, 0.0, 0.5 * (start.2 + end.2));
-        let ifil = 1.0;
+        let ifil = 1.0_f64;
         let axis_points = [("start", start), ("midpoint", midpoint), ("end", end)];
 
         for &wire_radius in &[0.0, 0.01, 0.1] {
@@ -1959,9 +1989,9 @@ mod test {
 
         let a_edge = amag[0];
         let pld = crate::math::point_line_distance_with_endpoints(
-            start,
-            end,
-            (wire_radius, 0.0, 0.0),
+            [start.0, start.1, start.2],
+            [end.0, end.1, end.2],
+            [wire_radius, 0.0, 0.0],
             wire_radius,
         );
         let sin_theta_a = pld.para_a / pld.dist_a;
@@ -2044,8 +2074,8 @@ mod test {
         let mut rel_err_axis = Vec::with_capacity(axis_z.len());
         let mut rel_err_outside = Vec::with_capacity(outside_x.len());
         for i in 0..xp.len() {
-            let a = rss3(ax[i], ay[i], az[i]);
-            let a_ref = rss3(ax_ref[i], ay_ref[i], az_ref[i]);
+            let a = norm3([ax[i], ay[i], az[i]]);
+            let a_ref = norm3([ax_ref[i], ay_ref[i], az_ref[i]]);
             let denom = a_ref.abs().max(1e-30);
             let err = (a - a_ref).abs() / denom;
             assert!(err.is_finite());
@@ -2089,12 +2119,12 @@ mod test {
 
     #[test]
     fn test_vector_potential_no_endpoint_blend_differs_from_thin_outside_projection() {
-        let wire_radius = 0.1;
-        let start = (0.0, 0.0, -0.5);
-        let end = (0.0, 0.0, 0.5);
-        let ifil = 1.0;
-        let x = 0.02;
-        let overhangs = [0.0, 0.02, 0.05, 0.1, 0.2];
+        let wire_radius = 0.1_f64;
+        let start = (0.0_f64, 0.0, -0.5);
+        let end = (0.0_f64, 0.0, 0.5);
+        let ifil = 1.0_f64;
+        let x = 0.02_f64;
+        let overhangs = [0.0_f64, 0.02, 0.05, 0.1, 0.2];
 
         let mut diff = Vec::with_capacity(overhangs.len());
 
@@ -2103,11 +2133,11 @@ mod test {
             let a_finite =
                 vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, obs);
             let a_thin = vector_potential_linear_filament_scalar((start, end, ifil), 0.0, obs);
-            diff.push(rss3(
+            diff.push(norm3([
                 a_finite.0 - a_thin.0,
                 a_finite.1 - a_thin.1,
                 a_finite.2 - a_thin.2,
-            ));
+            ]));
         }
 
         assert!(diff[0] > 0.0);
@@ -2158,13 +2188,13 @@ mod test {
     /// Explicitly check axis evaluations at both endpoints and midpoint are non-singular.
     #[test]
     fn test_vector_potential_axis_endpoint_midpoint_nonsingular_scalar() {
-        let start = (0.0, 0.0, -0.5);
-        let end = (0.0, 0.0, 0.5);
+        let start = (0.0_f64, 0.0, -0.5);
+        let end = (0.0_f64, 0.0, 0.5);
         let midpoint = (0.0, 0.0, 0.5 * (start.2 + end.2));
-        let ifil = 1.0;
+        let ifil = 1.0_f64;
         let axis_points = [("start", start), ("midpoint", midpoint), ("end", end)];
 
-        for &wire_radius in &[0.0, 0.01, 0.1] {
+        for &wire_radius in &[0.0_f64, 0.01, 0.1] {
             for &(label, p) in &axis_points {
                 let a = vector_potential_linear_filament_scalar((start, end, ifil), wire_radius, p);
                 assert!(
@@ -2372,7 +2402,7 @@ mod test {
                     let z = &(z - 1e-2);
 
                     // Scale tolerance and step size based on distance
-                    let r = rss3(*x, *y, *z);
+                    let r: f64 = norm3([*x, *y, *z]);
                     let atol = 1e-12 / r.max(1.0); // Smaller absolute tolerance as field falls off
                     let eps = 1e-8 * r; // Larger finite difference delta in far-field for resolution
 

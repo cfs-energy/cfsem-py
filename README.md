@@ -8,7 +8,7 @@ Quasi-steady electromagnetics including filamentized approximations, Biot-Savart
 
 Requirements
 
-* Python 3.9-3.13 and pip
+* Python 3.10-3.13 and pip
 * If on an x86 processor, you will need a CPU from roughly 2013 or later.
 
 ```bash
@@ -86,4 +86,4 @@ Anti-Goals
 
 ## License
 
-Licensed under the MIT license ([LICENSE](LICENSE) or http://opensource.org/licenses/MIT) .
+Licensed under the MIT license (see LICENSE or <http://opensource.org/licenses/MIT>) .

@@ -1,5 +1,9 @@
 #![allow(clippy::all)] // Clippy will attempt to remove black_box() internals
 
+use cfsem::physics::hierarchical::tree::BuildMethod;
+use cfsem::physics::hierarchical::{
+    flux_density_dipole_hierarchical, vector_potential_dipole_hierarchical,
+};
 use cfsem::physics::point_source::{
     flux_density_dipole, flux_density_dipole_par, vector_potential_dipole,
     vector_potential_dipole_par,
@@ -8,6 +12,8 @@ use criterion::*;
 use std::time::Duration;
 
 use std::hint::black_box;
+
+const HIERARCHICAL_THETA: f64 = 0.01;
 
 fn bench_flux_density_dipole(c: &mut Criterion) {
     let mut group = c.benchmark_group("Flux Density of a Magnetic Dipole");
@@ -79,6 +85,61 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                                 (&momx, &momy, &momz),
                                 &outer_radius,
                                 (&obsx, &obsy, &obsz),
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
+                        )
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Flux Density of a Magnetic Dipole, Hierarchical\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(
+                            flux_density_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                (&obsx, &obsy, &obsz),
+                                &outer_radius,
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                false,
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
+                        )
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Flux Density of a Magnetic Dipole, Hierarchical Parallel\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(
+                            flux_density_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                (&obsx, &obsy, &obsz),
+                                &outer_radius,
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                true,
                                 (&mut outx, &mut outy, &mut outz),
                             )
                             .unwrap(),
@@ -162,6 +223,61 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                                 (&momx, &momy, &momz),
                                 &outer_radius,
                                 (&obsx, &obsy, &obsz),
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
+                        )
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Vector Potential of a Magnetic Dipole, Hierarchical\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(
+                            vector_potential_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                (&obsx, &obsy, &obsz),
+                                &outer_radius,
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                false,
+                                (&mut outx, &mut outy, &mut outz),
+                            )
+                            .unwrap(),
+                        )
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(
+                    format!(
+                        "Vector Potential of a Magnetic Dipole, Hierarchical Parallel\n{} src × {} obs",
+                        ndipoles, nobs
+                    ),
+                    ntot,
+                ),
+                &ntot,
+                |b, &_| {
+                    b.iter(|| {
+                        black_box(
+                            vector_potential_dipole_hierarchical(
+                                (&locx, &locy, &locz),
+                                (&momx, &momy, &momz),
+                                (&obsx, &obsy, &obsz),
+                                &outer_radius,
+                                BuildMethod::LongestAxis,
+                                HIERARCHICAL_THETA,
+                                true,
                                 (&mut outx, &mut outy, &mut outz),
                             )
                             .unwrap(),

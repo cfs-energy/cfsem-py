@@ -1,5 +1,34 @@
 # Changelog
 
+## 11.0.0 2026-06-24
+
+* Rust
+    * !Consolidate math helper functions and use consistent array argument format
+    * !Update filament, dipole, and boundary-element kernel functions and their dependencies to be generic over float type
+    * !Remove Python 3.9 support
+    * Improve parallel chunking by using lazy-static physical CPU count
+    * Implement single-source-tree Barnes-Hut system under `hierarchical` module
+    * Implement tree kernels for filaments, dipoles, and boundary-element mesh
+    * Add hierarchical linear-filament and dipole benchmarks
+    * Add mesh and triangle helper utilities used by hierarchical boundary-element calculations
+    * Fix parallel chunk-size heuristic for single-core systems
+    * Return centerline points from `filament_helix_path` when helix offset is near zero
+    * Forbid unsafe Rust code at the crate level
+    * Fix rustdoc lints
+    * Rescale Dunavant triangle quadrature weights to sum to 1.0 instead of 0.5 and update downstream calcs for this change
+* Python
+    * Add bindings to new hierarchical solver methods
+    * Add full Python extension type stubs
+    * Add hierarchical field comparison GUI example
+    * Add hierarchical linear-filament self-field convergence example
+    * Add tests for hierarchical solver bindings and zero-offset helix paths
+    * Reorganize Python API docs by geometry type instead of field type
+    * Add hierarchical result types to Python docs
+    * Add hierarchical functions and diagnostics result types to public exports
+    * Add `MU_0` and `inductance_matrix_axisymmetric_coaxial_rectangular_coils` to public exports
+    * Correct wrapper type hints for sparse triplets and circular-to-linear mutual inductance
+    * Use ty instead of pyright
+
 ## 10.0.0 2026-06-09
 
 * Rust

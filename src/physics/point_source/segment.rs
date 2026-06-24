@@ -11,7 +11,7 @@ use crate::physics::point_source::current_element::{
 };
 use crate::{
     chunksize,
-    math::{cross3, decompose_filament},
+    math::{Scalar, cross3},
 };
 
 use crate::macros::*;
@@ -115,6 +115,21 @@ pub fn flux_density_point_segment(
     Ok(())
 }
 
+/// Return the midpoint point-current element representation of one finite segment.
+#[inline]
+fn decompose_filament_segment<T: Scalar>(xyzifil: ((T, T, T), (T, T, T), T)) -> ([T; 3], [T; 3]) {
+    let (xyz0, xyz1, ifil) = xyzifil;
+    let half = crate::math::cast::<T>(0.5);
+    let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
+    let src = [
+        half.mul_add(dl.0, xyz0.0),
+        half.mul_add(dl.1, xyz0.1),
+        half.mul_add(dl.2, xyz0.2),
+    ];
+    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
+    (src, moment)
+}
+
 /// Biot-Savart calculation for B-field contribution one filament
 /// to one observation point.
 ///
@@ -128,18 +143,13 @@ pub fn flux_density_point_segment(
 /// # Returns
 ///
 /// * `b`:        (T) Magnetic flux density (B-field)
-pub fn flux_density_point_segment_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
-    // Unpack
-    let (xyz0, xyz1, ifil) = xyzifil;
-    let (xp, yp, zp) = xyzobs;
-
-    // Get filament midpoint and length vector
-    let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
-    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
-    let b = flux_density_current_element_scalar([xmid, ymid, zmid], moment, [xp, yp, zp]);
+#[inline]
+pub fn flux_density_point_segment_scalar<T: Scalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
+    let (src, moment) = decompose_filament_segment(xyzifil);
+    let b = flux_density_current_element_scalar(src, moment, [xyzobs.0, xyzobs.1, xyzobs.2]);
     (b[0], b[1], b[2])
 }
 
@@ -256,21 +266,12 @@ pub fn vector_potential_point_segment(
 ///
 /// * `a`:        (V-s/m) Vector potential x, y, z components
 #[inline]
-pub fn vector_potential_point_segment_scalar(
-    xyzifil: ((f64, f64, f64), (f64, f64, f64), f64),
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
-    // Unpack
-    let (xyz0, xyz1, ifil) = xyzifil;
-
-    // Get filament midpoint and length vector
-    let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
-    let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
-    let a = vector_potential_current_element_scalar(
-        [xmid, ymid, zmid],
-        moment,
-        [xyzobs.0, xyzobs.1, xyzobs.2],
-    );
+pub fn vector_potential_point_segment_scalar<T: Scalar>(
+    xyzifil: ((T, T, T), (T, T, T), T),
+    xyzobs: (T, T, T),
+) -> (T, T, T) {
+    let (src, moment) = decompose_filament_segment(xyzifil);
+    let a = vector_potential_current_element_scalar(src, moment, [xyzobs.0, xyzobs.1, xyzobs.2]);
     (a[0], a[1], a[2])
 }
 
@@ -297,7 +298,8 @@ pub fn body_force_density_point_segment_scalar(
     let (bx, by, bz) = flux_density_point_segment_scalar(xyzifil, xyzobs); // [T]
 
     // Take JxB Lorentz force
-    cross3(jobs.0, jobs.1, jobs.2, bx, by, bz) // [N/m^3]
+    let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
+    (out[0], out[1], out[2])
 }
 
 /// JxB (Lorentz) body force density (per volume) due to a linear current
@@ -417,7 +419,7 @@ mod test {
     use std::f64::consts::PI;
 
     use super::*;
-    use crate::math::rss3;
+    use crate::math::norm3;
     use crate::mesh::quadrature::{GaussLegendreRule, gauss_legendre_unit_interval_table};
     use crate::physics::linear_filament::{
         inductance_piecewise_linear_filaments, vector_potential_linear_filament,
@@ -429,12 +431,15 @@ mod test {
 
     #[test]
     fn test_point_segment_scalars_match_current_element_midpoint_mapping() {
-        let xyz0 = (-0.4, 0.2, 0.7);
-        let xyz1 = (0.8, -0.3, 1.1);
-        let ifil = -2.3;
-        let obs = (1.4, -0.9, 0.6);
+        let xyz0 = (-0.4_f64, 0.2_f64, 0.7_f64);
+        let xyz1 = (0.8_f64, -0.3_f64, 1.1_f64);
+        let ifil = -2.3_f64;
+        let obs = (1.4_f64, -0.9_f64, 0.6_f64);
 
-        let ((xmid, ymid, zmid), dl) = decompose_filament(xyz0, xyz1);
+        let dl = (xyz1.0 - xyz0.0, xyz1.1 - xyz0.1, xyz1.2 - xyz0.2);
+        let xmid = dl.0.mul_add(0.5, xyz0.0);
+        let ymid = dl.1.mul_add(0.5, xyz0.1);
+        let zmid = dl.2.mul_add(0.5, xyz0.2);
         let moment = [ifil * dl.0, ifil * dl.1, ifil * dl.2];
 
         let b_segment = flux_density_point_segment_scalar((xyz0, xyz1, ifil), obs);
@@ -467,8 +472,8 @@ mod test {
 
     #[test]
     fn test_current_element_scalars_zero_inside_distance_tolerance() {
-        let src = [0.1, -0.2, 0.3];
-        let moment = [0.4, -0.7, 1.1];
+        let src = [0.1_f64, -0.2, 0.3];
+        let moment = [0.4_f64, -0.7, 1.1];
 
         let obs_near = [src[0] + 0.5e-14, src[1], src[2]];
         let b_near = flux_density_current_element_scalar(src, moment, obs_near);
@@ -534,9 +539,9 @@ mod test {
             // Make sure jxb points outward everywhere
             for j in 0..ndiscr - 1 {
                 let r: (f64, f64, f64) = (x[j], y[j], 0.0);
-                let rxjxb = cross3(r.0, r.1, r.2, jxbx[j], jxby[j], jxbz[j]);
+                let rxjxb = cross3([r.0, r.1, r.2], [jxbx[j], jxby[j], jxbz[j]]);
                 // Linear filaments aren't perfectly aligned, so we need a slighter wider tolerance here
-                assert!(approx(0.0, rss3(rxjxb.0, rxjxb.1, rxjxb.2), rtol, 1e-8));
+                assert!(approx(0.0, norm3(rxjxb), rtol, 1e-8));
             }
         }
 

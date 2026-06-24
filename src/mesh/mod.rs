@@ -1,11 +1,10 @@
 //! Meshing, filamentization, and reference-geometry infrastructure.
 
-use crate::math::{cross3, dot3, rss3};
+use crate::math::{cross3, dot3, norm3, normalize3, scale3, sub3};
 use core::f64::consts::PI;
 
 use nalgebra::Vector3;
 use nalgebra::geometry::Rotation3;
-use num_traits::{Float, FromPrimitive};
 
 pub mod elements;
 pub mod quad2d;
@@ -19,14 +18,8 @@ pub use quadrature::GaussLegendreRule;
 pub use sampling::{FaceSample, VolumeSample};
 pub use triangle3d::TriangleMeshView;
 
-/// Floating-point trait bound shared by the reusable mesh/element helpers.
-pub trait Scalar: Float + FromPrimitive + Copy + std::fmt::Debug + Send + Sync + 'static {}
-
-impl<T> Scalar for T where T: Float + FromPrimitive + Copy + std::fmt::Debug + Send + Sync + 'static {}
-
-pub(crate) fn cast<F: Scalar>(value: f64) -> F {
-    F::from_f64(value).expect("finite f64 literal should cast to target float")
-}
+pub use crate::math::Scalar;
+pub(crate) use crate::math::cast;
 
 /// Filamentize a helix about an arbitrary piecewise-linear path.
 ///
@@ -50,7 +43,7 @@ pub(crate) fn cast<F: Scalar>(value: f64) -> F {
 /// but its orientation is not.
 pub fn filament_helix_path(
     path: (&[f64], &[f64], &[f64]),
-    helix_start_offset: (f64, f64, f64),
+    helix_start_offset: [f64; 3],
     twist_pitch: f64,
     angle_offset: f64,
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -69,34 +62,29 @@ pub fn filament_helix_path(
         return Err("Output dimension mismatch");
     }
 
+    if norm3(helix_start_offset) < f64::EPSILON.sqrt() {
+        xfil.copy_from_slice(xp);
+        yfil.copy_from_slice(yp);
+        zfil.copy_from_slice(zp);
+        return Ok(());
+    }
+
     {
-        let ds = (xp[1] - xp[0], yp[1] - yp[0], zp[1] - zp[0]);
-        let ds_unit = tuplenormalize(ds);
+        let ds = [xp[1] - xp[0], yp[1] - yp[0], zp[1] - zp[0]];
+        let ds_unit = normalize3(ds);
 
-        let parallel_mag = tupledot(helix_start_offset, ds_unit);
-        let parallel_component = (
-            ds_unit.0 * parallel_mag,
-            ds_unit.1 * parallel_mag,
-            ds_unit.2 * parallel_mag,
-        );
+        let parallel_mag = dot3(helix_start_offset, ds_unit);
+        let parallel_component = scale3(ds_unit, parallel_mag);
 
-        let helix_start_offset_projected = (
-            helix_start_offset.0 - parallel_component.0,
-            helix_start_offset.1 - parallel_component.1,
-            helix_start_offset.2 - parallel_component.2,
-        );
+        let helix_start_offset_projected = sub3(helix_start_offset, parallel_component);
 
-        let helix_start_offset_mag = tuplerss(helix_start_offset);
-        let projected_mag = tuplerss(helix_start_offset_projected);
+        let helix_start_offset_mag = norm3(helix_start_offset);
+        let projected_mag = norm3(helix_start_offset_projected);
 
         let c = helix_start_offset_mag / projected_mag;
-        let helix_start_offset_corrected = (
-            helix_start_offset_projected.0 * c,
-            helix_start_offset_projected.1 * c,
-            helix_start_offset_projected.2 * c,
-        );
+        let helix_start_offset_corrected = scale3(helix_start_offset_projected, c);
 
-        let final_mag = tuplerss(helix_start_offset_corrected);
+        let final_mag = norm3(helix_start_offset_corrected);
 
         if (1.0 - helix_start_offset_mag / final_mag).abs() > 1e-4 {
             return Err(
@@ -104,7 +92,7 @@ pub fn filament_helix_path(
             );
         }
 
-        let final_parallel_mag = tupledot(helix_start_offset_corrected, ds_unit);
+        let final_parallel_mag = dot3(helix_start_offset_corrected, ds_unit);
 
         if final_parallel_mag > 1e-4 * helix_start_offset_mag {
             return Err(
@@ -112,30 +100,30 @@ pub fn filament_helix_path(
             );
         }
 
-        xfil[0] = helix_start_offset_corrected.0 + xp[0];
-        yfil[0] = helix_start_offset_corrected.1 + yp[0];
-        zfil[0] = helix_start_offset_corrected.2 + zp[0];
+        xfil[0] = helix_start_offset_corrected[0] + xp[0];
+        yfil[0] = helix_start_offset_corrected[1] + yp[0];
+        zfil[0] = helix_start_offset_corrected[2] + zp[0];
     }
 
-    let mut ds = (xp[1] - xp[0], yp[1] - yp[0], zp[1] - zp[0]);
+    let mut ds = [xp[1] - xp[0], yp[1] - yp[0], zp[1] - zp[0]];
     for i in 1..n {
         let ds_prev = ds;
-        let ds_prev_unit = tuplenormalize(ds_prev);
+        let ds_prev_unit = normalize3(ds_prev);
 
         if i < n - 1 {
-            ds = (xp[i + 1] - xp[i], yp[i + 1] - yp[i], zp[i + 1] - zp[i]);
+            ds = [xp[i + 1] - xp[i], yp[i + 1] - yp[i], zp[i + 1] - zp[i]];
         } else {
             ds = ds_prev;
         }
-        let ds_mag = tuplerss(ds);
-        let ds_unit = tuplenormalize(ds);
+        let ds_mag = norm3(ds);
+        let ds_unit = normalize3(ds);
 
-        let perpendicularity = tuplerss(tuplecross(ds_unit, ds_prev_unit));
-        let maybe_path_rotation = Rotation3::rotation_between(
-            &Vector3::from([ds_prev_unit.0, ds_prev_unit.1, ds_prev_unit.2]),
-            &Vector3::from([ds_unit.0, ds_unit.1, ds_unit.2]),
-        )
-        .ok_or("Path orientation rotation failed, likely due to path segment angle > 90 deg")?;
+        let perpendicularity = norm3(cross3(ds_unit, ds_prev_unit));
+        let maybe_path_rotation =
+            Rotation3::rotation_between(&Vector3::from(ds_prev_unit), &Vector3::from(ds_unit))
+                .ok_or(
+                    "Path orientation rotation failed, likely due to path segment angle > 90 deg",
+                )?;
 
         let rotation_almost_parallel = maybe_path_rotation.into_inner().iter().any(|x| x.is_nan());
         let path_rotation = if perpendicularity < 1e-16 || rotation_almost_parallel {
@@ -145,9 +133,7 @@ pub fn filament_helix_path(
         };
 
         let twist_angle = 2.0 * PI * ds_mag / twist_pitch;
-        let twist_rotation = Rotation3::from_scaled_axis(
-            twist_angle * Vector3::from([ds_unit.0, ds_unit.1, ds_unit.2]),
-        );
+        let twist_rotation = Rotation3::from_scaled_axis(twist_angle * Vector3::from(ds_unit));
 
         let r_prev = Vector3::from([
             xfil[i - 1] - xp[i - 1],
@@ -195,15 +181,13 @@ pub fn rotate_filaments_about_path(
 
     for i in 0..n {
         let ds = if i < n - 1 {
-            (xp[i + 1] - xp[i], yp[i + 1] - yp[i], zp[i + 1] - zp[i])
+            [xp[i + 1] - xp[i], yp[i + 1] - yp[i], zp[i + 1] - zp[i]]
         } else {
-            (xp[i] - xp[i - 1], yp[i] - yp[i - 1], zp[i] - zp[i - 1])
+            [xp[i] - xp[i - 1], yp[i] - yp[i - 1], zp[i] - zp[i - 1]]
         };
 
-        let ds_unit = tuplenormalize(ds);
-        let rotation = Rotation3::from_scaled_axis(
-            angle_offset * Vector3::from([ds_unit.0, ds_unit.1, ds_unit.2]),
-        );
+        let ds_unit = normalize3(ds);
+        let rotation = Rotation3::from_scaled_axis(angle_offset * Vector3::from(ds_unit));
 
         let mut r = Vector3::from([xfil[i] - xp[i], yfil[i] - yp[i], zfil[i] - zp[i]]);
         r = rotation * r;
@@ -214,25 +198,4 @@ pub fn rotate_filaments_about_path(
     }
 
     Ok(())
-}
-
-#[inline]
-fn tupledot(a: (f64, f64, f64), b: (f64, f64, f64)) -> f64 {
-    dot3(a.0, a.1, a.2, b.0, b.1, b.2)
-}
-
-#[inline]
-fn tuplerss(a: (f64, f64, f64)) -> f64 {
-    rss3(a.0, a.1, a.2)
-}
-
-#[inline]
-fn tuplenormalize(a: (f64, f64, f64)) -> (f64, f64, f64) {
-    let mag = tuplerss(a);
-    (a.0 / mag, a.1 / mag, a.2 / mag)
-}
-
-#[inline]
-fn tuplecross(a: (f64, f64, f64), b: (f64, f64, f64)) -> (f64, f64, f64) {
-    cross3(a.0, a.1, a.2, b.0, b.1, b.2)
 }

@@ -1,13 +1,16 @@
 """
 Symmetric bindings for backend calcs.
 
-This fulfills the function of typing stubs, while also guaranteeing arrays are
-passed as contiguous and reallocating into contiguous inputs if necessary.
+These wrappers provide the ergonomic public Python API around lower-level Rust
+extension functions. Most wrappers normalize accepted array layouts into
+contiguous component arrays before calling Rust. Hierarchical one-shot solvers
+are imported directly from the Rust extension and are documented in
+`cfsem/cfsem.pyi`.
 """
 
 from typing import Literal
 
-from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, zeros_like
+from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, uint64, zeros_like
 from numpy.typing import NDArray
 
 from cfsem.types import Array3xN
@@ -25,10 +28,14 @@ from .cfsem import (
     flux_density_circular_filament_cartesian as em_flux_density_circular_filament_cartesian,
 )
 from .cfsem import flux_density_dipole as em_flux_density_dipole
+from .cfsem import flux_density_dipole_hierarchical
 from .cfsem import vector_potential_dipole as em_vector_potential_dipole
+from .cfsem import vector_potential_dipole_hierarchical
 from .cfsem import flux_density_linear_filament as em_flux_density_linear_filament
+from .cfsem import flux_density_linear_filament_hierarchical
 from .cfsem import flux_density_triangle_mesh_mapping as em_flux_density_triangle_mesh_mapping
 from .cfsem import flux_density_triangle_mesh as em_flux_density_triangle_mesh
+from .cfsem import flux_density_triangle_mesh_hierarchical
 from .cfsem import (
     flux_density_linear_filament_matrix as em_flux_density_linear_filament_matrix,
 )
@@ -77,6 +84,7 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
+from .cfsem import vector_potential_linear_filament_hierarchical
 from .cfsem import (
     vector_potential_triangle_mesh_mapping as em_vector_potential_triangle_mesh_mapping,
 )
@@ -87,6 +95,57 @@ from .cfsem import (
 from .cfsem import (
     vector_potential_point_segment as em_vector_potential_point_segment,
 )
+from .cfsem import vector_potential_triangle_mesh_hierarchical
+from .cfsem import HierarchicalDiagnostics
+from .cfsem import SolveResult
+
+SparseTriplet = tuple[NDArray[float64], NDArray[uint64], NDArray[uint64]]
+
+__all__ = [
+    "SparseTriplet",
+    "body_force_density_circular_filament_cartesian",
+    "body_force_density_linear_filament",
+    "filament_helix_path",
+    "flux_circular_filament",
+    "flux_density_circular_filament",
+    "flux_density_circular_filament_cartesian",
+    "flux_density_dipole",
+    "flux_density_dipole_hierarchical",
+    "flux_density_linear_filament",
+    "flux_density_linear_filament_hierarchical",
+    "flux_density_point_segment",
+    "flux_density_triangle_mesh",
+    "flux_density_triangle_mesh_mapping",
+    "flux_density_triangle_mesh_hierarchical",
+    "gs_operator_order2",
+    "gs_operator_order4",
+    "HierarchicalDiagnostics",
+    "SolveResult",
+    "inductance_linear_filaments",
+    "inductance_piecewise_linear_filaments",
+    "mutual_inductance_circular_to_linear",
+    "rotate_filaments_about_path",
+    "triangle_mesh_current_density",
+    "triangle_mesh_flux_linkage_mapping_from_dipoles",
+    "triangle_mesh_force_mapping",
+    "triangle_mesh_force_mapping_from_circular_filaments",
+    "triangle_mesh_force_mapping_from_dipoles",
+    "triangle_mesh_force_mapping_from_linear_filaments",
+    "triangle_mesh_inductance_mapping_from_circular_filaments",
+    "triangle_mesh_inductance_mapping_from_linear_filaments",
+    "triangle_mesh_inductance_matrix",
+    "triangle_mesh_quadrature_points",
+    "triangle_mesh_self_force_mapping",
+    "vector_potential_circular_filament",
+    "vector_potential_dipole",
+    "vector_potential_dipole_hierarchical",
+    "vector_potential_linear_filament",
+    "vector_potential_linear_filament_hierarchical",
+    "vector_potential_point_segment",
+    "vector_potential_triangle_mesh",
+    "vector_potential_triangle_mesh_mapping",
+    "vector_potential_triangle_mesh_hierarchical",
+]
 
 
 def flux_circular_filament(
@@ -1007,7 +1066,7 @@ def inductance_linear_filaments(
     raise ValueError("output must be 'vector' or 'matrix'")
 
 
-def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
+def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> SparseTriplet:
     """Build second-order Grad-Shafranov operator in triplet format.
     Assumes regular grid spacing.
 
@@ -1022,7 +1081,7 @@ def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
     return em_gs_operator_order2(rs, zs)
 
 
-def gs_operator_order4(rs: NDArray[float64], zs: NDArray[float64]) -> Array3xN:
+def gs_operator_order4(rs: NDArray[float64], zs: NDArray[float64]) -> SparseTriplet:
     """
     Build fourth-order Grad-Shafranov operator in triplet format.
     Assumes regular grid spacing.
@@ -1148,7 +1207,7 @@ def flux_density_circular_filament_cartesian(
     xyzp = _3tup_contig(xyzp)
     bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, xyzp, par)  # [T]
 
-    return bx, by, bz  # type: ignore
+    return bx, by, bz
 
 
 def mutual_inductance_circular_to_linear(
@@ -1158,7 +1217,7 @@ def mutual_inductance_circular_to_linear(
     xyzfil: Array3xN,
     dlxyzfil: Array3xN,
     par: bool = True,
-) -> NDArray[float64]:
+) -> float:
     """
     Mutual inductance between a collection of circular filaments and a piecewise-linear filament.
     This method is much faster (~100x typically) than discretizing the circular loop
@@ -1212,7 +1271,7 @@ def flux_density_dipole(
 
     bx, by, bz = em_flux_density_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
-    return bx, by, bz  # type: ignore
+    return bx, by, bz
 
 
 def vector_potential_dipole(
@@ -1243,7 +1302,7 @@ def vector_potential_dipole(
 
     ax, ay, az = em_vector_potential_dipole(loc, moment, xyzp, outer_radius, par)  # [T]
 
-    return ax, ay, az  # type: ignore
+    return ax, ay, az
 
 
 def body_force_density_circular_filament_cartesian(
@@ -1276,7 +1335,7 @@ def body_force_density_circular_filament_cartesian(
         ifil, rfil, zfil, obs, j, par
     )  # [N/m^3]
 
-    return jxbx, jxby, jxbz  # type: ignore
+    return jxbx, jxby, jxbz
 
 
 def body_force_density_linear_filament(
@@ -1316,7 +1375,7 @@ def body_force_density_linear_filament(
         xyzfil, dlxyzfil, ifil, obs, j, wire_radius, par
     )  # [N/m^3]
 
-    return jxbx, jxby, jxbz  # type: ignore
+    return jxbx, jxby, jxbz
 
 
 def _3tup_contig(
@@ -1324,11 +1383,27 @@ def _3tup_contig(
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """Make contiguous references or copies to arrays in a 3-tuple.
     Only copies data if it is not already contiguous."""
-    return (
-        ascontiguousarray(t[0]).ravel(),
-        ascontiguousarray(t[1]).ravel(),
-        ascontiguousarray(t[2]).ravel(),
-    )
+    if isinstance(t, tuple):
+        return (
+            ascontiguousarray(t[0]).ravel(),
+            ascontiguousarray(t[1]).ravel(),
+            ascontiguousarray(t[2]).ravel(),
+        )
+    arr = asarray(t)
+    if arr.ndim == 2 and arr.shape[1] == 3:
+        return (
+            ascontiguousarray(arr[:, 0]).ravel(),
+            ascontiguousarray(arr[:, 1]).ravel(),
+            ascontiguousarray(arr[:, 2]).ravel(),
+        )
+    if arr.ndim == 2 and arr.shape[0] == 3:
+        return (
+            ascontiguousarray(arr[0, :]).ravel(),
+            ascontiguousarray(arr[1, :]).ravel(),
+            ascontiguousarray(arr[2, :]).ravel(),
+        )
+    msg = "Expected a tuple of three coordinate arrays or a 2D array with one dimension of length 3"
+    raise ValueError(msg)
 
 
 def _2tup_contig(

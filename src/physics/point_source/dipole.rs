@@ -7,14 +7,35 @@ use rayon::{
 
 use crate::{
     MU0_OVER_4PI, chunksize,
-    macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{clip_nan, cross3, dot3, rss3},
+    macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
+    math::{Scalar, cross3, dot3},
     physics::volumetric::{
-        flux_density_inside_magnetized_sphere, vector_potential_inside_magnetized_sphere,
+        flux_density_inside_magnetized_sphere, vector_potential_inside_magnetized_sphere_generic,
     },
 };
 
 /// Magnetic flux density of a dipole in cartesian coordinates.
+/// For more details, see [flux_density_dipole_scalar_generic].
+#[inline]
+pub fn flux_density_dipole_scalar(
+    loc: (f64, f64, f64),
+    moment: (f64, f64, f64),
+    outer_radius: f64,
+    obs: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let out = flux_density_dipole_scalar_generic(
+        [loc.0, loc.1, loc.2],
+        [moment.0, moment.1, moment.2],
+        outer_radius,
+        [obs.0, obs.1, obs.2],
+    );
+    (out[0], out[1], out[2])
+}
+
+/// Magnetic flux density of a dipole in cartesian coordinates.
+///
+/// Generic scalar helper used by both the f64 public point-source API and
+/// generic hierarchical dipole kernels.
 ///
 /// Arguments
 ///
@@ -25,32 +46,32 @@ use crate::{
 ///
 /// Returns
 ///
-/// * (bx, by, bz) [T] magnetic field components at observation point
+/// * (bx, by, bz) \[T\] magnetic field components at observation point
 #[inline]
-pub fn flux_density_dipole_scalar(
-    loc: (f64, f64, f64),
-    moment: (f64, f64, f64),
-    outer_radius: f64,
-    obs: (f64, f64, f64),
-) -> (f64, f64, f64) {
+pub fn flux_density_dipole_scalar_generic<T: Scalar>(
+    loc: [T; 3],
+    moment: [T; 3],
+    outer_radius: T,
+    obs: [T; 3],
+) -> [T; 3] {
     // Radius vector decomposed into direction and magnitude
-    let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
-    let r2 = dot3(r.0, r.1, r.2, r.0, r.1, r.2);
+    let r = [obs[0] - loc[0], obs[1] - loc[1], obs[2] - loc[2]]; // [m]
+    let r2 = dot3(r, r);
     let rmag = r2.sqrt(); // [m]
-    let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
+    let rhat = [r[0] / rmag, r[1] / rmag, r[2] / rmag]; // [dimensionless]
     let r3 = r2 * rmag; // [m^3]
 
     // r(dot(m, r))/|r|^5 reordered to avoid computing the 5th power for improved float resolution
-    let m_dot_rhat = dot3(moment.0, moment.1, moment.2, rhat.0, rhat.1, rhat.2);
+    let m_dot_rhat = dot3(moment, rhat);
 
     // Assemble components
-    let c = MU0_OVER_4PI / r3; // [H/m^4]
-    let c1 = 3.0 * m_dot_rhat; // [A-m^2]
-    let tsum = (
-        rhat.0.mul_add(c1, -moment.0),
-        rhat.1.mul_add(c1, -moment.1),
-        rhat.2.mul_add(c1, -moment.2),
-    );
+    let c = crate::math::cast::<T>(MU0_OVER_4PI) / r3; // [H/m^4]
+    let c1 = crate::math::cast::<T>(3.0) * m_dot_rhat; // [A-m^2]
+    let tsum = [
+        rhat[0].mul_add(c1, T::ZERO - moment[0]),
+        rhat[1].mul_add(c1, T::ZERO - moment[1]),
+        rhat[2].mul_add(c1, T::ZERO - moment[2]),
+    ];
 
     // Defer to magnetized sphere if necessary
     // This branch does not cause a cache miss because the conditional
@@ -59,17 +80,23 @@ pub fn flux_density_dipole_scalar(
     // branch is extremely predictable, and can be resolved consistently
     // between when rmag is calculated and when the other dependencies are done.
     let inside = rmag < outer_radius;
-    let (mut bx, mut by, mut bz) = match inside {
+    let mut out = match inside {
         true => flux_density_inside_magnetized_sphere(moment, outer_radius),
-        false => (c * tsum.0, c * tsum.1, c * tsum.2),
+        false => [c * tsum[0], c * tsum[1], c * tsum[2]],
     }; // [T]
 
     // This does not produce a jmp
-    bx = clip_nan(bx, 0.0);
-    by = clip_nan(by, 0.0);
-    bz = clip_nan(bz, 0.0);
+    for item in &mut out {
+        *item = clip_nan_generic(*item, T::ZERO);
+    }
 
-    (bx, by, bz) // [T]
+    out // [T]
+}
+
+#[inline]
+/// Replace a non-finite scalar with a finite fallback value.
+fn clip_nan_generic<T: Scalar>(value: T, fallback: T) -> T {
+    if value.is_nan() { fallback } else { value }
 }
 
 /// Magnetic flux density of a dipole in cartesian coordinates.
@@ -88,6 +115,7 @@ pub fn flux_density_dipole(
 
     check_length_3tup!(m, &loc);
     check_length_3tup!(m, &moment);
+    check_length!(m, outer_radius);
     check_length_3tup!(n, &obs);
     check_length_3tup!(n, &out);
 
@@ -159,18 +187,49 @@ pub fn vector_potential_dipole_scalar(
     outer_radius: f64,
     obs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
+    let out = vector_potential_dipole_scalar_generic(
+        [loc.0, loc.1, loc.2],
+        [moment.0, moment.1, moment.2],
+        outer_radius,
+        [obs.0, obs.1, obs.2],
+    );
+    (out[0], out[1], out[2])
+}
+
+/// Vector potential of a dipole in cartesian coordinates.
+///
+/// Generic scalar helper used by both the f64 public point-source API and
+/// generic hierarchical dipole kernels.
+///
+/// Arguments
+///
+/// * loc: (m) location of the point source
+/// * moment: (A-m^2) magnetic moment vector of the point source
+/// * obs: (m) observation point to examine
+/// * outer_radius: (m) radius inside which to defer to magnetized sphere calc
+///
+/// Returns
+///
+/// * (ax, ay, az) [V-s/m] vector potential components at observation point
+#[inline]
+pub fn vector_potential_dipole_scalar_generic<T: Scalar>(
+    loc: [T; 3],
+    moment: [T; 3],
+    outer_radius: T,
+    obs: [T; 3],
+) -> [T; 3] {
     // Radius and moment vectors decomposed into direction and magnitude
-    let r = (obs.0 - loc.0, obs.1 - loc.1, obs.2 - loc.2); // [m]
-    let r2 = dot3(r.0, r.1, r.2, r.0, r.1, r.2); // [m^2]
+    let r = [obs[0] - loc[0], obs[1] - loc[1], obs[2] - loc[2]]; // [m]
+    let r2 = dot3(r, r); // [m^2]
     let rmag = r2.sqrt(); // [m]
-    let rhat = (r.0 / rmag, r.1 / rmag, r.2 / rmag); // [dimensionless]
+    let rhat = [r[0] / rmag, r[1] / rmag, r[2] / rmag]; // [dimensionless]
     let m = moment;
-    let mmag = rss3(m.0, m.1, m.2); // [A-m^2]
-    let mhat = (m.0 / mmag, m.1 / mmag, m.2 / mmag); // [dimensionless]
+    let mmag = dot3(m, m).sqrt(); // [A-m^2]
+    let mhat = [m[0] / mmag, m[1] / mmag, m[2] / mmag]; // [dimensionless]
 
     // mhat x rhat
     // Use normalized vectors for cross product to improve float roundoff
-    let mhat_cross_rhat = cross3(mhat.0, mhat.1, mhat.2, rhat.0, rhat.1, rhat.2);
+    let mhat_cross_rhat = cross3(mhat, rhat);
 
     // Defer to magnetized sphere if necessary.
     // This branch does not cause a cache miss because the conditional
@@ -179,28 +238,31 @@ pub fn vector_potential_dipole_scalar(
     // branch is extremely predictable, and can be resolved consistently
     // between when rmag is calculated and when the other dependencies are done.
     let inside = rmag < outer_radius;
-    let (mut ax, mut ay, mut az) = match inside {
+    let mut out = match inside {
         // Magnetized sphere internal field
-        true => {
-            vector_potential_inside_magnetized_sphere(mhat_cross_rhat, mmag, rmag, outer_radius)
-        }
+        true => vector_potential_inside_magnetized_sphere_generic(
+            mhat_cross_rhat,
+            mmag,
+            rmag,
+            outer_radius,
+        ),
         // Dipole field
         false => {
-            let c = MU0_OVER_4PI * mmag / r2; // [V-s/m] Shared factor
-            (
-                mhat_cross_rhat.0 * c,
-                mhat_cross_rhat.1 * c,
-                mhat_cross_rhat.2 * c,
-            )
+            let c = crate::math::cast::<T>(MU0_OVER_4PI) * mmag / r2; // [V-s/m] Shared factor
+            [
+                mhat_cross_rhat[0] * c,
+                mhat_cross_rhat[1] * c,
+                mhat_cross_rhat[2] * c,
+            ]
         }
     };
 
     // This does not produce a jmp
-    ax = clip_nan(ax, 0.0);
-    ay = clip_nan(ay, 0.0);
-    az = clip_nan(az, 0.0);
+    for item in &mut out {
+        *item = clip_nan_generic(*item, T::ZERO);
+    }
 
-    (ax, ay, az) // [V-s/m]
+    out // [V-s/m]
 }
 
 /// Magnetic vector potential of a dipole in cartesian coordinates.
@@ -219,6 +281,7 @@ pub fn vector_potential_dipole(
 
     check_length_3tup!(m, &loc);
     check_length_3tup!(m, &moment);
+    check_length!(m, outer_radius);
     check_length_3tup!(n, &obs);
     check_length_3tup!(n, &out);
 

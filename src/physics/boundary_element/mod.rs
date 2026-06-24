@@ -9,7 +9,8 @@
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
 //! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
 
-use crate::math::rss3;
+use crate::math::Scalar;
+use crate::math::norm3;
 use crate::mesh::TriangleMeshView;
 pub use crate::mesh::elements::tri::mapping::{
     area as calc_tri_area, map_point as map_tri_uv, normal as calc_tri_normal,
@@ -76,14 +77,16 @@ pub use vector_potential::{
 const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 
 #[inline]
-fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (f64, [f64; 3]) {
+/// Return the triangle area and constant basis-current density vector.
+fn triangle_basis_current_density<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> (T, [T; 3]) {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]]; // [m]
     let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]]; // [m]
     let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
+    let two_area = tri_area + tri_area; // [m^2]
     let jref = [
-        (v01[0] - v02[0]) / tri_area, // [1/m]
-        (v01[1] - v02[1]) / tri_area, // [1/m]
-        (v01[2] - v02[2]) / tri_area, // [1/m]
+        (v01[0] - v02[0]) / two_area, // [1/m]
+        (v01[1] - v02[1]) / two_area, // [1/m]
+        (v01[2] - v02[2]) / two_area, // [1/m]
     ];
 
     (tri_area, jref)
@@ -107,7 +110,11 @@ fn triangle_basis_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> (
 ///     Three basis current-density vectors `[[jx, jy, jz]; 3]` [1/m], ordered
 ///     to match nodal basis functions `(n0, n1, n2)`.
 #[inline]
-pub fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]) -> [[f64; 3]; 3] {
+pub fn triangle_basis_current_densities<T: Scalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+) -> [[T; 3]; 3] {
     [
         triangle_basis_current_density(n0, n1, n2).1, // [1/m]
         triangle_basis_current_density(n1, n2, n0).1, // [1/m]
@@ -127,7 +134,12 @@ pub fn triangle_basis_current_densities(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3]
 /// Returns:
 ///     Constant surface current density `[jx, jy, jz]` on the triangle (A/m).
 #[inline]
-pub fn triangle_current_density(n0: [f64; 3], n1: [f64; 3], n2: [f64; 3], s: [f64; 3]) -> [f64; 3] {
+pub fn triangle_current_density<T: Scalar>(
+    n0: [T; 3],
+    n1: [T; 3],
+    n2: [T; 3],
+    s: [T; 3],
+) -> [T; 3] {
     let basis = triangle_basis_current_densities(n0, n1, n2);
     [
         s[0] * basis[0][0] + s[1] * basis[1][0] + s[2] * basis[2][0], // [A/m]
@@ -213,9 +225,10 @@ pub fn triangle_mesh_quadrature_points(
     Ok(())
 }
 
+/// Return whether two points match to the geometric tolerance.
 #[inline]
 fn points_match(a: [f64; 3], b: [f64; 3]) -> bool {
-    rss3(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-12
+    norm3([a[0] - b[0], a[1] - b[1], a[2] - b[2]]) < 1e-12
 }
 
 #[inline]

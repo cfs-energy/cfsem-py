@@ -94,7 +94,6 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
-        _child_ids: &[u32],
         out: &mut Self::SourceSummary,
     ) -> HierarchicalError {
         *out = SourceSummary::default();

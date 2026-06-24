@@ -307,8 +307,7 @@ pub trait HierarchicalKernel: Sized {
     /// Combine child source summaries into one parent summary.
     ///
     /// Args:
-    ///     children: Source summary storage for the whole tree.
-    ///     child_ids: Child node indices to combine.
+    ///     children: Source summaries for the child nodes being combined.
     ///     out: Parent summary value to fill.
     ///
     /// Returns:
@@ -316,7 +315,6 @@ pub trait HierarchicalKernel: Sized {
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
-        child_ids: &[u32],
         out: &mut Self::SourceSummary,
     ) -> HierarchicalError;
 

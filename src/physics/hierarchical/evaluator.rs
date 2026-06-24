@@ -681,13 +681,8 @@ fn propagate_source_summaries<K: HierarchicalKernel>(
             let node_id = tree.internal_level_ids[i];
             let left = tree.node_left_child[node_id as usize];
             let right = tree.node_right_child[node_id as usize];
-            let child_ids = [left, right];
             let children = [summaries[left as usize], summaries[right as usize]];
-            let err = kernel.combine_source_summaries(
-                &children,
-                &child_ids,
-                &mut summaries[node_id as usize],
-            );
+            let err = kernel.combine_source_summaries(&children, &mut summaries[node_id as usize]);
             if err != HierarchicalError::Ok {
                 return err;
             }

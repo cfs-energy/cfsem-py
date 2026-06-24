@@ -72,7 +72,6 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentFluxDensityKernel<T> {
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
-        _child_ids: &[u32],
         out: &mut Self::SourceSummary,
     ) -> HierarchicalError {
         combine_linear_filament_source_summaries(children, out)

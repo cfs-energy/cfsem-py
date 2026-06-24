@@ -82,10 +82,11 @@ fn triangle_basis_current_density<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3])
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]]; // [m]
     let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]]; // [m]
     let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
+    let two_area = tri_area + tri_area; // [m^2]
     let jref = [
-        (v01[0] - v02[0]) / tri_area, // [1/m]
-        (v01[1] - v02[1]) / tri_area, // [1/m]
-        (v01[2] - v02[2]) / tri_area, // [1/m]
+        (v01[0] - v02[0]) / two_area, // [1/m]
+        (v01[1] - v02[1]) / two_area, // [1/m]
+        (v01[2] - v02[2]) / two_area, // [1/m]
     ];
 
     (tri_area, jref)

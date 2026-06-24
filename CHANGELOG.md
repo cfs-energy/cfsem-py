@@ -1,6 +1,6 @@
 # Changelog
 
-## 11.0.0 2026-06-11
+## 11.0.0 2026-06-24
 
 * Rust
     * !Consolidate math helper functions and use consistent array argument format
@@ -15,6 +15,7 @@
     * Return centerline points from `filament_helix_path` when helix offset is near zero
     * Forbid unsafe Rust code at the crate level
     * Fix rustdoc lints
+    * Rescale Dunavant triangle quadrature weights to sum to 1.0 instead of 0.5 and update downstream calcs for this change
 * Python
     * Add bindings to new hierarchical solver methods
     * Add full Python extension type stubs

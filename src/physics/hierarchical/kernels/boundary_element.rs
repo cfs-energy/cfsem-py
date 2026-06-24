@@ -246,10 +246,10 @@ fn add_source_to_summary<T: Scalar>(
     if physical_area <= T::ZERO {
         return;
     }
-    // The upstream triangle kernels multiply physical area by Dunavant
-    // reference-triangle weights that sum to 0.5. Use the same effective area
-    // here so accepted far-field summaries stay normalized to the direct path.
-    let area = physical_area * crate::math::cast::<T>(0.5);
+    // The upstream triangle kernels multiply physical area by normalized
+    // Dunavant weights that sum to 1.0. Use the same physical area here so
+    // accepted far-field summaries stay normalized to the direct path.
+    let area = physical_area;
     let centroid = source.representative_point();
     let current_density = triangle_current_density(source.n0, source.n1, source.n2, moment);
     let current_element = scale3(current_density, area);

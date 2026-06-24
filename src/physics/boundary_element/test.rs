@@ -1213,7 +1213,7 @@ fn assert_triangle_rule_integrates_monomials(
                 .iter()
                 .map(|qp| qp[0] * qp[1].powi(p as i32) * qp[2].powi(q as i32))
                 .sum::<f64>();
-            let exact_int = reference_triangle_monomial_integral(p, q);
+            let exact_int = 2.0 * reference_triangle_monomial_integral(p, q);
             assert!(
                 approx(approx_int, exact_int, 0.0, 1e-14),
                 "{name} failed for u^{p} v^{q}: approx={approx_int:.16e}, exact={exact_int:.16e}"
@@ -1222,9 +1222,9 @@ fn assert_triangle_rule_integrates_monomials(
     }
 }
 
-/// Checks that the Dunavant rules integrate reference-triangle monomials to their exact degree.
+/// Checks that normalized Dunavant rules integrate reference-triangle monomial averages.
 #[test]
-fn test_dunavant_rules_integrate_reference_triangle_monomials_to_expected_degree() {
+fn test_dunavant_rules_integrate_normalized_reference_triangle_monomial_averages() {
     assert_triangle_rule_integrates_monomials("Dunavant1", QuadratureKind::Dunavant1, 1, 1);
     assert_triangle_rule_integrates_monomials("Dunavant2", QuadratureKind::Dunavant2, 2, 3);
     assert_triangle_rule_integrates_monomials("Dunavant3", QuadratureKind::Dunavant3, 3, 4);

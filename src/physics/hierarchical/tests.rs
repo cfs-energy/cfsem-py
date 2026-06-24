@@ -1,6 +1,7 @@
 use super::*;
 use crate::physics::boundary_element::{
-    QuadratureKind, flux_density_triangle, vector_potential_triangle,
+    QuadratureKind, calc_tri_area, flux_density_triangle, triangle_current_density,
+    vector_potential_triangle,
 };
 use crate::physics::hierarchical::kernels::{
     BoundaryElementFluxDensityKernel, BoundaryElementSummary, BoundaryElementTriangle,
@@ -830,6 +831,42 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
         quad_kind,
     );
     assert!(bf32[0].is_finite());
+}
+
+#[test]
+fn boundary_element_leaf_summary_current_element_matches_direct_quadrature_weight() {
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(QuadratureKind::Dunavant3);
+    let sources = [BoundaryElementTriangle {
+        n0: [0.0, 0.0, 0.0],
+        n1: [2.0, 0.0, 0.0],
+        n2: [0.0, 3.0, 0.0],
+    }];
+    let moments = [[0.75, -0.25, 0.5]];
+    let source_tree = ClusterTree::build(sources.as_slice()).unwrap();
+    let mut source_summaries =
+        SourceNodeSummaries::<BoundaryElementFluxDensityKernel<f64>>::new(source_tree.as_view());
+
+    assert_eq!(
+        update_summaries(
+            &kernel,
+            source_tree.as_view(),
+            sources.as_slice(),
+            &moments,
+            &mut source_summaries.node_summaries,
+        ),
+        HierarchicalError::Ok
+    );
+
+    let current_density =
+        triangle_current_density(sources[0].n0, sources[0].n1, sources[0].n2, moments[0]);
+    let effective_area = calc_tri_area(sources[0].n0, sources[0].n1, sources[0].n2);
+    let summary = source_summaries.node_summaries[0];
+    for axis in 0..3 {
+        assert!(
+            (summary.current_element[axis] - current_density[axis] * effective_area).abs()
+                < 1.0e-14
+        );
+    }
 }
 
 #[test]

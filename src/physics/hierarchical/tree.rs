@@ -950,7 +950,7 @@ fn scalar_cmp<T: Scalar>(a: T, b: T) -> Ordering {
 
 /// Convert `usize` into the u32 index type used by runtime tree arrays.
 pub(crate) fn usize_to_u32(value: usize) -> Result<u32, HierarchicalError> {
-    if value > u32::MAX as usize {
+    if value >= u32::MAX as usize {
         Err(HierarchicalError::CapacityExceeded)
     } else {
         Ok(value as u32)

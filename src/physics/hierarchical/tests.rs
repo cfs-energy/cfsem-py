@@ -190,6 +190,18 @@ fn hierarchical_error_raw_codes_keep_kernel_slots_first() {
     assert_eq!(HierarchicalError::from_u32(99), HierarchicalError::Unknown);
 }
 
+#[test]
+fn usize_to_u32_reserves_invalid_index_sentinel() {
+    assert_eq!(
+        super::tree::usize_to_u32(u32::MAX as usize - 1),
+        Ok(u32::MAX - 1)
+    );
+    assert_eq!(
+        super::tree::usize_to_u32(u32::MAX as usize),
+        Err(HierarchicalError::CapacityExceeded)
+    );
+}
+
 fn dist2<T: Scalar>(a: [T; 3], b: [T; 3]) -> T {
     let mut out = T::ZERO;
     for axis in 0..3 {

@@ -161,9 +161,7 @@ pub struct LinearFilamentSummary<T: Scalar> {
     pub direction: [T; 3],
     /// Magnitude of the net current element `|sum(I*dL)|`.
     pub magnitude: T,
-    /// Origin used for the residual magnetic dipole correction.
-    pub dipole_origin: [T; 3],
-    /// Magnetic dipole moment translated to `dipole_origin`.
+    /// Magnetic dipole moment translated to `origin`.
     pub dipole_moment: [T; 3],
     /// Total current-element weight `sum(|I*dL|)`.
     pub weight: T,
@@ -209,14 +207,9 @@ pub(super) fn combine_linear_filament_source_summaries<T: Scalar>(
             &mut out.direction,
             scale3(children[i].direction, children[i].magnitude),
         );
-        add3_in_place(
-            &mut out.dipole_origin,
-            scale3(children[i].dipole_origin, children[i].weight),
-        );
     }
     if out.weight > T::ZERO {
         out.origin = scale3(out.origin, T::ONE / out.weight);
-        out.dipole_origin = scale3(out.dipole_origin, T::ONE / out.weight);
     }
 
     for i in 0..children.len() {
@@ -225,10 +218,7 @@ pub(super) fn combine_linear_filament_source_summaries<T: Scalar>(
         add3_in_place(
             &mut out.dipole_moment,
             scale3(
-                cross3(
-                    sub3(children[i].dipole_origin, out.dipole_origin),
-                    child_current,
-                ),
+                cross3(sub3(children[i].origin, out.origin), child_current),
                 half::<T>(),
             ),
         );
@@ -280,10 +270,6 @@ fn add_source_to_summary<T: Scalar>(
         &mut out.origin,
         scale3(source.representative_point(), current_element_weight),
     );
-    add3_in_place(
-        &mut out.dipole_origin,
-        scale3(source.representative_point(), current_element_weight),
-    );
     add3_in_place(&mut out.direction, current_element);
     add3_in_place(
         &mut out.dipole_moment,
@@ -299,13 +285,12 @@ fn add_source_to_summary<T: Scalar>(
 fn finalize_leaf_source_summary<T: Scalar>(summary: &mut LinearFilamentSummary<T>) {
     if summary.weight > T::ZERO {
         summary.origin = scale3(summary.origin, T::ONE / summary.weight);
-        summary.dipole_origin = scale3(summary.dipole_origin, T::ONE / summary.weight);
     }
 
     add3_in_place(
         &mut summary.dipole_moment,
         scale3(
-            cross3(summary.dipole_origin, summary.direction),
+            cross3(summary.origin, summary.direction),
             T::ZERO - half::<T>(),
         ),
     );

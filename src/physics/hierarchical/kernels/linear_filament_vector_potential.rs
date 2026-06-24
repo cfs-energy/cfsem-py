@@ -24,7 +24,7 @@ pub type LinearFilamentVectorPotentialSummary<T> = LinearFilamentSummary<T>;
 /// near/far plan is based on the full span of the included filaments. Once a
 /// source cluster is accepted as far, the source term is represented as a point
 /// current element with a current-element-weighted origin, unit direction, and
-/// `I*dL` magnitude. A magnetic dipole term with its own weighted origin is
+/// `I*dL` magnitude. A magnetic dipole term translated to the same origin is
 /// also included so closed or locally cancelling current paths can still
 /// contribute to the far vector potential.
 #[derive(Clone, Copy, Debug, Default)]
@@ -138,7 +138,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
         let mut dipole_out = [T::ZERO; 3];
         dipole_vector_potential(
             target.centroid,
-            source.dipole_origin,
+            source.origin,
             source.dipole_moment,
             T::ZERO,
             &mut dipole_out,

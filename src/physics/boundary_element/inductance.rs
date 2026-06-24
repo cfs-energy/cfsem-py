@@ -91,7 +91,7 @@ fn triangle_scalar_potential_self_duffy(
             line_integral += 1.0 / norm3(edge_vec); // [1/m]
         }
 
-        out += area_sub * line_integral / TRIANGLE_SELF_DUFFY_SAMPLES as f64; // [m]
+        out += 2.0 * area_sub * line_integral / TRIANGLE_SELF_DUFFY_SAMPLES as f64; // [m]
     }
 
     out

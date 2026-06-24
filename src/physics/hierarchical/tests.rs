@@ -1686,11 +1686,6 @@ fn dipole_source_summary_centroid_tracks_moment_weights() {
 }
 
 #[test]
-fn theta_zero_matches_dense_direct_f64() {
-    run_theta_zero_matches_dense_direct_f64();
-}
-
-#[test]
 fn theta_zero_matches_dense_direct_f32() {
     let kernel = MockKernel::<f32>::new();
     let sources = points_f32(&[[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [2.0, 0.0, 0.0]]);
@@ -1843,7 +1838,8 @@ fn dense_direct_reports_empty_scratch() {
     );
 }
 
-fn run_theta_zero_matches_dense_direct_f64() {
+#[test]
+fn theta_zero_matches_dense_direct_f64() {
     let kernel = MockKernel::<f64>::new();
     let sources = points_f64(&[[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [2.0, 0.0, 0.0]]);
     let targets = points_f64(&[[3.0, 0.0, 0.0], [4.0, 1.0, 0.0]]);

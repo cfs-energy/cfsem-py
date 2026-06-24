@@ -165,6 +165,31 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
     }
 }
 
+#[test]
+fn hierarchical_error_raw_codes_keep_kernel_slots_first() {
+    assert_eq!(HierarchicalError::KernelError0 as u32, 0);
+    assert_eq!(HierarchicalError::KernelError1 as u32, 1);
+    assert_eq!(HierarchicalError::Ok as u32, 2);
+    assert_eq!(HierarchicalError::EmptyInput as u32, 3);
+    assert_eq!(HierarchicalError::LengthMismatch as u32, 4);
+    assert_eq!(HierarchicalError::ScratchTooSmall as u32, 5);
+    assert_eq!(HierarchicalError::InvalidTheta as u32, 6);
+    assert_eq!(HierarchicalError::CapacityExceeded as u32, 7);
+    assert_eq!(HierarchicalError::Unknown as u32, 8);
+
+    assert_eq!(
+        HierarchicalError::from_u32(0),
+        HierarchicalError::KernelError0
+    );
+    assert_eq!(
+        HierarchicalError::from_u32(1),
+        HierarchicalError::KernelError1
+    );
+    assert_eq!(HierarchicalError::from_u32(2), HierarchicalError::Ok);
+    assert_eq!(HierarchicalError::from_u32(8), HierarchicalError::Unknown);
+    assert_eq!(HierarchicalError::from_u32(99), HierarchicalError::Unknown);
+}
+
 fn dist2<T: Scalar>(a: [T; 3], b: [T; 3]) -> T {
     let mut out = T::ZERO;
     for axis in 0..3 {

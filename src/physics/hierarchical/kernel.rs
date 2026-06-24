@@ -4,19 +4,19 @@ use super::{Aabb, Scalar};
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HierarchicalError {
-    Ok = 0,
-    EmptyInput = 1,
-    LengthMismatch = 2,
-    ScratchTooSmall = 3,
-    InvalidTheta = 5,
-    CapacityExceeded = 6,
     /// Reserved GPU-compatible kernel-specific error slot; CPU kernels do not
     /// currently produce this value.
-    KernelError0 = 7,
+    KernelError0 = 0,
     /// Reserved GPU-compatible kernel-specific error slot; CPU kernels do not
     /// currently produce this value.
-    KernelError1 = 8,
-    Unknown = 9,
+    KernelError1 = 1,
+    Ok = 2,
+    EmptyInput = 3,
+    LengthMismatch = 4,
+    ScratchTooSmall = 5,
+    InvalidTheta = 6,
+    CapacityExceeded = 7,
+    Unknown = 8,
 }
 
 impl HierarchicalError {
@@ -30,14 +30,14 @@ impl HierarchicalError {
     #[inline]
     pub fn from_u32(value: u32) -> Self {
         match value {
-            0 => Self::Ok,
-            1 => Self::EmptyInput,
-            2 => Self::LengthMismatch,
-            3 => Self::ScratchTooSmall,
-            5 => Self::InvalidTheta,
-            6 => Self::CapacityExceeded,
-            7 => Self::KernelError0,
-            8 => Self::KernelError1,
+            0 => Self::KernelError0,
+            1 => Self::KernelError1,
+            2 => Self::Ok,
+            3 => Self::EmptyInput,
+            4 => Self::LengthMismatch,
+            5 => Self::ScratchTooSmall,
+            6 => Self::InvalidTheta,
+            7 => Self::CapacityExceeded,
             _ => Self::Unknown,
         }
     }

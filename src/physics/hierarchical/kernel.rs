@@ -10,7 +10,11 @@ pub enum HierarchicalError {
     ScratchTooSmall = 3,
     InvalidTheta = 5,
     CapacityExceeded = 6,
+    /// Reserved GPU-compatible kernel-specific error slot; CPU kernels do not
+    /// currently produce this value.
     KernelError0 = 7,
+    /// Reserved GPU-compatible kernel-specific error slot; CPU kernels do not
+    /// currently produce this value.
     KernelError1 = 8,
     Unknown = 9,
 }
@@ -401,22 +405,6 @@ pub trait HierarchicalKernel: Sized {
     ///     out: Output accumulator to update.
     ///     contribution: Contribution to add.
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output);
-
-    /// Describe a kernel-specific error code.
-    ///
-    /// Args:
-    ///     error: Error code returned by a kernel method.
-    ///
-    /// Returns:
-    ///     Static description of the error code.
-    #[inline]
-    fn describe_error(&self, error: HierarchicalError) -> &'static str {
-        match error {
-            HierarchicalError::KernelError0 => "kernel error 0",
-            HierarchicalError::KernelError1 => "kernel error 1",
-            _ => "not a kernel error",
-        }
-    }
 }
 
 /// Standard geometric Barnes-Hut acceptance test for two AABBs.

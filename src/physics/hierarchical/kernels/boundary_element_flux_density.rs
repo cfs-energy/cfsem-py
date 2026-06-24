@@ -132,7 +132,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
         let mut dipole_out = [T::ZERO; 3];
         dipole_field(
             target.centroid,
-            source.dipole_origin,
+            source.origin,
             source.dipole_moment,
             T::ZERO,
             &mut dipole_out,

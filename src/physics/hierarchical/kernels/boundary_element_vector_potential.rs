@@ -134,7 +134,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementVectorPotentialKernel<T> {
         let mut dipole_out = [T::ZERO; 3];
         dipole_vector_potential(
             target.centroid,
-            source.dipole_origin,
+            source.origin,
             source.dipole_moment,
             T::ZERO,
             &mut dipole_out,

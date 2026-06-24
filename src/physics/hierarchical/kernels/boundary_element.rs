@@ -165,9 +165,7 @@ pub struct BoundaryElementSummary<T: Scalar> {
     pub origin: [T; 3],
     /// Net `K dS` current element for the accepted source cluster.
     pub current_element: [T; 3],
-    /// Reference position for the magnetic-dipole correction.
-    pub dipole_origin: [T; 3],
-    /// Magnetic-dipole moment about `dipole_origin`.
+    /// Magnetic-dipole moment about `origin`.
     pub dipole_moment: [T; 3],
     /// Current-element magnitude weight used for source-position averages.
     pub weight: T,
@@ -215,14 +213,9 @@ pub(super) fn combine_source_summaries<T: Scalar>(
             scale3(children[i].origin, children[i].weight),
         );
         add3_in_place(&mut out.current_element, children[i].current_element);
-        add3_in_place(
-            &mut out.dipole_origin,
-            scale3(children[i].dipole_origin, children[i].weight),
-        );
     }
     if out.weight > T::ZERO {
         out.origin = scale3(out.origin, T::ONE / out.weight);
-        out.dipole_origin = scale3(out.dipole_origin, T::ONE / out.weight);
     }
 
     for i in 0..children.len() {
@@ -231,7 +224,7 @@ pub(super) fn combine_source_summaries<T: Scalar>(
             &mut out.dipole_moment,
             scale3(
                 cross3(
-                    sub3(children[i].dipole_origin, out.dipole_origin),
+                    sub3(children[i].origin, out.origin),
                     children[i].current_element,
                 ),
                 half::<T>(),
@@ -271,7 +264,6 @@ fn add_source_to_summary<T: Scalar>(
     // much as active elements.
     out.weight = out.weight + current_weight;
     add3_in_place(&mut out.origin, scale3(centroid, current_weight));
-    add3_in_place(&mut out.dipole_origin, scale3(centroid, current_weight));
     add3_in_place(&mut out.current_element, current_element);
     add3_in_place(
         &mut out.dipole_moment,
@@ -284,13 +276,12 @@ fn add_source_to_summary<T: Scalar>(
 fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<T>) {
     if summary.weight > T::ZERO {
         summary.origin = scale3(summary.origin, T::ONE / summary.weight);
-        summary.dipole_origin = scale3(summary.dipole_origin, T::ONE / summary.weight);
     }
 
     add3_in_place(
         &mut summary.dipole_moment,
         scale3(
-            cross3(summary.dipole_origin, summary.current_element),
+            cross3(summary.origin, summary.current_element),
             T::ZERO - half::<T>(),
         ),
     );

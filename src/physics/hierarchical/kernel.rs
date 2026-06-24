@@ -334,7 +334,7 @@ pub trait HierarchicalKernel: Sized {
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError;
 
-    /// Evaluate the exact source-target interaction.
+    /// Evaluate a near-field source-target interaction directly.
     ///
     /// Args:
     ///     target: Target geometry value.
@@ -342,7 +342,7 @@ pub trait HierarchicalKernel: Sized {
     ///     moment: Source amplitude or moment.
     ///     out: Contribution value to fill.
     ///
-    fn eval_exact(
+    fn eval_near(
         &self,
         target: &Self::TargetGeometry,
         source: &Self::SourceGeometry,

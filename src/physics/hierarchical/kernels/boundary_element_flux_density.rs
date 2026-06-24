@@ -85,7 +85,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     }
 
     #[inline]
-    fn eval_exact(
+    fn eval_near(
         &self,
         target: &Self::TargetGeometry,
         source: &Self::SourceGeometry,

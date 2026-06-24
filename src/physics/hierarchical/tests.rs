@@ -135,7 +135,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         HierarchicalError::Ok
     }
 
-    fn eval_exact(
+    fn eval_near(
         &self,
         target: &Self::TargetGeometry,
         source: &Self::SourceGeometry,
@@ -334,7 +334,7 @@ fn dipole_exact_uses_magnetized_sphere_radius() {
     let moment = [0.0, 0.0, 3.0];
     let mut out = [0.0; 3];
 
-    kernel.eval_exact(&target, &source, &moment, &mut out);
+    kernel.eval_near(&target, &source, &moment, &mut out);
 
     let expected = crate::physics::point_source::dipole::flux_density_dipole_scalar(
         (0.0, 0.0, 0.0),
@@ -493,7 +493,7 @@ fn linear_filament_exact_matches_scalar_and_supports_f32() {
     let current = 3.0;
     let mut out = [0.0; 3];
 
-    kernel.eval_exact(&target, &source, &current, &mut out);
+    kernel.eval_near(&target, &source, &current, &mut out);
     let expected = crate::physics::linear_filament::flux_density_linear_filament_scalar(
         (
             (source.start[0], source.start[1], source.start[2]),
@@ -756,7 +756,7 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
 
     let b_kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
     let mut b_out = [0.0; 3];
-    b_kernel.eval_exact(&target, &source, &moment, &mut b_out);
+    b_kernel.eval_near(&target, &source, &moment, &mut b_out);
     assert_eq!(
         b_out,
         flux_density_triangle(
@@ -771,7 +771,7 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
 
     let a_kernel = BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind);
     let mut a_out = [0.0; 3];
-    a_kernel.eval_exact(&target, &source, &moment, &mut a_out);
+    a_kernel.eval_near(&target, &source, &moment, &mut a_out);
     assert_eq!(
         a_out,
         vector_potential_triangle(

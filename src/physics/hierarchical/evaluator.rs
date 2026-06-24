@@ -252,7 +252,7 @@ where
                 let source_id = source_ids[i] as usize;
                 let source = sources.source(source_id);
                 let moment = moments.moment(source_id);
-                kernel.eval_exact(&target, &source, &moment, contribution);
+                kernel.eval_near(&target, &source, &moment, contribution);
                 kernel.accumulate(out, contribution);
             }
         } else {
@@ -565,7 +565,7 @@ where
         for source_id in 0..sources.len() {
             let source = sources.source(source_id);
             let moment = moments.moment(source_id);
-            kernel.eval_exact(&target, &source, &moment, &mut scratch.contribution[0]);
+            kernel.eval_near(&target, &source, &moment, &mut scratch.contribution[0]);
             kernel.accumulate(target_out, &scratch.contribution[0]);
         }
     }

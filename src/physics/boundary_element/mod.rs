@@ -77,6 +77,7 @@ pub use vector_potential::{
 const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 
 #[inline]
+/// Return the triangle area and constant basis-current density vector.
 fn triangle_basis_current_density<T: Scalar>(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> (T, [T; 3]) {
     let v01 = [n1[0] - n0[0], n1[1] - n0[1], n1[2] - n0[2]]; // [m]
     let v02 = [n2[0] - n0[0], n2[1] - n0[1], n2[2] - n0[2]]; // [m]
@@ -223,6 +224,7 @@ pub fn triangle_mesh_quadrature_points(
     Ok(())
 }
 
+/// Return whether two points match to the geometric tolerance.
 #[inline]
 fn points_match(a: [f64; 3], b: [f64; 3]) -> bool {
     norm3([a[0] - b[0], a[1] - b[1], a[2] - b[2]]) < 1e-12

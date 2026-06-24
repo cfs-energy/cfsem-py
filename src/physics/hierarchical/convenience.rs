@@ -361,6 +361,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     )
 }
 
+/// Build trees, evaluate a vector-valued hierarchical solve, and return diagnostics.
 pub(crate) fn one_shot_vec3<K, T, S, M, C>(
     kernel: K,
     sources: S,

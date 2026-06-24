@@ -24,6 +24,7 @@ pub struct TriangleMeshView<'a> {
 }
 
 #[inline]
+/// Compute the area of one 3D triangle from its node coordinates.
 fn triangle_area_from_nodes(nodes: [[f64; 3]; 3]) -> f64 {
     let [n0, n1, n2] = nodes;
     tri3::area(n0, n1, n2)
@@ -207,6 +208,7 @@ impl<'a> TriangleMeshView<'a> {
     }
 
     #[inline]
+    /// Return the coordinates for one node by local index.
     fn node(&self, i: usize) -> [f64; 3] {
         match self.nodes {
             NodeStorage::Columns(nodes) => [nodes.0[i], nodes.1[i], nodes.2[i]],
@@ -217,6 +219,7 @@ impl<'a> TriangleMeshView<'a> {
         }
     }
 
+    /// Validate that the mesh arrays describe finite, nondegenerate triangles.
     fn validate_geometry(&self) -> Result<(), &'static str> {
         let mut low_quality_triangles = Vec::new();
         for i in 0..self.ntri {

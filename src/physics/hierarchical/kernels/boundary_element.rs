@@ -46,21 +46,25 @@ impl<'a> BoundaryElementTriangles<'a, f64> {
 
 impl<'a> BoundedGeometryCollection<f64> for BoundaryElementTriangles<'a, f64> {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         self.mesh.len()
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         true
     }
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(self, index: usize) -> Aabb<f64> {
         self.source_value(index).aabb()
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(self, index: usize) -> [f64; 3] {
         self.source_value(index).representative_point()
     }
@@ -71,6 +75,7 @@ where
     K: HierarchicalKernel<Scalar = f64, SourceGeometry = BoundaryElementTriangle<f64>>,
 {
     #[inline]
+    /// Return one source geometry item by index.
     fn source(self, index: usize) -> BoundaryElementTriangle<f64> {
         self.source_value(index)
     }
@@ -96,16 +101,19 @@ where
     K: HierarchicalKernel<Scalar = f64, SourceMoment = [f64; 3]>,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         self.triangles.len()
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         self.s.len() == self.triangles.mesh.nnode() && self.triangles.valid_lengths()
     }
 
     #[inline]
+    /// Return one source moment item by index.
     fn moment(self, index: usize) -> [f64; 3] {
         self.triangles.mesh.triangle_scalars(index, self.s)
     }
@@ -115,6 +123,7 @@ impl<T: Scalar> BoundedGeometry for BoundaryElementTriangle<T> {
     type Scalar = T;
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(&self) -> Aabb<Self::Scalar> {
         let mut min = [T::ZERO; 3];
         let mut max = [T::ZERO; 3];
@@ -138,6 +147,7 @@ impl<T: Scalar> BoundedGeometry for BoundaryElementTriangle<T> {
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(&self) -> [Self::Scalar; 3] {
         let third = T::ONE / crate::math::cast::<T>(3.0);
         [
@@ -164,6 +174,7 @@ pub struct BoundaryElementSummary<T: Scalar> {
 }
 
 #[inline]
+/// Summarize boundary-element leaf sources into a far-field source summary.
 pub(super) fn summarize_leaf_sources<K, T, S, M>(
     source_ids: &[u32],
     sources: S,
@@ -191,6 +202,7 @@ where
 }
 
 #[inline]
+/// Combine boundary-element child summaries into a parent source summary.
 pub(super) fn combine_source_summaries<T: Scalar>(
     children: &[BoundaryElementSummary<T>],
     out: &mut BoundaryElementSummary<T>,
@@ -231,6 +243,7 @@ pub(super) fn combine_source_summaries<T: Scalar>(
 }
 
 #[inline]
+/// Accumulate one boundary-element source and current into a summary.
 fn add_source_to_summary<T: Scalar>(
     source: &BoundaryElementTriangle<T>,
     moment: [T; 3],
@@ -267,6 +280,7 @@ fn add_source_to_summary<T: Scalar>(
 }
 
 #[inline]
+/// Normalize accumulated boundary-element centroid fields after leaf accumulation.
 fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<T>) {
     if summary.weight > T::ZERO {
         summary.origin = scale3(summary.origin, T::ONE / summary.weight);
@@ -283,6 +297,7 @@ fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<
 }
 
 #[inline]
+/// Return whether a boundary-element summary carries nonzero current.
 pub(super) fn has_current<T: Scalar>(summary: &BoundaryElementSummary<T>) -> bool {
     norm3(summary.current_element) > T::ZERO
 }
@@ -307,6 +322,7 @@ pub(super) fn boundary_element_accept_far<T: Scalar>(
 }
 
 #[inline]
+/// Return one half in the active scalar type.
 fn half<T: Scalar>() -> T {
     crate::math::cast::<T>(0.5)
 }

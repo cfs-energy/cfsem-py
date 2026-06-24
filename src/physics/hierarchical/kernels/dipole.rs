@@ -103,16 +103,19 @@ where
     T: Scalar,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         self.x.len() == self.y.len() && self.x.len() == self.z.len()
     }
 
     #[inline]
+    /// Return one target geometry item by index.
     fn target(self, index: usize) -> DipoleTarget<T> {
         DipoleTarget {
             position: [self.x[index], self.y[index], self.z[index]],
@@ -120,6 +123,7 @@ where
     }
 
     #[inline]
+    /// Return a subview over the requested target range.
     fn slice(self, start: usize, end: usize) -> Self {
         Self {
             x: &self.x[start..end],
@@ -135,16 +139,19 @@ where
     T: Scalar,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         self.xyz.len() / 3
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         self.xyz.len().is_multiple_of(3)
     }
 
     #[inline]
+    /// Return one target geometry item by index.
     fn target(self, index: usize) -> DipoleTarget<T> {
         let start = 3 * index;
         DipoleTarget {
@@ -153,6 +160,7 @@ where
     }
 
     #[inline]
+    /// Return a subview over the requested target range.
     fn slice(self, start: usize, end: usize) -> Self {
         Self {
             xyz: &self.xyz[3 * start..3 * end],
@@ -162,11 +170,13 @@ where
 
 impl<'a, T: Scalar> BoundedGeometryCollection<T> for DipoleSources<'a, T> {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         self.x.len() == self.y.len()
             && self.x.len() == self.z.len()
@@ -174,11 +184,13 @@ impl<'a, T: Scalar> BoundedGeometryCollection<T> for DipoleSources<'a, T> {
     }
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(self, index: usize) -> Aabb<T> {
         self.source_value(index).aabb()
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(self, index: usize) -> [T; 3] {
         [self.x[index], self.y[index], self.z[index]]
     }
@@ -190,6 +202,7 @@ where
     T: Scalar,
 {
     #[inline]
+    /// Return one source geometry item by index.
     fn source(self, index: usize) -> DipoleSource<T> {
         self.source_value(index)
     }
@@ -201,16 +214,19 @@ where
     T: Scalar,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         self.x.len() == self.y.len() && self.x.len() == self.z.len()
     }
 
     #[inline]
+    /// Return one source moment item by index.
     fn moment(self, index: usize) -> [T; 3] {
         [self.x[index], self.y[index], self.z[index]]
     }
@@ -220,6 +236,7 @@ impl<T: Scalar> BoundedGeometry for DipoleSource<T> {
     type Scalar = T;
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(&self) -> Aabb<Self::Scalar> {
         if self.outer_radius > T::ZERO {
             Aabb {
@@ -240,6 +257,7 @@ impl<T: Scalar> BoundedGeometry for DipoleSource<T> {
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(&self) -> [Self::Scalar; 3] {
         self.position
     }
@@ -249,11 +267,13 @@ impl<T: Scalar> BoundedGeometry for DipoleTarget<T> {
     type Scalar = T;
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(&self) -> Aabb<Self::Scalar> {
         Aabb::from_point(self.position)
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(&self) -> [Self::Scalar; 3] {
         self.position
     }
@@ -336,6 +356,7 @@ pub(super) fn combine_dipole_source_summaries<T: Scalar>(
 }
 
 #[inline]
+/// Summarize dipole sources using moment magnitude as the centroid weight.
 pub(super) fn summarize_weighted_source_centroid<T, S, F>(
     source_ids: &[u32],
     sources: S,
@@ -370,6 +391,7 @@ pub(super) fn summarize_weighted_source_centroid<T, S, F>(
 }
 
 #[inline]
+/// Summarize dipole target leaves by averaging target positions.
 pub(super) fn summarize_target_leaf<T: Scalar>(
     target_ids: &[u32],
     targets: &[DipoleTarget<T>],
@@ -390,6 +412,7 @@ pub(super) fn summarize_target_leaf<T: Scalar>(
 }
 
 #[inline]
+/// Evaluate the magnetic flux density of one point dipole.
 pub(super) fn dipole_field<T: Scalar>(
     target: [T; 3],
     source: [T; 3],
@@ -401,6 +424,7 @@ pub(super) fn dipole_field<T: Scalar>(
 }
 
 #[inline]
+/// Evaluate the magnetic vector potential of one point dipole.
 pub(super) fn dipole_vector_potential<T: Scalar>(
     target: [T; 3],
     source: [T; 3],

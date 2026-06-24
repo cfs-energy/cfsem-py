@@ -104,6 +104,7 @@ fn parse_triangle_quadrature(quad: &str) -> PyResult<physics::boundary_element::
     }
 }
 
+/// Convert a hierarchical Rust error code into a Python exception for one call context.
 fn py_hierarchical_error(
     context: &str,
     error: physics::hierarchical::kernel::HierarchicalError,
@@ -127,31 +128,37 @@ struct HierarchicalDiagnostics {
 #[pymethods]
 impl HierarchicalDiagnostics {
     #[getter]
+    /// Return the source-tree construction time in seconds.
     fn construction_time(&self) -> f64 {
         self.construction_time
     }
 
     #[getter]
+    /// Return the hierarchical evaluation time in seconds.
     fn evaluation_time(&self) -> f64 {
         self.evaluation_time
     }
 
     #[getter]
+    /// Return the number of source geometries used by the solve.
     fn source_count(&self) -> usize {
         self.source_count
     }
 
     #[getter]
+    /// Return the number of target geometries evaluated by the solve.
     fn target_count(&self) -> usize {
         self.target_count
     }
 
     #[getter]
+    /// Return source-tree diagnostics when they were requested.
     fn source_tree(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.source_tree.as_ref().map(|value| value.clone_ref(py))
     }
 
     #[getter]
+    /// Return accepted-node level diagnostics when they were requested.
     fn accepted_levels(&self, py: Python<'_>) -> Option<Py<PyArray1<f64>>> {
         self.accepted_levels
             .as_ref()
@@ -168,16 +175,19 @@ struct SolveResult {
 #[pymethods]
 impl SolveResult {
     #[getter]
+    /// Return the computed vector field arrays.
     fn field(&self, py: Python<'_>) -> Py<PyAny> {
         self.field.clone_ref(py)
     }
 
     #[getter]
+    /// Return hierarchical diagnostics for this solve result.
     fn diagnostics(&self, py: Python<'_>) -> Py<HierarchicalDiagnostics> {
         self.diagnostics.clone_ref(py)
     }
 }
 
+/// Emit a Python warning when hierarchical evaluation must allocate replacement output arrays.
 fn warn_hierarchical_reallocation(py: Python<'_>, name: &str, direction: &str) -> PyResult<()> {
     let message = CString::new(format!(
         "Non-contiguous or misaligned hierarchical {direction} array {name:?} detected; \
@@ -202,6 +212,7 @@ enum FloatInput<'a, T: Copy> {
 
 impl<'a, T: Copy> FloatInput<'a, T> {
     #[inline]
+    /// Return this input view as a contiguous scalar slice.
     fn as_slice(&self) -> &[T] {
         match self {
             Self::Borrowed(slice) => slice,
@@ -210,6 +221,7 @@ impl<'a, T: Copy> FloatInput<'a, T> {
     }
 
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(&self) -> usize {
         self.as_slice().len()
     }
@@ -222,6 +234,7 @@ enum Matrix3Input<'a, T: Copy> {
 
 impl<'a, T: Copy> Matrix3Input<'a, T> {
     #[inline]
+    /// Return this input view as a contiguous scalar slice.
     fn as_slice(&self) -> &[T] {
         match self {
             Self::Borrowed(slice, _) => slice,
@@ -230,6 +243,7 @@ impl<'a, T: Copy> Matrix3Input<'a, T> {
     }
 
     #[inline]
+    /// Return the number of matrix rows in this input view.
     fn nrows(&self) -> usize {
         match self {
             Self::Borrowed(_, nrows) | Self::Owned(_, nrows) => *nrows,
@@ -245,16 +259,19 @@ struct XyzInput<'a, T: Copy> {
 
 impl<'a, T: Copy> XyzInput<'a, T> {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(&self) -> usize {
         self.x.len()
     }
 
     #[inline]
+    /// Return borrowed `(x, y, z)` component slices for this input view.
     fn as_tuple(&self) -> (&[T], &[T], &[T]) {
         (self.x.as_slice(), self.y.as_slice(), self.z.as_slice())
     }
 }
 
+/// Borrow or copy a Python one-dimensional float array into a contiguous Rust view.
 fn read_float_input_array1<'py, T>(
     py: Python<'_>,
     arr: &'py PyReadonlyArray1<'py, T>,
@@ -272,6 +289,7 @@ where
     }
 }
 
+/// Borrow or copy a Python three-column matrix into a contiguous Rust view.
 fn read_matrix3_input<'py, T>(
     py: Python<'_>,
     arr: &'py PyReadonlyArray2<'py, T>,
@@ -300,6 +318,7 @@ where
     }
 }
 
+/// Borrow or copy a Python `(x, y, z)` tuple into contiguous Rust component views.
 fn read_xyz_tuple<'py, T>(
     py: Python<'_>,
     xyz: &'py (
@@ -325,6 +344,7 @@ where
     Ok(XyzInput { x, y, z })
 }
 
+/// Borrow writable output arrays or allocate replacement arrays for hierarchical vector results.
 fn read_output_arrays<'py, T>(
     out: (
         PyReadwriteArray1<'py, T>,
@@ -356,6 +376,7 @@ where
     Ok(out)
 }
 
+/// Convert output array storage into the Python tuple returned to callers.
 fn output_arrays_to_py_tuple(
     out: &(
         PyReadwriteArray1<'_, f64>,
@@ -376,6 +397,7 @@ fn output_arrays_to_py_tuple(
     )
 }
 
+/// Convert owned component vectors into a Python `(x, y, z)` tuple.
 fn component_vecs_to_py_tuple(
     py: Python<'_>,
     values: (Vec<f64>, Vec<f64>, Vec<f64>),
@@ -395,6 +417,7 @@ type PyVec3Output<'py> = (
 
 type PyVec3Field = (Py<PyAny>, Py<PyAny>, Py<PyAny>);
 
+/// Evaluate a hierarchical vector solver and adapt its output ownership for Python.
 fn evaluate_hierarchical_vec3<'py, D, F>(
     py: Python<'_>,
     out: Option<PyVec3Output<'py>>,
@@ -424,6 +447,7 @@ where
     }
 }
 
+/// Return mutable component slices for borrowed or owned output arrays.
 fn output_slices_mut<'a, 'py, T>(
     out: &'a mut (
         PyReadwriteArray1<'py, T>,
@@ -456,6 +480,7 @@ where
     Ok((outx, outy, outz))
 }
 
+/// Convert source-tree node AABBs into Python component arrays.
 fn source_tree_aabbs_to_py_tuple(
     py: Python<'_>,
     tree: &physics::hierarchical::tree::ClusterTree<f64>,
@@ -505,6 +530,7 @@ fn source_tree_aabbs_to_py_tuple(
     )
 }
 
+/// Build the Python diagnostics object for source-tree metadata.
 fn source_tree_diagnostics_object(
     py: Python<'_>,
     tree: &physics::hierarchical::tree::ClusterTree<f64>,
@@ -525,6 +551,7 @@ fn source_tree_diagnostics_object(
     Ok(PyTuple::new(py, items)?.unbind().into())
 }
 
+/// Build a Python solve-result wrapper from field arrays and optional diagnostics.
 fn solve_result_from_field(
     py: Python<'_>,
     field: (Py<PyAny>, Py<PyAny>, Py<PyAny>),
@@ -552,6 +579,7 @@ fn solve_result_from_field(
     Py::new(py, SolveResult { field, diagnostics })
 }
 
+/// Return each source-tree node level as floating-point diagnostic data.
 fn source_tree_node_levels(tree: &physics::hierarchical::tree::ClusterTree<f64>) -> Vec<f64> {
     let mut levels = vec![0.0; tree.node_aabb.len()];
     let mut active = Vec::new();
@@ -572,6 +600,7 @@ fn source_tree_node_levels(tree: &physics::hierarchical::tree::ClusterTree<f64>)
     levels
 }
 
+/// Parse a Python build-method name into the hierarchical tree builder enum.
 fn parse_build_method(
     construction_method: &str,
 ) -> PyResult<physics::hierarchical::tree::BuildMethod> {
@@ -592,6 +621,7 @@ fn parse_build_method(
     }
 }
 
+/// Compute accepted source-node levels for hierarchical diagnostic output.
 fn accepted_levels_diagnostic<K, S, C, M>(
     kernel: K,
     source_tree: &physics::hierarchical::tree::ClusterTree<f64>,
@@ -646,6 +676,7 @@ struct HierarchicalDiagnosticRequest<'a, K, S, C, M> {
     theta: f64,
 }
 
+/// Return diagnostics only when requested by the Python caller.
 fn optional_hierarchical_diagnostics<K, S, C, M>(
     py: Python<'_>,
     extra_diagnostics: bool,
@@ -677,6 +708,7 @@ where
 }
 
 #[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+/// Evaluate dipole flux density with the hierarchical solver from Python inputs.
 fn flux_density_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -765,6 +797,7 @@ fn flux_density_dipole_hierarchical(
 }
 
 #[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+/// Evaluate dipole vector potential with the hierarchical solver from Python inputs.
 fn vector_potential_dipole_hierarchical(
     py: Python<'_>,
     loc: (
@@ -853,6 +886,7 @@ fn vector_potential_dipole_hierarchical(
 }
 
 #[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+/// Evaluate linear-filament flux density with the hierarchical solver from Python inputs.
 fn flux_density_linear_filament_hierarchical(
     py: Python<'_>,
     xyzp: (
@@ -938,6 +972,7 @@ fn flux_density_linear_filament_hierarchical(
 }
 
 #[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+/// Evaluate linear-filament vector potential with the hierarchical solver from Python inputs.
 fn vector_potential_linear_filament_hierarchical(
     py: Python<'_>,
     xyzp: (
@@ -1026,6 +1061,7 @@ fn vector_potential_linear_filament_hierarchical(
 }
 
 #[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+/// Evaluate triangle-mesh flux density with the hierarchical solver from Python inputs.
 fn flux_density_triangle_mesh_hierarchical(
     py: Python<'_>,
     obs: PyReadonlyArray2<f64>,
@@ -1095,6 +1131,7 @@ fn flux_density_triangle_mesh_hierarchical(
 }
 
 #[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+/// Evaluate triangle-mesh vector potential with the hierarchical solver from Python inputs.
 fn vector_potential_triangle_mesh_hierarchical(
     py: Python<'_>,
     obs: PyReadonlyArray2<f64>,
@@ -1316,6 +1353,7 @@ fn flatten_quad_points<F: Copy>(points: Vec<[F; 2]>) -> Vec<F> {
     flatten_points(points)
 }
 
+/// Flatten a sparse operator into CSR-style row, column, and value arrays.
 fn flatten_sparse_operator<F: math::Scalar>(
     operator: mesh::quad2d::QuadMeshSparseOperator<F>,
 ) -> (Vec<F>, Vec<u64>, Vec<u64>, u64, u64) {
@@ -3603,6 +3641,7 @@ fn triangle_mesh_view<'a>(
     })
 }
 
+/// Borrow Python triangle-mesh arrays as a validated Rust mesh view.
 fn borrowed_triangle_mesh_view<'a>(
     nodes: &'a Matrix3Input<'a, f64>,
     triangles: &'a Matrix3Input<'a, i64>,

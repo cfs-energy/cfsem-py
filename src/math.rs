@@ -23,7 +23,9 @@ pub trait Scalar:
     const ZERO: Self;
     const ONE: Self;
 
+    /// Return the smallest positive finite value for this scalar type.
     fn min_positive() -> Self;
+    /// Convert this scalar value to `f64` for diagnostics and tolerances.
     fn to_f64(self) -> f64;
 }
 
@@ -38,11 +40,13 @@ impl Scalar for f32 {
     const ONE: Self = 1.0;
 
     #[inline]
+    /// Return the smallest positive finite value for this scalar type.
     fn min_positive() -> Self {
         f32::MIN_POSITIVE
     }
 
     #[inline]
+    /// Convert this scalar value to `f64` for diagnostics and tolerances.
     fn to_f64(self) -> f64 {
         self as f64
     }
@@ -53,11 +57,13 @@ impl Scalar for f64 {
     const ONE: Self = 1.0;
 
     #[inline]
+    /// Return the smallest positive finite value for this scalar type.
     fn min_positive() -> Self {
         f64::MIN_POSITIVE
     }
 
     #[inline]
+    /// Convert this scalar value to `f64` for diagnostics and tolerances.
     fn to_f64(self) -> f64 {
         self
     }
@@ -363,11 +369,13 @@ pub(crate) fn point_line_distance_with_endpoints<T: Scalar>(
 }
 
 #[inline]
+/// Return the smaller of two scalar values.
 fn min_scalar<T: Scalar>(a: T, b: T) -> T {
     if a < b { a } else { b }
 }
 
 #[inline]
+/// Return the larger of two scalar values.
 pub(crate) fn max_scalar<T: Scalar>(a: T, b: T) -> T {
     if a > b { a } else { b }
 }

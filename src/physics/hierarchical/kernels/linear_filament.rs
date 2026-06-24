@@ -69,11 +69,13 @@ impl<'a, T: Scalar> LinearFilamentSources<'a, T> {
 
 impl<'a, T: Scalar> BoundedGeometryCollection<T> for LinearFilamentSources<'a, T> {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         self.x.len()
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         let n = self.x.len();
         self.y.len() == n
@@ -85,11 +87,13 @@ impl<'a, T: Scalar> BoundedGeometryCollection<T> for LinearFilamentSources<'a, T
     }
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(self, index: usize) -> Aabb<T> {
         self.source_value(index).aabb()
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(self, index: usize) -> [T; 3] {
         self.source_value(index).representative_point()
     }
@@ -101,6 +105,7 @@ where
     T: Scalar,
 {
     #[inline]
+    /// Return one source geometry item by index.
     fn source(self, index: usize) -> LinearFilamentSource<T> {
         self.source_value(index)
     }
@@ -110,6 +115,7 @@ impl<T: Scalar> BoundedGeometry for LinearFilamentSource<T> {
     type Scalar = T;
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(&self) -> Aabb<Self::Scalar> {
         let r = if self.wire_radius > T::ZERO {
             self.wire_radius
@@ -131,6 +137,7 @@ impl<T: Scalar> BoundedGeometry for LinearFilamentSource<T> {
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(&self) -> [Self::Scalar; 3] {
         let half = crate::math::cast::<T>(0.5);
         [

@@ -87,21 +87,25 @@ where
     G: BoundedGeometry<Scalar = T> + Sync,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         <[G]>::len(self)
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         true
     }
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(self, index: usize) -> Aabb<T> {
         self[index].aabb()
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(self, index: usize) -> [T; 3] {
         self[index].representative_point()
     }
@@ -113,21 +117,25 @@ where
     G: BoundedGeometry<Scalar = T> + Sync,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         N
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         true
     }
 
     #[inline]
+    /// Return the axis-aligned bounds for one geometry item.
     fn aabb(self, index: usize) -> Aabb<T> {
         self[index].aabb()
     }
 
     #[inline]
+    /// Return the representative point used for tree construction.
     fn representative_point(self, index: usize) -> [T; 3] {
         self[index].representative_point()
     }
@@ -145,6 +153,7 @@ where
     K::SourceGeometry: Copy,
 {
     #[inline]
+    /// Return one source geometry item by index.
     fn source(self, index: usize) -> K::SourceGeometry {
         self[index]
     }
@@ -156,6 +165,7 @@ where
     K::SourceGeometry: Copy,
 {
     #[inline]
+    /// Return one source geometry item by index.
     fn source(self, index: usize) -> K::SourceGeometry {
         self[index]
     }
@@ -185,16 +195,19 @@ where
     K::SourceMoment: Copy,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         <[K::SourceMoment]>::len(self)
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         true
     }
 
     #[inline]
+    /// Return one source moment item by index.
     fn moment(self, index: usize) -> K::SourceMoment {
         self[index]
     }
@@ -206,16 +219,19 @@ where
     K::SourceMoment: Copy,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         N
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         true
     }
 
     #[inline]
+    /// Return one source moment item by index.
     fn moment(self, index: usize) -> K::SourceMoment {
         self[index]
     }
@@ -256,21 +272,25 @@ where
     K::TargetGeometry: Copy,
 {
     #[inline]
+    /// Return the number of items in this collection view.
     fn len(self) -> usize {
         <[K::TargetGeometry]>::len(self)
     }
 
     #[inline]
+    /// Return whether all backing slices have compatible lengths.
     fn valid_lengths(self) -> bool {
         true
     }
 
     #[inline]
+    /// Return one target geometry item by index.
     fn target(self, index: usize) -> K::TargetGeometry {
         self[index]
     }
 
     #[inline]
+    /// Return a subview over the requested target range.
     fn slice(self, start: usize, end: usize) -> Self {
         &self[start..end]
     }

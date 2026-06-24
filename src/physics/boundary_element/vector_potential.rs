@@ -19,6 +19,7 @@ use crate::mesh::elements::tri::tri3::{
 use crate::physics::point_source::current_element::vector_potential_current_element_scalar;
 
 #[inline]
+/// Evaluate one triangle vector-potential contribution using the selected quadrature rule.
 fn triangle_vector_potential_inner<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],

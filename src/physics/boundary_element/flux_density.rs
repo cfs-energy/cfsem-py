@@ -29,6 +29,7 @@ const TRIANGLE_B_DUFFY_EDGE_SAMPLES: usize = 32;
 const TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR: f64 = 1e-12;
 
 #[inline]
+/// Evaluate one triangle flux-density contribution using the selected quadrature rule.
 fn triangle_flux_density_inner<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
@@ -64,6 +65,7 @@ fn triangle_flux_density_inner<T: Scalar>(
 }
 
 #[inline]
+/// Accumulate a scaled cross product into a vector accumulator.
 fn accum_cross_scaled<T: Scalar>(out: &mut [T; 3], k: [T; 3], r: [T; 3], scale: T) {
     let k_cross_r = cross3(k, r);
     out[0] = out[0] + scale * k_cross_r[0];
@@ -72,6 +74,7 @@ fn accum_cross_scaled<T: Scalar>(out: &mut [T; 3], k: [T; 3], r: [T; 3], scale: 
 }
 
 #[inline]
+/// Evaluate the near-surface Duffy quadrature contribution for triangle flux density.
 fn triangle_flux_density_surface_duffy<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
@@ -119,6 +122,7 @@ fn triangle_flux_density_surface_duffy<T: Scalar>(
 }
 
 #[inline]
+/// Evaluate the singularity-regularized Duffy quadrature contribution for triangle flux density.
 fn triangle_flux_density_duffy<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],

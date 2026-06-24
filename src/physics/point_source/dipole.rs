@@ -94,6 +94,7 @@ pub fn flux_density_dipole_scalar_generic<T: Scalar>(
 }
 
 #[inline]
+/// Replace a non-finite scalar with a finite fallback value.
 fn clip_nan_generic<T: Scalar>(value: T, fallback: T) -> T {
     if value.is_nan() { fallback } else { value }
 }

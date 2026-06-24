@@ -34,6 +34,7 @@ pub struct LinearFilamentVectorPotentialKernel<T: Scalar> {
 
 impl<T: Scalar> LinearFilamentVectorPotentialKernel<T> {
     #[inline]
+    /// Construct the default kernel value.
     pub fn new() -> Self {
         Self {
             marker: PhantomData,
@@ -51,6 +52,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     type Output = [T; 3];
 
     #[inline]
+    /// Summarize a source leaf for this hierarchical kernel.
     fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
@@ -71,6 +73,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     }
 
     #[inline]
+    /// Combine child source summaries for this hierarchical kernel.
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
@@ -80,6 +83,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     }
 
     #[inline]
+    /// Summarize a target leaf for this hierarchical kernel.
     fn summarize_leaf_targets(
         &self,
         target_ids: &[u32],
@@ -90,6 +94,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     }
 
     #[inline]
+    /// Evaluate one near-field source-target interaction for this kernel.
     fn eval_near(
         &self,
         target: &Self::TargetGeometry,
@@ -109,6 +114,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     }
 
     #[inline]
+    /// Evaluate one far-field summary interaction for this kernel.
     fn eval_far(
         &self,
         target: &Self::TargetSummary,
@@ -141,6 +147,7 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     }
 
     #[inline]
+    /// Return whether this source summary is acceptable for far-field evaluation.
     fn accept_far(
         &self,
         target_aabb: Aabb<Self::Scalar>,
@@ -152,17 +159,20 @@ impl<T: Scalar> HierarchicalKernel for LinearFilamentVectorPotentialKernel<T> {
     }
 
     #[inline]
+    /// Reset an output accumulator for this kernel.
     fn zero_output(&self, out: &mut Self::Output) {
         *out = [T::ZERO; 3];
     }
 
     #[inline]
+    /// Accumulate one kernel contribution into an output value.
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
         add3_in_place(out, *contribution);
     }
 }
 
 #[inline]
+/// Return the point-segment source term used by the far-field vector-potential approximation.
 fn point_segment_source_term<T: Scalar>(
     origin: [T; 3],
     direction: [T; 3],

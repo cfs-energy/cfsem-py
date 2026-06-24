@@ -83,6 +83,7 @@ impl<T: Scalar> Aabb<T> {
     }
 
     #[inline]
+    /// Return the AABB width along one coordinate axis.
     pub(crate) fn extent(&self, axis: usize) -> T {
         self.max[axis] - self.min[axis]
     }

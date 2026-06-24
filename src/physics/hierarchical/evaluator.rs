@@ -11,6 +11,7 @@ pub struct SourceNodeSummaries<K: HierarchicalKernel> {
 
 impl<K: HierarchicalKernel> SourceNodeSummaries<K> {
     #[inline]
+    /// Construct the default kernel value.
     pub fn new(tree: ClusterTreeView<'_, K::Scalar>) -> Self {
         Self {
             node_summaries: vec![K::SourceSummary::default(); tree.n_nodes()],
@@ -129,6 +130,7 @@ where
 }
 
 #[inline]
+/// Evaluate validated source-target rows with the hierarchical tree walk.
 fn eval_validated<K, T, S, M, C, const D: usize>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, T>,
@@ -341,6 +343,7 @@ where
 }
 
 #[inline]
+/// Evaluate validated output chunks in parallel and preserve the first error code.
 fn eval_par_chunks<K, T, S, M, C, const D: usize>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, T>,
@@ -435,6 +438,7 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
 }
 
 #[inline]
+/// Split component-major mutable output slices into disjoint chunks.
 fn split_output_components<T, const D: usize>(
     mut out: [&mut [T]; D],
     mid: usize,
@@ -663,6 +667,7 @@ fn validate_source_tree_layout<T: super::Scalar>(
 }
 
 #[inline]
+/// Propagate leaf source summaries upward through the internal tree levels.
 fn propagate_source_summaries<K: HierarchicalKernel>(
     kernel: &K,
     tree: ClusterTreeView<'_, K::Scalar>,

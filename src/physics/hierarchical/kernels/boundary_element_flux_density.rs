@@ -26,6 +26,7 @@ pub struct BoundaryElementFluxDensityKernel<T: Scalar> {
 
 impl<T: Scalar> BoundaryElementFluxDensityKernel<T> {
     #[inline]
+    /// Construct a kernel with the requested configuration.
     pub fn new(quad_kind: QuadratureKind) -> Self {
         Self {
             quad_kind,
@@ -36,6 +37,7 @@ impl<T: Scalar> BoundaryElementFluxDensityKernel<T> {
 
 impl<T: Scalar> Default for BoundaryElementFluxDensityKernel<T> {
     #[inline]
+    /// Return the default kernel configuration.
     fn default() -> Self {
         Self::new(QuadratureKind::Dunavant3)
     }
@@ -51,6 +53,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     type Output = [T; 3];
 
     #[inline]
+    /// Summarize a source leaf for this hierarchical kernel.
     fn summarize_leaf_sources<S, M>(
         &self,
         source_ids: &[u32],
@@ -66,6 +69,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     }
 
     #[inline]
+    /// Combine child source summaries for this hierarchical kernel.
     fn combine_source_summaries(
         &self,
         children: &[Self::SourceSummary],
@@ -75,6 +79,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     }
 
     #[inline]
+    /// Summarize a target leaf for this hierarchical kernel.
     fn summarize_leaf_targets(
         &self,
         target_ids: &[u32],
@@ -85,6 +90,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     }
 
     #[inline]
+    /// Evaluate one near-field source-target interaction for this kernel.
     fn eval_near(
         &self,
         target: &Self::TargetGeometry,
@@ -103,6 +109,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     }
 
     #[inline]
+    /// Evaluate one far-field summary interaction for this kernel.
     fn eval_far(
         &self,
         target: &Self::TargetSummary,
@@ -134,6 +141,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     }
 
     #[inline]
+    /// Return whether this source summary is acceptable for far-field evaluation.
     fn accept_far(
         &self,
         target_aabb: Aabb<Self::Scalar>,
@@ -145,11 +153,13 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementFluxDensityKernel<T> {
     }
 
     #[inline]
+    /// Reset an output accumulator for this kernel.
     fn zero_output(&self, out: &mut Self::Output) {
         *out = [T::ZERO; 3];
     }
 
     #[inline]
+    /// Accumulate one kernel contribution into an output value.
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
         add3_in_place(out, *contribution);
     }

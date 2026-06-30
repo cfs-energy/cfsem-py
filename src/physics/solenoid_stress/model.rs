@@ -873,8 +873,11 @@ impl Structural2dModel {
         debug_assert_eq!(displacements_full.len(), self.ndof_full);
         let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
         let deformed = self.deformed_nodes(displacements_full);
-        let (num_inverted, worst) =
-            find_degenerate_quads::<Family, NODES_PER_ELEMENT>(&deformed, &elements, self.quadrature);
+        let (num_inverted, worst) = find_degenerate_quads::<Family, NODES_PER_ELEMENT>(
+            &deformed,
+            &elements,
+            self.quadrature,
+        );
         let Some(worst_index) = worst.filter(|_| num_inverted > 0) else {
             return Ok(());
         };

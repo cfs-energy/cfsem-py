@@ -1,5 +1,12 @@
 # Changelog
 
+## 11.1.0 2026-06-30
+
+* Rust
+    * Reject non-convex or degenerate quadrilaterals in the structural 2D FEM
+* Python
+    * `assemble_structural_2d` now raises on a degenerate rest mesh, and `Structural2DFEMModel.solve` now raises when the recovered displacement inverts an element, so stress and strain are never recovered from a folded mesh.
+
 ## 11.0.0 2026-06-24
 
 * Rust

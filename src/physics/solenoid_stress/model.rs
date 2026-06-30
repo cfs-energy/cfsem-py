@@ -833,7 +833,77 @@ impl Structural2dModel {
     ///     `[u_r0, u_z0, u_r1, u_z1, ...]`. Units are `[length]`.
     pub fn solve(&mut self, rhs: &[f64]) -> Result<Vec<f64>, String> {
         let reduced_solution = self.solve_direct_reduced(rhs)?;
-        Ok(self.recover_full(&reduced_solution))
+        let displacement = self.recover_full(&reduced_solution);
+        // Certify that the shape the structure takes under load is still a valid mesh, so the
+        // strain and stress later recovered on `nodes + displacement` rest on positive element
+        // volume rather than a folded one.
+        self.assert_deformed_mesh_valid(&displacement)?;
+        Ok(displacement)
+    }
+
+    /// Verify the deformed mesh (rest nodes + displacement) keeps every element non-degenerate.
+    ///
+    /// Adds the displacement to the rest nodes and checks the mapping Jacobian stays strictly
+    /// positive at each family's certifying reference points. A non-positive determinant means an
+    /// element has folded through zero area into an inverted state, where any strain or stress
+    /// recovered on it is meaningless. At the microstrain displacements of a converged structural
+    /// solve this never trips; it fires only on a corrupted solve or a load large enough to invert
+    /// an element.
+    fn assert_deformed_mesh_valid(&self, displacements_full: &[f64]) -> Result<(), String> {
+        match self.element_type {
+            Structural2dElementType::Quad4 => self
+                .assert_deformed_mesh_valid_for_family::<Quad4Family, { quad4::NODES_PER_ELEMENT }>(
+                    displacements_full,
+                ),
+            Structural2dElementType::Quad9 => self
+                .assert_deformed_mesh_valid_for_family::<Quad9Family, { quad9::NODES_PER_ELEMENT }>(
+                    displacements_full,
+                ),
+        }
+    }
+
+    /// Family-generic core of the deformed-mesh guard.
+    fn assert_deformed_mesh_valid_for_family<Family, const NODES_PER_ELEMENT: usize>(
+        &self,
+        displacements_full: &[f64],
+    ) -> Result<(), String>
+    where
+        Family: QuadElementFamily<NODES_PER_ELEMENT>,
+    {
+        debug_assert_eq!(displacements_full.len(), self.ndof_full);
+        let elements = self.analysis_elements::<NODES_PER_ELEMENT>()?;
+        let deformed = self.deformed_nodes(displacements_full);
+        let (num_inverted, worst) =
+            find_degenerate_quads::<Family, NODES_PER_ELEMENT>(&deformed, &elements, self.quadrature);
+        let Some(worst_index) = worst.filter(|_| num_inverted > 0) else {
+            return Ok(());
+        };
+        let corners = gather_coords(&deformed, &elements[worst_index]);
+        Err(format!(
+            "{num_inverted} of {} elements invert under the displacement: the deformed mesh has a \
+             non-positive Jacobian, so strain or stress recovered on it is invalid. Worst deformed \
+             element corners (r, z) [m]: {:?}, {:?}, {:?}, {:?}. Likely cause: an unphysically \
+             large displacement (check loads and boundary conditions).",
+            elements.len(),
+            corners[0],
+            corners[1],
+            corners[2],
+            corners[3],
+        ))
+    }
+
+    /// Move every node to its deformed position: each rest node plus its `(u_r, u_z)`.
+    fn deformed_nodes(&self, displacements_full: &[f64]) -> Vec<[f64; 2]> {
+        self.analysis_nodes
+            .iter()
+            .enumerate()
+            .map(|(node, coord)| {
+                [
+                    coord[0] + displacements_full[2 * node],
+                    coord[1] + displacements_full[2 * node + 1],
+                ]
+            })
+            .collect()
     }
 
     /// Solve the reduced structural system with the cached sparse LU factorization.
@@ -1158,6 +1228,10 @@ where
     Family: QuadElementFamily<NODES_PER_ELEMENT>,
 {
     let mesh = QuadMeshView2d { nodes_rz, elements };
+    // Reject a degenerate rest mesh before assembly. Connectivity must be sound first so the
+    // geometry check can index nodes safely; assembly re-validates it as part of its own gate.
+    mesh.validate_connectivity()?;
+    assert_rest_mesh_valid::<Family, NODES_PER_ELEMENT>(nodes_rz, elements, quadrature)?;
     let ndof_full = nodes_rz.len() * 2;
     let nelem = elements.len();
     // Build the full-space -> reduced-space maps once. Every stored operator after this point will
@@ -1692,6 +1766,84 @@ fn element_coords_from_flat<const NODES_PER_ELEMENT: usize>(
     Ok(coords)
 }
 
+/// Gather one element's node coordinates from a node array in local-node order.
+fn gather_coords<const NODES_PER_ELEMENT: usize>(
+    nodes: &[[f64; 2]],
+    element: &[usize; NODES_PER_ELEMENT],
+) -> [[f64; 2]; NODES_PER_ELEMENT] {
+    std::array::from_fn(|local_node| nodes[element[local_node]])
+}
+
+/// Find any element whose mapping Jacobian is non-positive at the family's certifying points.
+///
+/// Returns the count of degenerate elements and, when any exist, the index of the worst one (the
+/// most negative minimum Jacobian) so the caller can localize the failure. The same kernel
+/// certifies both shapes the mesh ever takes -- the rest mesh at assembly and the deformed mesh
+/// after a solve -- so the two checkpoints cannot drift apart on what counts as a valid quad.
+fn find_degenerate_quads<Family, const NODES_PER_ELEMENT: usize>(
+    nodes: &[[f64; 2]],
+    elements: &[[usize; NODES_PER_ELEMENT]],
+    quadrature: QuadratureRule,
+) -> (usize, Option<usize>)
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    // Shape-function gradients at the certifying points are element-independent; evaluate once.
+    let grads = Family::jacobian_check_points(quadrature)
+        .into_iter()
+        .map(|reference| Family::ReferenceElement::grad_ref(reference[0], reference[1]))
+        .collect::<Vec<_>>();
+    let mut num_degenerate = 0usize;
+    let mut worst: Option<(usize, f64)> = None;
+    for (element_index, element) in elements.iter().enumerate() {
+        let coords = gather_coords(nodes, element);
+        let element_min = grads
+            .iter()
+            .map(|grad| mapping::det_j(&mapping::jacobian(&coords, grad)))
+            .fold(f64::INFINITY, f64::min);
+        if element_min <= 0.0 {
+            num_degenerate += 1;
+        }
+        if worst.is_none_or(|(_, worst_min)| element_min < worst_min) {
+            worst = Some((element_index, element_min));
+        }
+    }
+    (num_degenerate, worst.map(|(index, _)| index))
+}
+
+/// Reject a rest mesh that already contains non-convex or degenerate quads, before assembly.
+///
+/// gmsh recombination can emit a sliver or locally non-convex quad near sharp geometry features,
+/// where the corner Jacobian goes non-positive even though the global winding looks fine. Catching
+/// it here stops a degenerate mesh from reaching the assembler, with the offending element's
+/// corners named for diagnosis.
+fn assert_rest_mesh_valid<Family, const NODES_PER_ELEMENT: usize>(
+    nodes: &[[f64; 2]],
+    elements: &[[usize; NODES_PER_ELEMENT]],
+    quadrature: QuadratureRule,
+) -> Result<(), String>
+where
+    Family: QuadElementFamily<NODES_PER_ELEMENT>,
+{
+    let (num_degenerate, worst) =
+        find_degenerate_quads::<Family, NODES_PER_ELEMENT>(nodes, elements, quadrature);
+    let Some(worst_index) = worst.filter(|_| num_degenerate > 0) else {
+        return Ok(());
+    };
+    let corners = gather_coords(nodes, &elements[worst_index]);
+    Err(format!(
+        "{num_degenerate} of {} elements are non-convex or degenerate in the rest mesh, before any \
+         load is applied: the mapping Jacobian is non-positive, so the assembled stiffness and any \
+         recovered field are invalid. Worst element corners (r, z) [m]: {:?}, {:?}, {:?}, {:?}. Fix \
+         the mesh upstream (recombination, or geometry near sharp features).",
+        elements.len(),
+        corners[0],
+        corners[1],
+        corners[2],
+        corners[3],
+    ))
+}
+
 /// Reconstruct typed element connectivity from the stored flattened analysis connectivity.
 fn elements_from_flat<const NODES_PER_ELEMENT: usize>(
     analysis_elements_flat: &[usize],
@@ -1849,6 +2001,52 @@ mod tests {
             false,
         )
         .expect("single-element model assembly should succeed")
+    }
+
+    #[test]
+    fn assembly_rejects_a_degenerate_rest_mesh() {
+        // A single quad4 whose third corner is dragged across its own diagonal, so the element is
+        // non-convex (one corner cross product non-positive) before any load is applied.
+        let nodes = [[0.0_f64, 0.0], [1.0, 0.0], [-0.5, -0.5], [0.0, 1.0]];
+        let elements = [[0usize, 1, 2, 3]];
+        let error = assemble_structural_2d(
+            &nodes,
+            Structural2dElements::Quad4(&elements),
+            &[0],
+            &[isotropic_axisymmetric_material(200.0e9, 0.27)],
+            &[],
+            &[],
+            None,
+            None,
+            &[],
+            Structural2dFormulation::Axisymmetric,
+            QuadratureRule::GaussLegendre3,
+            false,
+        )
+        .expect_err("a non-convex rest quad must be rejected at assembly");
+        assert!(error.contains("degenerate in the rest mesh"));
+    }
+
+    #[test]
+    fn deformed_mesh_guard_passes_small_and_rejects_inverting_displacement() {
+        let model = single_element_thermal_model();
+
+        // A uniform microstrain-scale displacement is nearly a rigid shift: every quad stays convex.
+        let benign = vec![1.0e-6; model.ndof_full];
+        model
+            .assert_deformed_mesh_valid(&benign)
+            .expect("a microstrain displacement must keep the mesh valid");
+
+        // Drag one corner far across the element's interior so the quad folds over on itself.
+        let elements = model.analysis_elements::<4>().expect("analysis elements");
+        let folded_corner = elements[0][2];
+        let mut inverting = vec![0.0; model.ndof_full];
+        inverting[2 * folded_corner] = -10.0;
+        inverting[2 * folded_corner + 1] = -10.0;
+        let error = model
+            .assert_deformed_mesh_valid(&inverting)
+            .expect_err("a corner dragged across the element must invert it");
+        assert!(error.contains("invert under the displacement"));
     }
 
     #[test]

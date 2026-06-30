@@ -1,5 +1,6 @@
 //! Family-specific quadrilateral sampling and metadata for the structural 2D FEM backend.
 
+use crate::mesh::elements::quad2d::quadrature::gauss_volume;
 use crate::mesh::elements::quad2d::{quad4, quad9};
 use crate::mesh::quad2d::{Quad4ReferenceElement, Quad9ReferenceElement, QuadReferenceElement};
 use crate::mesh::{QuadratureRule, sampling};
@@ -30,6 +31,16 @@ pub(crate) trait QuadElementFamily<const NODES_PER_ELEMENT: usize> {
         flat
     }
 
+    /// Reference points whose Jacobian sign certifies that one element is non-degenerate.
+    ///
+    /// A bilinear quad4 maps the reference square with a Jacobian that is itself bilinear, so its
+    /// sign everywhere is pinned by its four corner values: testing the corners is exactly
+    /// sufficient, with no interior gap a fold could slip through. A biquadratic quad9 has a
+    /// higher-order Jacobian that a mid-side node can drive negative while the corners stay
+    /// positive, so it falls back to the volume Gauss points -- the same admissibility gate the
+    /// assembler imposes when it integrates the element.
+    fn jacobian_check_points(quadrature: QuadratureRule) -> Vec<[f64; 2]>;
+
     /// Evaluate the family-specific volume quadrature samples for one element.
     fn volume_samples(
         coords: &[[f64; 2]; NODES_PER_ELEMENT],
@@ -53,6 +64,11 @@ impl QuadElementFamily<{ quad4::NODES_PER_ELEMENT }> for Quad4Family {
     /// Identify this marker as the public `quad4` family.
     fn element_type() -> Structural2dElementType {
         Structural2dElementType::Quad4
+    }
+
+    /// The four reference corners, walked counter-clockwise; their Jacobian sign is sufficient.
+    fn jacobian_check_points(_quadrature: QuadratureRule) -> Vec<[f64; 2]> {
+        vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
     }
 
     /// Delegate `quad4` volume sampling to the generic mesh sampling layer.
@@ -82,6 +98,14 @@ impl QuadElementFamily<{ quad9::NODES_PER_ELEMENT }> for Quad9Family {
     /// Identify this marker as the public `quad9` family.
     fn element_type() -> Structural2dElementType {
         Structural2dElementType::Quad9
+    }
+
+    /// The volume Gauss points, matching the gate the assembler imposes during integration.
+    fn jacobian_check_points(quadrature: QuadratureRule) -> Vec<[f64; 2]> {
+        gauss_volume::<f64>(quadrature)
+            .into_iter()
+            .map(|(reference, _weight)| reference)
+            .collect()
     }
 
     /// Delegate `quad9` volume sampling to the generic mesh sampling layer.

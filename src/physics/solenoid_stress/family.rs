@@ -34,8 +34,8 @@ pub(crate) trait QuadElementFamily<const NODES_PER_ELEMENT: usize> {
     /// Reference points whose Jacobian sign certifies that one element is non-degenerate.
     ///
     /// A bilinear quad4 maps the reference square with a Jacobian that is itself bilinear, so its
-    /// sign everywhere is pinned by its four corner values: testing the corners is exactly
-    /// sufficient, with no interior gap a fold could slip through. A biquadratic quad9 has a
+    /// sign is pinned by its four corner values: testing the corners is exactly sufficient. A
+    /// biquadratic quad9 has a
     /// higher-order Jacobian that a mid-side node can drive negative while the corners stay
     /// positive, so it falls back to the volume Gauss points -- the same admissibility gate the
     /// assembler imposes when it integrates the element.

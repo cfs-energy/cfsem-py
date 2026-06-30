@@ -834,9 +834,9 @@ impl Structural2dModel {
     pub fn solve(&mut self, rhs: &[f64]) -> Result<Vec<f64>, String> {
         let reduced_solution = self.solve_direct_reduced(rhs)?;
         let displacement = self.recover_full(&reduced_solution);
-        // Certify that the shape the structure takes under load is still a valid mesh, so the
-        // strain and stress later recovered on `nodes + displacement` rest on positive element
-        // volume rather than a folded one.
+        // Certify that rest nodes + displacement is still a non-inverted mesh -- positive element
+        // Jacobian everywhere -- so the displacement field returned to callers describes a
+        // physically admissible deformed geometry rather than a folded one.
         self.assert_deformed_mesh_valid(&displacement)?;
         Ok(displacement)
     }
@@ -845,8 +845,8 @@ impl Structural2dModel {
     ///
     /// Adds the displacement to the rest nodes and checks the mapping Jacobian stays strictly
     /// positive at each family's certifying reference points. A non-positive determinant means an
-    /// element has folded through zero area into an inverted state, where any strain or stress
-    /// recovered on it is meaningless. At the microstrain displacements of a converged structural
+    /// element has folded through zero area into an inverted, physically inadmissible state. At
+    /// the microstrain displacements of a converged structural
     /// solve this never trips; it fires only on a corrupted solve or a load large enough to invert
     /// an element.
     fn assert_deformed_mesh_valid(&self, displacements_full: &[f64]) -> Result<(), String> {
@@ -884,7 +884,7 @@ impl Structural2dModel {
         let corners = gather_coords(&deformed, &elements[worst_index]);
         Err(format!(
             "{num_inverted} of {} elements invert under the displacement: the deformed mesh has a \
-             non-positive Jacobian, so strain or stress recovered on it is invalid. Worst deformed \
+             non-positive Jacobian -- an element has folded through zero area. Worst deformed \
              element corners (r, z) [m]: {:?}, {:?}, {:?}, {:?}. Likely cause: an unphysically \
              large displacement (check loads and boundary conditions).",
             elements.len(),

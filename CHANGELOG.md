@@ -1,5 +1,10 @@
 # Changelog
 
+## 11.2.0 2026-07-02
+
+* Rust - 2D FEM stress solver
+    * Add chunked parallelism for matrix-free solution recovery
+
 ## 11.1.0 2026-06-30
 
 * Rust

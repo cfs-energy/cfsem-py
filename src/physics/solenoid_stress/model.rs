@@ -34,6 +34,7 @@ use crate::physics::solenoid_stress::types::{
     PressureLoad, StiffnessTriplets, Structural2dFormulation, ThermalMaterial, TractionLoad,
     dof_per_element,
 };
+use crate::{chunksize, ranges_for_len};
 
 /// Element-owned point locations for structural 2D recovery.
 #[derive(Debug, Clone)]
@@ -561,39 +562,49 @@ impl Structural2dModel {
             nodes_rz: &self.analysis_nodes,
             elements: &elements,
         };
-        let mut strain = Vec::with_capacity(element_indices.len());
-        for (&element_index, &reference) in element_indices.iter().zip(reference_points) {
-            let coords = mesh.element_coords(element_index)?;
-            let nodes = mesh.element_nodes(element_index)?;
-            let mut local_u = [0.0; DOF_PER_ELEMENT];
-            for local_node in 0..NODES_PER_ELEMENT {
-                let global_node = nodes[local_node];
-                local_u[2 * local_node] = displacements_full[2 * global_node];
-                local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
-            }
-            let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
-            let grad_ref = Family::ReferenceElement::grad_ref(reference[0], reference[1]);
-            let jac = mapping::jacobian(&coords, &grad_ref);
-            let inv_jac = mapping::inv_j(&jac)?;
-            let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
-            let point = mapping::map_point(&coords, &shape);
-            let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                self.formulation,
-                &shape,
-                &grad_phys,
-                point,
-            )?;
-            let mut sample_strain = [0.0; 4];
-            for component in 0..4 {
-                let mut value = 0.0;
-                for dof in 0..DOF_PER_ELEMENT {
-                    value += b[component][dof] * local_u[dof];
+        let formulation = self.formulation;
+        let evaluate_range = |start: usize, end: usize| {
+            let mut strain = Vec::with_capacity(end - start);
+            for index in start..end {
+                let element_index = element_indices[index];
+                let reference = reference_points[index];
+                let coords = mesh.element_coords(element_index)?;
+                let nodes = mesh.element_nodes(element_index)?;
+                let mut local_u = [0.0; DOF_PER_ELEMENT];
+                for local_node in 0..NODES_PER_ELEMENT {
+                    let global_node = nodes[local_node];
+                    local_u[2 * local_node] = displacements_full[2 * global_node];
+                    local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
                 }
-                sample_strain[component] = value;
+                let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
+                let grad_ref = Family::ReferenceElement::grad_ref(reference[0], reference[1]);
+                let jac = mapping::jacobian(&coords, &grad_ref);
+                let inv_jac = mapping::inv_j(&jac)?;
+                let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
+                let point = mapping::map_point(&coords, &shape);
+                let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    formulation,
+                    &shape,
+                    &grad_phys,
+                    point,
+                )?;
+                let mut sample_strain = [0.0; 4];
+                for component in 0..4 {
+                    let mut value = 0.0;
+                    for dof in 0..DOF_PER_ELEMENT {
+                        value += b[component][dof] * local_u[dof];
+                    }
+                    sample_strain[component] = value;
+                }
+                strain.push(sample_strain);
             }
-            strain.push(sample_strain);
+            Ok(strain)
+        };
+        if self.assembly.par {
+            collect_location_chunks(element_indices.len(), evaluate_range)
+        } else {
+            evaluate_range(0, element_indices.len())
         }
-        Ok(strain)
     }
 
     fn evaluate_stress_for_locations_for_family<
@@ -615,55 +626,63 @@ impl Structural2dModel {
             nodes_rz: &self.analysis_nodes,
             elements: &elements,
         };
-        let mut stress = Vec::with_capacity(element_indices.len());
-        for (&element_index, &reference) in element_indices.iter().zip(reference_points) {
-            let coords = mesh.element_coords(element_index)?;
-            let nodes = mesh.element_nodes(element_index)?;
-            let material_id = self.assembly.material_ids[element_index];
-            let material = self
-                .assembly
-                .material_table
-                .get(material_id)
-                .ok_or_else(|| {
+        let formulation = self.formulation;
+        let material_ids = &self.assembly.material_ids;
+        let material_table = &self.assembly.material_table;
+        let material_orientation_angles = self.assembly.material_orientation_angles.as_deref();
+        let evaluate_range = |start: usize, end: usize| {
+            let mut stress = Vec::with_capacity(end - start);
+            for index in start..end {
+                let element_index = element_indices[index];
+                let reference = reference_points[index];
+                let coords = mesh.element_coords(element_index)?;
+                let nodes = mesh.element_nodes(element_index)?;
+                let material_id = material_ids[element_index];
+                let material = material_table.get(material_id).ok_or_else(|| {
                     format!("material_id {material_id} on element {element_index} is out of range")
                 })?;
-            let material_storage;
-            let material = if let Some(angles) = self.assembly.material_orientation_angles.as_ref()
-            {
-                material_storage = rotate_material_in_plane(material, angles[element_index]);
-                &material_storage
-            } else {
-                material
-            };
-            let mut local_u = [0.0; DOF_PER_ELEMENT];
-            for local_node in 0..NODES_PER_ELEMENT {
-                let global_node = nodes[local_node];
-                local_u[2 * local_node] = displacements_full[2 * global_node];
-                local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
-            }
-            let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
-            let grad_ref = Family::ReferenceElement::grad_ref(reference[0], reference[1]);
-            let jac = mapping::jacobian(&coords, &grad_ref);
-            let inv_jac = mapping::inv_j(&jac)?;
-            let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
-            let point = mapping::map_point(&coords, &shape);
-            let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
-                self.formulation,
-                &shape,
-                &grad_phys,
-                point,
-            )?;
-            let mut sample_strain = [0.0; 4];
-            for component in 0..4 {
-                let mut value = 0.0;
-                for dof in 0..DOF_PER_ELEMENT {
-                    value += b[component][dof] * local_u[dof];
+                let material_storage;
+                let material = if let Some(angles) = material_orientation_angles {
+                    material_storage = rotate_material_in_plane(material, angles[element_index]);
+                    &material_storage
+                } else {
+                    material
+                };
+                let mut local_u = [0.0; DOF_PER_ELEMENT];
+                for local_node in 0..NODES_PER_ELEMENT {
+                    let global_node = nodes[local_node];
+                    local_u[2 * local_node] = displacements_full[2 * global_node];
+                    local_u[2 * local_node + 1] = displacements_full[2 * global_node + 1];
                 }
-                sample_strain[component] = value;
+                let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
+                let grad_ref = Family::ReferenceElement::grad_ref(reference[0], reference[1]);
+                let jac = mapping::jacobian(&coords, &grad_ref);
+                let inv_jac = mapping::inv_j(&jac)?;
+                let grad_phys = mapping::grad_phys(&grad_ref, &inv_jac);
+                let point = mapping::map_point(&coords, &shape);
+                let b = build_b_matrix::<NODES_PER_ELEMENT, DOF_PER_ELEMENT>(
+                    formulation,
+                    &shape,
+                    &grad_phys,
+                    point,
+                )?;
+                let mut sample_strain = [0.0; 4];
+                for component in 0..4 {
+                    let mut value = 0.0;
+                    for dof in 0..DOF_PER_ELEMENT {
+                        value += b[component][dof] * local_u[dof];
+                    }
+                    sample_strain[component] = value;
+                }
+                stress.push(constitutive_times_strain(material, &sample_strain));
             }
-            stress.push(constitutive_times_strain(material, &sample_strain));
+            Ok(stress)
+        };
+        if self.assembly.par {
+            collect_location_chunks(element_indices.len(), evaluate_range)
+        } else {
+            evaluate_range(0, element_indices.len())
         }
-        Ok(stress)
     }
 
     fn evaluate_thermal_for_locations_for_family<
@@ -696,54 +715,62 @@ impl Structural2dModel {
             nodes_rz: &self.analysis_nodes,
             elements: &elements,
         };
-        let mut values = Vec::with_capacity(element_indices.len());
-        for (&element_index, &reference) in element_indices.iter().zip(reference_points) {
-            let nodes = mesh.element_nodes(element_index)?;
-            let material_id = self.assembly.material_ids[element_index];
-            let material = self
-                .assembly
-                .material_table
-                .get(material_id)
-                .ok_or_else(|| {
+        let material_ids = &self.assembly.material_ids;
+        let material_table = &self.assembly.material_table;
+        let material_orientation_angles = self.assembly.material_orientation_angles.as_deref();
+        let evaluate_range = |start: usize, end: usize| {
+            let mut values = Vec::with_capacity(end - start);
+            for index in start..end {
+                let element_index = element_indices[index];
+                let reference = reference_points[index];
+                let nodes = mesh.element_nodes(element_index)?;
+                let material_id = material_ids[element_index];
+                let material = material_table.get(material_id).ok_or_else(|| {
                     format!("material_id {material_id} on element {element_index} is out of range")
                 })?;
-            let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
-                format!(
-                    "thermal material_id {material_id} on element {element_index} is out of range"
-                )
-            })?;
-            let material_storage;
-            let thermal_storage;
-            let (material, thermal) = if let Some(angles) =
-                self.assembly.material_orientation_angles.as_ref()
-            {
-                material_storage = rotate_material_in_plane(material, angles[element_index]);
-                thermal_storage = rotate_thermal_material_in_plane(thermal, angles[element_index]);
-                (&material_storage, &thermal_storage)
-            } else {
-                (material, thermal)
-            };
-            let thermal_stress_unit =
-                STRESS.then(|| constitutive_times_strain(material, &thermal.alpha));
+                let thermal = thermal_material_table.get(material_id).ok_or_else(|| {
+                    format!(
+                        "thermal material_id {material_id} on element {element_index} is out of range"
+                    )
+                })?;
+                let material_storage;
+                let thermal_storage;
+                let (material, thermal) = if let Some(angles) = material_orientation_angles {
+                    material_storage = rotate_material_in_plane(material, angles[element_index]);
+                    thermal_storage =
+                        rotate_thermal_material_in_plane(thermal, angles[element_index]);
+                    (&material_storage, &thermal_storage)
+                } else {
+                    (material, thermal)
+                };
+                let thermal_stress_unit =
+                    STRESS.then(|| constitutive_times_strain(material, &thermal.alpha));
 
-            let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
-            let mut temperature_delta = -thermal.reference_temperature;
-            for local_node in 0..NODES_PER_ELEMENT {
-                temperature_delta += shape[local_node] * nodal_temperature[nodes[local_node]];
-            }
-            let mut sample_value = [0.0; 4];
-            if let Some(thermal_stress_unit) = thermal_stress_unit.as_ref() {
-                for component in 0..4 {
-                    sample_value[component] = thermal_stress_unit[component] * temperature_delta;
+                let shape = Family::ReferenceElement::shape(reference[0], reference[1]);
+                let mut temperature_delta = -thermal.reference_temperature;
+                for local_node in 0..NODES_PER_ELEMENT {
+                    temperature_delta += shape[local_node] * nodal_temperature[nodes[local_node]];
                 }
-            } else {
-                for component in 0..4 {
-                    sample_value[component] = thermal.alpha[component] * temperature_delta;
+                let mut sample_value = [0.0; 4];
+                if let Some(thermal_stress_unit) = thermal_stress_unit.as_ref() {
+                    for component in 0..4 {
+                        sample_value[component] =
+                            thermal_stress_unit[component] * temperature_delta;
+                    }
+                } else {
+                    for component in 0..4 {
+                        sample_value[component] = thermal.alpha[component] * temperature_delta;
+                    }
                 }
+                values.push(sample_value);
             }
-            values.push(sample_value);
+            Ok(values)
+        };
+        if self.assembly.par {
+            collect_location_chunks(element_indices.len(), evaluate_range)
+        } else {
+            evaluate_range(0, element_indices.len())
         }
-        Ok(values)
     }
 
     fn locate_points_in_elements_for_family<Family, const NODES_PER_ELEMENT: usize>(
@@ -1460,6 +1487,24 @@ fn reduce_sort_stiffness_chunks(
     sorted_chunks
 }
 
+/// Evaluate independent point-location chunks in parallel and flatten them in source order.
+fn collect_location_chunks<T, F>(len: usize, evaluate_range: F) -> Result<Vec<T>, String>
+where
+    T: Send,
+    F: Fn(usize, usize) -> Result<Vec<T>, String> + Sync,
+{
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let chunks = ranges_for_len(len, chunksize(len))
+        .into_par_iter()
+        .map(|(start, end)| evaluate_range(start, end))
+        .collect::<Result<Vec<_>, String>>()?;
+
+    Ok(chunks.into_iter().flatten().collect())
+}
+
 /// Return triplets in canonical CSC order with duplicate `(column, row)` entries coalesced.
 fn sort_coalesce_triplets(
     mut triplets: Vec<Triplet<usize, usize, f64>>,
@@ -2006,6 +2051,35 @@ mod tests {
         .expect("single-element model assembly should succeed")
     }
 
+    fn two_element_thermal_model(par: bool) -> Structural2dModel {
+        let nodes = [
+            [1.0_f64, 0.0],
+            [2.0, 0.0],
+            [3.0, 0.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+            [3.0, 1.0],
+        ];
+        let elements = [[0usize, 1, 4, 3], [1, 2, 5, 4]];
+        let material = isotropic_axisymmetric_material(200.0e9, 0.27);
+        let thermal = isotropic_axisymmetric_thermal_material(1.2e-5, 293.15);
+        assemble_structural_2d(
+            &nodes,
+            Structural2dElements::Quad4(&elements),
+            &[0, 0],
+            &[material],
+            &[],
+            &[],
+            Some(&[thermal]),
+            None,
+            &[],
+            Structural2dFormulation::Axisymmetric,
+            QuadratureRule::GaussLegendre3,
+            par,
+        )
+        .expect("two-element model assembly should succeed")
+    }
+
     #[test]
     fn assembly_rejects_a_degenerate_rest_mesh() {
         // A single quad4 whose third corner is dragged across its own diagonal, so the element is
@@ -2145,5 +2219,60 @@ mod tests {
             .flat_map(|sample| sample.into_iter())
             .collect::<Vec<_>>();
         assert_allclose(&actual, &expected);
+    }
+
+    #[test]
+    fn matrix_free_recovery_parallel_matches_serial_for_unsorted_locations() {
+        let serial = two_element_thermal_model(false);
+        let parallel = two_element_thermal_model(true);
+        let element_indices = vec![1usize, 0, 1, 1, 0, 0, 1];
+        let reference_points = vec![
+            [0.0, 0.0],
+            [-0.5, 0.25],
+            [0.75, -0.25],
+            [-0.25, 0.5],
+            [0.25, -0.75],
+            [0.0, 0.0],
+            [-0.75, -0.5],
+        ];
+        let displacements_full = (0..serial.ndof_full)
+            .map(|index| (index as f64 - 4.0) * 1.0e-6)
+            .collect::<Vec<_>>();
+        let nodal_temperature = (0..serial.n_temperature_nodes)
+            .map(|index| 293.15 + 2.5 * index as f64)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            serial
+                .strain(&element_indices, &reference_points, &displacements_full)
+                .expect("serial strain recovery"),
+            parallel
+                .strain(&element_indices, &reference_points, &displacements_full)
+                .expect("parallel strain recovery")
+        );
+        assert_eq!(
+            serial
+                .stress(&element_indices, &reference_points, &displacements_full)
+                .expect("serial stress recovery"),
+            parallel
+                .stress(&element_indices, &reference_points, &displacements_full)
+                .expect("parallel stress recovery")
+        );
+        assert_eq!(
+            serial
+                .thermal_strain(&element_indices, &reference_points, &nodal_temperature)
+                .expect("serial thermal-strain recovery"),
+            parallel
+                .thermal_strain(&element_indices, &reference_points, &nodal_temperature)
+                .expect("parallel thermal-strain recovery")
+        );
+        assert_eq!(
+            serial
+                .thermal_stress(&element_indices, &reference_points, &nodal_temperature)
+                .expect("serial thermal-stress recovery"),
+            parallel
+                .thermal_stress(&element_indices, &reference_points, &nodal_temperature)
+                .expect("parallel thermal-stress recovery")
+        );
     }
 }

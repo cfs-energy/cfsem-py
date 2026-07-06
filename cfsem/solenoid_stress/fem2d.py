@@ -88,6 +88,12 @@ def _as_uint64_array(data: Any) -> UInt64Array:
     return np.asarray(data)
 
 
+def _require_float64_array(name: str, arr: npt.NDArray[Any]) -> npt.NDArray[np.float64]:
+    if arr.dtype != np.float64:
+        raise TypeError(f"{name} must have dtype float64; got {arr.dtype}")
+    return arr
+
+
 def _csr_matrix_from_binding(
     binding: tuple[ArrayLike, ArrayLike, ArrayLike, int, int],
 ) -> sp.csr_matrix:
@@ -977,6 +983,7 @@ def _normalize_material_orientation_angles(
     if material_orientation_angles is None:
         return np.zeros((0,), dtype=np.float64)
     angles = np.asarray(material_orientation_angles)
+    angles = _require_float64_array("material_orientation_angles", angles)
     angles = np.broadcast_to(angles, (nelem,)).copy() if angles.ndim == 0 else angles
     assert angles.ndim == 1 and angles.shape[0] == nelem, (
         f"material_orientation_angles must be a scalar or have shape ({nelem},); " f"got {angles.shape}"
@@ -986,6 +993,7 @@ def _normalize_material_orientation_angles(
 
 def _normalize_nodes(nodes: ArrayLike) -> Float64Array:
     arr = np.asarray(nodes)
+    arr = _require_float64_array("nodes", arr)
     assert arr.ndim == 2 and arr.shape[1] == 2, f"nodes must have shape (nnode, 2); got {arr.shape}"
     return arr
 
@@ -1300,6 +1308,7 @@ def _normalize_materials(
         material_table, Mapping
     ), "material_table must be a dense array; use pack_material_tables_from_tags(...) for tagged inputs"
     table = np.asarray(material_table)
+    table = _require_float64_array("material_table", table)
     assert table.ndim == 3 and table.shape[1:] == (
         4,
         4,
@@ -1317,6 +1326,7 @@ def _normalize_thermal_material_table(
         "for tagged inputs"
     )
     table = np.asarray(thermal_material_table)
+    table = _require_float64_array("thermal_material_table", table)
     assert (
         table.ndim == 2 and table.shape[1] == 5
     ), f"thermal_material_table must have shape (nmat, 5); got {table.shape}"
@@ -1407,6 +1417,7 @@ def _normalize_nodal_temperature(
     nnode: int,
 ) -> npt.NDArray[np.floating[Any]]:
     arr = np.asarray(nodal_temperature)
+    arr = _require_float64_array("nodal_temperature", arr)
     assert (
         arr.ndim == 1 and arr.shape[0] == nnode
     ), f"nodal_temperature must have shape ({nnode},); got {arr.shape}"
@@ -1418,6 +1429,7 @@ def _normalize_body_force(
     nelem: int,
 ) -> npt.NDArray[np.floating[Any]]:
     arr = np.asarray(body_force)
+    arr = _require_float64_array("body_force", arr)
     if arr.ndim == 1 and arr.shape == (2,):
         arr = np.broadcast_to(arr, (nelem, 2)).copy()
     assert arr.ndim == 2 and arr.shape == (
@@ -1438,6 +1450,7 @@ def _normalize_pressure_values(
     nload: int,
 ) -> npt.NDArray[np.floating[Any]]:
     values = np.zeros((nload,), dtype=np.float64) if pressure_values is None else np.asarray(pressure_values)
+    values = _require_float64_array("pressure_values", values)
     assert values.ndim == 1, f"pressure_values must have shape (nload,); got {values.shape}"
     assert values.shape[0] == nload, f"pressure_values has {values.shape[0]} entries, but expected {nload}"
     return values
@@ -1450,6 +1463,7 @@ def _normalize_traction_values(
     values = (
         np.zeros((nload, 2), dtype=np.float64) if traction_values is None else np.asarray(traction_values)
     )
+    values = _require_float64_array("traction_values", values)
     values = (
         np.broadcast_to(values, (nload, 2)).copy() if values.ndim == 1 and values.shape == (2,) else values
     )

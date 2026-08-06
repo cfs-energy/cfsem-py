@@ -3,7 +3,7 @@
 **Date:** 2026-08-06  
 **Repo:** cfsem-py  
 **Branch:** jlogan/bem-analytic-inductance  
-**Status:** In progress
+**Status:** Complete
 
 ## Feature Request
 
@@ -607,6 +607,21 @@ Criterion review gates, not CI assertions:
 - Vector potential retains numerical quadrature and closest-point subdivision.
 - Hierarchical far B retains its opening-controlled approximation.
 - Performance gates are reviewed on hardware, not asserted in CI.
+
+## Implementation Outcome
+
+- Aspect-67 annulus energy is 455.27/455.81/455.82 J for Dunavant 1/3/5 versus
+  the independent 456.29 J filament reference; the previous default result was
+  about 1029 J.
+- The isolated shared-edge pair meets the independent reference within 0.05% at
+  aspects 1, 4, 16, and 67 for Dunavant 1/3/5.
+- Analytic direct B costs about 2.1x the legacy far-field rule, below the 4x gate,
+  and remains analytic everywhere off the source triangle.
+- All-analytic far inductance cost about 35x legacy, so well-separated pairs use
+  a reciprocal nested-quadrature fallback. Its measured pair cost is about 2x
+  legacy; self and near interactions remain analytic/adaptive.
+- Final verification: 130 Rust tests and 727 Python tests pass, with 100% Python
+  coverage; formatting, lint, type checks, and docs build also pass.
 
 ## References
 

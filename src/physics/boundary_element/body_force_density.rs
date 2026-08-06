@@ -70,7 +70,7 @@ fn triangle_flux_density_basis_integral_on_triangle(
     let mut out = [0.0; 3]; // [T*m^2/A]
     for qp in quad_points_tgt {
         let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]); // [m]
-        let b = triangle_flux_density_basis(src0, src1, src2, obs, quad_kind); // [T/A]
+        let b = triangle_flux_density_basis(src0, src1, src2, obs); // [T/A]
         let w = qp[0] * tri_area_tgt; // [m^2]
         out[0] += b[0] * w; // [T*m^2/A]
         out[1] += b[1] * w; // [T*m^2/A]

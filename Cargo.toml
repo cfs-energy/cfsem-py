@@ -60,5 +60,9 @@ harness = false
 name = "point_source"
 harness = false
 
+[[bench]]
+name = "boundary_element"
+harness = false
+
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "katex-header.html" ]

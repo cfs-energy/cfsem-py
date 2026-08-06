@@ -268,7 +268,6 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
 ///     obs: Observation point coordinates.
 ///     mesh: Triangle mesh source geometry.
 ///     s: Nodal stream-function values.
-///     quad_kind: Triangle quadrature rule.
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
@@ -284,7 +283,6 @@ pub fn flux_density_triangle_mesh_hierarchical(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     construction_method: BuildMethod,
     theta: f64,
     par: bool,
@@ -296,7 +294,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
     let moments = BoundaryElementNodalValues::new(sources, s);
     let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
     one_shot_vec3(
-        BoundaryElementFluxDensityKernel::<f64>::new(quad_kind),
+        BoundaryElementFluxDensityKernel::<f64>::new(),
         sources,
         moments,
         targets,

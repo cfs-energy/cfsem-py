@@ -23,6 +23,7 @@ pub(crate) use crate::mesh::elements::tri::quadrature::{
 mod body_force_density;
 mod flux_density;
 mod inductance;
+mod triangle_potential;
 mod vector_potential;
 
 #[cfg(test)]
@@ -71,10 +72,6 @@ pub use vector_potential::{
     vector_potential_triangle_mesh_mapping, vector_potential_triangle_mesh_mapping_par,
     vector_potential_triangle_mesh_par,
 };
-
-/// Midpoint-rule samples used for the 1D edge integral in the Duffy-style
-/// triangle self kernel.
-const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 
 #[inline]
 /// Return the triangle area and constant basis-current density vector.

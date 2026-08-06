@@ -3,157 +3,49 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
+use super::triangle_potential::UniformTriangle;
 use super::{
-    QuadratureKind, TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR, calc_tri_area, map_tri_uv,
-    triangle_basis_current_density, triangle_quadrature_points,
+    triangle_basis_current_densities, triangle_basis_current_density, triangle_current_density,
 };
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
 use crate::math::Scalar;
-use crate::math::{add_scaled3, cross3, norm3, sub3};
+use crate::math::{cross3, scale3};
 use crate::mesh::TriangleMeshView;
-use crate::mesh::elements::tri::tri3::{
-    closest_point as triangle_closest_point,
-    max_edge_length_squared as triangle_max_edge_length_squared,
-    subdivide_about_point as triangle_subdivide_about_point,
-};
-use crate::physics::point_source::current_element::flux_density_current_element_scalar;
-
-/// Midpoint-rule samples for the Duffy-style transverse edge integral in
-/// near-surface triangle B-field evaluations.
-const TRIANGLE_B_DUFFY_EDGE_SAMPLES: usize = 32;
-
-/// Observation offsets below this fraction of the maximum edge length are
-/// treated as exactly on the source surface and evaluated as a principal value.
-const TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR: f64 = 1e-12;
 
 #[inline]
-/// Evaluate one triangle flux-density contribution using the selected quadrature rule.
-fn triangle_flux_density_inner<T: Scalar>(
-    n0: [T; 3],
-    n1: [T; 3],
-    n2: [T; 3],
+fn triangle_flux_density_exact<T: Scalar>(
+    triangle: &UniformTriangle<T>,
     current_density: [T; 3],
     obs: [T; 3],
-    quad_kind: QuadratureKind,
 ) -> [T; 3] {
-    let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
-    let quad_points = triangle_quadrature_points(quad_kind);
-
-    let mut b = [T::ZERO; 3]; // [T/A]
-
-    for qp in quad_points {
-        let (c, u, v) = (
-            crate::math::cast::<T>(qp[0]),
-            crate::math::cast::<T>(qp[1]),
-            crate::math::cast::<T>(qp[2]),
-        );
-        let src = map_tri_uv(n0, n1, n2, [u, v]); // [m]
-        let moment = [
-            current_density[0] * c * tri_area, // [m]
-            current_density[1] * c * tri_area, // [m]
-            current_density[2] * c * tri_area, // [m]
-        ];
-        let contrib = flux_density_current_element_scalar(src, moment, obs); // [T/A]
-        b[0] = b[0] + contrib[0]; // [T/A]
-        b[1] = b[1] + contrib[1]; // [T/A]
-        b[2] = b[2] + contrib[2]; // [T/A]
+    if triangle.contains_on_surface(obs) {
+        return [T::ZERO; 3];
     }
-
-    b
+    scale3(
+        cross3(triangle.scalar_potential_gradient(obs), current_density),
+        crate::math::cast::<T>(MU0_OVER_4PI),
+    )
 }
 
 #[inline]
-/// Accumulate a scaled cross product into a vector accumulator.
-fn accum_cross_scaled<T: Scalar>(out: &mut [T; 3], k: [T; 3], r: [T; 3], scale: T) {
-    let k_cross_r = cross3(k, r);
-    out[0] = out[0] + scale * k_cross_r[0];
-    out[1] = out[1] + scale * k_cross_r[1];
-    out[2] = out[2] + scale * k_cross_r[2];
-}
-
-#[inline]
-/// Evaluate the near-surface Duffy quadrature contribution for triangle flux density.
-fn triangle_flux_density_surface_duffy<T: Scalar>(
-    n0: [T; 3],
-    n1: [T; 3],
-    n2: [T; 3],
-    current_density: [T; 3],
-    closest: [T; 3],
-    min_sub_area: T,
-    length_ref: T,
-) -> [T; 3] {
-    let mut b = [T::ZERO; 3]; // [T/A]
-
-    for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
-        let [p, va, vb] = tri;
-        let area_sub = calc_tri_area(p, va, vb); // [m^2]
-        if area_sub <= min_sub_area {
-            continue;
-        }
-
-        let qa = sub3(va, closest); // [m]
-        let qb = sub3(vb, closest); // [m]
-        let dq = sub3(qb, qa); // [m]
-        let mut sub_b = [T::ZERO; 3]; // [1/m]
-
-        for i in 0..TRIANGLE_B_DUFFY_EDGE_SAMPLES {
-            let eta =
-                crate::math::cast::<T>((i as f64 + 0.5) / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64);
-            let q = add_scaled3(qa, dq, eta); // [m]
-            let qnorm = norm3(q); // [m]
-            if qnorm == T::ZERO {
-                continue;
-            }
-            let scale = (qnorm / length_ref).ln() / qnorm.powf(crate::math::cast::<T>(3.0)); // [1/m^3]
-            accum_cross_scaled(&mut sub_b, current_density, q, scale); // [1/m^2]
-        }
-
-        let scale =
-            crate::math::cast::<T>(-MU0_OVER_4PI * 2.0 / TRIANGLE_B_DUFFY_EDGE_SAMPLES as f64)
-                * area_sub; // [H/m * m^2]
-        b[0] = b[0] + scale * sub_b[0]; // [T/A]
-        b[1] = b[1] + scale * sub_b[1]; // [T/A]
-        b[2] = b[2] + scale * sub_b[2]; // [T/A]
-    }
-
-    b
-}
-
-#[inline]
-/// Evaluate the singularity-regularized Duffy quadrature contribution for triangle flux density.
-fn triangle_flux_density_duffy<T: Scalar>(
-    n0: [T; 3],
-    n1: [T; 3],
-    n2: [T; 3],
-    current_density: [T; 3],
+fn triangle_flux_density_bases_exact<T: Scalar>(
+    triangle: &UniformTriangle<T>,
     obs: [T; 3],
-    closest: [T; 3],
-    max_edge_sq: T,
-) -> Option<[T; 3]> {
-    let h = sub3(obs, closest); // [m]
-    let surface_tol = crate::math::cast::<T>(TRIANGLE_B_DUFFY_SURFACE_TOL_FACTOR);
-    let surface_tol_sq = surface_tol * surface_tol * max_edge_sq; // [m^2]
-    let min_sub_area = max_edge_sq * crate::math::cast::<T>(1e-14); // [m^2]
-    // The finite-part log needs a dimensionless argument. The reference length
-    // is immaterial because the omitted log-divergent term cancels by angular
-    // symmetry across the subtriangles around the singular point.
-    let length_ref = max_edge_sq.sqrt(); // [m]
-
-    if h[0].mul_add(h[0], h[1].mul_add(h[1], h[2] * h[2])) <= surface_tol_sq {
-        Some(triangle_flux_density_surface_duffy(
-            n0,
-            n1,
-            n2,
-            current_density,
-            closest,
-            min_sub_area,
-            length_ref,
-        ))
-    } else {
-        None
+) -> [[T; 3]; 3] {
+    if triangle.contains_on_surface(obs) {
+        return [[T::ZERO; 3]; 3];
     }
+    let nodes = triangle.nodes();
+    let basis = triangle_basis_current_densities(nodes[0], nodes[1], nodes[2]);
+    let gradient = triangle.scalar_potential_gradient(obs);
+    let scale = crate::math::cast::<T>(MU0_OVER_4PI);
+    [
+        scale3(cross3(gradient, basis[0]), scale),
+        scale3(cross3(gradient, basis[1]), scale),
+        scale3(cross3(gradient, basis[2]), scale),
+    ]
 }
 
 /// Magnetic flux density (B-field) contribution of a given triangle's basis function
@@ -161,24 +53,15 @@ fn triangle_flux_density_duffy<T: Scalar>(
 ///
 /// Assumes a basis function living on the triangle's first node.
 ///
-/// Method:
-/// - The linear triangle basis induces a constant surface current density over the
-///   element.
-/// - Each quadrature point is treated as a point current element with moment
-///   `m = K * ΔS_q`.
-/// - When the target point is exactly on the triangle, a Duffy-style transform
-///   centered at the closest point is used for the principal-value sheet
-///   contribution without adding either one-sided `±mu0 / 2 K x n` jump term.
-/// - Other near-field points use one level of closest-point subdivision before
-///   applying the same quadrature rule on each subtriangle.
-/// - Sum the Biot-Savart contributions with the full `μ0 / 4π` prefactor included.
+/// Uses the exact gradient of the uniform-triangle scalar potential off the
+/// source. Directly on the finite source triangle, this triangle's contribution
+/// is defined to be exactly zero.
 ///
 /// Args:
 ///     n0: Basis node coordinates `[x, y, z]` (m).
 ///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
 ///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
 ///     obs: Observation point `[x, y, z]` (m).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///
 /// Returns:
 ///     Basis-function magnetic flux density `[bx, by, bz]` (T/A).
@@ -188,42 +71,9 @@ pub fn triangle_flux_density_basis<T: Scalar>(
     n1: [T; 3],
     n2: [T; 3],
     obs: [T; 3],
-    quad_kind: QuadratureKind,
 ) -> [T; 3] {
     let (_, jref) = triangle_basis_current_density(n0, n1, n2); // [m^2], [1/m]
-    let max_edge_sq = triangle_max_edge_length_squared(n0, n1, n2); // [m^2]
-    let closest = triangle_closest_point(obs, n0, n1, n2); // [m]
-    let dx = obs[0] - closest[0]; // [m]
-    let dy = obs[1] - closest[1]; // [m]
-    let dz = obs[2] - closest[2]; // [m]
-    let dist_sq = dx.mul_add(dx, dy.mul_add(dy, dz * dz)); // [m^2]
-    let subdiv_factor = crate::math::cast::<T>(TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR);
-    let subdiv_threshold_sq = subdiv_factor * subdiv_factor * max_edge_sq; // [m^2]
-
-    if dist_sq > subdiv_threshold_sq {
-        return triangle_flux_density_inner(n0, n1, n2, jref, obs, quad_kind);
-    }
-
-    if let Some(b) = triangle_flux_density_duffy(n0, n1, n2, jref, obs, closest, max_edge_sq) {
-        return b;
-    }
-
-    // Single-level triangle subdivision for finite-offset near-field calcs
-    // to keep quadrature points separated from the target point.
-    let mut b = [T::ZERO; 3]; // [T/A]
-    let min_sub_area = max_edge_sq * crate::math::cast::<T>(1e-14); // [m^2]
-    for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
-        let [a, b0, c] = tri;
-        if calc_tri_area(a, b0, c) <= min_sub_area {
-            continue;
-        }
-        let contrib = triangle_flux_density_inner(a, b0, c, jref, obs, quad_kind);
-        b[0] = b[0] + contrib[0]; // [T/A]
-        b[1] = b[1] + contrib[1]; // [T/A]
-        b[2] = b[2] + contrib[2]; // [T/A]
-    }
-
-    b
+    triangle_flux_density_exact(&UniformTriangle::new(n0, n1, n2), jref, obs)
 }
 
 /// Flux density (B-field) of triangular surface current density distribution
@@ -234,6 +84,8 @@ pub fn triangle_flux_density_basis<T: Scalar>(
 /// in potential between the nodes; for example, in a strip discretized into triangles
 /// with s=s0 on one side of the strip and s=-s0 on the other side of the strip,
 /// the total current on the strip (and its effective filament current) is equal to s0.
+/// Off the finite triangle this uses the exact gradient of its uniform-source
+/// potential. Directly on the triangle, this source contribution is defined as zero.
 ///
 /// Args:
 ///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
@@ -241,7 +93,6 @@ pub fn triangle_flux_density_basis<T: Scalar>(
 ///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
 ///     s: Nodal current-potential values `[s0, s1, s2]` (A).
 ///     obs: Observation point `[x, y, z]` (m).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///
 /// Returns:
 ///     Magnetic flux density `[bx, by, bz]` (T).
@@ -252,17 +103,9 @@ pub fn flux_density_triangle<T: Scalar>(
     n2: [T; 3],
     s: [T; 3],
     obs: [T; 3],
-    quad_kind: QuadratureKind,
 ) -> [T; 3] {
-    let b_n0 = triangle_flux_density_basis(n0, n1, n2, obs, quad_kind);
-    let b_n1 = triangle_flux_density_basis(n1, n2, n0, obs, quad_kind);
-    let b_n2 = triangle_flux_density_basis(n2, n0, n1, obs, quad_kind);
-
-    [
-        s[0] * b_n0[0] + s[1] * b_n1[0] + s[2] * b_n2[0], // [T]
-        s[0] * b_n0[1] + s[1] * b_n1[1] + s[2] * b_n2[1], // [T]
-        s[0] * b_n0[2] + s[1] * b_n1[2] + s[2] * b_n2[2], // [T]
-    ]
+    let current_density = triangle_current_density(n0, n1, n2, s); // [A/m]
+    triangle_flux_density_exact(&UniformTriangle::new(n0, n1, n2), current_density, obs)
 }
 
 #[inline]
@@ -286,7 +129,6 @@ fn validate_flux_density_mapping_inputs(
 fn flux_density_triangle_mesh_mapping_chunk(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len(); // [-]
@@ -304,27 +146,8 @@ fn flux_density_triangle_mesh_mapping_chunk(
         for itri in 0..mesh.len() {
             let (tri_nodes, idx) = mesh.triangle_nodes_and_indices(itri);
 
-            let b0 = triangle_flux_density_basis(
-                tri_nodes[0],
-                tri_nodes[1],
-                tri_nodes[2],
-                obs_i,
-                quad_kind,
-            ); // [T/A]
-            let b1 = triangle_flux_density_basis(
-                tri_nodes[1],
-                tri_nodes[2],
-                tri_nodes[0],
-                obs_i,
-                quad_kind,
-            ); // [T/A]
-            let b2 = triangle_flux_density_basis(
-                tri_nodes[2],
-                tri_nodes[0],
-                tri_nodes[1],
-                obs_i,
-                quad_kind,
-            ); // [T/A]
+            let triangle = UniformTriangle::new(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
+            let [b0, b1, b2] = triangle_flux_density_bases_exact(&triangle, obs_i); // [T/A]
 
             out.0[row_offset + idx[0]] += b0[0]; // [T/A]
             out.1[row_offset + idx[0]] += b0[1]; // [T/A]
@@ -348,7 +171,6 @@ fn flux_density_triangle_mesh_inner(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len();
@@ -365,14 +187,8 @@ fn flux_density_triangle_mesh_inner(
         for j in 0..mesh.len() {
             let tri_nodes = mesh.triangle_nodes(j);
             let tri_s = mesh.triangle_scalars(j, s);
-            let contrib = flux_density_triangle(
-                tri_nodes[0],
-                tri_nodes[1],
-                tri_nodes[2],
-                tri_s,
-                obs_i,
-                quad_kind,
-            );
+            let contrib =
+                flux_density_triangle(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s, obs_i);
             out.0[i] += contrib[0]; // [T]
             out.1[i] += contrib[1]; // [T]
             out.2[i] += contrib[2]; // [T]
@@ -387,7 +203,6 @@ fn flux_density_triangle_mesh_inner(
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output mapping buffers `(bx_map, by_map, bz_map)` (T/A), each row-major in
 ///         `(observation point, source node)` order.
 ///
@@ -398,10 +213,9 @@ fn flux_density_triangle_mesh_inner(
 pub fn flux_density_triangle_mesh_mapping(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    flux_density_triangle_mesh_mapping_chunk(obs, mesh, quad_kind, out)
+    flux_density_triangle_mesh_mapping_chunk(obs, mesh, out)
 }
 
 /// Parallel variant of [`flux_density_triangle_mesh_mapping`].
@@ -409,7 +223,6 @@ pub fn flux_density_triangle_mesh_mapping(
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output mapping buffers `(bx_map, by_map, bz_map)` (T/A), each row-major in
 ///         `(observation point, source node)` order.
 ///
@@ -420,7 +233,6 @@ pub fn flux_density_triangle_mesh_mapping(
 pub fn flux_density_triangle_mesh_mapping_par(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len(); // [-]
@@ -428,7 +240,7 @@ pub fn flux_density_triangle_mesh_mapping_par(
     validate_flux_density_mapping_inputs(out.0, out.1, out.2, nobs, mesh.nnode())?;
 
     if nobs == 0 || mesh.nnode() == 0 {
-        return flux_density_triangle_mesh_mapping_chunk(obs, mesh, quad_kind, out);
+        return flux_density_triangle_mesh_mapping_chunk(obs, mesh, out);
     }
 
     let nrow = chunksize(nobs); // [-]
@@ -443,7 +255,7 @@ pub fn flux_density_triangle_mesh_mapping_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            flux_density_triangle_mesh_mapping_chunk((xp, yp, zp), mesh, quad_kind, (bx, by, bz))
+            flux_density_triangle_mesh_mapping_chunk((xp, yp, zp), mesh, (bx, by, bz))
         })?;
 
     Ok(())
@@ -504,12 +316,13 @@ pub fn triangle_mesh_flux_density_from_potential_vectors(
 }
 
 /// Flux density contribution from a triangle mesh with nodal stream-function values.
+/// Each source triangle is evaluated analytically off its surface and contributes
+/// exactly zero when an observation lies on that finite triangle.
 ///
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
 ///     s: Nodal current-potential values (A).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output buffers for magnetic flux density `(bx, by, bz)` (T).
 ///
 /// Returns:
@@ -520,10 +333,9 @@ pub fn flux_density_triangle_mesh(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    flux_density_triangle_mesh_inner(obs, mesh, s, quad_kind, out)
+    flux_density_triangle_mesh_inner(obs, mesh, s, out)
 }
 
 /// Flux density contribution from a triangle mesh with nodal stream-function values.
@@ -533,7 +345,6 @@ pub fn flux_density_triangle_mesh(
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
 ///     s: Nodal current-potential values (A).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output buffers for magnetic flux density `(bx, by, bz)` (T).
 ///
 /// Returns:
@@ -544,7 +355,6 @@ pub fn flux_density_triangle_mesh_par(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     mesh.validate_nodal_values(s)?;
@@ -555,7 +365,7 @@ pub fn flux_density_triangle_mesh_par(
     (bxc, byc, bzc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(bx, by, bz, xp, yp, zp)| {
-            flux_density_triangle_mesh_inner((xp, yp, zp), mesh, s, quad_kind, (bx, by, bz))
+            flux_density_triangle_mesh_inner((xp, yp, zp), mesh, s, (bx, by, bz))
         })?;
 
     Ok(())

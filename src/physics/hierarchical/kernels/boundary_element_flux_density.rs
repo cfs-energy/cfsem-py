@@ -18,6 +18,11 @@ use crate::physics::point_source::current_element::flux_density_current_element_
 /// summarizes accepted source clusters as one point current element plus a
 /// shifted magnetic-dipole term so locally closed current paths retain their
 /// leading loop behavior.
+///
+/// References:
+/// - D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of Static
+///   Potential Integrals on Triangular Domains,” IEEE Access, vol. 8, pp. 99806–99819,
+///   2020, doi: 10.1109/ACCESS.2020.2997287.
 #[derive(Clone, Copy, Debug)]
 pub struct BoundaryElementFluxDensityKernel<T: Scalar> {
     marker: PhantomData<T>,

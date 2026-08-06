@@ -234,8 +234,7 @@ def test_triangle_mesh_quadrature_points_and_current_density(quad):
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("quad", TRIANGLE_QUADRATURES)
-def test_triangle_mesh_far_field_against_circular_filament(par, quad):
+def test_triangle_mesh_far_field_against_circular_filament(par):
     """Compare far-field triangle-mesh fields against the circular-filament reference."""
     radius = 0.7312345987
     height = radius * 1e-3
@@ -254,7 +253,7 @@ def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     )
 
     bx, by, bz = cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=par)
-    ax, ay, az = cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=par, quad=quad)
+    ax, ay, az = cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=par)
     b_ref = np.column_stack(
         cfsem.flux_density_circular_filament_cartesian(
             np.array([loop_current], dtype=np.float64),
@@ -275,8 +274,7 @@ def test_triangle_mesh_far_field_against_circular_filament(par, quad):
     assert np.allclose(a, a_ref, rtol=1e-3, atol=a_atol)
 
 
-@mark.parametrize("quad", TRIANGLE_QUADRATURES)
-def test_triangle_mesh_serial_vs_parallel(quad):
+def test_triangle_mesh_serial_vs_parallel():
     """Check that serial and parallel triangle-mesh field evaluations agree."""
     radius = 0.7312345987
     height = radius * 1e-3
@@ -294,20 +292,15 @@ def test_triangle_mesh_serial_vs_parallel(quad):
 
     b_serial = np.column_stack(cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=False))
     b_parallel = np.column_stack(cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=True))
-    a_serial = np.column_stack(
-        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False, quad=quad)
-    )
-    a_parallel = np.column_stack(
-        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=True, quad=quad)
-    )
+    a_serial = np.column_stack(cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False))
+    a_parallel = np.column_stack(cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=True))
 
     assert np.allclose(b_serial, b_parallel, rtol=1e-12, atol=1e-12)
     assert np.allclose(a_serial, a_parallel, rtol=1e-12, atol=1e-12)
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("quad", TRIANGLE_QUADRATURES)
-def test_triangle_mesh_field_mappings_contract_to_collection_fields(par, quad):
+def test_triangle_mesh_field_mappings_contract_to_collection_fields(par):
     """Check field mapping contractions against direct triangle-mesh field evaluation."""
     radius = 0.7312345987
     height = radius * 1e-3
@@ -324,22 +317,18 @@ def test_triangle_mesh_field_mappings_contract_to_collection_fields(par, quad):
     )
 
     bx_map, by_map, bz_map = cfsem.flux_density_triangle_mesh_mapping(obs, nodes, triangles, par=par)
-    ax_map, ay_map, az_map = cfsem.vector_potential_triangle_mesh_mapping(
-        obs, nodes, triangles, par=par, quad=quad
-    )
+    ax_map, ay_map, az_map = cfsem.vector_potential_triangle_mesh_mapping(obs, nodes, triangles, par=par)
     bx_map_ref, by_map_ref, bz_map_ref = cfsem.flux_density_triangle_mesh_mapping(
         obs, nodes, triangles, par=not par
     )
     ax_map_ref, ay_map_ref, az_map_ref = cfsem.vector_potential_triangle_mesh_mapping(
-        obs, nodes, triangles, par=not par, quad=quad
+        obs, nodes, triangles, par=not par
     )
 
     b_from_map = np.column_stack((bx_map @ s, by_map @ s, bz_map @ s))
     a_from_map = np.column_stack((ax_map @ s, ay_map @ s, az_map @ s))
     b_direct = np.column_stack(cfsem.flux_density_triangle_mesh(obs, nodes, triangles, s, par=False))
-    a_direct = np.column_stack(
-        cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False, quad=quad)
-    )
+    a_direct = np.column_stack(cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, par=False))
 
     assert bx_map.shape == (obs.shape[0], nodes.shape[0])
     assert by_map.shape == (obs.shape[0], nodes.shape[0])
@@ -843,9 +832,11 @@ def test_triangle_mesh_invalid_inputs():
     with raises(ValueError, match="zero area"):
         cfsem.triangle_mesh_quadrature_points(nodes, degenerate_triangles, quad="dunavant3")
 
-    with raises(ValueError, match="Unsupported triangle quadrature rule") as excinfo:
+    with raises(TypeError, match="unexpected keyword argument"):
         cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, s, quad="bad")
-    assert not isinstance(excinfo.value, cfsem.DimensionalityError)
+
+    with raises(TypeError, match="unexpected keyword argument"):
+        cfsem.vector_potential_triangle_mesh_mapping(obs, nodes, triangles, quad="bad")
 
     with raises(ValueError, match="Unsupported triangle quadrature rule") as excinfo:
         cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad="bad")

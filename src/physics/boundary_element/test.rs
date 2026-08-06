@@ -204,14 +204,8 @@ fn strip_flux_density(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
 fn strip_vector_potential(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
     let mut out = [0.0; 3];
     for tri in tris {
-        let contrib = vector_potential_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            obs,
-            QuadratureKind::Dunavant3,
-        );
+        let contrib =
+            vector_potential_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, obs);
         out[0] += contrib[0];
         out[1] += contrib[1];
         out[2] += contrib[2];
@@ -313,14 +307,12 @@ fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
     };
@@ -519,13 +511,11 @@ fn mesh_vector_potential_mapping(
         true => vector_potential_triangle_mesh_mapping_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh_mapping(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
     };
@@ -811,14 +801,8 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
     for (i, point) in obs.iter().enumerate() {
         let b_direct =
             flux_density_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
-        let a_direct = vector_potential_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            *point,
-            QuadratureKind::Dunavant3,
-        );
+        let a_direct =
+            vector_potential_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
 
         for axis in 0..3 {
             assert!(
@@ -1028,7 +1012,7 @@ fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
     }
 
     let b_basis = super::triangle_flux_density_basis(tri[0], tri[1], tri[2], obs);
-    let a_basis = triangle_vector_potential_basis(tri[0], tri[1], tri[2], obs, quad_kind);
+    let a_basis = triangle_vector_potential_basis(tri[0], tri[1], tri[2], obs);
 
     for axis in 0..3 {
         assert!(
@@ -1038,7 +1022,7 @@ fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
             b_via_elements[axis],
         );
         assert!(
-            approx(a_basis[axis], a_via_elements[axis], 0.0, 1e-15),
+            approx(a_basis[axis], a_via_elements[axis], 1e-3, 1e-15),
             "basis A/current-element mismatch at axis {axis}: basis={:.16e}, via_elements={:.16e}",
             a_basis[axis],
             a_via_elements[axis],
@@ -1069,14 +1053,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
 
         for s_basis in basis_vectors {
             let b: [f64; 3] = flux_density_triangle(tri[0], tri[1], tri[2], s_basis, obs);
-            let a: [f64; 3] = vector_potential_triangle(
-                tri[0],
-                tri[1],
-                tri[2],
-                s_basis,
-                obs,
-                QuadratureKind::Dunavant3,
-            );
+            let a: [f64; 3] = vector_potential_triangle(tri[0], tri[1], tri[2], s_basis, obs);
             for axis in 0..3 {
                 b_sum[axis] += b[axis];
                 a_sum[axis] += a[axis];
@@ -1232,13 +1209,8 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
             let mut via_a_dot_k = 0.0;
             for qp in quad_points_tgt {
                 let obs = map_tri_uv(tgt[0], tgt[1], tgt[2], [qp[1], qp[2]]);
-                let a_src = triangle_vector_potential_basis(
-                    src_basis[0],
-                    src_basis[1],
-                    src_basis[2],
-                    obs,
-                    quad_kind,
-                );
+                let a_src =
+                    triangle_vector_potential_basis(src_basis[0], src_basis[1], src_basis[2], obs);
                 via_a_dot_k += qp[0] * tri_area_tgt * dot3(a_src, ktgt[j]);
             }
 
@@ -2106,14 +2078,8 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
     for (i, point) in obs.iter().enumerate() {
         let b_direct =
             flux_density_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
-        let a_direct = vector_potential_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            *point,
-            QuadratureKind::Dunavant3,
-        );
+        let a_direct =
+            vector_potential_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
 
         for axis in 0..3 {
             assert!(
@@ -2159,12 +2125,23 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
             "on-triangle B must be clipped to zero"
         );
         assert!(
-            approx(a_mesh[1][axis], a_mesh[2][axis], 1e-9, 1e-12),
+            approx(a_mesh[1][axis], a_mesh[2][axis], 1e-9, 1e-18),
             "vector potential is not continuous across the surface on axis {axis}: above={:.16e}, below={:.16e}",
             a_mesh[1][axis],
             a_mesh[2][axis],
         );
+        assert!(
+            approx(a_mesh[0][axis], a_mesh[1][axis], 1e-9, 1e-18),
+            "on-surface vector potential does not match its limit on axis {axis}: on={:.16e}, above={:.16e}",
+            a_mesh[0][axis],
+            a_mesh[1][axis],
+        );
     }
+
+    assert!(
+        a_mesh[0].iter().any(|value| value.abs() > 1e-15),
+        "finite on-surface vector potential must not be clipped to zero"
+    );
 
     let current_density = triangle_current_density(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s);
     let expected_jump = cross3(current_density, normal).map(|value| crate::MU_0 * value);
@@ -2175,6 +2152,92 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
             "surface-current B jump mismatch on axis {axis}: jump={jump:.16e}, expected={:.16e}",
             expected_jump[axis],
         );
+    }
+}
+
+/// Checks the exact vector potential at all finite-triangle surface features.
+#[test]
+fn test_triangle_vector_potential_is_finite_on_interior_edges_and_vertices() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let s = [1.2, -0.4, 0.7];
+    let observations = [
+        map_tri_uv(tri[0], tri[1], tri[2], [0.25, 0.5]),
+        map_tri_uv(tri[0], tri[1], tri[2], [0.5, 0.0]),
+        tri[0],
+    ];
+
+    for (kind, obs) in ["interior", "edge", "vertex"].into_iter().zip(observations) {
+        let a: [f64; 3] = vector_potential_triangle(tri[0], tri[1], tri[2], s, obs);
+        assert!(
+            a.iter().all(|value| value.is_finite()),
+            "{kind} vector potential contains a non-finite value: {a:?}"
+        );
+        assert!(
+            a.iter().any(|value| value.abs() > 1e-15),
+            "{kind} vector potential was unexpectedly clipped to zero"
+        );
+    }
+}
+
+/// Checks the physical identity B = curl(A) away from the source sheet.
+#[test]
+fn test_triangle_vector_potential_curl_matches_flux_density() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let s = [1.2, -0.4, 0.7];
+    let step = 1e-6;
+
+    for obs in [[0.31, 0.24, 0.65], [1.1, -0.35, -0.22]] {
+        let mut derivative = [[0.0; 3]; 3];
+        for coordinate in 0..3 {
+            let mut plus = obs;
+            let mut minus = obs;
+            plus[coordinate] += step;
+            minus[coordinate] -= step;
+            let a_plus = vector_potential_triangle(tri[0], tri[1], tri[2], s, plus);
+            let a_minus = vector_potential_triangle(tri[0], tri[1], tri[2], s, minus);
+            for component in 0..3 {
+                derivative[component][coordinate] =
+                    (a_plus[component] - a_minus[component]) / (2.0 * step);
+            }
+        }
+        let curl = [
+            derivative[2][1] - derivative[1][2],
+            derivative[0][2] - derivative[2][0],
+            derivative[1][0] - derivative[0][1],
+        ];
+        let b = flux_density_triangle(tri[0], tri[1], tri[2], s, obs);
+        for axis in 0..3 {
+            assert!(
+                approx(curl[axis], b[axis], 2e-8, 2e-14),
+                "curl(A)/B mismatch at obs={obs:?}, axis={axis}: curl={:.16e}, B={:.16e}",
+                curl[axis],
+                b[axis],
+            );
+        }
+    }
+}
+
+/// Checks the scale invariance of A for fixed nodal stream-function values.
+#[test]
+fn test_triangle_vector_potential_is_scale_invariant() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let s = [1.2, -0.4, 0.7];
+    let obs = [0.31, 0.24, 0.65];
+    let reference: [f64; 3] = vector_potential_triangle(tri[0], tri[1], tri[2], s, obs);
+
+    for scale in [1e-5, 1e5] {
+        let scaled_tri = tri.map(|node| node.map(|coordinate| scale * coordinate));
+        let scaled_obs = obs.map(|coordinate| scale * coordinate);
+        let scaled =
+            vector_potential_triangle(scaled_tri[0], scaled_tri[1], scaled_tri[2], s, scaled_obs);
+        for axis in 0..3 {
+            assert!(
+                approx(scaled[axis], reference[axis], 2e-11, 1e-18),
+                "scale-invariant A mismatch at scale={scale:e}, axis={axis}: scaled={:.16e}, reference={:.16e}",
+                scaled[axis],
+                reference[axis],
+            );
+        }
     }
 }
 

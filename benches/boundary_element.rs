@@ -3,7 +3,7 @@
 use cfsem::MU0_OVER_4PI;
 use cfsem::physics::boundary_element::{
     QuadratureKind, flux_density_triangle, triangle_geometric_coupling,
-    triangle_geometric_coupling_regular,
+    triangle_geometric_coupling_regular, vector_potential_triangle,
 };
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
@@ -120,13 +120,69 @@ fn legacy_triangle_flux_density(
     out
 }
 
+fn legacy_triangle_vector_potential_basis(nodes: [[f64; 3]; 3], obs: [f64; 3]) -> [f64; 3] {
+    let ab = [
+        nodes[1][0] - nodes[0][0],
+        nodes[1][1] - nodes[0][1],
+        nodes[1][2] - nodes[0][2],
+    ];
+    let ac = [
+        nodes[2][0] - nodes[0][0],
+        nodes[2][1] - nodes[0][1],
+        nodes[2][2] - nodes[0][2],
+    ];
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    let area = 0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+    let current_density = [
+        (nodes[1][0] - nodes[2][0]) / (2.0 * area),
+        (nodes[1][1] - nodes[2][1]) / (2.0 * area),
+        (nodes[1][2] - nodes[2][2]) / (2.0 * area),
+    ];
+    let rule = [
+        (-27.0 / 48.0, 1.0 / 3.0, 1.0 / 3.0),
+        (25.0 / 48.0, 0.2, 0.2),
+        (25.0 / 48.0, 0.6, 0.2),
+        (25.0 / 48.0, 0.2, 0.6),
+    ];
+    let mut scalar = 0.0;
+    for (weight, u, v) in rule {
+        let source = [
+            nodes[0][0] + u * ab[0] + v * ac[0],
+            nodes[0][1] + u * ab[1] + v * ac[1],
+            nodes[0][2] + u * ab[2] + v * ac[2],
+        ];
+        let r = [obs[0] - source[0], obs[1] - source[1], obs[2] - source[2]];
+        scalar += weight / (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
+    }
+    let factor = MU0_OVER_4PI * area * scalar;
+    current_density.map(|component| factor * component)
+}
+
+fn legacy_triangle_vector_potential(
+    nodes: [[f64; 3]; 3],
+    nodal_values: [f64; 3],
+    obs: [f64; 3],
+) -> [f64; 3] {
+    let a0 = legacy_triangle_vector_potential_basis(nodes, obs);
+    let a1 = legacy_triangle_vector_potential_basis([nodes[1], nodes[2], nodes[0]], obs);
+    let a2 = legacy_triangle_vector_potential_basis([nodes[2], nodes[0], nodes[1]], obs);
+    [
+        nodal_values[0] * a0[0] + nodal_values[1] * a1[0] + nodal_values[2] * a2[0],
+        nodal_values[0] * a0[1] + nodal_values[1] * a1[1] + nodal_values[2] * a2[1],
+        nodal_values[0] * a0[2] + nodal_values[1] * a1[2] + nodal_values[2] * a2[2],
+    ]
+}
+
 fn bench_triangle_flux_density(c: &mut Criterion) {
     let mut group = c.benchmark_group("Triangle flux density far field");
     group.sample_size(20);
     group.measurement_time(Duration::from_secs(3));
     let nodes = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
     let nodal_values = [0.0, 1.0, 0.0];
-    let current_density = [0.0, 1.0, 0.0];
     let obs = [0.25, 0.25, 10.0];
 
     group.bench_function("analytic", |b| {
@@ -145,6 +201,39 @@ fn bench_triangle_flux_density(c: &mut Criterion) {
         b.iter(|| {
             black_box(legacy_triangle_flux_density(
                 black_box(nodes),
+                black_box(nodal_values),
+                black_box(obs),
+            ))
+        });
+    });
+    group.finish();
+}
+
+fn bench_triangle_vector_potential(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Triangle vector potential far field");
+    group.sample_size(20);
+    group.measurement_time(Duration::from_secs(3));
+    let nodes = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    let nodal_values = [0.0, 1.0, 0.0];
+    let current_density = [0.0, 1.0, 0.0];
+    let obs = [0.25, 0.25, 10.0];
+
+    group.bench_function("analytic", |b| {
+        b.iter(|| {
+            let nodes = black_box(nodes);
+            black_box(vector_potential_triangle(
+                nodes[0],
+                nodes[1],
+                nodes[2],
+                black_box(nodal_values),
+                black_box(obs),
+            ))
+        });
+    });
+    group.bench_function("legacy dunavant3", |b| {
+        b.iter(|| {
+            black_box(legacy_triangle_vector_potential(
+                black_box(nodes),
                 black_box(current_density),
                 black_box(obs),
             ))
@@ -156,6 +245,7 @@ fn bench_triangle_flux_density(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_triangle_coupling,
-    bench_triangle_flux_density
+    bench_triangle_flux_density,
+    bench_triangle_vector_potential
 );
 criterion_main!(benches);

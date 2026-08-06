@@ -67,6 +67,9 @@ impl<T: Scalar> UniformTriangle<T> {
     }
 
     /// Return the exact scalar potential, in metres.
+    ///
+    /// References:
+    /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), including limiting cases.
     #[inline]
     pub(crate) fn scalar_potential(&self, obs: [T; 3]) -> T {
         let d = dot3(sub3(obs, self.nodes[0]), self.normal);
@@ -86,6 +89,9 @@ impl<T: Scalar> UniformTriangle<T> {
     ///
     /// The caller chooses a convention on the source triangle, where the
     /// normal component is discontinuous.
+    ///
+    /// References:
+    /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), including limiting cases.
     #[inline]
     pub(crate) fn scalar_potential_gradient(&self, obs: [T; 3]) -> [T; 3] {
         let d = dot3(sub3(obs, self.nodes[0]), self.normal);
@@ -114,6 +120,9 @@ impl<T: Scalar> UniformTriangle<T> {
     }
 
     /// Integral of inverse distance along one edge (dimensionless).
+    ///
+    /// References:
+    /// - \[8\], Eqs. (5)-(9) and limiting cases in Eqs. (19)-(21).
     #[inline]
     fn edge_integral(&self, edge: usize, obs: [T; 3], d: T) -> T {
         let start = self.nodes[edge];
@@ -137,6 +146,10 @@ impl<T: Scalar> UniformTriangle<T> {
         T::infinity()
     }
 
+    /// Signed solid angle used by the exact potential and gradient.
+    ///
+    /// References:
+    /// - \[8\], Eq. (15) and the source-plane limits in Eqs. (19)-(21).
     #[inline]
     fn signed_solid_angle(&self, obs: [T; 3]) -> T {
         let r0 = sub3(obs, self.nodes[0]);

@@ -197,9 +197,7 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     obs = np.array([[0.25, 0.25, 0.5], [1.5, -0.2, 0.8], [-0.4, 1.2, -0.7]])
 
     direct_b = cfsem.flux_density_triangle_mesh(obs, nodes, triangles, stream_function, par=False)
-    direct_a = cfsem.vector_potential_triangle_mesh(
-        obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
-    )
+    direct_a = cfsem.vector_potential_triangle_mesh(obs, nodes, triangles, stream_function, par=False)
     result_b = cfsem.flux_density_triangle_mesh_hierarchical(
         obs,
         nodes,
@@ -215,7 +213,6 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
         triangles,
         stream_function,
         theta=0.0,
-        quad="dunavant3",
         par=True,
         extra_diagnostics=True,
     )
@@ -223,6 +220,15 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     _assert_vec_close(result_a, direct_a)
     _assert_diagnostics(result_b, nsource=2, ntarget=3)
     _assert_diagnostics(result_a, nsource=2, ntarget=3)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        cfsem.vector_potential_triangle_mesh_hierarchical(
+            obs,
+            nodes,
+            triangles,
+            stream_function,
+            quad="dunavant3",
+        )
 
 
 def test_hierarchical_accepts_tuple_columns_from_2d_inputs():

@@ -6,9 +6,12 @@
     * Fix BEM triangle inductance for touching and near high-aspect-ratio triangles with an exact uniform-triangle source potential and adaptive target integration
     * Evaluate direct triangle B fields from the analytic potential gradient and define each source contribution as zero directly on the surface
     * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical B-field APIs
+    * Evaluate direct triangle vector potentials from the exact uniform-triangle potential, including finite values on triangle interiors, edges, and vertices
+    * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical vector-potential APIs
 * Python
     * Add an absolute aspect-67 annular stored-energy regression test
     * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field functions
+    * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical vector-potential functions
 
 ## 11.2.0 2026-07-02
 

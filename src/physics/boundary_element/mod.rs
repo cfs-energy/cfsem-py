@@ -8,6 +8,7 @@
 //! * \[5\] G. N. Peeren, “Stream function approach for determining optimal surface currents,” Phd Thesis 2 (Research NOT TU/e / Graduation TU/e), Technische Universiteit Eindhoven, Eindhoven, 2003. doi: 10.6100/IR570424.
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
 //! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
+//! * \[8\] D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of Static Potential Integrals on Triangular Domains,” IEEE Access, vol. 8, pp. 99806–99819, 2020, doi: 10.1109/ACCESS.2020.2997287.
 
 use crate::math::Scalar;
 use crate::math::norm3;
@@ -28,10 +29,6 @@ mod vector_potential;
 
 #[cfg(test)]
 mod test;
-
-/// Near-field distance threshold relative to the triangle's maximum edge length
-/// for one level of closest-point subdivision in the B- and A-field kernels.
-pub(crate) const TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR: f64 = 1.0;
 
 pub use flux_density::{
     flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,

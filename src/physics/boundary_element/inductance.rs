@@ -99,6 +99,10 @@ fn triangle_geometric_coupling_regular_symmetric(
     ))
 }
 
+/// Integrate the exact source-triangle potential over one target triangle.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
 #[inline]
 fn triangle_geometric_coupling_exact_directed(
     source: &UniformTriangle<f64>,
@@ -364,8 +368,12 @@ fn triangle_geometric_coupling_exact_adaptive(
 
 /// Double-surface geometric coupling using the exact source-triangle
 /// potential and adaptive target integration for self and near pairs.
-/// Well-separated pairs retain nested quadrature because the analytic route
-/// exceeded the measured far-pair performance gate by more than 4x.
+/// Well-separated pairs use reciprocal nested quadrature; this keeps the
+/// exact source potential focused on interactions that need near-singular treatment.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for the exact source-triangle
+///   potential and its limiting cases.
 #[inline]
 pub fn triangle_geometric_coupling(
     src0: [f64; 3],
@@ -425,6 +433,7 @@ pub fn triangle_geometric_coupling(
 ///   current density induced by linear triangle nodal values.
 /// - \[3\], pp. 276-281.
 /// - \[2\], pp. 1448-1455.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -655,7 +664,7 @@ where
 /// Assemble the dense nodal-basis inductance matrix for one triangle mesh.
 ///
 /// Method:
-/// - Treat the existing triangle-pair `3x3` mutual-inductance block as the elemental
+/// - Treat the triangle-pair `3x3` mutual-inductance block as the elemental
 ///   nodal-basis kernel.
 /// - Loop over all source and target triangle pairs.
 /// - Scatter-add each elemental block into a row-major global node-node matrix.
@@ -677,6 +686,7 @@ where
 /// - \[5\], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
 /// - \[3\], pp. 276-281.
 /// - \[2\], pp. 1448-1455.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 #[inline]
 pub fn triangle_mesh_inductance_matrix(
     mesh: &TriangleMeshView<'_>,
@@ -728,6 +738,9 @@ pub fn triangle_mesh_inductance_matrix(
 /// Returns:
 ///     `Ok(())` after writing the dense nodal inductance matrix to `out`, or an error if
 ///     the mesh geometry or output dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 #[inline]
 pub fn triangle_mesh_inductance_matrix_par(
     mesh: &TriangleMeshView<'_>,
@@ -826,7 +839,7 @@ pub fn triangle_mesh_inductance_from_potential_vectors(
     Ok(out)
 }
 
-/// Internal helper retained for boundary-element tests of dense inductance contractions.
+/// Internal helper used by boundary-element tests of dense inductance contractions.
 ///
 /// Args:
 ///     lmat: Row-major nodal inductance matrix of length `nnode * nnode` (H).
@@ -1167,6 +1180,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
 ///
 /// References:
 /// - \[5\], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).

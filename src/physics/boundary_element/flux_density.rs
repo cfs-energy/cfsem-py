@@ -14,6 +14,10 @@ use crate::math::Scalar;
 use crate::math::{cross3, scale3};
 use crate::mesh::TriangleMeshView;
 
+/// Apply the exact uniform-triangle potential gradient to one constant current density.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
 #[inline]
 fn triangle_flux_density_exact<T: Scalar>(
     triangle: &UniformTriangle<T>,
@@ -29,6 +33,10 @@ fn triangle_flux_density_exact<T: Scalar>(
     )
 }
 
+/// Apply one exact uniform-triangle potential gradient to all three basis currents.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
 #[inline]
 fn triangle_flux_density_bases_exact<T: Scalar>(
     triangle: &UniformTriangle<T>,
@@ -65,6 +73,9 @@ fn triangle_flux_density_bases_exact<T: Scalar>(
 ///
 /// Returns:
 ///     Basis-function magnetic flux density `[bx, by, bz]` (T/A).
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for the exact potential gradient.
 #[inline]
 pub fn triangle_flux_density_basis<T: Scalar>(
     n0: [T; 3],
@@ -96,6 +107,9 @@ pub fn triangle_flux_density_basis<T: Scalar>(
 ///
 /// Returns:
 ///     Magnetic flux density `[bx, by, bz]` (T).
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for the exact potential gradient.
 #[inline]
 pub fn flux_density_triangle<T: Scalar>(
     n0: [T; 3],
@@ -209,6 +223,9 @@ fn flux_density_triangle_mesh_inner(
 /// Returns:
 ///     `Ok(())` after writing the dense mapping to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn flux_density_triangle_mesh_mapping(
     obs: (&[f64], &[f64], &[f64]),
@@ -229,6 +246,9 @@ pub fn flux_density_triangle_mesh_mapping(
 /// Returns:
 ///     `Ok(())` after writing the dense mapping to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn flux_density_triangle_mesh_mapping_par(
     obs: (&[f64], &[f64], &[f64]),
@@ -328,6 +348,9 @@ pub fn triangle_mesh_flux_density_from_potential_vectors(
 /// Returns:
 ///     `Ok(())` after writing the flux density to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn flux_density_triangle_mesh(
     obs: (&[f64], &[f64], &[f64]),
@@ -350,6 +373,9 @@ pub fn flux_density_triangle_mesh(
 /// Returns:
 ///     `Ok(())` after writing the flux density to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn flux_density_triangle_mesh_par(
     obs: (&[f64], &[f64], &[f64]),

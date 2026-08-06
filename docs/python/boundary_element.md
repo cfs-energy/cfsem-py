@@ -6,8 +6,10 @@ Triangle B-field evaluation is analytic away from each finite source triangle. A
 point directly on a source triangle, that triangle's contribution is defined as zero
 because the ideal current sheet has distinct one-sided limits. Use a small signed
 normal offset when a particular side is required. The B-field APIs therefore have no
-triangle-quadrature argument; vector-potential and inductance APIs retain one where it
-still controls target integration.
+triangle-quadrature argument. Triangle vector-potential evaluation is also analytic,
+and remains finite and continuous on triangle interiors, edges, and vertices. Its APIs
+therefore no longer accept a triangle-quadrature argument either. Quadrature remains
+available where it still controls target integration, including inductance and force.
 
 ::: cfsem.flux_density_triangle_mesh
 

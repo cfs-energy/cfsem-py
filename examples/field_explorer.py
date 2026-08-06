@@ -1382,7 +1382,7 @@ def compute_boundary_element_field(
     t0 = time.perf_counter()
     if mode == "b":
         vx_strip, vy_strip, vz_strip = cfsem.flux_density_triangle_mesh(
-            obs, nodes, triangles, s, par=True, quad=boundary_quad
+            obs, nodes, triangles, s, par=True
         )
     else:
         vx_strip, vy_strip, vz_strip = cfsem.vector_potential_triangle_mesh(

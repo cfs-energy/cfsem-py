@@ -2,6 +2,13 @@
 
 ## Fields
 
+Triangle B-field evaluation is analytic away from each finite source triangle. At a
+point directly on a source triangle, that triangle's contribution is defined as zero
+because the ideal current sheet has distinct one-sided limits. Use a small signed
+normal offset when a particular side is required. The B-field APIs therefore have no
+triangle-quadrature argument; vector-potential and inductance APIs retain one where it
+still controls target integration.
+
 ::: cfsem.flux_density_triangle_mesh
 
 ::: cfsem.flux_density_triangle_mesh_hierarchical

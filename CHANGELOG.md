@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+* Rust
+    * Fix BEM triangle inductance for touching and near high-aspect-ratio triangles with an exact uniform-triangle source potential and adaptive target integration
+    * Evaluate direct triangle B fields from the analytic potential gradient and define each source contribution as zero directly on its finite triangle
+    * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical B-field APIs
+* Python
+    * Add an absolute aspect-67 annular stored-energy regression
+    * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field functions
+
 ## 11.2.0 2026-07-02
 
 * Rust - 2D FEM stress solver

@@ -1060,7 +1060,7 @@ fn vector_potential_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, quad="dunavant3", construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
 /// Evaluate triangle-mesh flux density with the hierarchical solver from Python inputs.
 fn flux_density_triangle_mesh_hierarchical(
     py: Python<'_>,
@@ -1069,7 +1069,6 @@ fn flux_density_triangle_mesh_hierarchical(
     triangles: PyReadonlyArray2<i64>,
     s: PyReadonlyArray1<f64>,
     theta: f64,
-    quad: &str,
     construction_method: &str,
     par: bool,
     out: Option<(
@@ -1084,7 +1083,6 @@ fn flux_density_triangle_mesh_hierarchical(
     let triangles = read_matrix3_input(py, &triangles, "triangles")?;
     let mesh = borrowed_triangle_mesh_view(&nodes, &triangles)?;
     let s = read_float_input_array1(py, &s, "s")?;
-    let quad = parse_triangle_quadrature(quad)?;
     let construction_method = parse_build_method(construction_method)?;
     let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(&mesh);
     let targets = physics::hierarchical::kernels::DipoleTargetRows::new(obs.as_slice());
@@ -1093,7 +1091,7 @@ fn flux_density_triangle_mesh_hierarchical(
     let (field, diagnostics) =
         evaluate_hierarchical_vec3(py, out, obs.nrows(), "flux_density", |out| {
             physics::hierarchical::convenience::one_shot_vec3(
-                physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(quad),
+                physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(),
                 sources,
                 moments,
                 targets,
@@ -1108,9 +1106,7 @@ fn flux_density_triangle_mesh_hierarchical(
         py,
         extra_diagnostics,
         HierarchicalDiagnosticRequest {
-            kernel: physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(
-                quad,
-            ),
+            kernel: physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(),
             source_tree: &diagnostics.source_tree,
             sources,
             targets,
@@ -3656,21 +3652,19 @@ fn borrowed_triangle_mesh_view<'a>(
     )
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, s, par=true, quad="dunavant3"))]
+#[pyfunction(signature = (obs, nodes, triangles, s, par=true))]
 fn flux_density_triangle_mesh(
     obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
     s: PyReadonlyArray1<f64>,
     par: bool,
-    quad: &str,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     let obs = split_xyz_array2("obs", obs)?;
     let nodes = split_xyz_array2("nodes", nodes)?;
     let triangles = split_triangle_index_array2("triangles", triangles)?;
     let mesh = triangle_mesh_view(&nodes, &triangles)?;
     let s = s.as_slice()?;
-    let quad = parse_triangle_quadrature(&quad)?;
 
     let n = obs.0.len();
     let (mut bx, mut by, mut bz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
@@ -3683,7 +3677,6 @@ fn flux_density_triangle_mesh(
         (&obs.0, &obs.1, &obs.2),
         &mesh,
         s,
-        quad,
         (&mut bx, &mut by, &mut bz),
     ) {
         Ok(_) => (),
@@ -3736,19 +3729,17 @@ fn vector_potential_triangle_mesh(
     _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, par=true, quad="dunavant3"))]
+#[pyfunction(signature = (obs, nodes, triangles, par=true))]
 fn flux_density_triangle_mesh_mapping(
     obs: PyReadonlyArray2<f64>,
     nodes: PyReadonlyArray2<f64>,
     triangles: PyReadonlyArray2<i64>,
     par: bool,
-    quad: &str,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     let obs = split_xyz_array2("obs", obs)?;
     let nodes = split_xyz_array2("nodes", nodes)?;
     let triangles = split_triangle_index_array2("triangles", triangles)?;
     let mesh = triangle_mesh_view(&nodes, &triangles)?;
-    let quad = parse_triangle_quadrature(&quad)?;
 
     let nout =
         obs.0
@@ -3763,12 +3754,7 @@ fn flux_density_triangle_mesh_mapping(
         true => physics::boundary_element::flux_density_triangle_mesh_mapping_par,
         false => physics::boundary_element::flux_density_triangle_mesh_mapping,
     };
-    match func(
-        (&obs.0, &obs.1, &obs.2),
-        &mesh,
-        quad,
-        (&mut bx, &mut by, &mut bz),
-    ) {
+    match func((&obs.0, &obs.1, &obs.2), &mesh, (&mut bx, &mut by, &mut bz)) {
         Ok(_) => (),
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

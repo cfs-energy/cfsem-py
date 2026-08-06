@@ -196,9 +196,7 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
     stream_function = np.array([0.0, 1.0, 0.25, -0.5])
     obs = np.array([[0.25, 0.25, 0.5], [1.5, -0.2, 0.8], [-0.4, 1.2, -0.7]])
 
-    direct_b = cfsem.flux_density_triangle_mesh(
-        obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
-    )
+    direct_b = cfsem.flux_density_triangle_mesh(obs, nodes, triangles, stream_function, par=False)
     direct_a = cfsem.vector_potential_triangle_mesh(
         obs, nodes, triangles, stream_function, par=False, quad="dunavant3"
     )
@@ -208,7 +206,6 @@ def test_hierarchical_boundary_elements_match_direct_triangle_mesh():
         triangles,
         stream_function,
         theta=0.0,
-        quad="dunavant3",
         par=False,
         extra_diagnostics=True,
     )
@@ -257,9 +254,7 @@ def test_coordinate_tuple_conversion_rejects_invalid_shape():
     outer_radius = np.zeros(2)
 
     with pytest.raises(ValueError, match="component arrays must have matching lengths"):
-        cfsem.flux_density_dipole_hierarchical(
-            loc, bad_moment, obs, outer_radius, theta=0.0, par=False
-        )
+        cfsem.flux_density_dipole_hierarchical(loc, bad_moment, obs, outer_radius, theta=0.0, par=False)
 
 
 def test_direct_wrapper_rejects_array_without_coordinate_dimension():

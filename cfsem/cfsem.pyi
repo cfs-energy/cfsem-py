@@ -499,7 +499,6 @@ def flux_density_triangle_mesh(
     triangles: IntMatrix,
     s: FloatArray,
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def vector_potential_triangle_mesh(
     obs: FloatMatrix,
@@ -515,7 +514,6 @@ def flux_density_triangle_mesh_hierarchical(
     triangles: IntMatrix,
     s: FloatArray,
     theta: float = 0.05,
-    quad: str = "dunavant3",
     construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
@@ -529,13 +527,15 @@ def flux_density_triangle_mesh_hierarchical(
     error is unbounded. This method must be tuned to a given use-case in order to be
     useful, and should not be used to calculate safety-related field limits.
 
+    Direct triangle interactions use the analytic uniform-triangle field. A source
+    triangle contributes zero at target points geometrically on that triangle.
+
     Args:
         obs: Target point coordinates with one point per row.
         nodes: Mesh node coordinates with one node per row.
         triangles: Triangle node indices with one triangle per row.
         s: Nodal stream-function values.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        quad: Triangle quadrature rule.
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
@@ -592,7 +592,6 @@ def flux_density_triangle_mesh_mapping(
     nodes: FloatMatrix,
     triangles: IntMatrix,
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def vector_potential_triangle_mesh_mapping(
     obs: FloatMatrix,

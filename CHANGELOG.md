@@ -10,8 +10,7 @@
     * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical vector-potential APIs
 * Python
     * Add an absolute aspect-67 annular stored-energy regression test
-    * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field functions
-    * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical vector-potential functions
+    * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field and vector potential functions
 
 ## 11.2.0 2026-07-02
 

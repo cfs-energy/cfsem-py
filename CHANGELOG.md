@@ -1,6 +1,6 @@
 # Changelog
 
-## 12.0.0 2026-08-06
+## 12.0.0 2026-08-11
 
 * Rust
     * Fix BEM triangle inductance for touching and near high-aspect-ratio triangles with an exact uniform-triangle source potential

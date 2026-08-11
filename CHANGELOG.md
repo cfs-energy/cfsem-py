@@ -3,14 +3,13 @@
 ## 12.0.0 2026-08-06
 
 * Rust
-    * Fix BEM triangle inductance for touching and near high-aspect-ratio triangles with an exact uniform-triangle source potential and fixed D5 target integration at subdivision depth 2
-        * Bound near/self work at 28 exact-potential observations per directed pair, independent of the caller's far-field quadrature rule
-        * Keep directed near/self coupling within 0.25% of the representative validation references while dense matrix assembly remains exactly symmetric by construction
-        * On the 12-thread structured-annulus benchmark, assemble 4,050 triangles in about 145 ms with D1 and 248 ms with D3, and 7,938 triangles in about 510 ms with D1 and 921 ms with D3
-    * Evaluate direct triangle B fields from the analytic potential gradient and define each source contribution as zero directly on the surface
-    * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical B-field APIs
+    * Fix BEM triangle inductance for touching and near high-aspect-ratio triangles with an exact uniform-triangle source potential
+        * Near-field defers to fixed D5 target integration at subdivision depth 2
+        * Bound near/self work at 28 exact-potential observations per directed pair
+    * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical B-field and vector potential APIs
     * Evaluate direct triangle vector potentials from the exact uniform-triangle potential, including finite values on triangle interiors, edges, and vertices
-    * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical vector-potential APIs
+    * Evaluate direct triangle B fields from the analytic potential gradient and define as zero directly on the surface
+        * Protects zero self-force per Newton's third law
 * Python
     * Add an absolute aspect-67 annular stored-energy regression test
     * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field and vector potential functions

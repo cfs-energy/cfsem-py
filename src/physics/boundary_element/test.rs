@@ -2086,6 +2086,60 @@ fn test_triangle_mesh_self_force_mapping_serial_matches_parallel() {
     }
 }
 
+/// Regression for self-field and self-force evaluations on small elements at
+/// metre-scale machine coordinates. The centroid is recomputed from the stored
+/// vertices, so its plane residual includes global-coordinate roundoff.
+#[test]
+fn test_translated_triangle_recomputed_centroid_has_zero_self_field_and_force() {
+    let tri = [
+        [
+            2.347_032_597_872_290_3,
+            -0.046_946_911_712_602_866,
+            -0.049_916_708_323_414_08,
+        ],
+        [
+            2.347_601_380_533_803,
+            -0.041_961_598_950_529_37,
+            -0.044_939_274_599_005_53,
+        ],
+        [
+            2.347_506_786_885_663,
+            -0.046_956_396_757_576_714,
+            -0.044_939_274_599_005_53,
+        ],
+    ];
+    let centroid = std::array::from_fn(|axis| (tri[0][axis] + tri[1][axis] + tri[2][axis]) / 3.0);
+
+    for offset in 0..3 {
+        let b = super::triangle_flux_density_basis(
+            tri[offset],
+            tri[(offset + 1) % 3],
+            tri[(offset + 2) % 3],
+            centroid,
+        );
+        assert_eq!(b, [0.0; 3], "basis {offset} has a spurious self field");
+    }
+
+    let normal = calc_tri_normal(tri[0], tri[1], tri[2]);
+    let off_surface = std::array::from_fn(|axis| centroid[axis] + 1e-12 * normal[axis]);
+    let b_off = super::triangle_flux_density_basis(tri[0], tri[1], tri[2], off_surface);
+    assert!(
+        dot3(b_off, b_off) > 0.0,
+        "the relaxed predicate masked a resolvable off-surface field",
+    );
+
+    let block = triangle_basis_force_block(
+        tri[0],
+        tri[1],
+        tri[2],
+        tri[0],
+        tri[1],
+        tri[2],
+        QuadratureKind::Dunavant1,
+    );
+    assert_eq!(block, [[[0.0; 3]; 3]; 3]);
+}
+
 /// Checks that triangle B and A remain finite on and very near the source surface.
 #[test]
 fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {

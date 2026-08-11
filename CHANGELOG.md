@@ -10,6 +10,7 @@
     * Evaluate direct triangle vector potentials from the exact uniform-triangle potential, including finite values on triangle interiors, edges, and vertices
     * Evaluate direct triangle B fields from the analytic potential gradient and define as zero directly on the surface
         * Protects zero self-force per Newton's third law
+        * Scale on-surface detection by `max(element size, observation coordinate magnitude)` so recomputed mesh points remain self-field-free at machine coordinates
 * Python
     * Add an absolute aspect-67 annular stored-energy regression test
     * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field and vector potential functions

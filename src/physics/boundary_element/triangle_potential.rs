@@ -110,7 +110,15 @@ impl<T: Scalar> UniformTriangle<T> {
         let closest = closest_point(obs, self.nodes[0], self.nodes[1], self.nodes[2]);
         let delta = sub3(obs, closest);
         let factor = crate::math::cast::<T>(SURFACE_EPSILON_FACTOR);
-        let tolerance = factor * T::epsilon() * self.max_edge;
+        let obs_norm = norm3(obs);
+        // Recomputing a mesh point in global coordinates introduces a plane
+        // residual proportional to the coordinate magnitude, not just the edge length.
+        let scale = if obs_norm > self.max_edge {
+            obs_norm
+        } else {
+            self.max_edge
+        };
+        let tolerance = factor * T::epsilon() * scale;
         dot3(delta, delta) <= tolerance * tolerance
     }
 
@@ -197,6 +205,53 @@ mod tests {
         assert!(!tri.contains_on_surface([1.0, 1.0, 0.0]));
         assert!(!tri.contains_on_surface([0.2, 0.2, 1e-12]));
         assert!(!tri.contains_on_surface([0.2, 0.2, -1e-12]));
+    }
+
+    #[test]
+    fn surface_predicate_accepts_recomputed_centroids_at_machine_coordinates() {
+        let major_radius = 1.85_f64;
+        let minor_radius = 0.5_f64;
+        let edge = 5e-3_f64;
+
+        let dphi = edge / (major_radius + minor_radius);
+        let dtheta = edge / minor_radius;
+        let torus_point = |phi: f64, theta: f64| {
+            let (sin_phi, cos_phi) = phi.sin_cos();
+            let (sin_theta, cos_theta) = theta.sin_cos();
+            let radius = major_radius + minor_radius * cos_theta;
+            [radius * cos_phi, radius * sin_phi, minor_radius * sin_theta]
+        };
+
+        for iphi in 0..20 {
+            let phi0 = -0.02 + dphi * iphi as f64;
+            let phi1 = phi0 + dphi;
+            for itheta in 0..20 {
+                let theta0 = -0.1 + dtheta * itheta as f64;
+                let theta1 = theta0 + dtheta;
+                let p00 = torus_point(phi0, theta0);
+                let p10 = torus_point(phi1, theta0);
+                let p01 = torus_point(phi0, theta1);
+                let p11 = torus_point(phi1, theta1);
+
+                for nodes in [[p00, p10, p11], [p00, p11, p01]] {
+                    let centroid = std::array::from_fn(|axis| {
+                        (nodes[0][axis] + nodes[1][axis] + nodes[2][axis]) / 3.0
+                    });
+                    let triangle = UniformTriangle::new(nodes[0], nodes[1], nodes[2]);
+                    assert!(
+                        triangle.contains_on_surface(centroid),
+                        "recomputed centroid was classified off-surface: nodes={nodes:?}, centroid={centroid:?}",
+                    );
+
+                    let normal_offset =
+                        std::array::from_fn(|axis| centroid[axis] + 1e-12 * triangle.normal[axis]);
+                    assert!(
+                        !triangle.contains_on_surface(normal_offset),
+                        "1 pm normal offset was classified on-surface",
+                    );
+                }
+            }
+        }
     }
 
     #[test]

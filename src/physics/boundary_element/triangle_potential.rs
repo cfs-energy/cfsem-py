@@ -61,11 +61,6 @@ impl<T: Scalar> UniformTriangle<T> {
         self.nodes
     }
 
-    #[inline]
-    pub(crate) fn max_edge(&self) -> T {
-        self.max_edge
-    }
-
     /// Return the exact scalar potential, in metres.
     ///
     /// References:

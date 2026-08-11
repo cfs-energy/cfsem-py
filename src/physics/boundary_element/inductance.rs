@@ -104,7 +104,7 @@ fn triangle_geometric_coupling_regular_symmetric(
 /// References:
 /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
 #[inline]
-fn triangle_geometric_coupling_exact_directed(
+pub(super) fn triangle_geometric_coupling_exact_directed(
     source: &UniformTriangle<f64>,
     target_nodes: [[f64; 3]; 3],
     quad_kind: QuadratureKind,
@@ -123,13 +123,10 @@ fn triangle_geometric_coupling_exact_directed(
     out
 }
 
-const COUPLING_ADAPT_REL_TOL: f64 = 1e-5;
-const COUPLING_ADAPT_ABS_FACTOR: f64 = 1e-14;
-const COUPLING_ADAPT_MAX_DEPTH: usize = 14;
-const COUPLING_ADAPT_MAX_FORCED_DEPTH: usize = 10;
+const COUPLING_NEAR_SUBDIVISION_DEPTH: usize = 2;
 
 #[inline]
-fn longest_edge_bisection(nodes: [[f64; 3]; 3]) -> [[[f64; 3]; 3]; 2] {
+pub(super) fn longest_edge_bisection(nodes: [[f64; 3]; 3]) -> [[[f64; 3]; 3]; 2] {
     let lengths = [
         dot3(
             [
@@ -290,90 +287,80 @@ fn triangle_max_edge_squared(nodes: [[f64; 3]; 3]) -> f64 {
     maximum
 }
 
-#[inline]
-fn triangle_aspect(nodes: [[f64; 3]; 3]) -> f64 {
-    let triangle = UniformTriangle::new(nodes[0], nodes[1], nodes[2]);
-    let twice_area = 2.0 * calc_tri_area(nodes[0], nodes[1], nodes[2]);
-    triangle.max_edge() * triangle.max_edge() / twice_area
-}
-
-fn adaptive_target_integral(
+/// Integrate an exact source-triangle potential over a target triangle after
+/// a fixed number of longest-edge bisections.
+///
+/// The source surface integral is analytic. Each target leaf uses the fixed
+/// seven-point Dunavant degree-5 rule, independent of the caller's far-field
+/// quadrature selection.
+///
+/// Args:
+///     source: Cached nondegenerate uniform source triangle.
+///     target_nodes: Target triangle vertices in metres.
+///     depth: Remaining fixed bisection levels.
+///
+/// Returns:
+///     Directed geometric coupling in cubic metres.
+///
+/// References:
+/// - D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of
+///   Static Potential Integrals on Triangular Domains,” IEEE Access, vol. 8,
+///   pp. 99806–99819, 2020. doi:10.1109/ACCESS.2020.2997287.
+/// - D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature
+///   Rules for the Triangle,” International Journal for Numerical Methods in
+///   Engineering, vol. 21, no. 6, pp. 1129–1148, 1985.
+///   doi:10.1002/nme.1620210612.
+/// - N. A. Gumerov, S. Kaneko, and R. Duraiswami, “Analytical Galerkin
+///   Boundary Integrals of Laplace Kernel Layer Potentials in R^3,” SIAM
+///   Journal on Scientific Computing, vol. 46, no. 2, pp. A974–A997, 2024.
+///   doi:10.1137/23M1547688. Provides an analytic double-integral formulation
+///   suitable for independent validation.
+pub(super) fn triangle_geometric_coupling_exact_fixed(
     source: &UniformTriangle<f64>,
     target_nodes: [[f64; 3]; 3],
-    quad_kind: QuadratureKind,
-    coarse: f64,
     depth: usize,
-    forced_depth: usize,
-    abs_tol: f64,
 ) -> f64 {
+    if depth == 0 {
+        return triangle_geometric_coupling_exact_directed(
+            source,
+            target_nodes,
+            QuadratureKind::Dunavant5,
+        );
+    }
+
     let children = longest_edge_bisection(target_nodes);
-    let estimates = [
-        triangle_geometric_coupling_exact_directed(source, children[0], quad_kind),
-        triangle_geometric_coupling_exact_directed(source, children[1], quad_kind),
-    ];
-    let fine = estimates[0] + estimates[1];
-    let converged = depth >= forced_depth
-        && (fine - coarse).abs() <= abs_tol + COUPLING_ADAPT_REL_TOL * fine.abs().max(coarse.abs());
-    if converged || depth >= COUPLING_ADAPT_MAX_DEPTH {
-        return fine;
-    }
-    adaptive_target_integral(
-        source,
-        children[0],
-        quad_kind,
-        estimates[0],
-        depth + 1,
-        forced_depth,
-        0.5 * abs_tol,
-    ) + adaptive_target_integral(
-        source,
-        children[1],
-        quad_kind,
-        estimates[1],
-        depth + 1,
-        forced_depth,
-        0.5 * abs_tol,
-    )
+    triangle_geometric_coupling_exact_fixed(source, children[0], depth - 1)
+        + triangle_geometric_coupling_exact_fixed(source, children[1], depth - 1)
 }
 
-#[inline]
-fn triangle_geometric_coupling_exact_adaptive(
-    source: &UniformTriangle<f64>,
-    target: &UniformTriangle<f64>,
-    quad_kind: QuadratureKind,
-    force_shape_refinement: bool,
-) -> f64 {
-    let coarse = triangle_geometric_coupling_exact_directed(source, target.nodes(), quad_kind);
-    let forced_depth = if force_shape_refinement {
-        triangle_aspect(source.nodes())
-            .max(triangle_aspect(target.nodes()))
-            .max(1.0)
-            .log2()
-            .ceil() as usize
-    } else {
-        0
-    }
-    .min(COUPLING_ADAPT_MAX_FORCED_DEPTH);
-    let length = source.max_edge().max(target.max_edge());
-    adaptive_target_integral(
-        source,
-        target.nodes(),
-        quad_kind,
-        coarse,
-        0,
-        forced_depth,
-        COUPLING_ADAPT_ABS_FACTOR * length.powi(3),
-    )
-}
-
-/// Double-surface geometric coupling using the exact source-triangle
-/// potential and adaptive target integration for self and near pairs.
+/// Double-surface geometric coupling using the exact source-triangle potential
+/// and fixed D5 target integration at subdivision depth 2 for self and near pairs.
 /// Well-separated pairs use reciprocal nested quadrature; this keeps the
 /// exact source potential focused on interactions that need near-singular treatment.
+///
+/// Near and self evaluations are directed from the supplied source to target.
+/// Reversing a direct pair call can therefore change the approximation within
+/// the 0.25% validation tolerance established for the representative near-pair
+/// test suite. This is a validation bound, not a runtime error estimate. Mesh
+/// assembly remains exactly symmetric because each computed upper-triangular
+/// block is scattered with its transpose.
 ///
 /// References:
 /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for the exact source-triangle
 ///   potential and its limiting cases.
+///
+/// Args:
+///     src0: Source triangle vertex 0 `[x, y, z]` (m).
+///     src1: Source triangle vertex 1 `[x, y, z]` (m).
+///     src2: Source triangle vertex 2 `[x, y, z]` (m).
+///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
+///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
+///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
+///
+/// Returns:
+///     Directed geometric coupling in cubic metres.
 #[inline]
 pub fn triangle_geometric_coupling(
     src0: [f64; 3],
@@ -388,8 +375,11 @@ pub fn triangle_geometric_coupling(
     let target_nodes = [tgt0, tgt1, tgt2];
     if triangles_identical(src0, src1, src2, tgt0, tgt1, tgt2) {
         let source = UniformTriangle::new(src0, src1, src2);
-        let target = UniformTriangle::new(tgt0, tgt1, tgt2);
-        return triangle_geometric_coupling_exact_adaptive(&source, &target, quad_kind, true);
+        return triangle_geometric_coupling_exact_fixed(
+            &source,
+            target_nodes,
+            COUPLING_NEAR_SUBDIVISION_DEPTH,
+        );
     }
     let max_edge_squared =
         triangle_max_edge_squared(source_nodes).max(triangle_max_edge_squared(target_nodes));
@@ -409,12 +399,7 @@ pub fn triangle_geometric_coupling(
         );
     }
     let source = UniformTriangle::new(src0, src1, src2);
-    let target = UniformTriangle::new(tgt0, tgt1, tgt2);
-    let touching = pair_distance_sq <= (64.0 * f64::EPSILON).powi(2) * max_edge_squared;
-    let directed = |src: &UniformTriangle<f64>, tgt: &UniformTriangle<f64>| {
-        triangle_geometric_coupling_exact_adaptive(src, tgt, quad_kind, touching)
-    };
-    0.5 * (directed(&source, &target) + directed(&target, &source))
+    triangle_geometric_coupling_exact_fixed(&source, target_nodes, COUPLING_NEAR_SUBDIVISION_DEPTH)
 }
 
 /// Mutual-inductance block for the three nodal basis functions on a source triangle and
@@ -426,6 +411,10 @@ pub fn triangle_geometric_coupling(
 /// - Form the full `3x3` block as `μ0 / 4π * G * (K_src_i · K_tgt_j)`.
 /// - This block is the elemental nodal-basis contribution used to assemble a full mesh
 ///   inductance matrix.
+///
+/// For self and near pairs this is a directed approximation: reversing source
+/// and target can change the block within the representative-suite tolerance
+/// described by [`triangle_geometric_coupling`].
 ///
 /// References:
 /// - \[5\], Eq. (3.16) on p. 68 for `M_mn = ∬ A_m · j_n dS`, Eq. (3.24) on p. 70 for the
@@ -442,7 +431,8 @@ pub fn triangle_geometric_coupling(
 ///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
 ///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
 ///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///
 /// Returns:
 ///     Mutual-inductance block `[[M_ij]; 3]` for the source and target triangle bases (H).
@@ -666,16 +656,22 @@ where
 /// Method:
 /// - Treat the triangle-pair `3x3` mutual-inductance block as the elemental
 ///   nodal-basis kernel.
-/// - Loop over all source and target triangle pairs.
-/// - Scatter-add each elemental block into a row-major global node-node matrix.
+/// - Loop over the upper triangle of source-target element pairs.
+/// - Scatter-add each elemental block and its transpose into a row-major global
+///   node-node matrix.
 ///
 /// The resulting matrix acts on nodal current-potential values `s_a` and represents the
 /// bilinear form
 /// `L_ab = μ0 / 4π ∬ K_a(r) · K_b(r') / |r - r'| dS dS'`.
+/// Matrix entries are exactly symmetric by construction. Because each near pair
+/// is evaluated in upper-triangular element order, permuting mesh cells can change
+/// its directed near-field approximation within the representative-suite 0.25%
+/// validation tolerance.
 ///
 /// Args:
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
 ///
 /// Returns:
@@ -726,13 +722,16 @@ pub fn triangle_mesh_inductance_matrix(
 /// Assemble the dense nodal-basis inductance matrix for one triangle mesh.
 /// This variant is parallelized over chunks of source triangles and reduced into the
 /// final dense matrix.
+/// It has the same directed near-pair and structural-symmetry behavior as
+/// [`triangle_mesh_inductance_matrix`].
 ///
 /// If the per-worker scratch matrices cannot be allocated, this routine falls back to
 /// the serial implementation rather than failing outright.
 ///
 /// Args:
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
 ///
 /// Returns:
@@ -1191,7 +1190,8 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
 ///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
 ///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
 ///     tgt_basis: Target basis-function index in `{0, 1, 2}` (dimensionless).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///
 /// Returns:
 ///     Triangle-basis mutual-inductance entry `M_ij` (H).

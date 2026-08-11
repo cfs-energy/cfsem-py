@@ -9,6 +9,7 @@
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
 //! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
 //! * \[8\] D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of Static Potential Integrals on Triangular Domains,” IEEE Access, vol. 8, pp. 99806–99819, 2020, doi: 10.1109/ACCESS.2020.2997287.
+//! * \[9\] N. A. Gumerov, S. Kaneko, and R. Duraiswami, “Analytical Galerkin Boundary Integrals of Laplace Kernel Layer Potentials in R^3,” SIAM Journal on Scientific Computing, vol. 46, no. 2, pp. A974–A997, 2024, doi: 10.1137/23M1547688.
 
 use crate::math::Scalar;
 use crate::math::norm3;

@@ -1,6 +1,9 @@
 use core::f64::consts::PI;
 
-use super::inductance::triangle_mesh_inductive_energy;
+use super::inductance::{
+    longest_edge_bisection, triangle_geometric_coupling_exact_directed,
+    triangle_geometric_coupling_exact_fixed, triangle_mesh_inductive_energy,
+};
 use super::{
     QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
     flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
@@ -90,7 +93,7 @@ fn explicit_patch_inductance_matrix(
             mesh.triangles.1[isrc],
             mesh.triangles.2[isrc],
         ];
-        for (itgt, tgt) in patches.iter().enumerate() {
+        for (itgt, tgt) in patches.iter().enumerate().skip(isrc) {
             let tgt_idx = [
                 mesh.triangles.0[itgt],
                 mesh.triangles.1[itgt],
@@ -109,6 +112,9 @@ fn explicit_patch_inductance_matrix(
             for i in 0..3 {
                 for j in 0..3 {
                     out[src_idx[i] * nnode + tgt_idx[j]] += block[i][j];
+                    if itgt != isrc {
+                        out[tgt_idx[j] * nnode + src_idx[i]] += block[i][j];
+                    }
                 }
             }
         }
@@ -1185,6 +1191,41 @@ fn test_dunavant_rules_integrate_normalized_reference_triangle_monomial_averages
     assert_triangle_rule_integrates_monomials("Dunavant5", QuadratureKind::Dunavant5, 5, 7);
 }
 
+/// Checks that fixed depth 2 is exactly four D5 leaves, or 28 observations.
+#[test]
+fn test_fixed_d5_depth_two_matches_explicit_leaf_sum() {
+    use super::triangle_potential::UniformTriangle;
+
+    let source_nodes = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let target_nodes = [[0.1, -0.2, 0.03], [0.8, 0.0, 0.02], [0.2, 0.7, -0.01]];
+    let source = UniformTriangle::new(source_nodes[0], source_nodes[1], source_nodes[2]);
+
+    let fixed = triangle_geometric_coupling_exact_fixed(&source, target_nodes, 2);
+    let level_1 = longest_edge_bisection(target_nodes);
+    let mut explicit = 0.0;
+    let mut leaf_count = 0;
+    for child in level_1 {
+        for leaf in longest_edge_bisection(child) {
+            explicit += triangle_geometric_coupling_exact_directed(
+                &source,
+                leaf,
+                QuadratureKind::Dunavant5,
+            );
+            leaf_count += 1;
+        }
+    }
+
+    assert_eq!(leaf_count, 4);
+    assert_eq!(
+        leaf_count * triangle_quadrature_count(QuadratureKind::Dunavant5),
+        28,
+    );
+    assert!(
+        approx(fixed, explicit, 4.0 * f64::EPSILON, 0.0),
+        "fixed recursion differs from explicit leaf sum: fixed={fixed:.16e}, explicit={explicit:.16e}",
+    );
+}
+
 /// Checks disjoint-triangle inductance blocks against vector-potential contraction.
 #[test]
 fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disjoint_triangles() {
@@ -1675,9 +1716,9 @@ fn test_triangle_mesh_flux_linkage_mapping_from_dipoles_matches_direct_target_qu
     );
 }
 
-/// Checks that touching-triangle inductance pairs remain finite and reciprocal.
+/// Checks that both directed evaluations of touching-triangle pairs remain finite.
 #[test]
-fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciprocal() {
+fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite() {
     let tri0 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
     let shared_edge = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
     let shared_vertex = [[0.0, 1.0, 0.0], [0.2, 1.7, 0.4], [-0.3, 1.4, -0.2]];
@@ -1709,10 +1750,8 @@ fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciproca
                     "touching-pair entry is non-finite at ({i},{j})"
                 );
                 assert!(
-                    approx(block12[i][j], block21[j][i], 1e-8, 1e-11),
-                    "touching-pair reciprocity mismatch at ({i},{j}): {:.6e} vs {:.6e}",
-                    block12[i][j],
-                    block21[j][i],
+                    block21[i][j].is_finite(),
+                    "reversed touching-pair entry is non-finite at ({i},{j})"
                 );
             }
         }
@@ -2276,11 +2315,212 @@ fn test_edge_sharing_sliver_pair_coupling_regression() {
                 source[0], source[1], source[2], target[0], target[1], target[2], quadrature,
             );
             assert!(
-                approx(coupling, reference, 5e-4, 1e-12),
+                approx(coupling, reference, 2.5e-3, 1e-12),
                 "sliver pair mismatch at aspect {aspect} with {quadrature:?}: coupling={coupling:.16e}, reference={reference:.16e}"
             );
         }
     }
+}
+
+/// Checks fixed-depth self coupling against references recorded from the
+/// converged pre-change adaptive D5 implementation.
+#[test]
+fn test_fixed_d5_depth_two_self_coupling_references() {
+    let cases = [
+        (1.0, 9.133_341_399_928_91e-5),
+        (4.0, 8.307_493_878_047_309e-5),
+        (16.0, 6.201_409_019_475_143e-5),
+        (67.0, 4.073_016_396_224_205e-5),
+    ];
+    let area = 1e-3;
+    for (aspect, reference) in cases {
+        let length = f64::sqrt(2.0 * area * aspect);
+        let width = length / aspect;
+        let triangle = [
+            [0.0, 0.0, 0.0],
+            [length, 0.0, 0.0],
+            [0.5 * length, width, 0.0],
+        ];
+        let source =
+            super::triangle_potential::UniformTriangle::new(triangle[0], triangle[1], triangle[2]);
+        if aspect == 1.0 {
+            let shallow = triangle_geometric_coupling_exact_fixed(&source, triangle, 1);
+            assert!(
+                !approx(shallow, reference, 2.5e-3, 1e-12),
+                "depth 1 unexpectedly satisfies the depth-2 accuracy contract",
+            );
+        }
+        let mut first = None;
+        for quadrature in [
+            QuadratureKind::Dunavant1,
+            QuadratureKind::Dunavant3,
+            QuadratureKind::Dunavant5,
+        ] {
+            let coupling = triangle_geometric_coupling(
+                triangle[0],
+                triangle[1],
+                triangle[2],
+                triangle[0],
+                triangle[1],
+                triangle[2],
+                quadrature,
+            );
+            assert!(
+                approx(coupling, reference, 2.5e-3, 1e-12),
+                "self coupling mismatch at aspect {aspect} with {quadrature:?}: coupling={coupling:.16e}, reference={reference:.16e}",
+            );
+            if let Some(expected) = first {
+                assert_eq!(
+                    coupling.to_bits(),
+                    expected,
+                    "near work depends on caller quadrature at aspect {aspect}",
+                );
+            } else {
+                first = Some(coupling.to_bits());
+            }
+        }
+    }
+}
+
+/// Checks both argument orders of asymmetric near pairs against converged
+/// pre-change reciprocal adaptive D5 references. Directed values need not be
+/// equal, but each must satisfy the 0.25% near-field accuracy contract.
+#[test]
+fn test_fixed_d5_depth_two_asymmetric_near_coupling_references() {
+    let cases = [
+        (
+            "shared edge",
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.3, -0.4, 0.2]],
+            2.434_440_362_332_022_7e-1,
+        ),
+        (
+            "shared vertex",
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 1.0, 0.0], [0.2, 1.7, 0.4], [-0.3, 1.4, -0.2]],
+            1.044_682_738_723_791_3e-1,
+        ),
+        (
+            "close disjoint",
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.12, 0.08, 0.05], [0.88, 0.15, 0.08], [0.22, 0.76, 0.03]],
+            4.788_197_703_983_14e-1,
+        ),
+    ];
+
+    for (name, source, target, reference) in cases {
+        for (direction, src, tgt) in [("A->B", source, target), ("B->A", target, source)] {
+            let mut first = None;
+            for quadrature in [
+                QuadratureKind::Dunavant1,
+                QuadratureKind::Dunavant3,
+                QuadratureKind::Dunavant5,
+            ] {
+                let coupling = triangle_geometric_coupling(
+                    src[0], src[1], src[2], tgt[0], tgt[1], tgt[2], quadrature,
+                );
+                assert!(
+                    approx(coupling, reference, 2.5e-3, 1e-12),
+                    "{name} {direction} mismatch with {quadrature:?}: coupling={coupling:.16e}, reference={reference:.16e}",
+                );
+                if let Some(expected) = first {
+                    assert_eq!(
+                        coupling.to_bits(),
+                        expected,
+                        "{name} {direction} depends on caller quadrature",
+                    );
+                } else {
+                    first = Some(coupling.to_bits());
+                }
+            }
+        }
+    }
+}
+
+/// Checks that fixed near integration remains homogeneous and independent of
+/// cyclic triangle-node ordering.
+#[test]
+fn test_fixed_d5_depth_two_scale_and_node_order_invariance() {
+    let source = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    let target = [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.3, -0.4, 0.2]];
+    let reference = triangle_geometric_coupling(
+        source[0],
+        source[1],
+        source[2],
+        target[0],
+        target[1],
+        target[2],
+        QuadratureKind::Dunavant3,
+    );
+
+    let source_cyclic = [source[1], source[2], source[0]];
+    let target_cyclic = [target[2], target[0], target[1]];
+    let reordered = triangle_geometric_coupling(
+        source_cyclic[0],
+        source_cyclic[1],
+        source_cyclic[2],
+        target_cyclic[0],
+        target_cyclic[1],
+        target_cyclic[2],
+        QuadratureKind::Dunavant3,
+    );
+    assert!(
+        approx(reordered, reference, 2e-14, 0.0),
+        "near coupling changed under cyclic node order: reordered={reordered:.16e}, reference={reference:.16e}",
+    );
+
+    let scale = 1e3;
+    let scaled_source = source.map(|node| node.map(|coordinate| scale * coordinate));
+    let scaled_target = target.map(|node| node.map(|coordinate| scale * coordinate));
+    let scaled = triangle_geometric_coupling(
+        scaled_source[0],
+        scaled_source[1],
+        scaled_source[2],
+        scaled_target[0],
+        scaled_target[1],
+        scaled_target[2],
+        QuadratureKind::Dunavant3,
+    );
+    assert!(
+        approx(scaled, scale.powi(3) * reference, 2e-14, 0.0),
+        "near coupling does not scale cubically: scaled={scaled:.16e}, expected={:.16e}",
+        scale.powi(3) * reference,
+    );
+}
+
+/// Checks that separated pairs retain the caller-selected reciprocal rule.
+#[test]
+fn test_triangle_geometric_coupling_far_pair_uses_caller_quadrature() {
+    let source = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let target = [[0.1, -0.2, 2.0], [1.0, 0.0, 2.2], [0.3, 0.9, 2.1]];
+
+    let coupling = |quadrature| {
+        triangle_geometric_coupling(
+            source[0], source[1], source[2], target[0], target[1], target[2], quadrature,
+        )
+    };
+    let regular_symmetric = |quadrature| {
+        0.5 * (super::triangle_geometric_coupling_regular(
+            source[0], source[1], source[2], target[0], target[1], target[2], quadrature,
+        ) + super::triangle_geometric_coupling_regular(
+            target[0], target[1], target[2], source[0], source[1], source[2], quadrature,
+        ))
+    };
+
+    let d1 = coupling(QuadratureKind::Dunavant1);
+    let d5 = coupling(QuadratureKind::Dunavant5);
+    assert_eq!(
+        d1.to_bits(),
+        regular_symmetric(QuadratureKind::Dunavant1).to_bits(),
+    );
+    assert_eq!(
+        d5.to_bits(),
+        regular_symmetric(QuadratureKind::Dunavant5).to_bits(),
+    );
+    assert!(
+        !approx(d1, d5, 1e-12, 0.0),
+        "far pair unexpectedly ignored caller quadrature: D1={d1:.16e}, D5={d5:.16e}",
+    );
 }
 
 /// Checks far-field strip flux density and vector potential against a circular filament.

@@ -1,7 +1,6 @@
 use super::*;
 use crate::physics::boundary_element::{
-    QuadratureKind, calc_tri_area, flux_density_triangle, triangle_current_density,
-    vector_potential_triangle,
+    calc_tri_area, flux_density_triangle, triangle_current_density, vector_potential_triangle,
 };
 use crate::physics::hierarchical::kernels::{
     BoundaryElementFluxDensityKernel, BoundaryElementSummary, BoundaryElementTriangle,
@@ -781,7 +780,6 @@ fn linear_filament_vector_potential_theta_zero_matches_dense_and_serial_direct()
 
 #[test]
 fn boundary_element_exact_matches_scalar_and_supports_f32() {
-    let quad_kind = QuadratureKind::Dunavant3;
     let source = BoundaryElementTriangle {
         n0: [0.0_f64, 0.0, 0.0],
         n1: [1.0, 0.0, 0.0],
@@ -792,34 +790,20 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
     };
     let moment = [0.0, 1.0, -0.25];
 
-    let b_kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let b_kernel = BoundaryElementFluxDensityKernel::<f64>::new();
     let mut b_out = [0.0; 3];
     b_kernel.eval_near(&target, &source, &moment, &mut b_out);
     assert_eq!(
         b_out,
-        flux_density_triangle(
-            source.n0,
-            source.n1,
-            source.n2,
-            moment,
-            target.position,
-            quad_kind
-        )
+        flux_density_triangle(source.n0, source.n1, source.n2, moment, target.position)
     );
 
-    let a_kernel = BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind);
+    let a_kernel = BoundaryElementVectorPotentialKernel::<f64>::new();
     let mut a_out = [0.0; 3];
     a_kernel.eval_near(&target, &source, &moment, &mut a_out);
     assert_eq!(
         a_out,
-        vector_potential_triangle(
-            source.n0,
-            source.n1,
-            source.n2,
-            moment,
-            target.position,
-            quad_kind
-        )
+        vector_potential_triangle(source.n0, source.n1, source.n2, moment, target.position)
     );
 
     let bf32 = flux_density_triangle(
@@ -828,14 +812,21 @@ fn boundary_element_exact_matches_scalar_and_supports_f32() {
         [0.0, 1.0, 0.0],
         [0.0, 1.0, -0.25],
         [0.25, 0.3, 0.8],
-        quad_kind,
     );
     assert!(bf32[0].is_finite());
+    let af32 = vector_potential_triangle(
+        [0.0_f32, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, -0.25],
+        [0.25, 0.3, 0.8],
+    );
+    assert!(af32[0].is_finite());
 }
 
 #[test]
 fn boundary_element_leaf_summary_current_element_matches_direct_quadrature_weight() {
-    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(QuadratureKind::Dunavant3);
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new();
     let sources = [BoundaryElementTriangle {
         n0: [0.0, 0.0, 0.0],
         n1: [2.0, 0.0, 0.0],
@@ -871,8 +862,7 @@ fn boundary_element_leaf_summary_current_element_matches_direct_quadrature_weigh
 
 #[test]
 fn boundary_element_zero_current_source_does_not_shift_far_summary() {
-    let quad_kind = QuadratureKind::Dunavant3;
-    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new();
     let active_source = BoundaryElementTriangle {
         n0: [0.0, 0.0, 0.0],
         n1: [1.0, 0.0, 0.0],
@@ -962,8 +952,7 @@ fn boundary_element_zero_current_source_does_not_shift_far_summary() {
 
 #[test]
 fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
-    let quad_kind = QuadratureKind::Dunavant3;
-    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new();
     let sources = [
         BoundaryElementTriangle {
             n0: [0.0, -0.05, 0.0],
@@ -1058,8 +1047,7 @@ fn boundary_element_forced_far_matches_direct_for_bent_strip_asymptotically() {
 
 #[test]
 fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
-    let quad_kind = QuadratureKind::Dunavant3;
-    let kernel = BoundaryElementFluxDensityKernel::<f64>::new(quad_kind);
+    let kernel = BoundaryElementFluxDensityKernel::<f64>::new();
     let sources = [
         BoundaryElementTriangle {
             n0: [0.0, 0.0, 0.0],
@@ -1138,7 +1126,6 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
                 sources[source_id].n2,
                 moments[source_id],
                 targets[target_id].position,
-                quad_kind,
             );
             for axis in 0..3 {
                 direct[axis] += contrib[axis];
@@ -1153,8 +1140,7 @@ fn boundary_element_theta_zero_matches_dense_and_scalar_direct() {
 
 #[test]
 fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct() {
-    let quad_kind = QuadratureKind::Dunavant3;
-    let kernel = BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind);
+    let kernel = BoundaryElementVectorPotentialKernel::<f64>::new();
     let sources = [
         BoundaryElementTriangle {
             n0: [0.0, 0.0, 0.0],
@@ -1235,7 +1221,6 @@ fn boundary_element_vector_potential_theta_zero_matches_dense_and_scalar_direct(
                 sources[source_id].n2,
                 moments[source_id],
                 targets[target_id].position,
-                quad_kind,
             );
             for axis in 0..3 {
                 direct[axis] += contrib[axis];
@@ -1381,8 +1366,8 @@ fn linear_filament_acceptance_rejects_intermediate_closure_ratio() {
 
 #[test]
 fn boundary_element_acceptance_rejects_intermediate_closure_ratio() {
-    let b_kernel = BoundaryElementFluxDensityKernel::<f64>::new(QuadratureKind::Dunavant3);
-    let a_kernel = BoundaryElementVectorPotentialKernel::<f64>::new(QuadratureKind::Dunavant3);
+    let b_kernel = BoundaryElementFluxDensityKernel::<f64>::new();
+    let a_kernel = BoundaryElementVectorPotentialKernel::<f64>::new();
     let target_aabb = Aabb::from_point([20.0, 0.0, 0.5]);
     let source_aabb = Aabb {
         min: [0.0, 0.0, 0.0],

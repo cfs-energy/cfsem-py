@@ -1,14 +1,18 @@
 use core::f64::consts::PI;
 
-use super::inductance::triangle_mesh_inductive_energy;
+use super::inductance::{
+    longest_edge_bisection, triangle_geometric_coupling_exact_directed,
+    triangle_geometric_coupling_exact_fixed, triangle_mesh_inductive_energy,
+};
 use super::{
     QuadratureKind, calc_tri_area, calc_tri_normal, flux_density_triangle,
     flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
     flux_density_triangle_mesh_mapping_par, flux_density_triangle_mesh_par, map_tri_uv,
     triangle_basis_current_densities, triangle_basis_current_density, triangle_basis_force_block,
     triangle_basis_mutual_inductance_block, triangle_current_density,
-    triangle_force_from_potential_vectors, triangle_inductance_from_potential_vectors,
-    triangle_mesh_current_density, triangle_mesh_flux_density_from_potential_vectors,
+    triangle_force_from_potential_vectors, triangle_geometric_coupling,
+    triangle_inductance_from_potential_vectors, triangle_mesh_current_density,
+    triangle_mesh_flux_density_from_potential_vectors,
     triangle_mesh_flux_linkage_from_source_coefficients,
     triangle_mesh_flux_linkage_mapping_from_dipoles,
     triangle_mesh_flux_linkage_mapping_from_dipoles_par,
@@ -89,7 +93,7 @@ fn explicit_patch_inductance_matrix(
             mesh.triangles.1[isrc],
             mesh.triangles.2[isrc],
         ];
-        for (itgt, tgt) in patches.iter().enumerate() {
+        for (itgt, tgt) in patches.iter().enumerate().skip(isrc) {
             let tgt_idx = [
                 mesh.triangles.0[itgt],
                 mesh.triangles.1[itgt],
@@ -108,6 +112,9 @@ fn explicit_patch_inductance_matrix(
             for i in 0..3 {
                 for j in 0..3 {
                     out[src_idx[i] * nnode + tgt_idx[j]] += block[i][j];
+                    if itgt != isrc {
+                        out[tgt_idx[j] * nnode + src_idx[i]] += block[i][j];
+                    }
                 }
             }
         }
@@ -192,14 +199,7 @@ fn circular_strip_triangles(radius: f64, height: f64, s0: f64, nphi: usize) -> V
 fn strip_flux_density(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
     let mut out = [0.0; 3];
     for tri in tris {
-        let contrib = flux_density_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            obs,
-            QuadratureKind::Dunavant3,
-        );
+        let contrib = flux_density_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, obs);
         out[0] += contrib[0];
         out[1] += contrib[1];
         out[2] += contrib[2];
@@ -210,14 +210,8 @@ fn strip_flux_density(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
 fn strip_vector_potential(tris: &[TrianglePatch], obs: [f64; 3]) -> [f64; 3] {
     let mut out = [0.0; 3];
     for tri in tris {
-        let contrib = vector_potential_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            obs,
-            QuadratureKind::Dunavant3,
-        );
+        let contrib =
+            vector_potential_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, obs);
         out[0] += contrib[0];
         out[1] += contrib[1];
         out[2] += contrib[2];
@@ -293,14 +287,12 @@ fn mesh_flux_density(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -> Ve
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
         false => flux_density_triangle_mesh(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
     };
@@ -321,14 +313,12 @@ fn mesh_vector_potential(mesh: &TriangleMeshData, obs: &[[f64; 3]], par: bool) -
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
             &mesh.s,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
     };
@@ -499,13 +489,11 @@ fn mesh_flux_density_mapping(
         true => flux_density_triangle_mesh_mapping_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
         false => flux_density_triangle_mesh_mapping(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         ),
     };
@@ -529,13 +517,11 @@ fn mesh_vector_potential_mapping(
         true => vector_potential_triangle_mesh_mapping_par(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
         false => vector_potential_triangle_mesh_mapping(
             (&obs_xyz.0, &obs_xyz.1, &obs_xyz.2),
             &view,
-            QuadratureKind::Dunavant3,
             (&mut ax, &mut ay, &mut az),
         ),
     };
@@ -621,7 +607,6 @@ fn explicit_force_on_target_triangle_from_source_mesh(
             (&[obs[0]], &[obs[1]], &[obs[2]]),
             &view,
             &mesh_src.s,
-            QuadratureKind::Dunavant3,
             (&mut bx, &mut by, &mut bz),
         )
         .unwrap();
@@ -820,22 +805,10 @@ fn test_triangle_mesh_collection_matches_single_triangle_kernels() {
     .unwrap();
 
     for (i, point) in obs.iter().enumerate() {
-        let b_direct = flux_density_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            *point,
-            QuadratureKind::Dunavant3,
-        );
-        let a_direct = vector_potential_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            *point,
-            QuadratureKind::Dunavant3,
-        );
+        let b_direct =
+            flux_density_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
+        let a_direct =
+            vector_potential_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
 
         for axis in 0..3 {
             assert!(
@@ -1023,7 +996,7 @@ fn test_triangle_mesh_field_mappings_match_collection_fields() {
 fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
     let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
     let obs = [0.35, -0.22, 1.15];
-    let quad_kind = QuadratureKind::Dunavant3;
+    let quad_kind = QuadratureKind::Dunavant5;
 
     let (tri_area, jref) = triangle_basis_current_density(tri[0], tri[1], tri[2]);
     let mut b_via_elements = [0.0; 3];
@@ -1044,18 +1017,18 @@ fn test_triangle_basis_fields_match_current_element_quadrature_sum() {
         }
     }
 
-    let b_basis = super::triangle_flux_density_basis(tri[0], tri[1], tri[2], obs, quad_kind);
-    let a_basis = triangle_vector_potential_basis(tri[0], tri[1], tri[2], obs, quad_kind);
+    let b_basis = super::triangle_flux_density_basis(tri[0], tri[1], tri[2], obs);
+    let a_basis = triangle_vector_potential_basis(tri[0], tri[1], tri[2], obs);
 
     for axis in 0..3 {
         assert!(
-            approx(b_basis[axis], b_via_elements[axis], 0.0, 1e-15),
+            approx(b_basis[axis], b_via_elements[axis], 1e-3, 1e-15),
             "basis B/current-element mismatch at axis {axis}: basis={:.16e}, via_elements={:.16e}",
             b_basis[axis],
             b_via_elements[axis],
         );
         assert!(
-            approx(a_basis[axis], a_via_elements[axis], 0.0, 1e-15),
+            approx(a_basis[axis], a_via_elements[axis], 1e-3, 1e-15),
             "basis A/current-element mismatch at axis {axis}: basis={:.16e}, via_elements={:.16e}",
             a_basis[axis],
             a_via_elements[axis],
@@ -1085,22 +1058,8 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
         let mut a_scale: f64 = 0.0;
 
         for s_basis in basis_vectors {
-            let b: [f64; 3] = flux_density_triangle(
-                tri[0],
-                tri[1],
-                tri[2],
-                s_basis,
-                obs,
-                QuadratureKind::Dunavant3,
-            );
-            let a: [f64; 3] = vector_potential_triangle(
-                tri[0],
-                tri[1],
-                tri[2],
-                s_basis,
-                obs,
-                QuadratureKind::Dunavant3,
-            );
+            let b: [f64; 3] = flux_density_triangle(tri[0], tri[1], tri[2], s_basis, obs);
+            let a: [f64; 3] = vector_potential_triangle(tri[0], tri[1], tri[2], s_basis, obs);
             for axis in 0..3 {
                 b_sum[axis] += b[axis];
                 a_sum[axis] += a[axis];
@@ -1116,7 +1075,7 @@ fn test_single_triangle_basis_contributions_cancel_for_constant_potential() {
             "near" | "on" => (1e-12, 1e-12),
             _ => unreachable!(),
         };
-        let b_atol = b_rtol * b_scale;
+        let b_atol = (b_rtol * b_scale).max(1e-30);
         let a_atol = a_rtol * a_scale;
         for axis in 0..3 {
             assert!(
@@ -1232,6 +1191,41 @@ fn test_dunavant_rules_integrate_normalized_reference_triangle_monomial_averages
     assert_triangle_rule_integrates_monomials("Dunavant5", QuadratureKind::Dunavant5, 5, 7);
 }
 
+/// Checks that fixed depth 2 is exactly four D5 leaves, or 28 observations.
+#[test]
+fn test_fixed_d5_depth_two_matches_explicit_leaf_sum() {
+    use super::triangle_potential::UniformTriangle;
+
+    let source_nodes = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let target_nodes = [[0.1, -0.2, 0.03], [0.8, 0.0, 0.02], [0.2, 0.7, -0.01]];
+    let source = UniformTriangle::new(source_nodes[0], source_nodes[1], source_nodes[2]);
+
+    let fixed = triangle_geometric_coupling_exact_fixed(&source, target_nodes, 2);
+    let level_1 = longest_edge_bisection(target_nodes);
+    let mut explicit = 0.0;
+    let mut leaf_count = 0;
+    for child in level_1 {
+        for leaf in longest_edge_bisection(child) {
+            explicit += triangle_geometric_coupling_exact_directed(
+                &source,
+                leaf,
+                QuadratureKind::Dunavant5,
+            );
+            leaf_count += 1;
+        }
+    }
+
+    assert_eq!(leaf_count, 4);
+    assert_eq!(
+        leaf_count * triangle_quadrature_count(QuadratureKind::Dunavant5),
+        28,
+    );
+    assert!(
+        approx(fixed, explicit, 4.0 * f64::EPSILON, 0.0),
+        "fixed recursion differs from explicit leaf sum: fixed={fixed:.16e}, explicit={explicit:.16e}",
+    );
+}
+
 /// Checks disjoint-triangle inductance blocks against vector-potential contraction.
 #[test]
 fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disjoint_triangles() {
@@ -1256,18 +1250,13 @@ fn test_triangle_basis_mutual_inductance_block_matches_vector_potential_for_disj
             let mut via_a_dot_k = 0.0;
             for qp in quad_points_tgt {
                 let obs = map_tri_uv(tgt[0], tgt[1], tgt[2], [qp[1], qp[2]]);
-                let a_src = triangle_vector_potential_basis(
-                    src_basis[0],
-                    src_basis[1],
-                    src_basis[2],
-                    obs,
-                    quad_kind,
-                );
+                let a_src =
+                    triangle_vector_potential_basis(src_basis[0], src_basis[1], src_basis[2], obs);
                 via_a_dot_k += qp[0] * tri_area_tgt * dot3(a_src, ktgt[j]);
             }
 
             assert!(
-                approx(block[i][j], via_a_dot_k, 1e-10, 1e-12),
+                approx(block[i][j], via_a_dot_k, 2e-3, 1e-12),
                 "A·K mismatch for block[{i}][{j}]: direct={:.6e}, via_A={:.6e}",
                 block[i][j],
                 via_a_dot_k,
@@ -1727,9 +1716,9 @@ fn test_triangle_mesh_flux_linkage_mapping_from_dipoles_matches_direct_target_qu
     );
 }
 
-/// Checks that touching-triangle inductance pairs remain finite and reciprocal.
+/// Checks that both directed evaluations of touching-triangle pairs remain finite.
 #[test]
-fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciprocal() {
+fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite() {
     let tri0 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
     let shared_edge = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
     let shared_vertex = [[0.0, 1.0, 0.0], [0.2, 1.7, 0.4], [-0.3, 1.4, -0.2]];
@@ -1761,10 +1750,8 @@ fn test_triangle_basis_mutual_inductance_touching_pairs_are_finite_and_reciproca
                     "touching-pair entry is non-finite at ({i},{j})"
                 );
                 assert!(
-                    approx(block12[i][j], block21[j][i], 1e-8, 1e-11),
-                    "touching-pair reciprocity mismatch at ({i},{j}): {:.6e} vs {:.6e}",
-                    block12[i][j],
-                    block21[j][i],
+                    block21[i][j].is_finite(),
+                    "reversed touching-pair entry is non-finite at ({i},{j})"
                 );
             }
         }
@@ -1858,7 +1845,7 @@ fn test_triangle_basis_force_block_matches_direct_contraction() {
     let mut direct = [0.0; 3];
     for qp in triangle_quadrature_points(QuadratureKind::Dunavant3) {
         let obs = map_tri_uv(tgt0, tgt1, tgt2, [qp[1], qp[2]]);
-        let b = flux_density_triangle(src0, src1, src2, s_src, obs, QuadratureKind::Dunavant3);
+        let b = flux_density_triangle(src0, src1, src2, s_src, obs);
         let jf = cross3(k_tgt, b);
         let w = qp[0] * tri_area;
         direct[0] += jf[0] * w;
@@ -2099,6 +2086,60 @@ fn test_triangle_mesh_self_force_mapping_serial_matches_parallel() {
     }
 }
 
+/// Regression for self-field and self-force evaluations on small elements at
+/// metre-scale machine coordinates. The centroid is recomputed from the stored
+/// vertices, so its plane residual includes global-coordinate roundoff.
+#[test]
+fn test_translated_triangle_recomputed_centroid_has_zero_self_field_and_force() {
+    let tri = [
+        [
+            2.347_032_597_872_290_3,
+            -0.046_946_911_712_602_866,
+            -0.049_916_708_323_414_08,
+        ],
+        [
+            2.347_601_380_533_803,
+            -0.041_961_598_950_529_37,
+            -0.044_939_274_599_005_53,
+        ],
+        [
+            2.347_506_786_885_663,
+            -0.046_956_396_757_576_714,
+            -0.044_939_274_599_005_53,
+        ],
+    ];
+    let centroid = std::array::from_fn(|axis| (tri[0][axis] + tri[1][axis] + tri[2][axis]) / 3.0);
+
+    for offset in 0..3 {
+        let b = super::triangle_flux_density_basis(
+            tri[offset],
+            tri[(offset + 1) % 3],
+            tri[(offset + 2) % 3],
+            centroid,
+        );
+        assert_eq!(b, [0.0; 3], "basis {offset} has a spurious self field");
+    }
+
+    let normal = calc_tri_normal(tri[0], tri[1], tri[2]);
+    let off_surface = std::array::from_fn(|axis| centroid[axis] + 1e-12 * normal[axis]);
+    let b_off = super::triangle_flux_density_basis(tri[0], tri[1], tri[2], off_surface);
+    assert!(
+        dot3(b_off, b_off) > 0.0,
+        "the relaxed predicate masked a resolvable off-surface field",
+    );
+
+    let block = triangle_basis_force_block(
+        tri[0],
+        tri[1],
+        tri[2],
+        tri[0],
+        tri[1],
+        tri[2],
+        QuadratureKind::Dunavant1,
+    );
+    assert_eq!(block, [[[0.0; 3]; 3]; 3]);
+}
+
 /// Checks that triangle B and A remain finite on and very near the source surface.
 #[test]
 fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
@@ -2128,22 +2169,10 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
     let a_mesh_par = mesh_vector_potential(&mesh, &obs, true);
 
     for (i, point) in obs.iter().enumerate() {
-        let b_direct = flux_density_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            *point,
-            QuadratureKind::Dunavant3,
-        );
-        let a_direct = vector_potential_triangle(
-            tri.nodes[0],
-            tri.nodes[1],
-            tri.nodes[2],
-            tri.s,
-            *point,
-            QuadratureKind::Dunavant3,
-        );
+        let b_direct =
+            flux_density_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
+        let a_direct =
+            vector_potential_triangle(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s, *point);
 
         for axis in 0..3 {
             assert!(
@@ -2184,13 +2213,368 @@ fn test_triangle_fields_are_finite_on_and_very_near_triangle_surface() {
     }
 
     for axis in 0..3 {
+        assert_eq!(
+            b_mesh[0][axis], 0.0,
+            "on-triangle B must be clipped to zero"
+        );
         assert!(
-            approx(a_mesh[1][axis], a_mesh[2][axis], 1e-9, 1e-12),
+            approx(a_mesh[1][axis], a_mesh[2][axis], 1e-9, 1e-18),
             "vector potential is not continuous across the surface on axis {axis}: above={:.16e}, below={:.16e}",
             a_mesh[1][axis],
             a_mesh[2][axis],
         );
+        assert!(
+            approx(a_mesh[0][axis], a_mesh[1][axis], 1e-9, 1e-18),
+            "on-surface vector potential does not match its limit on axis {axis}: on={:.16e}, above={:.16e}",
+            a_mesh[0][axis],
+            a_mesh[1][axis],
+        );
     }
+
+    assert!(
+        a_mesh[0].iter().any(|value| value.abs() > 1e-15),
+        "finite on-surface vector potential must not be clipped to zero"
+    );
+
+    let current_density = triangle_current_density(tri.nodes[0], tri.nodes[1], tri.nodes[2], tri.s);
+    let expected_jump = cross3(current_density, normal).map(|value| crate::MU_0 * value);
+    for axis in 0..3 {
+        let jump = b_mesh[1][axis] - b_mesh[2][axis];
+        assert!(
+            approx(jump, expected_jump[axis], 1e-8, 1e-12),
+            "surface-current B jump mismatch on axis {axis}: jump={jump:.16e}, expected={:.16e}",
+            expected_jump[axis],
+        );
+    }
+}
+
+/// Checks the exact vector potential at all finite-triangle surface features.
+#[test]
+fn test_triangle_vector_potential_is_finite_on_interior_edges_and_vertices() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let s = [1.2, -0.4, 0.7];
+    let observations = [
+        map_tri_uv(tri[0], tri[1], tri[2], [0.25, 0.5]),
+        map_tri_uv(tri[0], tri[1], tri[2], [0.5, 0.0]),
+        tri[0],
+    ];
+
+    for (kind, obs) in ["interior", "edge", "vertex"].into_iter().zip(observations) {
+        let a: [f64; 3] = vector_potential_triangle(tri[0], tri[1], tri[2], s, obs);
+        assert!(
+            a.iter().all(|value| value.is_finite()),
+            "{kind} vector potential contains a non-finite value: {a:?}"
+        );
+        assert!(
+            a.iter().any(|value| value.abs() > 1e-15),
+            "{kind} vector potential was unexpectedly clipped to zero"
+        );
+    }
+}
+
+/// Checks the physical identity B = curl(A) away from the source sheet.
+#[test]
+fn test_triangle_vector_potential_curl_matches_flux_density() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let s = [1.2, -0.4, 0.7];
+    let step = 1e-6;
+
+    for obs in [[0.31, 0.24, 0.65], [1.1, -0.35, -0.22]] {
+        let mut derivative = [[0.0; 3]; 3];
+        for coordinate in 0..3 {
+            let mut plus = obs;
+            let mut minus = obs;
+            plus[coordinate] += step;
+            minus[coordinate] -= step;
+            let a_plus = vector_potential_triangle(tri[0], tri[1], tri[2], s, plus);
+            let a_minus = vector_potential_triangle(tri[0], tri[1], tri[2], s, minus);
+            for component in 0..3 {
+                derivative[component][coordinate] =
+                    (a_plus[component] - a_minus[component]) / (2.0 * step);
+            }
+        }
+        let curl = [
+            derivative[2][1] - derivative[1][2],
+            derivative[0][2] - derivative[2][0],
+            derivative[1][0] - derivative[0][1],
+        ];
+        let b = flux_density_triangle(tri[0], tri[1], tri[2], s, obs);
+        for axis in 0..3 {
+            assert!(
+                approx(curl[axis], b[axis], 2e-8, 2e-14),
+                "curl(A)/B mismatch at obs={obs:?}, axis={axis}: curl={:.16e}, B={:.16e}",
+                curl[axis],
+                b[axis],
+            );
+        }
+    }
+}
+
+/// Checks the scale invariance of A for fixed nodal stream-function values.
+#[test]
+fn test_triangle_vector_potential_is_scale_invariant() {
+    let tri = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let s = [1.2, -0.4, 0.7];
+    let obs = [0.31, 0.24, 0.65];
+    let reference: [f64; 3] = vector_potential_triangle(tri[0], tri[1], tri[2], s, obs);
+
+    for scale in [1e-5, 1e5] {
+        let scaled_tri = tri.map(|node| node.map(|coordinate| scale * coordinate));
+        let scaled_obs = obs.map(|coordinate| scale * coordinate);
+        let scaled =
+            vector_potential_triangle(scaled_tri[0], scaled_tri[1], scaled_tri[2], s, scaled_obs);
+        for axis in 0..3 {
+            assert!(
+                approx(scaled[axis], reference[axis], 2e-11, 1e-18),
+                "scale-invariant A mismatch at scale={scale:e}, axis={axis}: scaled={:.16e}, reference={:.16e}",
+                scaled[axis],
+                reference[axis],
+            );
+        }
+    }
+}
+
+/// Regression for edge-sharing slivers that plain nested Dunavant quadrature
+/// over-couples by factors that grow with triangle aspect ratio.
+#[test]
+fn test_edge_sharing_sliver_pair_coupling_regression() {
+    // Independent n=256 target-subdivision references using the exact
+    // line-integral source potential in a separate Python implementation.
+    let cases = [
+        (1.0, 3.765_858_184_566_611e-5),
+        (4.0, 4.591_806_464_750_891e-5),
+        (16.0, 4.168_335_360_156_621e-5),
+        (67.0, 3.064_813_417_534_103e-5),
+    ];
+    let area = 1e-3;
+    for (aspect, reference) in cases {
+        let length = f64::sqrt(2.0 * area * aspect);
+        let width = length / aspect;
+        let source = [
+            [0.0, 0.0, 0.0],
+            [length, 0.0, 0.0],
+            [0.5 * length, width, 0.0],
+        ];
+        let target = [
+            [0.0, 0.0, 0.0],
+            [0.5 * length, -width, 0.0],
+            [length, 0.0, 0.0],
+        ];
+        for quadrature in [
+            QuadratureKind::Dunavant1,
+            QuadratureKind::Dunavant3,
+            QuadratureKind::Dunavant5,
+        ] {
+            let coupling = triangle_geometric_coupling(
+                source[0], source[1], source[2], target[0], target[1], target[2], quadrature,
+            );
+            assert!(
+                approx(coupling, reference, 2.5e-3, 1e-12),
+                "sliver pair mismatch at aspect {aspect} with {quadrature:?}: coupling={coupling:.16e}, reference={reference:.16e}"
+            );
+        }
+    }
+}
+
+/// Checks fixed-depth self coupling against references recorded from the
+/// converged pre-change adaptive D5 implementation.
+#[test]
+fn test_fixed_d5_depth_two_self_coupling_references() {
+    let cases = [
+        (1.0, 9.133_341_399_928_91e-5),
+        (4.0, 8.307_493_878_047_309e-5),
+        (16.0, 6.201_409_019_475_143e-5),
+        (67.0, 4.073_016_396_224_205e-5),
+    ];
+    let area = 1e-3;
+    for (aspect, reference) in cases {
+        let length = f64::sqrt(2.0 * area * aspect);
+        let width = length / aspect;
+        let triangle = [
+            [0.0, 0.0, 0.0],
+            [length, 0.0, 0.0],
+            [0.5 * length, width, 0.0],
+        ];
+        let source =
+            super::triangle_potential::UniformTriangle::new(triangle[0], triangle[1], triangle[2]);
+        if aspect == 1.0 {
+            let shallow = triangle_geometric_coupling_exact_fixed(&source, triangle, 1);
+            assert!(
+                !approx(shallow, reference, 2.5e-3, 1e-12),
+                "depth 1 unexpectedly satisfies the depth-2 accuracy contract",
+            );
+        }
+        let mut first = None;
+        for quadrature in [
+            QuadratureKind::Dunavant1,
+            QuadratureKind::Dunavant3,
+            QuadratureKind::Dunavant5,
+        ] {
+            let coupling = triangle_geometric_coupling(
+                triangle[0],
+                triangle[1],
+                triangle[2],
+                triangle[0],
+                triangle[1],
+                triangle[2],
+                quadrature,
+            );
+            assert!(
+                approx(coupling, reference, 2.5e-3, 1e-12),
+                "self coupling mismatch at aspect {aspect} with {quadrature:?}: coupling={coupling:.16e}, reference={reference:.16e}",
+            );
+            if let Some(expected) = first {
+                assert_eq!(
+                    coupling.to_bits(),
+                    expected,
+                    "near work depends on caller quadrature at aspect {aspect}",
+                );
+            } else {
+                first = Some(coupling.to_bits());
+            }
+        }
+    }
+}
+
+/// Checks both argument orders of asymmetric near pairs against converged
+/// pre-change reciprocal adaptive D5 references. Directed values need not be
+/// equal, but each must satisfy the 0.25% near-field accuracy contract.
+#[test]
+fn test_fixed_d5_depth_two_asymmetric_near_coupling_references() {
+    let cases = [
+        (
+            "shared edge",
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.3, -0.4, 0.2]],
+            2.434_440_362_332_022_7e-1,
+        ),
+        (
+            "shared vertex",
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 1.0, 0.0], [0.2, 1.7, 0.4], [-0.3, 1.4, -0.2]],
+            1.044_682_738_723_791_3e-1,
+        ),
+        (
+            "close disjoint",
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.12, 0.08, 0.05], [0.88, 0.15, 0.08], [0.22, 0.76, 0.03]],
+            4.788_197_703_983_14e-1,
+        ),
+    ];
+
+    for (name, source, target, reference) in cases {
+        for (direction, src, tgt) in [("A->B", source, target), ("B->A", target, source)] {
+            let mut first = None;
+            for quadrature in [
+                QuadratureKind::Dunavant1,
+                QuadratureKind::Dunavant3,
+                QuadratureKind::Dunavant5,
+            ] {
+                let coupling = triangle_geometric_coupling(
+                    src[0], src[1], src[2], tgt[0], tgt[1], tgt[2], quadrature,
+                );
+                assert!(
+                    approx(coupling, reference, 2.5e-3, 1e-12),
+                    "{name} {direction} mismatch with {quadrature:?}: coupling={coupling:.16e}, reference={reference:.16e}",
+                );
+                if let Some(expected) = first {
+                    assert_eq!(
+                        coupling.to_bits(),
+                        expected,
+                        "{name} {direction} depends on caller quadrature",
+                    );
+                } else {
+                    first = Some(coupling.to_bits());
+                }
+            }
+        }
+    }
+}
+
+/// Checks that fixed near integration remains homogeneous and independent of
+/// cyclic triangle-node ordering.
+#[test]
+fn test_fixed_d5_depth_two_scale_and_node_order_invariance() {
+    let source = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    let target = [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.3, -0.4, 0.2]];
+    let reference = triangle_geometric_coupling(
+        source[0],
+        source[1],
+        source[2],
+        target[0],
+        target[1],
+        target[2],
+        QuadratureKind::Dunavant3,
+    );
+
+    let source_cyclic = [source[1], source[2], source[0]];
+    let target_cyclic = [target[2], target[0], target[1]];
+    let reordered = triangle_geometric_coupling(
+        source_cyclic[0],
+        source_cyclic[1],
+        source_cyclic[2],
+        target_cyclic[0],
+        target_cyclic[1],
+        target_cyclic[2],
+        QuadratureKind::Dunavant3,
+    );
+    assert!(
+        approx(reordered, reference, 2e-14, 0.0),
+        "near coupling changed under cyclic node order: reordered={reordered:.16e}, reference={reference:.16e}",
+    );
+
+    let scale = 1e3;
+    let scaled_source = source.map(|node| node.map(|coordinate| scale * coordinate));
+    let scaled_target = target.map(|node| node.map(|coordinate| scale * coordinate));
+    let scaled = triangle_geometric_coupling(
+        scaled_source[0],
+        scaled_source[1],
+        scaled_source[2],
+        scaled_target[0],
+        scaled_target[1],
+        scaled_target[2],
+        QuadratureKind::Dunavant3,
+    );
+    assert!(
+        approx(scaled, scale.powi(3) * reference, 2e-14, 0.0),
+        "near coupling does not scale cubically: scaled={scaled:.16e}, expected={:.16e}",
+        scale.powi(3) * reference,
+    );
+}
+
+/// Checks that separated pairs retain the caller-selected reciprocal rule.
+#[test]
+fn test_triangle_geometric_coupling_far_pair_uses_caller_quadrature() {
+    let source = [[0.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.2, 0.8, 0.1]];
+    let target = [[0.1, -0.2, 2.0], [1.0, 0.0, 2.2], [0.3, 0.9, 2.1]];
+
+    let coupling = |quadrature| {
+        triangle_geometric_coupling(
+            source[0], source[1], source[2], target[0], target[1], target[2], quadrature,
+        )
+    };
+    let regular_symmetric = |quadrature| {
+        0.5 * (super::triangle_geometric_coupling_regular(
+            source[0], source[1], source[2], target[0], target[1], target[2], quadrature,
+        ) + super::triangle_geometric_coupling_regular(
+            target[0], target[1], target[2], source[0], source[1], source[2], quadrature,
+        ))
+    };
+
+    let d1 = coupling(QuadratureKind::Dunavant1);
+    let d5 = coupling(QuadratureKind::Dunavant5);
+    assert_eq!(
+        d1.to_bits(),
+        regular_symmetric(QuadratureKind::Dunavant1).to_bits(),
+    );
+    assert_eq!(
+        d5.to_bits(),
+        regular_symmetric(QuadratureKind::Dunavant5).to_bits(),
+    );
+    assert!(
+        !approx(d1, d5, 1e-12, 0.0),
+        "far pair unexpectedly ignored caller quadrature: D1={d1:.16e}, D5={d5:.16e}",
+    );
 }
 
 /// Checks far-field strip flux density and vector potential against a circular filament.

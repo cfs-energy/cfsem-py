@@ -6,7 +6,6 @@
 //! API favors direct-method ergonomics.
 
 use crate::mesh::triangle3d::TriangleMeshView;
-use crate::physics::boundary_element::QuadratureKind;
 use std::time::Instant;
 
 use super::kernels::{
@@ -264,11 +263,18 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
 /// tuned to a given use-case in order to be useful, and should not be used to calculate
 /// safety-related field limits.
 ///
+/// Direct triangle interactions use the exact uniform-triangle potential gradient.
+/// A source triangle contributes zero at targets geometrically on that triangle.
+///
+/// References:
+/// - D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of Static
+///   Potential Integrals on Triangular Domains,” IEEE Access, vol. 8, pp. 99806–99819,
+///   2020, doi: 10.1109/ACCESS.2020.2997287.
+///
 /// Args:
 ///     obs: Observation point coordinates.
 ///     mesh: Triangle mesh source geometry.
 ///     s: Nodal stream-function values.
-///     quad_kind: Triangle quadrature rule.
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
@@ -284,7 +290,6 @@ pub fn flux_density_triangle_mesh_hierarchical(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     construction_method: BuildMethod,
     theta: f64,
     par: bool,
@@ -296,7 +301,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
     let moments = BoundaryElementNodalValues::new(sources, s);
     let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
     one_shot_vec3(
-        BoundaryElementFluxDensityKernel::<f64>::new(quad_kind),
+        BoundaryElementFluxDensityKernel::<f64>::new(),
         sources,
         moments,
         targets,
@@ -318,11 +323,18 @@ pub fn flux_density_triangle_mesh_hierarchical(
 /// tuned to a given use-case in order to be useful, and should not be used to calculate
 /// safety-related field limits.
 ///
+/// Direct triangle interactions use the exact uniform-triangle potential, which
+/// is finite and continuous on triangle interiors, edges, and vertices.
+///
+/// References:
+/// - D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of Static
+///   Potential Integrals on Triangular Domains,” IEEE Access, vol. 8, pp. 99806–99819,
+///   2020, doi: 10.1109/ACCESS.2020.2997287.
+///
 /// Args:
 ///     obs: Observation point coordinates.
 ///     mesh: Triangle mesh source geometry.
 ///     s: Nodal stream-function values.
-///     quad_kind: Triangle quadrature rule.
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
@@ -338,7 +350,6 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     construction_method: BuildMethod,
     theta: f64,
     par: bool,
@@ -350,7 +361,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     let moments = BoundaryElementNodalValues::new(sources, s);
     let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
     one_shot_vec3(
-        BoundaryElementVectorPotentialKernel::<f64>::new(quad_kind),
+        BoundaryElementVectorPotentialKernel::<f64>::new(),
         sources,
         moments,
         targets,

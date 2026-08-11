@@ -8,6 +8,8 @@
 //! * \[5\] G. N. Peeren, “Stream function approach for determining optimal surface currents,” Phd Thesis 2 (Research NOT TU/e / Graduation TU/e), Technische Universiteit Eindhoven, Eindhoven, 2003. doi: 10.6100/IR570424.
 //! * \[6\] F. Hussain, M. S. Karim, and R. Ahamad, “Appropriate Gaussian quadrature formulae for triangles”.
 //! * \[7\] D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature Rules for the Triangle,” International Journal for Numerical Methods in Engineering, vol. 21, no. 6, pp. 1129-1148, 1985, doi: 10.1002/nme.1620210612.
+//! * \[8\] D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of Static Potential Integrals on Triangular Domains,” IEEE Access, vol. 8, pp. 99806–99819, 2020, doi: 10.1109/ACCESS.2020.2997287.
+//! * \[9\] N. A. Gumerov, S. Kaneko, and R. Duraiswami, “Analytical Galerkin Boundary Integrals of Laplace Kernel Layer Potentials in R^3,” SIAM Journal on Scientific Computing, vol. 46, no. 2, pp. A974–A997, 2024, doi: 10.1137/23M1547688.
 
 use crate::math::Scalar;
 use crate::math::norm3;
@@ -23,14 +25,11 @@ pub(crate) use crate::mesh::elements::tri::quadrature::{
 mod body_force_density;
 mod flux_density;
 mod inductance;
+mod triangle_potential;
 mod vector_potential;
 
 #[cfg(test)]
 mod test;
-
-/// Near-field distance threshold relative to the triangle's maximum edge length
-/// for one level of closest-point subdivision in the B- and A-field kernels.
-pub(crate) const TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR: f64 = 1.0;
 
 pub use flux_density::{
     flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
@@ -71,10 +70,6 @@ pub use vector_potential::{
     vector_potential_triangle_mesh_mapping, vector_potential_triangle_mesh_mapping_par,
     vector_potential_triangle_mesh_par,
 };
-
-/// Midpoint-rule samples used for the 1D edge integral in the Duffy-style
-/// triangle self kernel.
-const TRIANGLE_SELF_DUFFY_SAMPLES: usize = 16;
 
 #[inline]
 /// Return the triangle area and constant basis-current density vector.

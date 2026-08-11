@@ -437,11 +437,20 @@ def flux_density_triangle_mesh(
     triangles: NDArray[int64],
     s: NDArray[float64],
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> Array3xN:
     """
     Biot-Savart law calculation for B-field contribution from a triangle mesh
     with one stream-function value per node.
+
+    Each triangle uses the exact gradient of its uniform-source potential away
+    from its finite surface. A triangle contributes exactly zero at an observation
+    on that triangle; use a signed normal offset to request a one-sided field.
+
+    References:
+        D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana,
+        “Evaluation of Static Potential Integrals on Triangular Domains,”
+        IEEE Access, vol. 8, pp. 99806–99819, 2020.
+        <https://doi.org/10.1109/ACCESS.2020.2997287>
 
     Args:
         obs: [m] observation points with shape `(nobs, 3)`
@@ -449,8 +458,6 @@ def flux_density_triangle_mesh(
         triangles: node indices with shape `(ntri, 3)`
         s: [A] nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
-            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [T] (Bx, By, Bz) magnetic flux density at observation points
@@ -459,7 +466,7 @@ def flux_density_triangle_mesh(
     nodes = ascontiguousarray(nodes, dtype=float64)
     triangles = ascontiguousarray(triangles, dtype=int64)
     s = ascontiguousarray(s, dtype=float64).ravel()
-    return em_flux_density_triangle_mesh(obs, nodes, triangles, s, par, quad)
+    return em_flux_density_triangle_mesh(obs, nodes, triangles, s, par)
 
 
 def vector_potential_triangle_mesh(
@@ -468,11 +475,19 @@ def vector_potential_triangle_mesh(
     triangles: NDArray[int64],
     s: NDArray[float64],
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> Array3xN:
     """
     Vector potential calculation for A-field contribution from a triangle mesh
     with one stream-function value per node.
+
+    Each triangle contribution uses the exact uniform-triangle potential. It is
+    finite and continuous on triangle interiors, edges, and vertices.
+
+    References:
+        D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana,
+        “Evaluation of Static Potential Integrals on Triangular Domains,”
+        IEEE Access, vol. 8, pp. 99806–99819, 2020.
+        <https://doi.org/10.1109/ACCESS.2020.2997287>
 
     Args:
         obs: [m] observation points with shape `(nobs, 3)`
@@ -480,8 +495,6 @@ def vector_potential_triangle_mesh(
         triangles: node indices with shape `(ntri, 3)`
         s: [A] nodal stream-function values with shape `(nnode,)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
-            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [Wb/m] or [V-s/m] (Ax, Ay, Az) magnetic vector potential at observation points
@@ -490,7 +503,7 @@ def vector_potential_triangle_mesh(
     nodes = ascontiguousarray(nodes, dtype=float64)
     triangles = ascontiguousarray(triangles, dtype=int64)
     s = ascontiguousarray(s, dtype=float64).ravel()
-    return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par, quad)
+    return em_vector_potential_triangle_mesh(obs, nodes, triangles, s, par)
 
 
 def flux_density_triangle_mesh_mapping(
@@ -498,18 +511,24 @@ def flux_density_triangle_mesh_mapping(
     nodes: NDArray[float64],
     triangles: NDArray[int64],
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the dense source-node to target-point B-field mapping for a triangle mesh.
+
+    The same exact off-surface and zero-on-source convention as
+    :func:`flux_density_triangle_mesh` is applied to every source triangle.
+
+    References:
+        D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana,
+        “Evaluation of Static Potential Integrals on Triangular Domains,”
+        IEEE Access, vol. 8, pp. 99806–99819, 2020.
+        <https://doi.org/10.1109/ACCESS.2020.2997287>
 
     Args:
         obs: [m] observation points with shape `(nobs, 3)`
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
-            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [T/A] `(bx_map, by_map, bz_map)` with shape `(nobs, nnode)`
@@ -517,7 +536,7 @@ def flux_density_triangle_mesh_mapping(
     obs = ascontiguousarray(obs, dtype=float64)
     nodes = ascontiguousarray(nodes, dtype=float64)
     triangles = ascontiguousarray(triangles, dtype=int64)
-    bx, by, bz = em_flux_density_triangle_mesh_mapping(obs, nodes, triangles, par, quad)
+    bx, by, bz = em_flux_density_triangle_mesh_mapping(obs, nodes, triangles, par)
     nobs = obs.shape[0]
     nnode = nodes.shape[0]
     return (
@@ -532,18 +551,24 @@ def vector_potential_triangle_mesh_mapping(
     nodes: NDArray[float64],
     triangles: NDArray[int64],
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> tuple[NDArray[float64], NDArray[float64], NDArray[float64]]:
     """
     Assemble the dense source-node to target-point A-field mapping for a triangle mesh.
+
+    Each mapping entry uses the exact uniform-triangle potential, including at
+    points on triangle interiors, edges, and vertices.
+
+    References:
+        D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana,
+        “Evaluation of Static Potential Integrals on Triangular Domains,”
+        IEEE Access, vol. 8, pp. 99806–99819, 2020.
+        <https://doi.org/10.1109/ACCESS.2020.2997287>
 
     Args:
         obs: [m] observation points with shape `(nobs, 3)`
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
-            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [V*s/(m*A)] `(ax_map, ay_map, az_map)` with shape `(nobs, nnode)`
@@ -551,7 +576,7 @@ def vector_potential_triangle_mesh_mapping(
     obs = ascontiguousarray(obs, dtype=float64)
     nodes = ascontiguousarray(nodes, dtype=float64)
     triangles = ascontiguousarray(triangles, dtype=int64)
-    ax, ay, az = em_vector_potential_triangle_mesh_mapping(obs, nodes, triangles, par, quad)
+    ax, ay, az = em_vector_potential_triangle_mesh_mapping(obs, nodes, triangles, par)
     nobs = obs.shape[0]
     nnode = nodes.shape[0]
     return (
@@ -620,15 +645,26 @@ def triangle_mesh_inductance_matrix(
     """
     Assemble the dense nodal inductance matrix for a triangle stream-function mesh.
 
+    Self and near triangle pairs use the exact uniform-triangle source potential
+    with adaptive target integration, including touching high-aspect elements.
+    Well-separated pairs use reciprocal nested quadrature to keep far-field
+    assembly cost bounded.
+
     If `par=True` and the per-worker scratch matrices cannot be allocated, the
     implementation falls back to the serial path instead of failing outright.
+
+    References:
+        D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana,
+        “Evaluation of Static Potential Integrals on Triangular Domains,”
+        IEEE Access, vol. 8, pp. 99806–99819, 2020.
+        <https://doi.org/10.1109/ACCESS.2020.2997287>
 
     Args:
         nodes: [m] mesh node coordinates with shape `(nnode, 3)`
         triangles: node indices with shape `(ntri, 3)`
         par: Whether to use CPU parallelism
-        quad: Triangle quadrature rule, one of `"dunavant1"`, `"dunavant2"`,
-            `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
+        quad: Target/far-pair triangle quadrature rule, one of `"dunavant1"`,
+            `"dunavant2"`, `"dunavant3"`, `"dunavant4"`, or `"dunavant5"`
 
     Returns:
         [H] dense nodal inductance matrix with shape `(nnode, nnode)`

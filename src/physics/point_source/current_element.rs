@@ -3,7 +3,7 @@
 
 use crate::MU0_OVER_4PI;
 use crate::math::Scalar;
-use crate::math::{cross3, dot3, max_scalar};
+use crate::math::{cross3, dot3};
 
 /// Minimum observation-point distance below which point-current-element kernels
 /// return zero to avoid singular self-evaluation.
@@ -26,7 +26,7 @@ pub(crate) fn flux_density_current_element_scalar<T: Scalar>(
     let r_sq = dot3(r, r); // [m^2]
     let min_distance_sq = crate::math::cast::<T>(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
     let near = r_sq < min_distance_sq; // [-]
-    let rnorm3_inv = max_scalar(r_sq, min_distance_sq).powf(crate::math::cast::<T>(-1.5)); // [m^-3]
+    let rnorm3_inv = r_sq.max(min_distance_sq).powf(crate::math::cast::<T>(-1.5)); // [m^-3]
     let m_cross_r = cross3(moment, r); // [A*m^2]
     let c = crate::math::cast::<T>(MU0_OVER_4PI);
     let out = [
@@ -50,7 +50,7 @@ pub(crate) fn vector_potential_current_element_scalar<T: Scalar>(
     let min_distance = crate::math::cast::<T>(CURRENT_ELEMENT_MIN_DISTANCE);
     let min_distance_sq = crate::math::cast::<T>(CURRENT_ELEMENT_MIN_DISTANCE_SQ);
     let near = r_sq < min_distance_sq; // [-]
-    let rmag = max_scalar(r_sq.sqrt(), min_distance); // [m]
+    let rmag = r_sq.sqrt().max(min_distance); // [m]
     let c = crate::math::cast::<T>(MU0_OVER_4PI);
     let out = [
         c * moment[0] / rmag, // [V*s/m]

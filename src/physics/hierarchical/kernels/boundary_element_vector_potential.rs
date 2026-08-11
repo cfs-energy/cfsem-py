@@ -8,7 +8,7 @@ use super::dipole::{
     DipoleTarget, DipoleTargetSummary, dipole_vector_potential, summarize_target_leaf,
 };
 use crate::math::add3_in_place;
-use crate::physics::boundary_element::{QuadratureKind, vector_potential_triangle};
+use crate::physics::boundary_element::vector_potential_triangle;
 use crate::physics::hierarchical::{
     Aabb, HierarchicalError, HierarchicalKernel, Scalar, SourceCollection, SourceMomentCollection,
 };
@@ -16,22 +16,25 @@ use crate::physics::point_source::current_element::vector_potential_current_elem
 
 /// Boundary-element vector-potential Barnes-Hut kernel.
 ///
-/// Exact evaluation uses the upstream triangle quadrature. Far evaluation
+/// Exact evaluation uses the closed-form uniform-triangle potential. Far evaluation
 /// summarizes accepted source clusters as one point current element plus a
 /// shifted magnetic-dipole term so locally closed current paths retain their
 /// leading loop behavior.
+///
+/// References:
+/// - D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of Static
+///   Potential Integrals on Triangular Domains,” IEEE Access, vol. 8, pp. 99806–99819,
+///   2020, doi: 10.1109/ACCESS.2020.2997287.
 #[derive(Clone, Copy, Debug)]
 pub struct BoundaryElementVectorPotentialKernel<T: Scalar> {
-    quad_kind: QuadratureKind,
     marker: PhantomData<T>,
 }
 
 impl<T: Scalar> BoundaryElementVectorPotentialKernel<T> {
     #[inline]
-    /// Construct a kernel with the requested configuration.
-    pub fn new(quad_kind: QuadratureKind) -> Self {
+    /// Construct the triangle vector-potential kernel.
+    pub fn new() -> Self {
         Self {
-            quad_kind,
             marker: PhantomData,
         }
     }
@@ -41,7 +44,7 @@ impl<T: Scalar> Default for BoundaryElementVectorPotentialKernel<T> {
     #[inline]
     /// Return the default kernel configuration.
     fn default() -> Self {
-        Self::new(QuadratureKind::Dunavant3)
+        Self::new()
     }
 }
 
@@ -100,14 +103,7 @@ impl<T: Scalar> HierarchicalKernel for BoundaryElementVectorPotentialKernel<T> {
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
     ) {
-        *out = vector_potential_triangle(
-            source.n0,
-            source.n1,
-            source.n2,
-            *moment,
-            target.position,
-            self.quad_kind,
-        );
+        *out = vector_potential_triangle(source.n0, source.n1, source.n2, *moment, target.position);
     }
 
     #[inline]

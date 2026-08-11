@@ -1,12 +1,12 @@
+use super::triangle_potential::UniformTriangle;
 use super::{
-    QuadratureKind, TRIANGLE_SELF_DUFFY_SAMPLES, calc_tri_area, map_tri_uv,
-    triangle_basis_current_densities, triangle_quadrature_points, triangles_identical,
+    QuadratureKind, calc_tri_area, map_tri_uv, triangle_basis_current_densities,
+    triangle_quadrature_points, triangles_identical,
 };
 use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::math::{cartesian_to_cylindrical, dot3, norm3};
 use crate::mesh::TriangleMeshView;
-use crate::mesh::elements::tri::tri3::subdivide_about_point as triangle_subdivide_about_point;
 use crate::physics::circular_filament::vector_potential_circular_filament_scalar;
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::dipole::vector_potential_dipole_scalar;
@@ -35,63 +35,6 @@ fn triangle_scalar_potential_regular(
         let src = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]); // [m]
         let dist = norm3([obs[0] - src[0], obs[1] - src[1], obs[2] - src[2]]); // [m]
         out += qp[0] * tri_area / dist; // [m]
-    }
-
-    out
-}
-
-/// Weakly singular single-triangle `∫ dS / R` evaluation for a target point on the
-/// triangle itself.
-///
-/// Method:
-/// - Split the parent triangle into three sub-triangles sharing `obs` as a vertex.
-/// - On each sub-triangle, use a Duffy-style collapse of the radial coordinate so the
-///   `1 / R` singularity is canceled by the surface Jacobian.
-///     - Because the new triangles each end at `obs`, the local dS area (and local
-///       contribution to current) of each triangle goes to zero linearly (like `R`) as it
-///       approaches `obs`, while the vector potential becomes singular like `1/R`. So, the
-///       local contribution to the field at `obs` now goes to `R/R` at `obs` instead of
-///       diverging to a div/0.
-/// - The remaining 1D integral along the opposite edge is smooth and is evaluated by a
-///   midpoint rule.
-///
-/// References:
-/// - \[4\], pp. 1260-1262, for the original Duffy transform for vertex singularities on
-///   simplices.
-/// - \[1\], abstract and Sec. 2, for the generalized Duffy mapping and the note that the
-///   standard `1 / r` case corresponds to the classical Duffy choice.
-/// - \[2\], pp. 1448-1455, and \[3\], pp. 276-281, for related weakly singular triangle
-///   Green-function integrals.
-#[inline]
-fn triangle_scalar_potential_self_duffy(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
-    obs: [f64; 3],
-) -> f64 {
-    let mut out = 0.0; // [m]
-
-    // For each [obs, nx, ny] in the triangle, treat it as a
-    // new sub-triangle for nonsingular integration.
-    for [p, va, vb] in triangle_subdivide_about_point(obs, n0, n1, n2) {
-        let area_sub = calc_tri_area(p, va, vb); // [m^2]
-        if area_sub == 0.0 {
-            continue;
-        }
-
-        // Integrate the transverse direction (across the triangle).
-        let mut line_integral = 0.0; // [1/m]
-        for i in 0..TRIANGLE_SELF_DUFFY_SAMPLES {
-            let eta = (i as f64 + 0.5) / TRIANGLE_SELF_DUFFY_SAMPLES as f64;
-            let edge_vec = [
-                (1.0 - eta).mul_add(va[0] - obs[0], eta * (vb[0] - obs[0])),
-                (1.0 - eta).mul_add(va[1] - obs[1], eta * (vb[1] - obs[1])),
-                (1.0 - eta).mul_add(va[2] - obs[2], eta * (vb[2] - obs[2])),
-            ];
-            line_integral += 1.0 / norm3(edge_vec); // [1/m]
-        }
-
-        out += 2.0 * area_sub * line_integral / TRIANGLE_SELF_DUFFY_SAMPLES as f64; // [m]
     }
 
     out
@@ -143,55 +86,268 @@ pub fn triangle_geometric_coupling_regular(
     out
 }
 
-/// Double-surface self coupling for a triangle.
-///
-/// Method:
-/// - Integrate over target quadrature points on the triangle.
-/// - At each target point, evaluate the source-side weakly singular `∫ dS / R` term
-///   with the Duffy-style helper above.
-///
-/// References:
-/// - \[5\], discussion on p. 106 and Eqs. (5.3)-(5.5) on pp. 107-108 for evaluation of
-///   vector potential on the source support.
-/// - \[4\], pp. 1260-1262.
-/// - \[1\], abstract and Sec. 2.
-/// - \[2\], pp. 1448-1455, and \[3\], pp. 276-281.
 #[inline]
-fn triangle_geometric_coupling_self(
-    n0: [f64; 3],
-    n1: [f64; 3],
-    n2: [f64; 3],
+fn triangle_geometric_coupling_regular_symmetric(
+    source: [[f64; 3]; 3],
+    target: [[f64; 3]; 3],
     quad_kind: QuadratureKind,
 ) -> f64 {
-    let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
-    let quad_points = triangle_quadrature_points(quad_kind);
+    0.5 * (triangle_geometric_coupling_regular(
+        source[0], source[1], source[2], target[0], target[1], target[2], quad_kind,
+    ) + triangle_geometric_coupling_regular(
+        target[0], target[1], target[2], source[0], source[1], source[2], quad_kind,
+    ))
+}
 
+/// Integrate the exact source-triangle potential over one target triangle.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
+#[inline]
+pub(super) fn triangle_geometric_coupling_exact_directed(
+    source: &UniformTriangle<f64>,
+    target_nodes: [[f64; 3]; 3],
+    quad_kind: QuadratureKind,
+) -> f64 {
+    let area = calc_tri_area(target_nodes[0], target_nodes[1], target_nodes[2]); // [m^2]
     let mut out = 0.0; // [m^3]
-    for qp in quad_points {
-        let obs = map_tri_uv(n0, n1, n2, [qp[1], qp[2]]); // [m]
-        out += qp[0] * tri_area * triangle_scalar_potential_self_duffy(n0, n1, n2, obs); // [m^3]
+    for qp in triangle_quadrature_points(quad_kind) {
+        let obs = map_tri_uv(
+            target_nodes[0],
+            target_nodes[1],
+            target_nodes[2],
+            [qp[1], qp[2]],
+        ); // [m]
+        out += qp[0] * area * source.scalar_potential(obs); // [m^3]
     }
-
     out
 }
 
-/// Double-surface geometric coupling
-/// `∫_target ∫_source 1 / |r - r'| dS' dS`
-/// between two triangles.
+const COUPLING_NEAR_SUBDIVISION_DEPTH: usize = 2;
+
+#[inline]
+pub(super) fn longest_edge_bisection(nodes: [[f64; 3]; 3]) -> [[[f64; 3]; 3]; 2] {
+    let lengths = [
+        dot3(
+            [
+                nodes[1][0] - nodes[0][0],
+                nodes[1][1] - nodes[0][1],
+                nodes[1][2] - nodes[0][2],
+            ],
+            [
+                nodes[1][0] - nodes[0][0],
+                nodes[1][1] - nodes[0][1],
+                nodes[1][2] - nodes[0][2],
+            ],
+        ),
+        dot3(
+            [
+                nodes[2][0] - nodes[1][0],
+                nodes[2][1] - nodes[1][1],
+                nodes[2][2] - nodes[1][2],
+            ],
+            [
+                nodes[2][0] - nodes[1][0],
+                nodes[2][1] - nodes[1][1],
+                nodes[2][2] - nodes[1][2],
+            ],
+        ),
+        dot3(
+            [
+                nodes[0][0] - nodes[2][0],
+                nodes[0][1] - nodes[2][1],
+                nodes[0][2] - nodes[2][2],
+            ],
+            [
+                nodes[0][0] - nodes[2][0],
+                nodes[0][1] - nodes[2][1],
+                nodes[0][2] - nodes[2][2],
+            ],
+        ),
+    ];
+    let edge = if lengths[1] > lengths[0] && lengths[1] >= lengths[2] {
+        1
+    } else if lengths[2] > lengths[0] {
+        2
+    } else {
+        0
+    };
+    let i = edge;
+    let j = (edge + 1) % 3;
+    let k = (edge + 2) % 3;
+    let midpoint = [
+        0.5 * (nodes[i][0] + nodes[j][0]),
+        0.5 * (nodes[i][1] + nodes[j][1]),
+        0.5 * (nodes[i][2] + nodes[j][2]),
+    ];
+    [
+        [nodes[i], midpoint, nodes[k]],
+        [midpoint, nodes[j], nodes[k]],
+    ]
+}
+
+#[inline]
+fn point_triangle_distance_squared(point: [f64; 3], tri: [[f64; 3]; 3]) -> f64 {
+    let closest = crate::mesh::elements::tri::tri3::closest_point(point, tri[0], tri[1], tri[2]);
+    dot3(
+        [
+            point[0] - closest[0],
+            point[1] - closest[1],
+            point[2] - closest[2],
+        ],
+        [
+            point[0] - closest[0],
+            point[1] - closest[1],
+            point[2] - closest[2],
+        ],
+    )
+}
+
+#[inline]
+fn segment_distance_squared(p0: [f64; 3], p1: [f64; 3], q0: [f64; 3], q1: [f64; 3]) -> f64 {
+    let d1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+    let d2 = [q1[0] - q0[0], q1[1] - q0[1], q1[2] - q0[2]];
+    let r = [p0[0] - q0[0], p0[1] - q0[1], p0[2] - q0[2]];
+    let a = dot3(d1, d1);
+    let e = dot3(d2, d2);
+    let b = dot3(d1, d2);
+    let c = dot3(d1, r);
+    let f = dot3(d2, r);
+    let denominator = a * e - b * b;
+
+    let mut s = if denominator > 0.0 {
+        ((b * f - c * e) / denominator).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let mut t = (b * s + f) / e;
+    if t < 0.0 {
+        t = 0.0;
+        s = (-c / a).clamp(0.0, 1.0);
+    } else if t > 1.0 {
+        t = 1.0;
+        s = ((b - c) / a).clamp(0.0, 1.0);
+    }
+
+    let delta = [
+        r[0] + s * d1[0] - t * d2[0],
+        r[1] + s * d1[1] - t * d2[1],
+        r[2] + s * d1[2] - t * d2[2],
+    ];
+    dot3(delta, delta)
+}
+
+#[inline]
+fn triangle_distance_squared(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> f64 {
+    let mut distance = f64::INFINITY;
+    for vertex in a {
+        distance = distance.min(point_triangle_distance_squared(vertex, b));
+    }
+    for vertex in b {
+        distance = distance.min(point_triangle_distance_squared(vertex, a));
+    }
+    for edge_a in 0..3 {
+        for edge_b in 0..3 {
+            distance = distance.min(segment_distance_squared(
+                a[edge_a],
+                a[(edge_a + 1) % 3],
+                b[edge_b],
+                b[(edge_b + 1) % 3],
+            ));
+        }
+    }
+    distance
+}
+
+#[inline]
+fn triangle_aabb_distance_squared(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> f64 {
+    let mut distance = 0.0;
+    for axis in 0..3 {
+        let a_min = a[0][axis].min(a[1][axis]).min(a[2][axis]);
+        let a_max = a[0][axis].max(a[1][axis]).max(a[2][axis]);
+        let b_min = b[0][axis].min(b[1][axis]).min(b[2][axis]);
+        let b_max = b[0][axis].max(b[1][axis]).max(b[2][axis]);
+        let gap = (a_min - b_max).max(b_min - a_max).max(0.0);
+        distance += gap * gap;
+    }
+    distance
+}
+
+#[inline]
+fn triangle_max_edge_squared(nodes: [[f64; 3]; 3]) -> f64 {
+    let mut maximum: f64 = 0.0;
+    for edge in 0..3 {
+        let delta = [
+            nodes[(edge + 1) % 3][0] - nodes[edge][0],
+            nodes[(edge + 1) % 3][1] - nodes[edge][1],
+            nodes[(edge + 1) % 3][2] - nodes[edge][2],
+        ];
+        maximum = maximum.max(dot3(delta, delta));
+    }
+    maximum
+}
+
+/// Integrate an exact source-triangle potential over a target triangle after
+/// a fixed number of longest-edge bisections.
 ///
-/// Method:
-/// - Use the dedicated self-term path when the two triangles are identical.
-/// - Otherwise evaluate the pair with regular nested quadrature in both
-///   source/target directions and average the two results so the numerical coupling is
-///   explicitly symmetric.
+/// The source surface integral is analytic. Each target leaf uses the fixed
+/// seven-point Dunavant degree-5 rule, independent of the caller's far-field
+/// quadrature selection.
+///
+/// Args:
+///     source: Cached nondegenerate uniform source triangle.
+///     target_nodes: Target triangle vertices in metres.
+///     depth: Remaining fixed bisection levels.
+///
+/// Returns:
+///     Directed geometric coupling in cubic metres.
 ///
 /// References:
-/// - \[5\], Eq. (3.16) on p. 68 and Sec. 3.5.1 on p. 85 for the symmetry of mutual
-///   inductance, together with Eqs. (5.3)-(5.5) on pp. 107-108 for triangle
-///   vector-potential evaluation.
-/// - \[2\], pp. 1448-1455.
-/// - \[3\], pp. 276-281.
-/// - \[1\] and \[4\], for weakly singular integration background for the dedicated self term.
+/// - D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana, “Evaluation of
+///   Static Potential Integrals on Triangular Domains,” IEEE Access, vol. 8,
+///   pp. 99806–99819, 2020. doi:10.1109/ACCESS.2020.2997287.
+/// - D. A. Dunavant, “High Degree Efficient Symmetrical Gaussian Quadrature
+///   Rules for the Triangle,” International Journal for Numerical Methods in
+///   Engineering, vol. 21, no. 6, pp. 1129–1148, 1985.
+///   doi:10.1002/nme.1620210612.
+/// - N. A. Gumerov, S. Kaneko, and R. Duraiswami, “Analytical Galerkin
+///   Boundary Integrals of Laplace Kernel Layer Potentials in R^3,” SIAM
+///   Journal on Scientific Computing, vol. 46, no. 2, pp. A974–A997, 2024.
+///   doi:10.1137/23M1547688. Provides an analytic double-integral formulation
+///   suitable for independent validation.
+pub(super) fn triangle_geometric_coupling_exact_fixed(
+    source: &UniformTriangle<f64>,
+    target_nodes: [[f64; 3]; 3],
+    depth: usize,
+) -> f64 {
+    if depth == 0 {
+        return triangle_geometric_coupling_exact_directed(
+            source,
+            target_nodes,
+            QuadratureKind::Dunavant5,
+        );
+    }
+
+    let children = longest_edge_bisection(target_nodes);
+    triangle_geometric_coupling_exact_fixed(source, children[0], depth - 1)
+        + triangle_geometric_coupling_exact_fixed(source, children[1], depth - 1)
+}
+
+/// Double-surface geometric coupling using the exact source-triangle potential
+/// and fixed D5 target integration at subdivision depth 2 for self and near pairs.
+/// Well-separated pairs use reciprocal nested quadrature; this keeps the
+/// exact source potential focused on interactions that need near-singular treatment.
+///
+/// Near and self evaluations are directed from the supplied source to target.
+/// Reversing a direct pair call can therefore change the approximation within
+/// the 0.25% validation tolerance established for the representative near-pair
+/// test suite. This is a validation bound, not a runtime error estimate. Mesh
+/// assembly remains exactly symmetric because each computed upper-triangular
+/// block is scattered with its transpose.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for the exact source-triangle
+///   potential and its limiting cases.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -200,10 +356,11 @@ fn triangle_geometric_coupling_self(
 ///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
 ///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
 ///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///
 /// Returns:
-///     Symmetric double-surface geometric coupling `∫∫ dS' dS / R` (m^3).
+///     Directed geometric coupling in cubic metres.
 #[inline]
 pub fn triangle_geometric_coupling(
     src0: [f64; 3],
@@ -214,12 +371,35 @@ pub fn triangle_geometric_coupling(
     tgt2: [f64; 3],
     quad_kind: QuadratureKind,
 ) -> f64 {
+    let source_nodes = [src0, src1, src2];
+    let target_nodes = [tgt0, tgt1, tgt2];
     if triangles_identical(src0, src1, src2, tgt0, tgt1, tgt2) {
-        return triangle_geometric_coupling_self(src0, src1, src2, quad_kind);
+        let source = UniformTriangle::new(src0, src1, src2);
+        return triangle_geometric_coupling_exact_fixed(
+            &source,
+            target_nodes,
+            COUPLING_NEAR_SUBDIVISION_DEPTH,
+        );
     }
-
-    0.5 * (triangle_geometric_coupling_regular(src0, src1, src2, tgt0, tgt1, tgt2, quad_kind)
-        + triangle_geometric_coupling_regular(tgt0, tgt1, tgt2, src0, src1, src2, quad_kind))
+    let max_edge_squared =
+        triangle_max_edge_squared(source_nodes).max(triangle_max_edge_squared(target_nodes));
+    if triangle_aabb_distance_squared(source_nodes, target_nodes) > max_edge_squared {
+        return triangle_geometric_coupling_regular_symmetric(
+            source_nodes,
+            target_nodes,
+            quad_kind,
+        );
+    }
+    let pair_distance_sq = triangle_distance_squared(source_nodes, target_nodes);
+    if pair_distance_sq > max_edge_squared {
+        return triangle_geometric_coupling_regular_symmetric(
+            source_nodes,
+            target_nodes,
+            quad_kind,
+        );
+    }
+    let source = UniformTriangle::new(src0, src1, src2);
+    triangle_geometric_coupling_exact_fixed(&source, target_nodes, COUPLING_NEAR_SUBDIVISION_DEPTH)
 }
 
 /// Mutual-inductance block for the three nodal basis functions on a source triangle and
@@ -232,12 +412,17 @@ pub fn triangle_geometric_coupling(
 /// - This block is the elemental nodal-basis contribution used to assemble a full mesh
 ///   inductance matrix.
 ///
+/// For self and near pairs this is a directed approximation: reversing source
+/// and target can change the block within the representative-suite tolerance
+/// described by [`triangle_geometric_coupling`].
+///
 /// References:
 /// - \[5\], Eq. (3.16) on p. 68 for `M_mn = ∬ A_m · j_n dS`, Eq. (3.24) on p. 70 for the
 ///   stream-function current representation, and Eq. (4.6) on p. 93 for the constant
 ///   current density induced by linear triangle nodal values.
 /// - \[3\], pp. 276-281.
 /// - \[2\], pp. 1448-1455.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -246,7 +431,8 @@ pub fn triangle_geometric_coupling(
 ///     tgt0: Target triangle vertex 0 `[x, y, z]` (m).
 ///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
 ///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///
 /// Returns:
 ///     Mutual-inductance block `[[M_ij]; 3]` for the source and target triangle bases (H).
@@ -286,6 +472,21 @@ fn scatter_triangle_block(
         let row = src_idx[i] * nnode; // [-]
         for j in 0..3 {
             out[row + tgt_idx[j]] += block[i][j]; // [H]
+        }
+    }
+}
+
+#[inline]
+fn scatter_triangle_block_transpose(
+    out: &mut [f64],
+    nnode: usize,
+    src_idx: [usize; 3],
+    tgt_idx: [usize; 3],
+    block: [[f64; 3]; 3],
+) {
+    for i in 0..3 {
+        for j in 0..3 {
+            out[tgt_idx[j] * nnode + src_idx[i]] += block[i][j]; // [H]
         }
     }
 }
@@ -453,18 +654,24 @@ where
 /// Assemble the dense nodal-basis inductance matrix for one triangle mesh.
 ///
 /// Method:
-/// - Treat the existing triangle-pair `3x3` mutual-inductance block as the elemental
+/// - Treat the triangle-pair `3x3` mutual-inductance block as the elemental
 ///   nodal-basis kernel.
-/// - Loop over all source and target triangle pairs.
-/// - Scatter-add each elemental block into a row-major global node-node matrix.
+/// - Loop over the upper triangle of source-target element pairs.
+/// - Scatter-add each elemental block and its transpose into a row-major global
+///   node-node matrix.
 ///
 /// The resulting matrix acts on nodal current-potential values `s_a` and represents the
 /// bilinear form
 /// `L_ab = μ0 / 4π ∬ K_a(r) · K_b(r') / |r - r'| dS dS'`.
+/// Matrix entries are exactly symmetric by construction. Because each near pair
+/// is evaluated in upper-triangular element order, permuting mesh cells can change
+/// its directed near-field approximation within the representative-suite 0.25%
+/// validation tolerance.
 ///
 /// Args:
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
 ///
 /// Returns:
@@ -475,6 +682,7 @@ where
 /// - \[5\], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
 /// - \[3\], pp. 276-281.
 /// - \[2\], pp. 1448-1455.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 #[inline]
 pub fn triangle_mesh_inductance_matrix(
     mesh: &TriangleMeshView<'_>,
@@ -490,7 +698,7 @@ pub fn triangle_mesh_inductance_matrix(
 
     for isrc in 0..mesh.len() {
         let (src_nodes, src_idx) = mesh.triangle_nodes_and_indices(isrc);
-        for itgt in 0..mesh.len() {
+        for itgt in isrc..mesh.len() {
             let (tgt_nodes, tgt_idx) = mesh.triangle_nodes_and_indices(itgt);
             let block = triangle_basis_mutual_inductance_block(
                 src_nodes[0],
@@ -502,6 +710,9 @@ pub fn triangle_mesh_inductance_matrix(
                 quad_kind,
             );
             scatter_triangle_block(out, nnode, src_idx, tgt_idx, block);
+            if itgt != isrc {
+                scatter_triangle_block_transpose(out, nnode, src_idx, tgt_idx, block);
+            }
         }
     }
 
@@ -511,18 +722,24 @@ pub fn triangle_mesh_inductance_matrix(
 /// Assemble the dense nodal-basis inductance matrix for one triangle mesh.
 /// This variant is parallelized over chunks of source triangles and reduced into the
 /// final dense matrix.
+/// It has the same directed near-pair and structural-symmetry behavior as
+/// [`triangle_mesh_inductance_matrix`].
 ///
 /// If the per-worker scratch matrices cannot be allocated, this routine falls back to
 /// the serial implementation rather than failing outright.
 ///
 /// Args:
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///     out: Row-major output matrix buffer of length `nnode * nnode` (H).
 ///
 /// Returns:
 ///     `Ok(())` after writing the dense nodal inductance matrix to `out`, or an error if
 ///     the mesh geometry or output dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 #[inline]
 pub fn triangle_mesh_inductance_matrix_par(
     mesh: &TriangleMeshView<'_>,
@@ -557,7 +774,7 @@ pub fn triangle_mesh_inductance_matrix_par(
             let end = (start + chunk).min(mesh.len());
             for isrc in start..end {
                 let (src_nodes, src_idx) = mesh.triangle_nodes_and_indices(isrc);
-                for itgt in 0..mesh.len() {
+                for itgt in isrc..mesh.len() {
                     let (tgt_nodes, tgt_idx) = mesh.triangle_nodes_and_indices(itgt);
                     let block = triangle_basis_mutual_inductance_block(
                         src_nodes[0],
@@ -569,6 +786,11 @@ pub fn triangle_mesh_inductance_matrix_par(
                         quad_kind,
                     );
                     scatter_triangle_block(&mut local, nnode, src_idx, tgt_idx, block);
+                    if itgt != isrc {
+                        scatter_triangle_block_transpose(
+                            &mut local, nnode, src_idx, tgt_idx, block,
+                        );
+                    }
                 }
             }
             local
@@ -616,7 +838,7 @@ pub fn triangle_mesh_inductance_from_potential_vectors(
     Ok(out)
 }
 
-/// Internal helper retained for boundary-element tests of dense inductance contractions.
+/// Internal helper used by boundary-element tests of dense inductance contractions.
 ///
 /// Args:
 ///     lmat: Row-major nodal inductance matrix of length `nnode * nnode` (H).
@@ -957,6 +1179,7 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
 ///
 /// References:
 /// - \[5\], Eq. (3.16) on p. 68, Eq. (3.24) on p. 70, and Eq. (4.6) on p. 93.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for near and self interactions.
 ///
 /// Args:
 ///     src0: Source triangle vertex 0 `[x, y, z]` (m).
@@ -967,7 +1190,8 @@ pub fn triangle_mesh_flux_linkage_mapping_from_dipoles_par(
 ///     tgt1: Target triangle vertex 1 `[x, y, z]` (m).
 ///     tgt2: Target triangle vertex 2 `[x, y, z]` (m).
 ///     tgt_basis: Target basis-function index in `{0, 1, 2}` (dimensionless).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
+///     quad_kind: Quadrature rule for well-separated pairs; self and near pairs
+///         always use fixed D5 integration (dimensionless).
 ///
 /// Returns:
 ///     Triangle-basis mutual-inductance entry `M_ij` (H).

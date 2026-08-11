@@ -499,7 +499,6 @@ def flux_density_triangle_mesh(
     triangles: IntMatrix,
     s: FloatArray,
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def vector_potential_triangle_mesh(
     obs: FloatMatrix,
@@ -507,7 +506,6 @@ def vector_potential_triangle_mesh(
     triangles: IntMatrix,
     s: FloatArray,
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def flux_density_triangle_mesh_hierarchical(
     obs: FloatMatrix,
@@ -515,7 +513,6 @@ def flux_density_triangle_mesh_hierarchical(
     triangles: IntMatrix,
     s: FloatArray,
     theta: float = 0.05,
-    quad: str = "dunavant3",
     construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
@@ -529,13 +526,21 @@ def flux_density_triangle_mesh_hierarchical(
     error is unbounded. This method must be tuned to a given use-case in order to be
     useful, and should not be used to calculate safety-related field limits.
 
+    Direct triangle interactions use the analytic uniform-triangle field. A source
+    triangle contributes zero at target points geometrically on that triangle.
+
+    References:
+        D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana,
+        “Evaluation of Static Potential Integrals on Triangular Domains,”
+        IEEE Access, vol. 8, pp. 99806–99819, 2020.
+        <https://doi.org/10.1109/ACCESS.2020.2997287>
+
     Args:
         obs: Target point coordinates with one point per row.
         nodes: Mesh node coordinates with one node per row.
         triangles: Triangle node indices with one triangle per row.
         s: Nodal stream-function values.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        quad: Triangle quadrature rule.
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
@@ -554,7 +559,6 @@ def vector_potential_triangle_mesh_hierarchical(
     triangles: IntMatrix,
     s: FloatArray,
     theta: float = 0.05,
-    quad: str = "dunavant3",
     construction_method: str = "longest_axis",
     par: bool = True,
     out: ArrayTriple | None = None,
@@ -568,13 +572,21 @@ def vector_potential_triangle_mesh_hierarchical(
     error is unbounded. This method must be tuned to a given use-case in order to be
     useful, and should not be used to calculate safety-related field limits.
 
+    Direct triangle interactions use the exact uniform-triangle potential, which
+    is finite and continuous on triangle interiors, edges, and vertices.
+
+    References:
+        D. R. Wilton, J. Rivero, W. A. Johnson, and F. Vipiana,
+        “Evaluation of Static Potential Integrals on Triangular Domains,”
+        IEEE Access, vol. 8, pp. 99806–99819, 2020.
+        <https://doi.org/10.1109/ACCESS.2020.2997287>
+
     Args:
         obs: Target point coordinates with one point per row.
         nodes: Mesh node coordinates with one node per row.
         triangles: Triangle node indices with one triangle per row.
         s: Nodal stream-function values.
         theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
-        quad: Triangle quadrature rule.
         construction_method: Source-tree construction method, either `"longest_axis"` or
             `"morton_lbvh"`.
         par: Whether to evaluate target batches in parallel.
@@ -592,14 +604,12 @@ def flux_density_triangle_mesh_mapping(
     nodes: FloatMatrix,
     triangles: IntMatrix,
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def vector_potential_triangle_mesh_mapping(
     obs: FloatMatrix,
     nodes: FloatMatrix,
     triangles: IntMatrix,
     par: bool = True,
-    quad: str = "dunavant3",
 ) -> ArrayTriple: ...
 def triangle_mesh_current_density(nodes: FloatMatrix, triangles: IntMatrix, s: FloatArray) -> ArrayTriple: ...
 def triangle_mesh_quadrature_points(

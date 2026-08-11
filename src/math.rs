@@ -4,6 +4,8 @@ use core::ops::{Add, Div, Mul, Sub};
 use num_traits::{Float, FromPrimitive};
 
 /// Scalar type shared by generic math, mesh, field, and FEM infrastructure.
+/// Floating-point operations, including [`Float::min`] and [`Float::max`], are
+/// exposed through the [`Float`] supertrait.
 pub trait Scalar:
     Float
     + FromPrimitive
@@ -302,13 +304,13 @@ pub(crate) fn point_line_distance_with_endpoints<T: Scalar>(
     let ab2 = dot3(ab, ab); // (m^2) squared length.
     // Handle zero-length special case before any division by segment length.
     if ab2 == T::ZERO {
-        let r_min = max_scalar(r_min, T::ZERO);
-        let r_min_frac = max_scalar(r_min, T::min_positive());
+        let r_min = r_min.max(T::ZERO);
+        let r_min_frac = r_min.max(T::min_positive());
         let dist_a = norm3(ap);
         let dist_b = norm3(bp);
-        let frac = min_scalar(dist_a / r_min_frac, T::ONE);
-        let dist_a = max_scalar(dist_a, r_min);
-        let dist_b = max_scalar(dist_b, r_min);
+        let frac = (dist_a / r_min_frac).min(T::ONE);
+        let dist_a = dist_a.max(r_min);
+        let dist_b = dist_b.max(r_min);
         let perp = dist_a;
         return PointLineDistance {
             perp,
@@ -340,17 +342,17 @@ pub(crate) fn point_line_distance_with_endpoints<T: Scalar>(
     };
 
     // Clamp r_min to prevent div/0
-    let r_min = max_scalar(r_min, T::min_positive());
+    let r_min = r_min.max(T::min_positive());
 
     // Parallel distances from each endpoint to the target
     let para_a = dot3(ap, ab_norm);
     let para_b = para_a - ab_len;
 
     // Fraction used by field models to blend finite-thickness behavior to thin-wire behavior.
-    let frac = min_scalar(perp_raw / r_min, T::ONE);
+    let frac = (perp_raw / r_min).min(T::ONE);
 
     // Clamp distances only if we are inside the minimum radius.
-    let perp = max_scalar(perp_raw, r_min);
+    let perp = perp_raw.max(r_min);
 
     // Clamped dist_a and dist_b must be kept consistent with the clamped perpendicular distance
     let dist_a = perp.mul_add(perp, para_a * para_a).sqrt();
@@ -366,18 +368,6 @@ pub(crate) fn point_line_distance_with_endpoints<T: Scalar>(
         para_b,
         ab_norm,
     }
-}
-
-#[inline]
-/// Return the smaller of two scalar values.
-fn min_scalar<T: Scalar>(a: T, b: T) -> T {
-    if a < b { a } else { b }
-}
-
-#[inline]
-/// Return the larger of two scalar values.
-pub(crate) fn max_scalar<T: Scalar>(a: T, b: T) -> T {
-    if a > b { a } else { b }
 }
 
 /// Clip NaN values to the provided value.

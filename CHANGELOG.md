@@ -1,5 +1,19 @@
 # Changelog
 
+## 12.0.0 2026-08-11
+
+* Rust
+    * Fix BEM triangle inductance for touching and near high-aspect-ratio triangles with an exact uniform-triangle source potential
+        * Near-field defers to fixed D5 target integration at subdivision depth 2
+        * Bound near/self work at 28 exact-potential observations per directed pair
+    * !Remove unused triangle-quadrature arguments from direct, mesh, mapping, and hierarchical B-field and vector potential APIs
+    * Evaluate direct triangle vector potentials from the exact uniform-triangle potential, including finite values on triangle interiors, edges, and vertices
+    * Evaluate direct triangle B fields from the analytic potential gradient and define as zero directly on the surface
+        * Protects zero self-force per Newton's third law
+* Python
+    * Add an absolute aspect-67 annular stored-energy regression test
+    * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field and vector potential functions
+
 ## 11.2.0 2026-07-02
 
 * Rust - 2D FEM stress solver

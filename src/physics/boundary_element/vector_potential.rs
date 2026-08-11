@@ -3,55 +3,50 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
+use super::triangle_potential::UniformTriangle;
 use super::{
-    QuadratureKind, TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR, calc_tri_area, map_tri_uv,
-    triangle_basis_current_density, triangle_quadrature_points,
+    triangle_basis_current_densities, triangle_basis_current_density, triangle_current_density,
 };
+use crate::MU0_OVER_4PI;
 use crate::chunksize;
 use crate::macros::{check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup};
 use crate::math::Scalar;
+use crate::math::scale3;
 use crate::mesh::TriangleMeshView;
-use crate::mesh::elements::tri::tri3::{
-    closest_point as triangle_closest_point,
-    max_edge_length_squared as triangle_max_edge_length_squared,
-    subdivide_about_point as triangle_subdivide_about_point,
-};
-use crate::physics::point_source::current_element::vector_potential_current_element_scalar;
 
+/// Apply the exact uniform-triangle scalar potential to one constant current density.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
 #[inline]
-/// Evaluate one triangle vector-potential contribution using the selected quadrature rule.
-fn triangle_vector_potential_inner<T: Scalar>(
-    n0: [T; 3],
-    n1: [T; 3],
-    n2: [T; 3],
+fn triangle_vector_potential_exact<T: Scalar>(
+    triangle: &UniformTriangle<T>,
     current_density: [T; 3],
     obs: [T; 3],
-    quad_kind: QuadratureKind,
 ) -> [T; 3] {
-    let tri_area = calc_tri_area(n0, n1, n2); // [m^2]
-    let quad_points = triangle_quadrature_points(quad_kind);
+    scale3(
+        current_density,
+        crate::math::cast::<T>(MU0_OVER_4PI) * triangle.scalar_potential(obs),
+    )
+}
 
-    let mut a = [T::ZERO; 3]; // [V*s/(A*m)]
-
-    for qp in quad_points {
-        let (c, u, v) = (
-            crate::math::cast::<T>(qp[0]),
-            crate::math::cast::<T>(qp[1]),
-            crate::math::cast::<T>(qp[2]),
-        );
-        let src = map_tri_uv(n0, n1, n2, [u, v]); // [m]
-        let moment = [
-            current_density[0] * c * tri_area, // [m]
-            current_density[1] * c * tri_area, // [m]
-            current_density[2] * c * tri_area, // [m]
-        ];
-        let contrib = vector_potential_current_element_scalar(src, moment, obs); // [V*s/(A*m)]
-        a[0] = a[0] + contrib[0]; // [V*s/(A*m)]
-        a[1] = a[1] + contrib[1]; // [V*s/(A*m)]
-        a[2] = a[2] + contrib[2]; // [V*s/(A*m)]
-    }
-
-    a
+/// Apply one exact uniform-triangle scalar potential to all three basis currents.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
+#[inline]
+fn triangle_vector_potential_bases_exact<T: Scalar>(
+    triangle: &UniformTriangle<T>,
+    obs: [T; 3],
+) -> [[T; 3]; 3] {
+    let nodes = triangle.nodes();
+    let basis = triangle_basis_current_densities(nodes[0], nodes[1], nodes[2]);
+    let factor = crate::math::cast::<T>(MU0_OVER_4PI) * triangle.scalar_potential(obs);
+    [
+        scale3(basis[0], factor),
+        scale3(basis[1], factor),
+        scale3(basis[2], factor),
+    ]
 }
 
 /// Magnetic vector potential (A-field) contribution of a given triangle's basis
@@ -59,23 +54,14 @@ fn triangle_vector_potential_inner<T: Scalar>(
 ///
 /// Assumes a basis function living on the triangle's first node.
 ///
-/// Method:
-/// - The linear triangle basis induces a constant surface current density over the
-///   element.
-/// - Each quadrature point is treated as a point current element with moment
-///   `m = K * ΔS_q`.
-/// - When the target point is close to the triangle, the element is split once
-///   about the closest point before applying the same quadrature rule on each
-///   subtriangle.
-/// - Sum the weighted contributions with the full `μ0 / 4π` prefactor included.
+/// Uses the exact uniform-triangle scalar potential. The result is finite and
+/// continuous on triangle interiors, edges, and vertices.
 ///
 /// Args:
 ///     n0: Basis node coordinates `[x, y, z]` (m).
 ///     n1: Triangle vertex 1 coordinates `[x, y, z]` (m).
 ///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
 ///     obs: Observation point `[x, y, z]` (m).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
-///
 /// Returns:
 ///     Basis-function magnetic vector potential `[ax, ay, az]` (V*s/(A*m)).
 ///
@@ -86,44 +72,17 @@ fn triangle_vector_potential_inner<T: Scalar>(
 /// - \[3\] for `1 / R` potential integrals on polygonal and polyhedral elements.
 /// - \[2\] for numerical treatment of triangle `1 / R` and `∇(1 / R)`
 ///   integrals with linear shape functions.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for the robust exact potential and
+///   its limiting cases.
 #[inline]
 pub fn triangle_vector_potential_basis<T: Scalar>(
     n0: [T; 3],
     n1: [T; 3],
     n2: [T; 3],
     obs: [T; 3],
-    quad_kind: QuadratureKind,
 ) -> [T; 3] {
     let (_, jref) = triangle_basis_current_density(n0, n1, n2); // [m^2], [1/m]
-    let max_edge_sq = triangle_max_edge_length_squared(n0, n1, n2); // [m^2]
-    let closest = triangle_closest_point(obs, n0, n1, n2); // [m]
-    let dx = obs[0] - closest[0]; // [m]
-    let dy = obs[1] - closest[1]; // [m]
-    let dz = obs[2] - closest[2]; // [m]
-    let dist_sq = dx.mul_add(dx, dy.mul_add(dy, dz * dz)); // [m^2]
-    let subdiv_factor = crate::math::cast::<T>(TRIANGLE_NEAR_SUBDIVISION_DISTANCE_FACTOR);
-    let subdiv_threshold_sq = subdiv_factor * subdiv_factor * max_edge_sq; // [m^2]
-
-    if dist_sq > subdiv_threshold_sq {
-        return triangle_vector_potential_inner(n0, n1, n2, jref, obs, quad_kind);
-    }
-
-    // Single-level triangle subdivision for near-field calcs
-    // to ensure that quad point singularities are separated from the target point.
-    let mut a = [T::ZERO; 3]; // [V*s/(A*m)]
-    let min_sub_area = max_edge_sq * crate::math::cast::<T>(1e-14); // [m^2]
-    for tri in triangle_subdivide_about_point(closest, n0, n1, n2) {
-        let [a0, b0, c0] = tri;
-        if calc_tri_area(a0, b0, c0) <= min_sub_area {
-            continue;
-        }
-        let contrib = triangle_vector_potential_inner(a0, b0, c0, jref, obs, quad_kind);
-        a[0] = a[0] + contrib[0]; // [V*s/(A*m)]
-        a[1] = a[1] + contrib[1]; // [V*s/(A*m)]
-        a[2] = a[2] + contrib[2]; // [V*s/(A*m)]
-    }
-
-    a
+    triangle_vector_potential_exact(&UniformTriangle::new(n0, n1, n2), jref, obs)
 }
 
 /// Magnetic vector potential (A-field) of triangular surface current density
@@ -135,9 +94,8 @@ pub fn triangle_vector_potential_basis<T: Scalar>(
 /// with s=s0 on one side of the strip and s=-s0 on the other side of the strip,
 /// the total current on the strip (and its effective filament current) is equal to s0.
 ///
-/// Method:
-/// - Evaluate the three nodal basis-function vector potentials.
-/// - Weight them by the nodal scalar potential values.
+/// Uses the exact uniform-triangle scalar potential with the constant physical
+/// current density induced by the three nodal values.
 ///
 /// Args:
 ///     n0: Triangle vertex 0 coordinates `[x, y, z]` (m).
@@ -145,8 +103,6 @@ pub fn triangle_vector_potential_basis<T: Scalar>(
 ///     n2: Triangle vertex 2 coordinates `[x, y, z]` (m).
 ///     s: Nodal current-potential values `[s0, s1, s2]` (A).
 ///     obs: Observation point `[x, y, z]` (m).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
-///
 /// Returns:
 ///     Magnetic vector potential `[ax, ay, az]` (V*s/m).
 ///
@@ -154,6 +110,8 @@ pub fn triangle_vector_potential_basis<T: Scalar>(
 /// - \[5\], Eq. (3.24), Eq. (4.6), and Eqs. (5.3)-(5.5).
 /// - \[3\], pp. 276-281.
 /// - \[2\], pp. 1448-1455.
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for the robust exact potential and
+///   its limiting cases.
 #[inline]
 pub fn vector_potential_triangle<T: Scalar>(
     n0: [T; 3],
@@ -161,17 +119,9 @@ pub fn vector_potential_triangle<T: Scalar>(
     n2: [T; 3],
     s: [T; 3],
     obs: [T; 3],
-    quad_kind: QuadratureKind,
 ) -> [T; 3] {
-    let a_n0 = triangle_vector_potential_basis(n0, n1, n2, obs, quad_kind);
-    let a_n1 = triangle_vector_potential_basis(n1, n2, n0, obs, quad_kind);
-    let a_n2 = triangle_vector_potential_basis(n2, n0, n1, obs, quad_kind);
-
-    [
-        s[0] * a_n0[0] + s[1] * a_n1[0] + s[2] * a_n2[0], // [V*s/m]
-        s[0] * a_n0[1] + s[1] * a_n1[1] + s[2] * a_n2[1], // [V*s/m]
-        s[0] * a_n0[2] + s[1] * a_n1[2] + s[2] * a_n2[2], // [V*s/m]
-    ]
+    let current_density = triangle_current_density(n0, n1, n2, s); // [A/m]
+    triangle_vector_potential_exact(&UniformTriangle::new(n0, n1, n2), current_density, obs)
 }
 
 #[inline]
@@ -195,7 +145,6 @@ fn validate_vector_potential_mapping_inputs(
 fn vector_potential_triangle_mesh_mapping_chunk(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len(); // [-]
@@ -212,28 +161,8 @@ fn vector_potential_triangle_mesh_mapping_chunk(
 
         for itri in 0..mesh.len() {
             let (tri_nodes, idx) = mesh.triangle_nodes_and_indices(itri);
-
-            let a0 = triangle_vector_potential_basis(
-                tri_nodes[0],
-                tri_nodes[1],
-                tri_nodes[2],
-                obs_i,
-                quad_kind,
-            ); // [V*s/(A*m)]
-            let a1 = triangle_vector_potential_basis(
-                tri_nodes[1],
-                tri_nodes[2],
-                tri_nodes[0],
-                obs_i,
-                quad_kind,
-            ); // [V*s/(A*m)]
-            let a2 = triangle_vector_potential_basis(
-                tri_nodes[2],
-                tri_nodes[0],
-                tri_nodes[1],
-                obs_i,
-                quad_kind,
-            ); // [V*s/(A*m)]
+            let triangle = UniformTriangle::new(tri_nodes[0], tri_nodes[1], tri_nodes[2]);
+            let [a0, a1, a2] = triangle_vector_potential_bases_exact(&triangle, obs_i); // [V*s/(A*m)]
 
             out.0[row_offset + idx[0]] += a0[0]; // [V*s/(A*m)]
             out.1[row_offset + idx[0]] += a0[1]; // [V*s/(A*m)]
@@ -257,7 +186,6 @@ fn vector_potential_triangle_mesh_inner(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len();
@@ -274,14 +202,8 @@ fn vector_potential_triangle_mesh_inner(
         for j in 0..mesh.len() {
             let tri_nodes = mesh.triangle_nodes(j);
             let tri_s = mesh.triangle_scalars(j, s);
-            let contrib = vector_potential_triangle(
-                tri_nodes[0],
-                tri_nodes[1],
-                tri_nodes[2],
-                tri_s,
-                obs_i,
-                quad_kind,
-            );
+            let contrib =
+                vector_potential_triangle(tri_nodes[0], tri_nodes[1], tri_nodes[2], tri_s, obs_i);
             out.0[i] += contrib[0]; // [V*s/m]
             out.1[i] += contrib[1]; // [V*s/m]
             out.2[i] += contrib[2]; // [V*s/m]
@@ -296,21 +218,22 @@ fn vector_potential_triangle_mesh_inner(
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output mapping buffers `(ax_map, ay_map, az_map)` (V*s/(m*A)), each row-major in
 ///         `(observation point, source node)` order.
 ///
 /// Returns:
 ///     `Ok(())` after writing the dense mapping to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn vector_potential_triangle_mesh_mapping(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    vector_potential_triangle_mesh_mapping_chunk(obs, mesh, quad_kind, out)
+    vector_potential_triangle_mesh_mapping_chunk(obs, mesh, out)
 }
 
 /// Parallel variant of [`vector_potential_triangle_mesh_mapping`].
@@ -318,18 +241,19 @@ pub fn vector_potential_triangle_mesh_mapping(
 /// Args:
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output mapping buffers `(ax_map, ay_map, az_map)` (V*s/(m*A)), each row-major in
 ///         `(observation point, source node)` order.
 ///
 /// Returns:
 ///     `Ok(())` after writing the dense mapping to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn vector_potential_triangle_mesh_mapping_par(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     let nobs = obs.0.len(); // [-]
@@ -337,7 +261,7 @@ pub fn vector_potential_triangle_mesh_mapping_par(
     validate_vector_potential_mapping_inputs(out.0, out.1, out.2, nobs, mesh.nnode())?;
 
     if nobs == 0 || mesh.nnode() == 0 {
-        return vector_potential_triangle_mesh_mapping_chunk(obs, mesh, quad_kind, out);
+        return vector_potential_triangle_mesh_mapping_chunk(obs, mesh, out);
     }
 
     let nrow = chunksize(nobs); // [-]
@@ -352,12 +276,7 @@ pub fn vector_potential_triangle_mesh_mapping_par(
     (axc, ayc, azc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(ax, ay, az, xp, yp, zp)| {
-            vector_potential_triangle_mesh_mapping_chunk(
-                (xp, yp, zp),
-                mesh,
-                quad_kind,
-                (ax, ay, az),
-            )
+            vector_potential_triangle_mesh_mapping_chunk((xp, yp, zp), mesh, (ax, ay, az))
         })?;
 
     Ok(())
@@ -423,21 +342,22 @@ pub fn triangle_mesh_vector_potential_from_potential_vectors(
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
 ///     s: Nodal current-potential values (A).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output buffers for magnetic vector potential `(ax, ay, az)` (V*s/m).
 ///
 /// Returns:
 ///     `Ok(())` after writing the vector potential to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn vector_potential_triangle_mesh(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    vector_potential_triangle_mesh_inner(obs, mesh, s, quad_kind, out)
+    vector_potential_triangle_mesh_inner(obs, mesh, s, out)
 }
 
 /// Vector potential contribution from a triangle mesh with nodal stream-function values.
@@ -447,18 +367,19 @@ pub fn vector_potential_triangle_mesh(
 ///     obs: Observation point component slices `(x, y, z)` (m).
 ///     mesh: Borrowed triangle-mesh geometry view.
 ///     s: Nodal current-potential values (A).
-///     quad_kind: Triangle quadrature rule selector (dimensionless).
 ///     out: Output buffers for magnetic vector potential `(ax, ay, az)` (V*s/m).
 ///
 /// Returns:
 ///     `Ok(())` after writing the vector potential to `out`, or an error if the mesh
 ///     geometry or slice dimensions are inconsistent.
+///
+/// References:
+/// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), for each exact triangle interaction.
 #[inline]
 pub fn vector_potential_triangle_mesh_par(
     obs: (&[f64], &[f64], &[f64]),
     mesh: &TriangleMeshView<'_>,
     s: &[f64],
-    quad_kind: QuadratureKind,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     mesh.validate_nodal_values(s)?;
@@ -469,7 +390,7 @@ pub fn vector_potential_triangle_mesh_par(
     (axc, ayc, azc, xpc, ypc, zpc)
         .into_par_iter()
         .try_for_each(|(ax, ay, az, xp, yp, zp)| {
-            vector_potential_triangle_mesh_inner((xp, yp, zp), mesh, s, quad_kind, (ax, ay, az))
+            vector_potential_triangle_mesh_inner((xp, yp, zp), mesh, s, (ax, ay, az))
         })?;
 
     Ok(())

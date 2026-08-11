@@ -970,13 +970,13 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
     wire_radius: T,
     xyzobs: (T, T, T),
 ) -> (T, T, T) {
-    use crate::math::{PointLineDistance, max_scalar, point_line_distance_with_endpoints};
+    use crate::math::{PointLineDistance, point_line_distance_with_endpoints};
 
     // Unpack
     let (start, end, ifil) = xyzifil;
 
     // Regularize the line-filament singularity with a minimum core radius.
-    let core_radius = max_scalar(wire_radius, crate::math::cast::<T>(MIN_WIRE_THICKNESS));
+    let core_radius = wire_radius.max(crate::math::cast::<T>(MIN_WIRE_THICKNESS));
 
     // Get perpendicular distance and distance from each endpoint to the target,
     // and a fraction between 0 and 1 representing finite-thickness blending:
@@ -1058,7 +1058,7 @@ pub fn vector_potential_linear_filament_scalar<T: Scalar>(
     }; // (m)
     let a_edge = crate::math::cast::<T>(MU0_OVER_4PI)
         * ifil
-        * crate::math::cast::<T>(libm::log(max_scalar(k1 / k2, T::ZERO).to_f64())); // (V-s/m)
+        * crate::math::cast::<T>(libm::log((k1 / k2).max(T::ZERO).to_f64())); // (V-s/m)
 
     // Finite-thickness effect for points inside the conductor or near the endpoints.
     //

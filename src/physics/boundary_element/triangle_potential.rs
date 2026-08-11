@@ -113,11 +113,7 @@ impl<T: Scalar> UniformTriangle<T> {
         let obs_norm = norm3(obs);
         // Recomputing a mesh point in global coordinates introduces a plane
         // residual proportional to the coordinate magnitude, not just the edge length.
-        let scale = if obs_norm > self.max_edge {
-            obs_norm
-        } else {
-            self.max_edge
-        };
+        let scale = obs_norm.max(self.max_edge);
         let tolerance = factor * T::epsilon() * scale;
         dot3(delta, delta) <= tolerance * tolerance
     }

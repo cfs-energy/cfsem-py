@@ -6,6 +6,7 @@ use cfsem::physics::hierarchical::{
 };
 use cfsem::physics::linear_filament::{
     flux_density_linear_filament, flux_density_linear_filament_par,
+    inductance_linear_filaments_matrix_par, inductance_linear_filaments_sparse_csc_par,
     vector_potential_linear_filament, vector_potential_linear_filament_par,
 };
 use criterion::*;
@@ -366,6 +367,75 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_sparse_inductance(c: &mut Criterion) {
+    const NSEGMENT: usize = 512;
+    const HALF_BANDWIDTH: usize = 8;
+
+    let input = circular_loop_linear_filament_bench_input(NSEGMENT, NSEGMENT);
+    let mut row_indices = Vec::new();
+    let mut column_pointers = Vec::with_capacity(NSEGMENT + 1);
+    column_pointers.push(0);
+    for target in 0..NSEGMENT {
+        for source in 0..NSEGMENT {
+            let separation = source.abs_diff(target);
+            let periodic_separation = separation.min(NSEGMENT - separation);
+            if periodic_separation <= HALF_BANDWIDTH {
+                row_indices.push(source);
+            }
+        }
+        column_pointers.push(row_indices.len());
+    }
+
+    let xyz = (&input.xfil[..], &input.yfil[..], &input.zfil[..]);
+    let dlxyz = (&input.dlxfil[..], &input.dlyfil[..], &input.dlzfil[..]);
+    let sparse_fraction = row_indices.len() as f64 / (NSEGMENT * NSEGMENT) as f64;
+    let mut group = c.benchmark_group("Linear Filament Inductance Matrix");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(5));
+
+    group.throughput(Throughput::Elements((NSEGMENT * NSEGMENT) as u64));
+    group.bench_function("Dense GL3, Parallel", |b| {
+        let mut out = vec![0.0; NSEGMENT * NSEGMENT];
+        b.iter(|| {
+            black_box(
+                inductance_linear_filaments_matrix_par(
+                    xyz,
+                    dlxyz,
+                    xyz,
+                    dlxyz,
+                    &input.wire_radius,
+                    &mut out,
+                )
+                .unwrap(),
+            )
+        });
+    });
+
+    group.throughput(Throughput::Elements(row_indices.len() as u64));
+    group.bench_function(
+        format!("Sparse GL3, Parallel ({:.1}% nnz)", 100.0 * sparse_fraction),
+        |b| {
+            let mut out = vec![0.0; row_indices.len()];
+            b.iter(|| {
+                black_box(
+                    inductance_linear_filaments_sparse_csc_par(
+                        xyz,
+                        dlxyz,
+                        xyz,
+                        dlxyz,
+                        &input.wire_radius,
+                        &row_indices,
+                        &column_pointers,
+                        &mut out,
+                    )
+                    .unwrap(),
+                )
+            });
+        },
+    );
+    group.finish();
+}
+
 criterion_group!(
     group_bench_flux_density_linear_filament,
     bench_flux_density_linear_filament
@@ -374,8 +444,10 @@ criterion_group!(
     group_bench_vector_potential_linear_filament,
     bench_vector_potential_linear_filament
 );
+criterion_group!(group_bench_sparse_inductance, bench_sparse_inductance);
 
 criterion_main!(
     group_bench_flux_density_linear_filament,
-    group_bench_vector_potential_linear_filament
+    group_bench_vector_potential_linear_filament,
+    group_bench_sparse_inductance
 );

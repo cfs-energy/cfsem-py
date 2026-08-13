@@ -1113,6 +1113,17 @@ def test_inductance_linear_filaments_sparse_preserves_csc_pattern(par):
     assert actual.nnz == interaction_map.nnz
     assert actual.data[2] == 0.0
 
+    scalar_radius = cfsem.inductance_linear_filaments_sparse(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        interaction_map,
+        wire_radius_src=0.01,
+        par=par,
+    )
+    assert scalar_radius.shape == interaction_map.shape
+
 
 def test_inductance_linear_filaments_sparse_validates_map():
     xyz = (np.array([0.0, 1.0]), np.zeros(2), np.zeros(2))

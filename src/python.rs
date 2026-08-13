@@ -621,6 +621,23 @@ fn parse_build_method(
     }
 }
 
+/// Parse the optional hierarchical interaction class to omit.
+fn parse_hierarchical_skip(
+    skip: Option<&str>,
+) -> PyResult<Option<physics::hierarchical::kernel::Skip>> {
+    match skip {
+        None => Ok(None),
+        Some("near") => Ok(Some(physics::hierarchical::kernel::Skip::Near)),
+        Some("far") => Ok(Some(physics::hierarchical::kernel::Skip::Far)),
+        Some(value) => Err(PyInteropError::ValueError {
+            msg: format!(
+                "Unsupported hierarchical skip value: {value}. Expected 'near', 'far', or None."
+            ),
+        }
+        .into()),
+    }
+}
+
 /// Compute accepted source-node levels for hierarchical diagnostic output.
 fn accepted_levels_diagnostic<K, S, C, M>(
     kernel: K,
@@ -707,7 +724,7 @@ where
     ))
 }
 
-#[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false, skip=None))]
 /// Evaluate dipole flux density with the hierarchical solver from Python inputs.
 fn flux_density_dipole_hierarchical(
     py: Python<'_>,
@@ -736,24 +753,39 @@ fn flux_density_dipole_hierarchical(
         PyReadwriteArray1<f64>,
     )>,
     extra_diagnostics: bool,
+    skip: Option<&str>,
 ) -> PyResult<Py<SolveResult>> {
     let loc = read_xyz_tuple(py, &loc, "loc")?;
     let moment = read_xyz_tuple(py, &moment, "moment")?;
     let outer_radius = read_float_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
     let construction_method = parse_build_method(construction_method)?;
+    let skip = parse_hierarchical_skip(skip)?;
     let (field, diagnostics) =
         evaluate_hierarchical_vec3(py, out, obs.len(), "flux_density", |out| {
-            physics::hierarchical::flux_density_dipole_hierarchical(
-                loc.as_tuple(),
-                moment.as_tuple(),
-                obs.as_tuple(),
-                outer_radius.as_slice(),
-                construction_method,
-                theta,
-                par,
-                out,
-            )
+            match skip {
+                Some(skip) => physics::hierarchical::flux_density_dipole_hierarchical_with_skip(
+                    loc.as_tuple(),
+                    moment.as_tuple(),
+                    obs.as_tuple(),
+                    outer_radius.as_slice(),
+                    construction_method,
+                    theta,
+                    par,
+                    skip,
+                    out,
+                ),
+                None => physics::hierarchical::flux_density_dipole_hierarchical(
+                    loc.as_tuple(),
+                    moment.as_tuple(),
+                    obs.as_tuple(),
+                    outer_radius.as_slice(),
+                    construction_method,
+                    theta,
+                    par,
+                    out,
+                ),
+            }
             .map_err(|err| py_hierarchical_error("hierarchical dipole flux density", err))
         })?;
     let sources = physics::hierarchical::kernels::DipoleSources::new(
@@ -796,7 +828,7 @@ fn flux_density_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (loc, moment, obs, outer_radius, theta=0.01, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false, skip=None))]
 /// Evaluate dipole vector potential with the hierarchical solver from Python inputs.
 fn vector_potential_dipole_hierarchical(
     py: Python<'_>,
@@ -825,24 +857,41 @@ fn vector_potential_dipole_hierarchical(
         PyReadwriteArray1<f64>,
     )>,
     extra_diagnostics: bool,
+    skip: Option<&str>,
 ) -> PyResult<Py<SolveResult>> {
     let loc = read_xyz_tuple(py, &loc, "loc")?;
     let moment = read_xyz_tuple(py, &moment, "moment")?;
     let outer_radius = read_float_input_array1(py, &outer_radius, "outer_radius")?;
     let obs = read_xyz_tuple(py, &obs, "obs")?;
     let construction_method = parse_build_method(construction_method)?;
+    let skip = parse_hierarchical_skip(skip)?;
     let (field, diagnostics) =
         evaluate_hierarchical_vec3(py, out, obs.len(), "vector_potential", |out| {
-            physics::hierarchical::vector_potential_dipole_hierarchical(
-                loc.as_tuple(),
-                moment.as_tuple(),
-                obs.as_tuple(),
-                outer_radius.as_slice(),
-                construction_method,
-                theta,
-                par,
-                out,
-            )
+            match skip {
+                Some(skip) => {
+                    physics::hierarchical::vector_potential_dipole_hierarchical_with_skip(
+                        loc.as_tuple(),
+                        moment.as_tuple(),
+                        obs.as_tuple(),
+                        outer_radius.as_slice(),
+                        construction_method,
+                        theta,
+                        par,
+                        skip,
+                        out,
+                    )
+                }
+                None => physics::hierarchical::vector_potential_dipole_hierarchical(
+                    loc.as_tuple(),
+                    moment.as_tuple(),
+                    obs.as_tuple(),
+                    outer_radius.as_slice(),
+                    construction_method,
+                    theta,
+                    par,
+                    out,
+                ),
+            }
             .map_err(|err| py_hierarchical_error("hierarchical dipole vector potential", err))
         })?;
     let sources = physics::hierarchical::kernels::DipoleSources::new(
@@ -885,7 +934,7 @@ fn vector_potential_dipole_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false, skip=None))]
 /// Evaluate linear-filament flux density with the hierarchical solver from Python inputs.
 fn flux_density_linear_filament_hierarchical(
     py: Python<'_>,
@@ -915,6 +964,7 @@ fn flux_density_linear_filament_hierarchical(
         PyReadwriteArray1<f64>,
     )>,
     extra_diagnostics: bool,
+    skip: Option<&str>,
 ) -> PyResult<Py<SolveResult>> {
     let xyzp = read_xyz_tuple(py, &xyzp, "xyzp")?;
     let xyzfil = read_xyz_tuple(py, &xyzfil, "xyzfil")?;
@@ -922,19 +972,36 @@ fn flux_density_linear_filament_hierarchical(
     let ifil = read_float_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
     let construction_method = parse_build_method(construction_method)?;
+    let skip = parse_hierarchical_skip(skip)?;
     let (field, diagnostics) =
         evaluate_hierarchical_vec3(py, out, xyzp.len(), "flux_density", |out| {
-            physics::hierarchical::flux_density_linear_filament_hierarchical(
-                xyzp.as_tuple(),
-                xyzfil.as_tuple(),
-                dlxyzfil.as_tuple(),
-                ifil.as_slice(),
-                wire_radius.as_slice(),
-                construction_method,
-                theta,
-                par,
-                out,
-            )
+            match skip {
+                Some(skip) => {
+                    physics::hierarchical::flux_density_linear_filament_hierarchical_with_skip(
+                        xyzp.as_tuple(),
+                        xyzfil.as_tuple(),
+                        dlxyzfil.as_tuple(),
+                        ifil.as_slice(),
+                        wire_radius.as_slice(),
+                        construction_method,
+                        theta,
+                        par,
+                        skip,
+                        out,
+                    )
+                }
+                None => physics::hierarchical::flux_density_linear_filament_hierarchical(
+                    xyzp.as_tuple(),
+                    xyzfil.as_tuple(),
+                    dlxyzfil.as_tuple(),
+                    ifil.as_slice(),
+                    wire_radius.as_slice(),
+                    construction_method,
+                    theta,
+                    par,
+                    out,
+                ),
+            }
             .map_err(|err| py_hierarchical_error("hierarchical linear-filament flux density", err))
         })?;
     let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
@@ -971,7 +1038,7 @@ fn flux_density_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (xyzp, xyzfil, dlxyzfil, ifil, wire_radius, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false, skip=None))]
 /// Evaluate linear-filament vector potential with the hierarchical solver from Python inputs.
 fn vector_potential_linear_filament_hierarchical(
     py: Python<'_>,
@@ -1001,6 +1068,7 @@ fn vector_potential_linear_filament_hierarchical(
         PyReadwriteArray1<f64>,
     )>,
     extra_diagnostics: bool,
+    skip: Option<&str>,
 ) -> PyResult<Py<SolveResult>> {
     let xyzp = read_xyz_tuple(py, &xyzp, "xyzp")?;
     let xyzfil = read_xyz_tuple(py, &xyzfil, "xyzfil")?;
@@ -1008,19 +1076,36 @@ fn vector_potential_linear_filament_hierarchical(
     let ifil = read_float_input_array1(py, &ifil, "ifil")?;
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
     let construction_method = parse_build_method(construction_method)?;
+    let skip = parse_hierarchical_skip(skip)?;
     let (field, diagnostics) =
         evaluate_hierarchical_vec3(py, out, xyzp.len(), "vector_potential", |out| {
-            physics::hierarchical::vector_potential_linear_filament_hierarchical(
-                xyzp.as_tuple(),
-                xyzfil.as_tuple(),
-                dlxyzfil.as_tuple(),
-                ifil.as_slice(),
-                wire_radius.as_slice(),
-                construction_method,
-                theta,
-                par,
-                out,
-            )
+            match skip {
+                Some(skip) => {
+                    physics::hierarchical::vector_potential_linear_filament_hierarchical_with_skip(
+                        xyzp.as_tuple(),
+                        xyzfil.as_tuple(),
+                        dlxyzfil.as_tuple(),
+                        ifil.as_slice(),
+                        wire_radius.as_slice(),
+                        construction_method,
+                        theta,
+                        par,
+                        skip,
+                        out,
+                    )
+                }
+                None => physics::hierarchical::vector_potential_linear_filament_hierarchical(
+                    xyzp.as_tuple(),
+                    xyzfil.as_tuple(),
+                    dlxyzfil.as_tuple(),
+                    ifil.as_slice(),
+                    wire_radius.as_slice(),
+                    construction_method,
+                    theta,
+                    par,
+                    out,
+                ),
+            }
             .map_err(|err| {
                 py_hierarchical_error("hierarchical linear-filament vector potential", err)
             })
@@ -1060,7 +1145,7 @@ fn vector_potential_linear_filament_hierarchical(
     )
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false, skip=None))]
 /// Evaluate triangle-mesh flux density with the hierarchical solver from Python inputs.
 fn flux_density_triangle_mesh_hierarchical(
     py: Python<'_>,
@@ -1077,6 +1162,7 @@ fn flux_density_triangle_mesh_hierarchical(
         PyReadwriteArray1<f64>,
     )>,
     extra_diagnostics: bool,
+    skip: Option<&str>,
 ) -> PyResult<Py<SolveResult>> {
     let obs = read_matrix3_input(py, &obs, "obs")?;
     let nodes = read_matrix3_input(py, &nodes, "nodes")?;
@@ -1084,6 +1170,7 @@ fn flux_density_triangle_mesh_hierarchical(
     let mesh = borrowed_triangle_mesh_view(&nodes, &triangles)?;
     let s = read_float_input_array1(py, &s, "s")?;
     let construction_method = parse_build_method(construction_method)?;
+    let skip = parse_hierarchical_skip(skip)?;
     let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(&mesh);
     let targets = physics::hierarchical::kernels::DipoleTargetRows::new(obs.as_slice());
     let moments =
@@ -1098,6 +1185,7 @@ fn flux_density_triangle_mesh_hierarchical(
                 construction_method,
                 theta,
                 par,
+                skip,
                 out,
             )
             .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh flux density", err))
@@ -1126,7 +1214,7 @@ fn flux_density_triangle_mesh_hierarchical(
     )
 }
 
-#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false))]
+#[pyfunction(signature = (obs, nodes, triangles, s, theta=0.05, construction_method="longest_axis", par=true, out=None, extra_diagnostics=false, skip=None))]
 /// Evaluate triangle-mesh vector potential with the hierarchical solver from Python inputs.
 fn vector_potential_triangle_mesh_hierarchical(
     py: Python<'_>,
@@ -1143,6 +1231,7 @@ fn vector_potential_triangle_mesh_hierarchical(
         PyReadwriteArray1<f64>,
     )>,
     extra_diagnostics: bool,
+    skip: Option<&str>,
 ) -> PyResult<Py<SolveResult>> {
     let obs = read_matrix3_input(py, &obs, "obs")?;
     let nodes = read_matrix3_input(py, &nodes, "nodes")?;
@@ -1150,6 +1239,7 @@ fn vector_potential_triangle_mesh_hierarchical(
     let mesh = borrowed_triangle_mesh_view(&nodes, &triangles)?;
     let s = read_float_input_array1(py, &s, "s")?;
     let construction_method = parse_build_method(construction_method)?;
+    let skip = parse_hierarchical_skip(skip)?;
     let sources = physics::hierarchical::kernels::BoundaryElementTriangles::new(&mesh);
     let targets = physics::hierarchical::kernels::DipoleTargetRows::new(obs.as_slice());
     let moments =
@@ -1164,6 +1254,7 @@ fn vector_potential_triangle_mesh_hierarchical(
                 construction_method,
                 theta,
                 par,
+                skip,
                 out,
             )
             .map_err(|err| {

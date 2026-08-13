@@ -16,8 +16,8 @@ use super::kernels::{
 };
 use super::{
     BuildMethod, ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, Scalar,
-    SourceCollection, SourceMomentCollection, SourceNodeSummaries, TargetCollection, eval,
-    eval_par, scratch_len, scratch_len_par, update_summaries,
+    Skip, SourceCollection, SourceMomentCollection, SourceNodeSummaries, TargetCollection, eval,
+    eval_par, eval_par_with_skip, eval_with_skip, scratch_len, scratch_len_par, update_summaries,
 };
 
 /// Diagnostic information returned by stateless hierarchical solves.
@@ -90,6 +90,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
         construction_method,
         theta,
         par,
+        None,
         out,
     )
 }
@@ -142,6 +143,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
         construction_method,
         theta,
         par,
+        None,
         out,
     )
 }
@@ -195,6 +197,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
         construction_method,
         theta,
         par,
+        None,
         out,
     )
 }
@@ -248,6 +251,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
         construction_method,
         theta,
         par,
+        None,
         out,
     )
 }
@@ -308,6 +312,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
         construction_method,
         theta,
         par,
+        None,
         out,
     )
 }
@@ -368,6 +373,177 @@ pub fn vector_potential_triangle_mesh_hierarchical(
         construction_method,
         theta,
         par,
+        None,
+        out,
+    )
+}
+
+/// Filtered variant of [`flux_density_dipole_hierarchical`].
+pub fn flux_density_dipole_hierarchical_with_skip<T: Scalar>(
+    loc: (&[T], &[T], &[T]),
+    moment: (&[T], &[T], &[T]),
+    obs: (&[T], &[T], &[T]),
+    outer_radius: &[T],
+    construction_method: BuildMethod,
+    theta: T,
+    par: bool,
+    skip: Skip,
+    out: (&mut [T], &mut [T], &mut [T]),
+) -> Result<Diagnostics<DipoleFluxDensityKernel<T>>, HierarchicalError> {
+    let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
+    let moments = DipoleMoments::new(moment.0, moment.1, moment.2);
+    let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
+    one_shot_vec3(
+        DipoleFluxDensityKernel::<T>::new(),
+        sources,
+        moments,
+        targets,
+        construction_method,
+        theta,
+        par,
+        Some(skip),
+        out,
+    )
+}
+
+/// Filtered variant of [`vector_potential_dipole_hierarchical`].
+pub fn vector_potential_dipole_hierarchical_with_skip<T: Scalar>(
+    loc: (&[T], &[T], &[T]),
+    moment: (&[T], &[T], &[T]),
+    obs: (&[T], &[T], &[T]),
+    outer_radius: &[T],
+    construction_method: BuildMethod,
+    theta: T,
+    par: bool,
+    skip: Skip,
+    out: (&mut [T], &mut [T], &mut [T]),
+) -> Result<Diagnostics<DipoleVectorPotentialKernel<T>>, HierarchicalError> {
+    let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
+    let moments = DipoleMoments::new(moment.0, moment.1, moment.2);
+    let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
+    one_shot_vec3(
+        DipoleVectorPotentialKernel::<T>::new(),
+        sources,
+        moments,
+        targets,
+        construction_method,
+        theta,
+        par,
+        Some(skip),
+        out,
+    )
+}
+
+/// Filtered variant of [`flux_density_linear_filament_hierarchical`].
+pub fn flux_density_linear_filament_hierarchical_with_skip<T: Scalar>(
+    xyzp: (&[T], &[T], &[T]),
+    xyzfil: (&[T], &[T], &[T]),
+    dlxyzfil: (&[T], &[T], &[T]),
+    ifil: &[T],
+    wire_radius: &[T],
+    construction_method: BuildMethod,
+    theta: T,
+    par: bool,
+    skip: Skip,
+    out: (&mut [T], &mut [T], &mut [T]),
+) -> Result<Diagnostics<LinearFilamentFluxDensityKernel<T>>, HierarchicalError> {
+    let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
+    let targets = DipoleTargets::new(xyzp.0, xyzp.1, xyzp.2);
+    one_shot_vec3(
+        LinearFilamentFluxDensityKernel::<T>::new(),
+        sources,
+        ifil,
+        targets,
+        construction_method,
+        theta,
+        par,
+        Some(skip),
+        out,
+    )
+}
+
+/// Filtered variant of [`vector_potential_linear_filament_hierarchical`].
+pub fn vector_potential_linear_filament_hierarchical_with_skip<T: Scalar>(
+    xyzp: (&[T], &[T], &[T]),
+    xyzfil: (&[T], &[T], &[T]),
+    dlxyzfil: (&[T], &[T], &[T]),
+    ifil: &[T],
+    wire_radius: &[T],
+    construction_method: BuildMethod,
+    theta: T,
+    par: bool,
+    skip: Skip,
+    out: (&mut [T], &mut [T], &mut [T]),
+) -> Result<Diagnostics<LinearFilamentVectorPotentialKernel<T>>, HierarchicalError> {
+    let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
+    let targets = DipoleTargets::new(xyzp.0, xyzp.1, xyzp.2);
+    one_shot_vec3(
+        LinearFilamentVectorPotentialKernel::<T>::new(),
+        sources,
+        ifil,
+        targets,
+        construction_method,
+        theta,
+        par,
+        Some(skip),
+        out,
+    )
+}
+
+/// Filtered variant of [`flux_density_triangle_mesh_hierarchical`].
+pub fn flux_density_triangle_mesh_hierarchical_with_skip(
+    obs: (&[f64], &[f64], &[f64]),
+    mesh: &TriangleMeshView<'_>,
+    s: &[f64],
+    construction_method: BuildMethod,
+    theta: f64,
+    par: bool,
+    skip: Skip,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<Diagnostics<BoundaryElementFluxDensityKernel<f64>>, HierarchicalError> {
+    mesh.validate_nodal_values(s)
+        .map_err(|_| HierarchicalError::LengthMismatch)?;
+    let sources = BoundaryElementTriangles::new(mesh);
+    let moments = BoundaryElementNodalValues::new(sources, s);
+    let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
+    one_shot_vec3(
+        BoundaryElementFluxDensityKernel::<f64>::new(),
+        sources,
+        moments,
+        targets,
+        construction_method,
+        theta,
+        par,
+        Some(skip),
+        out,
+    )
+}
+
+/// Filtered variant of [`vector_potential_triangle_mesh_hierarchical`].
+pub fn vector_potential_triangle_mesh_hierarchical_with_skip(
+    obs: (&[f64], &[f64], &[f64]),
+    mesh: &TriangleMeshView<'_>,
+    s: &[f64],
+    construction_method: BuildMethod,
+    theta: f64,
+    par: bool,
+    skip: Skip,
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<Diagnostics<BoundaryElementVectorPotentialKernel<f64>>, HierarchicalError> {
+    mesh.validate_nodal_values(s)
+        .map_err(|_| HierarchicalError::LengthMismatch)?;
+    let sources = BoundaryElementTriangles::new(mesh);
+    let moments = BoundaryElementNodalValues::new(sources, s);
+    let targets = DipoleTargets::new(obs.0, obs.1, obs.2);
+    one_shot_vec3(
+        BoundaryElementVectorPotentialKernel::<f64>::new(),
+        sources,
+        moments,
+        targets,
+        construction_method,
+        theta,
+        par,
+        Some(skip),
         out,
     )
 }
@@ -381,6 +557,7 @@ pub(crate) fn one_shot_vec3<K, T, S, M, C>(
     construction_method: BuildMethod,
     theta: T,
     par: bool,
+    skip: Option<Skip>,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<K>, HierarchicalError>
 where
@@ -430,8 +607,20 @@ where
         contribution: &mut scratch_values,
     };
     let out_components = [out.0, out.1, out.2];
-    err = match par {
-        true => eval_par(
+    err = match (par, skip) {
+        (true, Some(skip)) => eval_par_with_skip(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            skip,
+            out_components,
+            &mut scratch,
+        ),
+        (true, None) => eval_par(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,
@@ -442,7 +631,19 @@ where
             out_components,
             &mut scratch,
         ),
-        false => eval(
+        (false, Some(skip)) => eval_with_skip(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            skip,
+            out_components,
+            &mut scratch,
+        ),
+        (false, None) => eval(
             &kernel,
             source_tree.as_view(),
             &source_summaries.node_summaries,

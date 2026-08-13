@@ -30,6 +30,10 @@ def _assert_returns_output_views(returned, out):
         assert np.shares_memory(returned_component, out_component)
 
 
+def _add_vec3(lhs, rhs):
+    return tuple(left + right for left, right in zip(lhs, rhs, strict=True))
+
+
 def _assert_diagnostics(result, nsource, ntarget):
     assert result.diagnostics.construction_time >= 0.0
     assert result.diagnostics.evaluation_time >= 0.0
@@ -114,6 +118,45 @@ def test_hierarchical_linear_filaments_match_direct():
     _assert_vec_close(result_a, direct_a)
     _assert_diagnostics(result_b, nsource=2, ntarget=3)
     _assert_diagnostics(result_a, nsource=2, ntarget=3)
+
+
+@pytest.mark.parametrize("par", [False, True])
+def test_hierarchical_skip_decomposes_near_and_far_fields(par):
+    loc = (
+        np.array([0.0, 0.1, 0.2, 10.0, 10.1, 10.2]),
+        np.zeros(6),
+        np.zeros(6),
+    )
+    moment = (np.zeros(6), np.ones(6), np.ones(6))
+    obs = (np.array([0.4]), np.array([0.3]), np.array([0.2]))
+    # Finite source bounds force the nearby leaves down the direct path while
+    # the compact cluster near x=10 is still accepted as far field.
+    outer_radius = np.full(6, 0.05)
+
+    full = cfsem.vector_potential_dipole_hierarchical(
+        loc, moment, obs, outer_radius, theta=0.2, par=par
+    )
+    far_only = cfsem.vector_potential_dipole_hierarchical(
+        loc, moment, obs, outer_radius, theta=0.2, par=par, skip="near"
+    )
+    near_only = cfsem.vector_potential_dipole_hierarchical(
+        loc, moment, obs, outer_radius, theta=0.2, par=par, skip="far"
+    )
+
+    _assert_vec_close(full, _add_vec3(far_only.field, near_only.field))
+    assert any(np.any(component != 0.0) for component in far_only.field)
+    assert any(np.any(component != 0.0) for component in near_only.field)
+
+
+def test_hierarchical_skip_rejects_unknown_value():
+    loc = (np.array([0.0]), np.array([0.0]), np.array([0.0]))
+    moment = (np.array([0.0]), np.array([0.0]), np.array([1.0]))
+    obs = (np.array([1.0]), np.array([0.0]), np.array([0.0]))
+
+    with pytest.raises(ValueError, match="Unsupported hierarchical skip value"):
+        cfsem.vector_potential_dipole_hierarchical(
+            loc, moment, obs, np.zeros(1), skip="not-an-interaction"
+        )
 
 
 def test_hierarchical_construction_method_is_exposed():

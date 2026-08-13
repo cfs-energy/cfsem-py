@@ -38,7 +38,10 @@ pub(crate) use evaluator::eval_dense;
 pub(crate) use evaluator::{
     EvaluationScratch, SourceNodeSummaries, scratch_len, scratch_len_par, update_summaries,
 };
-pub use evaluator::{eval, eval_par, eval_par_with_skip, eval_with_skip};
+pub use evaluator::{
+    NearFieldInteractionMap, TraversalDiagnostics, eval, eval_par, eval_par_with_skip,
+    eval_with_skip, traversal_diagnostics,
+};
 pub use kernel::Skip;
 pub(crate) use kernel::{
     BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,

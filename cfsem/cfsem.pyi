@@ -2,6 +2,7 @@ from typing import Literal, TypeAlias, TypedDict
 
 from numpy import float32, float64, int64, uint64
 from numpy.typing import NDArray
+from scipy.sparse import csc_matrix
 
 FloatArray: TypeAlias = NDArray[float64]
 Float32Array: TypeAlias = NDArray[float32]
@@ -46,6 +47,8 @@ class HierarchicalDiagnostics:
     def source_tree(self) -> SourceTreeDiagnostics | None: ...
     @property
     def accepted_levels(self) -> FloatArray | None: ...
+    @property
+    def near_field_interaction_map(self) -> csc_matrix | None: ...
 
 class SolveResult:
     """Field arrays and diagnostics returned by a hierarchical solve."""

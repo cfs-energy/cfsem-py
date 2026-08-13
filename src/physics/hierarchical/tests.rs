@@ -280,6 +280,54 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
 }
 
 #[test]
+fn traversal_diagnostics_returns_canonical_near_field_csc_pattern() {
+    let kernel = MockKernel::<f64>::new();
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let source_tree = ClusterTree::build(sources.as_slice()).unwrap();
+    let mut summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
+    assert_eq!(
+        update_summaries(
+            &kernel,
+            source_tree.as_view(),
+            sources.as_slice(),
+            &moments,
+            &mut summaries.node_summaries,
+        ),
+        HierarchicalError::Ok
+    );
+
+    let diagnostics = super::traversal_diagnostics(
+        &kernel,
+        source_tree.as_view(),
+        &summaries.node_summaries,
+        targets.as_slice(),
+        0.5,
+    )
+    .unwrap();
+    let map = diagnostics.near_field_interaction_map;
+    assert_eq!(map.source_count, 2);
+    assert_eq!(map.target_count, 3);
+    assert_eq!(map.row_indices, vec![0, 1]);
+    assert_eq!(map.column_pointers, vec![0, 1, 2, 2]);
+
+    let mut accepted_levels = vec![0.0; targets.len()];
+    assert_eq!(
+        super::evaluator::accepted_levels(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            targets.as_slice(),
+            0.5,
+            &mut accepted_levels,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(diagnostics.accepted_levels, accepted_levels);
+}
+
+#[test]
 fn hierarchical_error_raw_codes_keep_kernel_slots_first() {
     assert_eq!(HierarchicalError::KernelError0 as u32, 0);
     assert_eq!(HierarchicalError::KernelError1 as u32, 1);

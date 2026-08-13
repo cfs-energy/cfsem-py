@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import scipy.sparse as sp
 
 import cfsem
 
@@ -46,6 +47,10 @@ def _assert_diagnostics(result, nsource, ntarget):
     assert result.diagnostics.source_tree[8].shape == result.diagnostics.source_tree[0].shape
     assert result.diagnostics.accepted_levels is not None
     assert result.diagnostics.accepted_levels.shape == (ntarget,)
+    interaction_map = result.diagnostics.near_field_interaction_map
+    assert sp.isspmatrix_csc(interaction_map)
+    assert interaction_map.shape == (nsource, ntarget)
+    assert interaction_map.has_canonical_format
 
 
 def test_hierarchical_dipoles_match_direct():
@@ -157,6 +162,34 @@ def test_hierarchical_skip_rejects_unknown_value():
         cfsem.vector_potential_dipole_hierarchical(
             loc, moment, obs, np.zeros(1), skip="not-an-interaction"
         )
+
+
+def test_near_field_interaction_map_uses_original_source_rows():
+    loc = (
+        np.array([10.0, 0.0]),
+        np.zeros(2),
+        np.zeros(2),
+    )
+    moment = (np.zeros(2), np.ones(2), np.ones(2))
+    obs = (
+        np.array([0.0, 10.0, 5.0]),
+        np.zeros(3),
+        np.zeros(3),
+    )
+    result = cfsem.vector_potential_dipole_hierarchical(
+        loc,
+        moment,
+        obs,
+        np.zeros(2),
+        theta=0.5,
+        par=False,
+        extra_diagnostics=True,
+    )
+
+    interaction_map = result.diagnostics.near_field_interaction_map
+    np.testing.assert_array_equal(interaction_map.indices, np.array([1, 0]))
+    np.testing.assert_array_equal(interaction_map.indptr, np.array([0, 1, 2, 2]))
+    np.testing.assert_array_equal(interaction_map.data, np.ones(2, dtype=bool))
 
 
 def test_hierarchical_construction_method_is_exposed():

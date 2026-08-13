@@ -614,6 +614,126 @@ fn split_output_components<T, const D: usize>(
     (left, right)
 }
 
+/// Canonical CSC sparsity for direct source-target interactions selected by a tree walk.
+///
+/// Rows are original source indices and columns are target indices, so the shape is
+/// `(source_count, target_count)`. Row indices are sorted within each column and are unique.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NearFieldInteractionMap {
+    /// Original source indices for stored direct interactions.
+    pub row_indices: Vec<u32>,
+    /// CSC column offsets, with length `target_count + 1`.
+    pub column_pointers: Vec<usize>,
+    /// Number of source rows in the sparse pattern.
+    pub source_count: usize,
+    /// Number of target columns in the sparse pattern.
+    pub target_count: usize,
+}
+
+/// Diagnostic data collected in one traversal of the source tree per target.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TraversalDiagnostics<T: Scalar> {
+    /// Source-tree level represented at each target.
+    pub accepted_levels: Vec<T>,
+    /// Direct near-field source-target interaction pattern.
+    pub near_field_interaction_map: NearFieldInteractionMap,
+}
+
+/// Collect accepted levels and the direct near-field CSC pattern in one diagnostic walk.
+///
+/// The interaction map records every original source owned by a rejected terminal leaf. Far
+/// accepted nodes are omitted. The resulting pattern has shape `(source_count, target_count)`.
+pub fn traversal_diagnostics<K, C>(
+    kernel: &K,
+    source_tree: ClusterTreeView<'_, K::Scalar>,
+    source_summaries: &[K::SourceSummary],
+    targets: C,
+    theta: K::Scalar,
+) -> Result<TraversalDiagnostics<K::Scalar>, HierarchicalError>
+where
+    K: HierarchicalKernel,
+    K::TargetGeometry: Copy,
+    C: TargetCollection<K>,
+{
+    let err = validate_source_tree_layout(source_tree);
+    if err != HierarchicalError::Ok {
+        return Err(err);
+    }
+    if !targets.valid_lengths() {
+        return Err(HierarchicalError::LengthMismatch);
+    }
+    if source_summaries.len() < source_tree.n_nodes() {
+        return Err(HierarchicalError::ScratchTooSmall);
+    }
+
+    let target_count = targets.len();
+    let source_count = source_tree.node_range_count[0] as usize;
+    let mut accepted_levels = Vec::with_capacity(target_count);
+    let mut row_indices = Vec::new();
+    let mut column_pointers = Vec::with_capacity(target_count + 1);
+    let mut active = Vec::new();
+    column_pointers.push(0);
+
+    for target_id in 0..target_count {
+        let target = targets.target(target_id);
+        let mut weighted_level = K::Scalar::ZERO;
+        let mut represented_sources = K::Scalar::ZERO;
+        let column_start = row_indices.len();
+
+        active.clear();
+        active.push((0_u32, 0_u32));
+        while let Some((source_node, source_level)) = active.pop() {
+            let source_node_index = source_node as usize;
+            let source_count_at_node = crate::math::cast::<K::Scalar>(
+                source_tree.node_range_count[source_node_index] as f64,
+            );
+            let source_summary = &source_summaries[source_node_index];
+            let source_aabb = source_tree.node_aabb[source_node_index];
+            if kernel.accept_far(target.aabb(), source_aabb, source_summary, theta) {
+                weighted_level = weighted_level
+                    + crate::math::cast::<K::Scalar>(f64::from(source_level))
+                        * source_count_at_node;
+                represented_sources = represented_sources + source_count_at_node;
+                continue;
+            }
+
+            let leaf_count = source_tree.leaf_count[source_node_index];
+            if leaf_count > 0 {
+                weighted_level = weighted_level
+                    + crate::math::cast::<K::Scalar>(f64::from(source_level))
+                        * source_count_at_node;
+                represented_sources = represented_sources + source_count_at_node;
+
+                let start = source_tree.leaf_start[source_node_index] as usize;
+                let end = start + leaf_count as usize;
+                row_indices.extend_from_slice(&source_tree.sorted_indices[start..end]);
+            } else {
+                let next_level = source_level + 1;
+                active.push((source_tree.node_left_child[source_node_index], next_level));
+                active.push((source_tree.node_right_child[source_node_index], next_level));
+            }
+        }
+
+        row_indices[column_start..].sort_unstable();
+        column_pointers.push(row_indices.len());
+        accepted_levels.push(if represented_sources > K::Scalar::ZERO {
+            weighted_level / represented_sources
+        } else {
+            crate::math::cast::<K::Scalar>(f64::NAN)
+        });
+    }
+
+    Ok(TraversalDiagnostics {
+        accepted_levels,
+        near_field_interaction_map: NearFieldInteractionMap {
+            row_indices,
+            column_pointers,
+            source_count,
+            target_count,
+        },
+    })
+}
+
 /// Compute the source-tree level represented at each target by the terminal traversal nodes.
 ///
 /// This is a diagnostic companion to [`eval`]. It mirrors

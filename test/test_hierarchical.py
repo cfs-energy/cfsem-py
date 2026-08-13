@@ -309,7 +309,17 @@ def test_near_field_map_drives_sparse_filament_inductance(par):
         wire_radius,
         theta=0.35,
         par=par,
+    )
+    diagnostics_only = cfsem.vector_potential_linear_filament_hierarchical(
+        targets,
+        xyzfil,
+        dlxyzfil,
+        current,
+        wire_radius,
+        theta=0.35,
+        par=par,
         extra_diagnostics=True,
+        skip="both",
     )
     far_only = cfsem.vector_potential_linear_filament_hierarchical(
         targets,
@@ -332,8 +342,9 @@ def test_near_field_map_drives_sparse_filament_inductance(par):
         skip="far",
     )
     _assert_vec_close(full, _add_vec3(far_only.field, near_only.field))
+    _assert_vec_zero(diagnostics_only)
 
-    interaction_map = full.diagnostics.near_field_interaction_map
+    interaction_map = diagnostics_only.diagnostics.near_field_interaction_map
     assert 0 < interaction_map.nnz < nsegment * nsegment
     sparse_inductance = cfsem.inductance_linear_filaments_sparse(
         xyzfil,

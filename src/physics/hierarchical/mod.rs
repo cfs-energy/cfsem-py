@@ -31,9 +31,10 @@ pub(crate) use aabb::Aabb;
 #[cfg(test)]
 pub(crate) use evaluator::eval_dense;
 pub(crate) use evaluator::{
-    EvaluationScratch, SourceNodeSummaries, eval, eval_par, scratch_len, scratch_len_par,
-    update_summaries,
+    EvaluationScratch, SourceNodeSummaries, scratch_len, scratch_len_par, update_summaries,
 };
+pub use evaluator::{eval, eval_par, eval_par_with_skip, eval_with_skip};
+pub use kernel::Skip;
 pub(crate) use kernel::{
     BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
     SourceCollection, SourceMomentCollection, TargetCollection, geometric_accept_far,

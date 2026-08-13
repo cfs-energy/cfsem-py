@@ -10,6 +10,7 @@ use crate::physics::hierarchical::kernels::{
     LinearFilamentVectorPotentialSummary,
 };
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy)]
 struct MockPoint<T: Scalar> {
@@ -43,12 +44,16 @@ struct TargetSummary<T: Scalar> {
 
 struct MockKernel<T: Scalar> {
     _marker: core::marker::PhantomData<T>,
+    near_calls: AtomicUsize,
+    far_calls: AtomicUsize,
 }
 
 impl<T: Scalar> MockKernel<T> {
     fn new() -> Self {
         Self {
             _marker: core::marker::PhantomData,
+            near_calls: AtomicUsize::new(0),
+            far_calls: AtomicUsize::new(0),
         }
     }
 }
@@ -142,6 +147,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
     ) {
+        self.near_calls.fetch_add(1, Ordering::Relaxed);
         let r2 = dist2(target.point, source.point);
         out[0] = *moment / (T::ONE + r2);
     }
@@ -152,6 +158,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         source: &Self::SourceSummary,
         out: &mut Self::Output,
     ) {
+        self.far_calls.fetch_add(1, Ordering::Relaxed);
         let r2 = dist2(target.centroid, source.centroid);
         out[0] = source.moment / (T::ONE + r2);
     }
@@ -163,6 +170,113 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
         out[0] = out[0] + contribution[0];
     }
+}
+
+#[test]
+fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output() {
+    let kernel = MockKernel::<f64>::new();
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let source_tree = ClusterTree::build(sources.as_slice()).unwrap();
+    let mut summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
+    assert_eq!(
+        update_summaries(
+            &kernel,
+            source_tree.as_view(),
+            sources.as_slice(),
+            &moments,
+            &mut summaries.node_summaries,
+        ),
+        HierarchicalError::Ok
+    );
+
+    let mut contribution = [[0.0; 1]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut contribution,
+    };
+    let mut full = [0.0];
+    assert_eq!(
+        super::eval(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            [&mut full],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
+
+    kernel.near_calls.store(0, Ordering::Relaxed);
+    kernel.far_calls.store(0, Ordering::Relaxed);
+    let mut far_only = [0.0];
+    assert_eq!(
+        super::eval_with_skip(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Skip::Near,
+            [&mut far_only],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
+
+    kernel.near_calls.store(0, Ordering::Relaxed);
+    kernel.far_calls.store(0, Ordering::Relaxed);
+    let mut near_only = [0.0];
+    assert_eq!(
+        super::eval_with_skip(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Skip::Far,
+            [&mut near_only],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 0);
+    assert!((full[0] - near_only[0] - far_only[0]).abs() < 1.0e-15);
+
+    kernel.near_calls.store(0, Ordering::Relaxed);
+    kernel.far_calls.store(0, Ordering::Relaxed);
+    let mut far_only_par = [0.0];
+    assert_eq!(
+        super::eval_par_with_skip(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Skip::Near,
+            [&mut far_only_par],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(far_only_par, far_only);
 }
 
 #[test]

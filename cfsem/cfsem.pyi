@@ -506,6 +506,16 @@ def inductance_linear_filaments_matrix(
     wire_radius_src: FloatArray,
     par: bool = True,
 ) -> FloatArray: ...
+def inductance_linear_filaments_sparse_csc(
+    xyzfil_tgt: ArrayTriple,
+    dlxyzfil_tgt: ArrayTriple,
+    xyzfil_src: ArrayTriple,
+    dlxyzfil_src: ArrayTriple,
+    wire_radius_src: FloatArray,
+    row_indices: UIntArray,
+    column_pointers: UIntArray,
+    par: bool = True,
+) -> FloatArray: ...
 def gs_operator_order2(rs: FloatArray, zs: FloatArray) -> tuple[FloatArray, UIntArray, UIntArray]: ...
 def gs_operator_order4(rs: FloatArray, zs: FloatArray) -> tuple[FloatArray, UIntArray, UIntArray]: ...
 def flux_density_triangle_mesh(

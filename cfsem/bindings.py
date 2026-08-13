@@ -12,6 +12,7 @@ from typing import Literal
 
 from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, uint64, zeros_like
 from numpy.typing import NDArray
+from scipy.sparse import csc_matrix
 
 from cfsem.types import Array3xN
 
@@ -47,6 +48,9 @@ from .cfsem import (
 )
 from .cfsem import (
     inductance_linear_filaments_matrix as em_inductance_linear_filaments_matrix,
+)
+from .cfsem import (
+    inductance_linear_filaments_sparse_csc as em_inductance_linear_filaments_sparse_csc,
 )
 from .cfsem import (
     inductance_piecewise_linear_filaments as em_inductance_piecewise_linear_filaments,
@@ -122,6 +126,7 @@ __all__ = [
     "HierarchicalDiagnostics",
     "SolveResult",
     "inductance_linear_filaments",
+    "inductance_linear_filaments_sparse",
     "inductance_piecewise_linear_filaments",
     "mutual_inductance_circular_to_linear",
     "rotate_filaments_about_path",
@@ -1100,6 +1105,74 @@ def inductance_linear_filaments(
         ntgt = xyzfil_tgt[0].size
         return out.reshape((nsrc, ntgt))
     raise ValueError("output must be 'vector' or 'matrix'")
+
+
+def inductance_linear_filaments_sparse(
+    xyzfil_tgt: Array3xN,
+    dlxyzfil_tgt: Array3xN,
+    xyzfil_src: Array3xN,
+    dlxyzfil_src: Array3xN,
+    interaction_map: csc_matrix,
+    wire_radius_src: float | NDArray[float64] = 0.0,
+    par: bool = True,
+) -> csc_matrix:
+    """Evaluate selected direct source-target filament inductances.
+
+    Every stored coordinate in ``interaction_map`` is evaluated with the finite-radius source
+    vector-potential kernel and three-point Gauss--Legendre integration over the complete target
+    segment. Map data values are ignored. The result has shape ``(nsrc, ntgt)`` and exactly the
+    same CSC row-index and column-pointer arrays, including entries whose inductance is zero.
+
+    Args:
+        xyzfil_tgt: [m] target filament segment start points
+        dlxyzfil_tgt: [m] target filament segment deltas
+        xyzfil_src: [m] source filament segment start points
+        dlxyzfil_src: [m] source filament segment deltas
+        interaction_map: Canonical CSC interaction pattern with shape ``(nsrc, ntgt)``
+        wire_radius_src: [m] source filament radius, scalar or array of length ``nsrc``
+        par: Whether to evaluate stored interactions in parallel
+
+    Returns:
+        [H] CSC inductance matrix with the supplied sparsity pattern
+
+    Raises:
+        TypeError: If ``interaction_map`` is not a SciPy ``csc_matrix``.
+        ValueError: If the map is non-canonical or has the wrong shape.
+        DimensionalityError: If filament geometry or radius lengths are inconsistent.
+    """
+    if not isinstance(interaction_map, csc_matrix):
+        raise TypeError("interaction_map must be a scipy.sparse.csc_matrix")
+    if not interaction_map.has_canonical_format:
+        raise ValueError("interaction_map must have sorted, unique row indices in each column")
+
+    xyzfil_tgt = _3tup_contig(xyzfil_tgt)
+    dlxyzfil_tgt = _3tup_contig(dlxyzfil_tgt)
+    xyzfil_src = _3tup_contig(xyzfil_src)
+    dlxyzfil_src = _3tup_contig(dlxyzfil_src)
+    nsrc = xyzfil_src[0].size
+    ntgt = xyzfil_tgt[0].size
+    if interaction_map.shape != (nsrc, ntgt):
+        raise ValueError(f"interaction_map must have shape ({nsrc}, {ntgt}); got {interaction_map.shape}")
+
+    if asarray(wire_radius_src).ndim == 0:
+        wire_radius_src = full(nsrc, float(wire_radius_src))
+    wire_radius_src = ascontiguousarray(wire_radius_src, dtype=float64).ravel()
+    row_indices = ascontiguousarray(interaction_map.indices, dtype=uint64)
+    column_pointers = ascontiguousarray(interaction_map.indptr, dtype=uint64)
+    values = em_inductance_linear_filaments_sparse_csc(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src,
+        row_indices,
+        column_pointers,
+        par,
+    )
+    return csc_matrix(
+        (values, interaction_map.indices.copy(), interaction_map.indptr.copy()),
+        shape=interaction_map.shape,
+    )
 
 
 def gs_operator_order2(rs: NDArray[float64], zs: NDArray[float64]) -> SparseTriplet:

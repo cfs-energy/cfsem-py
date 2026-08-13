@@ -3409,6 +3409,64 @@ fn inductance_linear_filaments_matrix(
     Ok(PyArray1::from_vec(py, out).unbind())
 }
 
+#[pyfunction(signature = (xyzfil_tgt, dlxyzfil_tgt, xyzfil_src, dlxyzfil_src, wire_radius_src, row_indices, column_pointers, par=true))]
+fn inductance_linear_filaments_sparse_csc(
+    py: Python<'_>,
+    xyzfil_tgt: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil_tgt: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    xyzfil_src: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    dlxyzfil_src: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    wire_radius_src: PyReadonlyArray1<f64>,
+    row_indices: PyReadonlyArray1<usize>,
+    column_pointers: PyReadonlyArray1<usize>,
+    par: bool,
+) -> PyResult<Py<PyArray1<f64>>> {
+    _3tup_slice_ro!(xyzfil_tgt);
+    _3tup_slice_ro!(dlxyzfil_tgt);
+    _3tup_slice_ro!(xyzfil_src);
+    _3tup_slice_ro!(dlxyzfil_src);
+    let wire_radius_src = wire_radius_src.as_slice()?;
+    let row_indices = row_indices.as_slice()?;
+    let column_pointers = column_pointers.as_slice()?;
+    let mut out = vec![0.0; row_indices.len()];
+
+    let func = match par {
+        true => physics::linear_filament::inductance_linear_filaments_sparse_csc_par,
+        false => physics::linear_filament::inductance_linear_filaments_sparse_csc,
+    };
+    func(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src,
+        row_indices,
+        column_pointers,
+        &mut out,
+    )
+    .map_err(|msg| PyInteropError::DimensionalityError {
+        msg: msg.to_string(),
+    })?;
+
+    Ok(PyArray1::from_vec(py, out).unbind())
+}
+
 /// Python bindings for cfsemrs::physics::gradshafranov::gs_operator_order2
 #[pyfunction]
 fn gs_operator_order2(
@@ -4544,6 +4602,10 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(inductance_linear_filaments, m.clone())?)?;
     m.add_function(wrap_pyfunction!(
         inductance_linear_filaments_matrix,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        inductance_linear_filaments_sparse_csc,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

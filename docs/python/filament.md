@@ -1,10 +1,12 @@
 # Linear Filament
 
-Hierarchical field solvers accept `skip=None`, `skip="near"`, or `skip="far"`. The value names the
-interaction class to omit: `skip="near"` evaluates only accepted far-field summaries, while
-`skip="far"` evaluates only direct near-field interactions. A full solve is therefore the sum of
-those two filtered solves, up to floating-point roundoff. Filtering happens in the common evaluator,
-so skipped kernel calculations are not performed.
+Hierarchical field solvers accept `skip=None`, `skip="near"`, `skip="far"`, or `skip="both"`. The
+value names the interaction class to omit: `skip="near"` evaluates only accepted far-field
+summaries, while `skip="far"` evaluates only direct near-field interactions. `skip="both"` returns
+zero field arrays without a field traversal; with `extra_diagnostics=True`, only the diagnostic tree
+walk runs. A full solve is the sum of the near-only and far-only solves, up to floating-point
+roundoff. Filtering happens in the common evaluator, so skipped kernel calculations are not
+performed.
 
 ## Fields
 

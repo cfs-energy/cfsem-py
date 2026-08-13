@@ -130,7 +130,8 @@ where
 ///
 /// The source tree is still traversed normally so acceptance decisions do not
 /// change. [`Skip::Near`] returns accepted far-summary contributions only;
-/// [`Skip::Far`] returns direct leaf contributions only.
+/// [`Skip::Far`] returns direct leaf contributions only. [`Skip::Both`] zeroes the output without
+/// target summarization or source-tree traversal.
 #[inline]
 pub fn eval_with_skip<K, T, S, M, C, const D: usize>(
     kernel: &K,
@@ -240,6 +241,12 @@ where
         if out[component].len() != targets.len() {
             return HierarchicalError::LengthMismatch;
         }
+    }
+    if skip == Some(Skip::Both) {
+        for component in out {
+            component.fill(T::ZERO);
+        }
+        return HierarchicalError::Ok;
     }
     if source_summaries.len() < source_tree.n_nodes() || scratch.contribution.is_empty() {
         return HierarchicalError::ScratchTooSmall;
@@ -391,7 +398,10 @@ where
     )
 }
 
-/// Evaluate vector-valued targets in parallel while omitting one interaction class.
+/// Evaluate vector-valued targets in parallel while omitting interaction classes.
+///
+/// [`Skip::Both`] zeroes the output without target summarization, source-tree traversal, or
+/// parallel scratch use.
 #[inline]
 pub fn eval_par_with_skip<K, T, S, M, C, const D: usize>(
     kernel: &K,
@@ -465,6 +475,12 @@ where
         if out[component].len() != targets.len() {
             return HierarchicalError::LengthMismatch;
         }
+    }
+    if skip == Some(Skip::Both) {
+        for component in out {
+            component.fill(T::ZERO);
+        }
+        return HierarchicalError::Ok;
     }
     if source_summaries.len() < source_tree.n_nodes() {
         return HierarchicalError::ScratchTooSmall;

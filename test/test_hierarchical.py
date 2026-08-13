@@ -171,11 +171,22 @@ def test_hierarchical_skip_decomposes_near_and_far_fields(par):
         skip="far",
         extra_diagnostics=True,
     )
+    diagnostics_only = cfsem.vector_potential_dipole_hierarchical(
+        loc,
+        moment,
+        obs,
+        outer_radius,
+        theta=0.2,
+        par=par,
+        skip="both",
+        extra_diagnostics=True,
+    )
 
     _assert_vec_close(full, _add_vec3(far_only.field, near_only.field))
     assert any(np.any(component != 0.0) for component in far_only.field)
     assert any(np.any(component != 0.0) for component in near_only.field)
-    for filtered in (far_only, near_only):
+    _assert_vec_zero(diagnostics_only)
+    for filtered in (far_only, near_only, diagnostics_only):
         np.testing.assert_array_equal(
             filtered.diagnostics.near_field_interaction_map.indices,
             full.diagnostics.near_field_interaction_map.indices,
@@ -184,6 +195,12 @@ def test_hierarchical_skip_decomposes_near_and_far_fields(par):
             filtered.diagnostics.near_field_interaction_map.indptr,
             full.diagnostics.near_field_interaction_map.indptr,
         )
+
+    zero_only = cfsem.vector_potential_dipole_hierarchical(
+        loc, moment, obs, outer_radius, theta=0.2, par=par, skip="both"
+    )
+    _assert_vec_zero(zero_only)
+    assert zero_only.diagnostics.near_field_interaction_map is None
 
 
 def test_hierarchical_skip_rejects_unknown_value():
@@ -223,7 +240,7 @@ def test_near_field_interaction_map_uses_original_source_rows():
     np.testing.assert_array_equal(interaction_map.data, np.ones(2, dtype=bool))
 
 
-def test_all_hierarchical_methods_accept_skip():
+def test_all_hierarchical_methods_accept_skip_both():
     loc = (np.array([0.0]), np.array([0.0]), np.array([0.0]))
     moment = (np.array([0.0]), np.array([0.0]), np.array([1.0]))
     obs = (np.array([1.0]), np.array([0.2]), np.array([0.3]))
@@ -237,23 +254,37 @@ def test_all_hierarchical_methods_accept_skip():
     obs_rows = np.array([[0.2, 0.2, 0.5]])
 
     results = (
-        cfsem.flux_density_dipole_hierarchical(loc, moment, obs, radius, theta=0.0, skip="near"),
-        cfsem.vector_potential_dipole_hierarchical(loc, moment, obs, radius, theta=0.0, skip="near"),
+        cfsem.flux_density_dipole_hierarchical(loc, moment, obs, radius, theta=0.0, skip="both"),
+        cfsem.vector_potential_dipole_hierarchical(loc, moment, obs, radius, theta=0.0, skip="both"),
         cfsem.flux_density_linear_filament_hierarchical(
-            obs, xyzfil, dlxyzfil, current, radius, theta=0.0, skip="near"
+            obs, xyzfil, dlxyzfil, current, radius, theta=0.0, skip="both"
         ),
         cfsem.vector_potential_linear_filament_hierarchical(
-            obs, xyzfil, dlxyzfil, current, radius, theta=0.0, skip="near"
+            obs, xyzfil, dlxyzfil, current, radius, theta=0.0, skip="both"
         ),
         cfsem.flux_density_triangle_mesh_hierarchical(
-            obs_rows, nodes, triangles, stream_function, theta=0.0, skip="near"
+            obs_rows, nodes, triangles, stream_function, theta=0.0, skip="both"
         ),
         cfsem.vector_potential_triangle_mesh_hierarchical(
-            obs_rows, nodes, triangles, stream_function, theta=0.0, skip="near"
+            obs_rows, nodes, triangles, stream_function, theta=0.0, skip="both"
         ),
     )
     for result in results:
         _assert_vec_zero(result)
+
+
+def test_skip_both_zeroes_and_returns_supplied_output_arrays():
+    loc = (np.array([0.0]), np.array([0.0]), np.array([0.0]))
+    moment = (np.array([0.0]), np.array([0.0]), np.array([1.0]))
+    obs = (np.array([1.0, 2.0]), np.zeros(2), np.zeros(2))
+    out = tuple(np.full(2, np.nan) for _ in range(3))
+
+    result = cfsem.vector_potential_dipole_hierarchical(
+        loc, moment, obs, np.zeros(1), skip="both", out=out
+    )
+
+    _assert_returns_output_views(result, out)
+    _assert_vec_zero(result)
 
 
 @pytest.mark.parametrize("par", [False, True])

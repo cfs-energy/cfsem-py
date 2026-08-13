@@ -7,6 +7,8 @@ pub enum Skip {
     Near,
     /// Omit accepted source-summary interactions.
     Far,
+    /// Omit both interaction classes, producing zero field output without a tree walk.
+    Both,
 }
 
 /// Runtime error code for hierarchical tree operations.

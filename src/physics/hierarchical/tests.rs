@@ -44,6 +44,8 @@ struct TargetSummary<T: Scalar> {
 
 struct MockKernel<T: Scalar> {
     _marker: core::marker::PhantomData<T>,
+    target_summary_calls: AtomicUsize,
+    accept_calls: AtomicUsize,
     near_calls: AtomicUsize,
     far_calls: AtomicUsize,
 }
@@ -52,6 +54,8 @@ impl<T: Scalar> MockKernel<T> {
     fn new() -> Self {
         Self {
             _marker: core::marker::PhantomData,
+            target_summary_calls: AtomicUsize::new(0),
+            accept_calls: AtomicUsize::new(0),
             near_calls: AtomicUsize::new(0),
             far_calls: AtomicUsize::new(0),
         }
@@ -124,6 +128,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         targets: &[Self::TargetGeometry],
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError {
+        self.target_summary_calls.fetch_add(1, Ordering::Relaxed);
         *out = TargetSummary::default();
         for i in 0..target_ids.len() {
             let id = target_ids[i] as usize;
@@ -138,6 +143,17 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
             }
         }
         HierarchicalError::Ok
+    }
+
+    fn accept_far(
+        &self,
+        target_aabb: Aabb<T>,
+        source_aabb: Aabb<T>,
+        _source: &Self::SourceSummary,
+        theta: T,
+    ) -> bool {
+        self.accept_calls.fetch_add(1, Ordering::Relaxed);
+        geometric_accept_far(target_aabb, source_aabb, theta)
     }
 
     fn eval_near(
@@ -169,6 +185,87 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
 
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
         out[0] = out[0] + contribution[0];
+    }
+}
+
+struct NoFieldTraversalKernel;
+
+impl HierarchicalKernel for NoFieldTraversalKernel {
+    type Scalar = f64;
+    type SourceGeometry = MockPoint<f64>;
+    type TargetGeometry = MockPoint<f64>;
+    type SourceMoment = f64;
+    type SourceSummary = SourceSummary<f64>;
+    type TargetSummary = TargetSummary<f64>;
+    type Output = [f64; 3];
+
+    fn summarize_leaf_sources<S, M>(
+        &self,
+        source_ids: &[u32],
+        sources: S,
+        moments: M,
+        out: &mut Self::SourceSummary,
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>,
+    {
+        let _ = (source_ids, sources, moments, out);
+        panic!("Skip::Both must not summarize source leaves")
+    }
+
+    fn combine_source_summaries(
+        &self,
+        _children: &[Self::SourceSummary],
+        _out: &mut Self::SourceSummary,
+    ) -> HierarchicalError {
+        panic!("Skip::Both must not combine source summaries")
+    }
+
+    fn summarize_leaf_targets(
+        &self,
+        _target_ids: &[u32],
+        _targets: &[Self::TargetGeometry],
+        _out: &mut Self::TargetSummary,
+    ) -> HierarchicalError {
+        panic!("Skip::Both must not summarize field targets")
+    }
+
+    fn eval_near(
+        &self,
+        _target: &Self::TargetGeometry,
+        _source: &Self::SourceGeometry,
+        _moment: &Self::SourceMoment,
+        _out: &mut Self::Output,
+    ) {
+        panic!("Skip::Both must not evaluate near interactions")
+    }
+
+    fn eval_far(
+        &self,
+        _target: &Self::TargetSummary,
+        _source: &Self::SourceSummary,
+        _out: &mut Self::Output,
+    ) {
+        panic!("Skip::Both must not evaluate far interactions")
+    }
+
+    fn accept_far(
+        &self,
+        _target_aabb: Aabb<f64>,
+        _source_aabb: Aabb<f64>,
+        _source: &Self::SourceSummary,
+        _theta: f64,
+    ) -> bool {
+        panic!("Skip::Both must not traverse the source tree")
+    }
+
+    fn zero_output(&self, _out: &mut Self::Output) {
+        panic!("Skip::Both must zero component arrays without invoking the kernel")
+    }
+
+    fn accumulate(&self, _out: &mut Self::Output, _contribution: &Self::Output) {
+        panic!("Skip::Both must not accumulate field interactions")
     }
 }
 
@@ -277,6 +374,85 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
     assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
     assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
     assert_eq!(far_only_par, far_only);
+
+    kernel.target_summary_calls.store(0, Ordering::Relaxed);
+    kernel.accept_calls.store(0, Ordering::Relaxed);
+    kernel.near_calls.store(0, Ordering::Relaxed);
+    kernel.far_calls.store(0, Ordering::Relaxed);
+    let mut skipped_both = [f64::NAN];
+    let mut empty_contribution = [];
+    let mut empty_scratch = EvaluationScratch {
+        contribution: &mut empty_contribution,
+    };
+    assert_eq!(
+        super::eval_with_skip(
+            &kernel,
+            source_tree.as_view(),
+            &[],
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Skip::Both,
+            [&mut skipped_both],
+            &mut empty_scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(skipped_both, [0.0]);
+    assert_eq!(kernel.target_summary_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.accept_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 0);
+
+    skipped_both.fill(f64::NAN);
+    assert_eq!(
+        super::eval_par_with_skip(
+            &kernel,
+            source_tree.as_view(),
+            &[],
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Skip::Both,
+            [&mut skipped_both],
+            &mut empty_scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(skipped_both, [0.0]);
+    assert_eq!(kernel.target_summary_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.accept_calls.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn one_shot_skip_both_bypasses_field_traversal_and_zeroes_outputs() {
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let mut out0 = [f64::NAN; 2];
+    let mut out1 = [f64::NAN; 2];
+    let mut out2 = [f64::NAN; 2];
+
+    let diagnostics = super::convenience::one_shot_vec3(
+        NoFieldTraversalKernel,
+        sources.as_slice(),
+        moments.as_slice(),
+        targets.as_slice(),
+        BuildMethod::LongestAxis,
+        0.5,
+        true,
+        Some(Skip::Both),
+        (&mut out0, &mut out1, &mut out2),
+    )
+    .unwrap();
+
+    assert_eq!(out0, [0.0; 2]);
+    assert_eq!(out1, [0.0; 2]);
+    assert_eq!(out2, [0.0; 2]);
+    assert_eq!(diagnostics.source_count, 2);
+    assert_eq!(diagnostics.target_count, 2);
 }
 
 #[test]

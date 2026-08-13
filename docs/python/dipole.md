@@ -1,9 +1,10 @@
 # Dipole
 
 Hierarchical dipole solvers accept an optional interaction filter. `skip="near"` returns the
-far-only result, `skip="far"` returns the direct near-only result, and the default `skip=None`
-evaluates both. With `extra_diagnostics=True`, the diagnostics include the direct-interaction
-pattern as a canonical `(nsrc, ntgt)` SciPy CSC matrix.
+far-only result, `skip="far"` returns the direct near-only result, `skip="both"` returns zero field
+arrays without a field traversal, and the default `skip=None` evaluates both. With
+`extra_diagnostics=True`, the diagnostics include the direct-interaction pattern as a canonical
+`(nsrc, ntgt)` SciPy CSC matrix; for `skip="both"`, only that diagnostic traversal runs.
 
 ## Fields
 

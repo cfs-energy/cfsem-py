@@ -584,79 +584,90 @@ where
         BuildMethod::LongestAxis => ClusterTree::build(sources)?,
         BuildMethod::MortonLbvh => ClusterTree::build_morton_lbvh(sources)?,
     };
-    let mut source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
-    let mut err = update_summaries(
-        &kernel,
-        source_tree.as_view(),
-        sources,
-        moments,
-        &mut source_summaries.node_summaries,
-    );
-    if err != HierarchicalError::Ok {
-        return Err(err);
-    }
+    let source_summaries = if skip == Some(Skip::Both) {
+        None
+    } else {
+        let mut source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
+        let err = update_summaries(
+            &kernel,
+            source_tree.as_view(),
+            sources,
+            moments,
+            &mut source_summaries.node_summaries,
+        );
+        if err != HierarchicalError::Ok {
+            return Err(err);
+        }
+        Some(source_summaries)
+    };
     let construction_seconds = construction_start.elapsed().as_secs_f64();
 
     let evaluation_start = Instant::now();
-    let scratch_len = match par {
-        true => scratch_len_par(targets.len()),
-        false => scratch_len(),
-    };
-    let mut scratch_values = vec![[T::ZERO; 3]; scratch_len];
-    let mut scratch = EvaluationScratch {
-        contribution: &mut scratch_values,
-    };
-    let out_components = [out.0, out.1, out.2];
-    err = match (par, skip) {
-        (true, Some(skip)) => eval_par_with_skip(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            sources,
-            targets,
-            moments,
-            theta,
-            skip,
-            out_components,
-            &mut scratch,
-        ),
-        (true, None) => eval_par(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            sources,
-            targets,
-            moments,
-            theta,
-            out_components,
-            &mut scratch,
-        ),
-        (false, Some(skip)) => eval_with_skip(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            sources,
-            targets,
-            moments,
-            theta,
-            skip,
-            out_components,
-            &mut scratch,
-        ),
-        (false, None) => eval(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            sources,
-            targets,
-            moments,
-            theta,
-            out_components,
-            &mut scratch,
-        ),
-    };
-    if err != HierarchicalError::Ok {
-        return Err(err);
+    if let Some(source_summaries) = source_summaries {
+        let scratch_len = match par {
+            true => scratch_len_par(targets.len()),
+            false => scratch_len(),
+        };
+        let mut scratch_values = vec![[T::ZERO; 3]; scratch_len];
+        let mut scratch = EvaluationScratch {
+            contribution: &mut scratch_values,
+        };
+        let out_components = [out.0, out.1, out.2];
+        let err = match (par, skip) {
+            (true, Some(skip)) => eval_par_with_skip(
+                &kernel,
+                source_tree.as_view(),
+                &source_summaries.node_summaries,
+                sources,
+                targets,
+                moments,
+                theta,
+                skip,
+                out_components,
+                &mut scratch,
+            ),
+            (true, None) => eval_par(
+                &kernel,
+                source_tree.as_view(),
+                &source_summaries.node_summaries,
+                sources,
+                targets,
+                moments,
+                theta,
+                out_components,
+                &mut scratch,
+            ),
+            (false, Some(skip)) => eval_with_skip(
+                &kernel,
+                source_tree.as_view(),
+                &source_summaries.node_summaries,
+                sources,
+                targets,
+                moments,
+                theta,
+                skip,
+                out_components,
+                &mut scratch,
+            ),
+            (false, None) => eval(
+                &kernel,
+                source_tree.as_view(),
+                &source_summaries.node_summaries,
+                sources,
+                targets,
+                moments,
+                theta,
+                out_components,
+                &mut scratch,
+            ),
+        };
+        if err != HierarchicalError::Ok {
+            return Err(err);
+        }
+    } else {
+        out.0.fill(T::ZERO);
+        out.1.fill(T::ZERO);
+        out.2.fill(T::ZERO);
     }
     let evaluation_seconds = evaluation_start.elapsed().as_secs_f64();
 

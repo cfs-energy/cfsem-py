@@ -640,9 +640,10 @@ fn parse_hierarchical_skip(
         None => Ok(None),
         Some("near") => Ok(Some(physics::hierarchical::kernel::Skip::Near)),
         Some("far") => Ok(Some(physics::hierarchical::kernel::Skip::Far)),
+        Some("both") => Ok(Some(physics::hierarchical::kernel::Skip::Both)),
         Some(value) => Err(PyInteropError::ValueError {
             msg: format!(
-                "Unsupported hierarchical skip value: {value}. Expected 'near', 'far', or None."
+                "Unsupported hierarchical skip value: {value}. Expected 'near', 'far', 'both', or None."
             ),
         }
         .into()),

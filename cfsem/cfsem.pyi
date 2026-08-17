@@ -217,6 +217,8 @@ def hyp2f1(
     c: ComplexArray,
     z: ComplexArray,
     par: bool = True,
+    *,
+    out: ComplexArray | None = None,
 ) -> ComplexArray: ...
 def filament_helix_path(
     path: ArrayTriple,

@@ -53,25 +53,6 @@ No part of installation requires root. If access issues are encountered, this ca
 
 Some computationally-expensive calculations are written in Rust. These calculations and their python bindings are installed from pre-built binaries when installing from pypi or compiled during local development installation, with no intervention from the user in either case. Symmetric bindings with docstrings are available in the `bindings.py` module and re-exported at the library level.
 
-The Gauss hypergeometric function is available for fully complex arguments:
-
-```python
-import numpy as np
-from cfsem import hyp2f1
-
-a = np.array([0.5 + 0.2j], dtype=np.complex128)
-b = np.array([1.1 - 0.1j], dtype=np.complex128)
-c = np.array([2.4 + 0.3j], dtype=np.complex128)
-z = np.array([2.0 + 0.0j], dtype=np.complex128)
-value = hyp2f1(a, b, c, z)
-```
-
-All four inputs must be equal-length, one-dimensional, C-contiguous
-`complex128` arrays; the binding does not broadcast or cast. It uses the
-principal branch, with `+0.0j` and `-0.0j` selecting opposite lips of the cut
-from 1 to positive infinity. Singular or nonconvergent elements return complex
-NaN. Accuracy is not guaranteed uniformly for unbounded parameter magnitudes.
-
 To build with all of the optimizations available on your local machine, you can do:
 
 ```bash

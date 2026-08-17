@@ -29,12 +29,51 @@ def test_hyp2f1_complex128_binding():
     b = np.array([1.1 - 0.1j, 0.7 + 0.4j], dtype=np.complex128)
     c = np.array([2.4 + 0.3j, 2.8 - 0.2j], dtype=np.complex128)
     z = np.array([0.0 - 0.0j, 2.0 + 0.5j], dtype=np.complex128)
-    serial = cfsem.hyp2f1(a, b, c, z, par=False)
+    serial = cfsem.hyp2f1(a, b, c, z, False)
     parallel = cfsem.hyp2f1(a, b, c, z)
     assert serial.dtype == np.complex128
     assert serial.shape == (2,)
     assert serial[0] == 1.0 + 0.0j
     np.testing.assert_array_equal(parallel, serial)
+
+
+@pytest.mark.parametrize("par", [False, True])
+def test_hyp2f1_writes_optional_output_and_returns_same_array(par):
+    a = np.array([0.5 + 0.2j, 1.2 - 0.3j], dtype=np.complex128)
+    b = np.array([1.1 - 0.1j, 0.7 + 0.4j], dtype=np.complex128)
+    c = np.array([2.4 + 0.3j, 2.8 - 0.2j], dtype=np.complex128)
+    z = np.array([0.2 + 0.1j, 2.0 + 0.5j], dtype=np.complex128)
+    expected = cfsem.hyp2f1(a, b, c, z, par=par)
+    out = np.full(a.shape, np.nan + 1j * np.nan, dtype=np.complex128)
+
+    returned = cfsem.hyp2f1(a, b, c, z, par=par, out=out)
+
+    assert returned is out
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_hyp2f1_output_length_mismatch_is_transactional():
+    inputs = [np.ones(2, dtype=np.complex128) for _ in range(4)]
+    out = np.full(3, 7.0 + 8.0j, dtype=np.complex128)
+
+    with pytest.raises(ValueError, match="Length mismatch"):
+        cfsem.hyp2f1(inputs[0], inputs[1], inputs[2], inputs[3], out=out)
+
+    np.testing.assert_array_equal(out, np.full(3, 7.0 + 8.0j, dtype=np.complex128))
+
+
+@pytest.mark.parametrize(
+    "bad_out",
+    [
+        np.ones(3, dtype=np.float64),
+        np.ones((1, 3), dtype=np.complex128),
+        np.ones(6, dtype=np.complex128)[::2],
+    ],
+)
+def test_hyp2f1_rejects_invalid_output(bad_out):
+    valid = np.ones(3, dtype=np.complex128)
+    with pytest.raises((TypeError, ValueError)):
+        cfsem.hyp2f1(valid, valid, valid, valid, out=bad_out)
 
 
 @pytest.mark.parametrize(

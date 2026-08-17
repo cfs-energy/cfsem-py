@@ -1,6 +1,6 @@
 use numpy::Element as NumpyElement;
 use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadwriteArray1};
-use numpy::{Complex64, PyArray1};
+use numpy::{Complex64, PyArray1, PyArrayMethods};
 use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
@@ -3322,7 +3322,11 @@ fn ellipk(x: f64) -> f64 {
 /// cut `[1, +inf)` distinguish the sign of zero in `z.imag`; mathematical
 /// singularities and unsupported numerical failures produce complex NaN values.
 /// Accuracy is not guaranteed uniformly for unbounded parameter magnitudes.
-#[pyfunction(signature = (a, b, c, z, par = true))]
+///
+/// Pass a writable, one-dimensional, C-contiguous `complex128` array as `out`
+/// to reuse its storage. The same array object is returned. If `out` is `None`,
+/// a new output array is allocated. `out` must not alias an input array.
+#[pyfunction(signature = (a, b, c, z, par = true, *, out = None))]
 fn hyp2f1(
     py: Python<'_>,
     a: PyReadonlyArray1<'_, Complex64>,
@@ -3330,19 +3334,38 @@ fn hyp2f1(
     c: PyReadonlyArray1<'_, Complex64>,
     z: PyReadonlyArray1<'_, Complex64>,
     par: bool,
+    out: Option<Bound<'_, PyArray1<Complex64>>>,
 ) -> PyResult<Py<PyArray1<Complex64>>> {
     let a = a.as_slice()?;
     let b = b.as_slice()?;
     let c = c.as_slice()?;
     let z = z.as_slice()?;
-    let mut out = vec![Complex64::ZERO; a.len()];
-    let result = if par {
-        math::hyp2f1_par(a, b, c, z, &mut out)
-    } else {
-        math::hyp2f1(a, b, c, z, &mut out)
-    };
-    result.map_err(exceptions::PyValueError::new_err)?;
-    Ok(PyArray1::from_vec(py, out).unbind())
+    match out {
+        Some(out) => {
+            let returned = out.clone().unbind();
+            let mut out = out.try_into_readwrite()?;
+            let result = {
+                let out_slice = out.as_slice_mut()?;
+                if par {
+                    math::hyp2f1_par(a, b, c, z, out_slice)
+                } else {
+                    math::hyp2f1(a, b, c, z, out_slice)
+                }
+            };
+            result.map_err(exceptions::PyValueError::new_err)?;
+            Ok(returned)
+        }
+        None => {
+            let mut out = vec![Complex64::ZERO; a.len()];
+            let result = if par {
+                math::hyp2f1_par(a, b, c, z, &mut out)
+            } else {
+                math::hyp2f1(a, b, c, z, &mut out)
+            };
+            result.map_err(exceptions::PyValueError::new_err)?;
+            Ok(PyArray1::from_vec(py, out).unbind())
+        }
+    }
 }
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian

@@ -123,6 +123,8 @@ def benchmark_complex(size: int, repeats: int, dps: int) -> None:
     """Benchmark complex128 cfsem arrays against scalar mpmath evaluation."""
 
     arguments = tiled_arguments(COMPLEX_CASES, size, np.dtype(np.complex128))
+    parallel_out = np.empty(size, dtype=np.complex128)
+    serial_out = np.empty(size, dtype=np.complex128)
     mp.mp.dps = dps
     mp_arguments = mpmath_arguments(arguments)
 
@@ -132,9 +134,17 @@ def benchmark_complex(size: int, repeats: int, dps: int) -> None:
     mp.hyp2f1(*(argument[0] for argument in mp_arguments))
 
     parallel, parallel_values = time_call(
-        "cfsem (parallel)", lambda: cfsem.hyp2f1(*arguments, par=True), size, repeats
+        "cfsem (parallel)",
+        lambda: cfsem.hyp2f1(*arguments, par=True, out=parallel_out),
+        size,
+        repeats,
     )
-    serial, _ = time_call("cfsem (serial)", lambda: cfsem.hyp2f1(*arguments, par=False), size, repeats)
+    serial, _ = time_call(
+        "cfsem (serial)",
+        lambda: cfsem.hyp2f1(*arguments, par=False, out=serial_out),
+        size,
+        repeats,
+    )
     mpmath, mpmath_values = time_call(
         "mpmath (scalar loop)",
         lambda: [mp.hyp2f1(a, b, c, z) for a, b, c, z in zip(*mp_arguments, strict=True)],
@@ -153,15 +163,23 @@ def benchmark_real(size: int, repeats: int) -> None:
 
     real_arguments = tiled_arguments(REAL_CASES, size, np.dtype(np.float64))
     complex_arguments = tuple(argument.astype(np.complex128) for argument in real_arguments)
+    parallel_out = np.empty(size, dtype=np.complex128)
+    serial_out = np.empty(size, dtype=np.complex128)
 
     cfsem.hyp2f1(*(argument[: len(REAL_CASES)] for argument in complex_arguments), par=True)
     scipy_hyp2f1(*(argument[: len(REAL_CASES)] for argument in real_arguments))
 
     parallel, parallel_values = time_call(
-        "cfsem (parallel)", lambda: cfsem.hyp2f1(*complex_arguments, par=True), size, repeats
+        "cfsem (parallel)",
+        lambda: cfsem.hyp2f1(*complex_arguments, par=True, out=parallel_out),
+        size,
+        repeats,
     )
     serial, _ = time_call(
-        "cfsem (serial)", lambda: cfsem.hyp2f1(*complex_arguments, par=False), size, repeats
+        "cfsem (serial)",
+        lambda: cfsem.hyp2f1(*complex_arguments, par=False, out=serial_out),
+        size,
+        repeats,
     )
     scipy, scipy_values = time_call(
         "scipy.special.hyp2f1", lambda: scipy_hyp2f1(*real_arguments), size, repeats

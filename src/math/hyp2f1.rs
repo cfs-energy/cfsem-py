@@ -1284,7 +1284,9 @@ mod tests {
                 row.label,
                 "pfaff"
                     | "infinity"
+                    | "infinity-equal-m0"
                     | "one"
+                    | "one-balanced-m0"
                     | "one-near-integer"
                     | "infinity-near-integer"
                     | "euler"

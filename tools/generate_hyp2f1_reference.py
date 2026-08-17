@@ -23,7 +23,9 @@ def hyp_rows() -> list[tuple[complex, complex, complex, complex, str, float]]:
         (-2.0 + 0j, 1.2 + 0.4j, 3.5 - 0.2j, 2.0 + 0.5j, "polynomial", 2e-13),
         (0.7 + 0.2j, 1.3 - 0.1j, 2.4 + 0.3j, -3.0 + 0.4j, "pfaff", 2e-12),
         (0.4 + 0.2j, 1.1 + 0.3j, 2.7 - 0.2j, 4.0 + 2.0j, "infinity", 3e-12),
+        (0.4 + 0.2j, 0.4 + 0.2j, 2.7 - 0.2j, 4.0 + 2.0j, "infinity-equal-m0", 8e-11),
         (0.4 + 0.2j, 1.1 + 0.3j, 2.5 + 0.5j, 0.98 + 0.03j, "one", 3e-12),
+        (0.4 + 0.2j, 0.9 - 0.1j, 1.3 + 0.1j, 0.98 + 0.03j, "one-balanced-m0", 8e-11),
         (
             0.4 + 0.2j,
             0.9 - 0.1j,

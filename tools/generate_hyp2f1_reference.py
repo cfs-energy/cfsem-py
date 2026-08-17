@@ -24,6 +24,8 @@ def broad_hyp_rows() -> list[HypRow]:
 
     parameter_families = [
         ("generic", 0.5 + 0.25j, 1.25 - 0.5j, 2.0 + 0.75j, 2e-9),
+        ("integer-c1", 0.5 + 0.25j, 1.25 - 0.5j, 1.0 + 0.0j, 5e-9),
+        ("integer-c2", 1.4 + 0.2j, 0.7 - 0.3j, 2.0 + 0.0j, 5e-9),
         ("euler", 1.4 + 0.2j, 1.2 - 0.3j, 1.1 + 0.4j, 5e-9),
         ("near-one-integer", 0.4 + 0.2j, 0.9 - 0.1j, 3.3 + 0.100000001j, 8e-9),
         ("near-infinity-integer", 0.4 + 0.2j, 2.400000001 + 0.2j, 3.1 - 0.3j, 8e-9),

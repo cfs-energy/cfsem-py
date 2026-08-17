@@ -1491,7 +1491,7 @@ mod tests {
             .into_iter()
             .filter(|row| row.label.starts_with("grid-"))
             .collect();
-        assert_eq!(rows.len(), 290);
+        assert_eq!(rows.len(), 406);
         let mut failures = Vec::new();
         for row in rows {
             let actual = hyp2f1_scalar(row.a, row.b, row.c, row.z);

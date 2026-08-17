@@ -5,7 +5,7 @@
 * Rust
     * Add allocation-free `hyp2f1_scalar`, `hyp2f1`, and `hyp2f1_par` for fully complex parameters and arguments
 * Python
-    * Add a strict contiguous `complex128` array binding for `hyp2f1`
+    * Add a `complex128` array binding for `hyp2f1`
 
 ## 12.0.0 2026-08-11
 

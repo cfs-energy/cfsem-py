@@ -1,7 +1,4 @@
 //! Gauss hypergeometric function with complex parameters and argument.
-// The private continuation primitives are introduced and validated before the
-// region evaluators that consume them.
-#![allow(dead_code)]
 
 use num_complex::Complex64;
 use rayon::prelude::*;
@@ -106,6 +103,19 @@ fn complex_pow(base: Complex64, exponent: Complex64) -> Complex64 {
 }
 
 #[inline]
+fn complex_inverse(z: Complex64) -> Complex64 {
+    if z.re.abs() >= z.im.abs() {
+        let ratio = z.im / z.re;
+        let denominator = z.re + z.im * ratio;
+        Complex64::new(1.0 / denominator, -ratio / denominator)
+    } else {
+        let ratio = z.re / z.im;
+        let denominator = z.im + z.re * ratio;
+        Complex64::new(ratio / denominator, -1.0 / denominator)
+    }
+}
+
+#[inline]
 fn is_nonpositive_integer(z: Complex64) -> bool {
     z.im == 0.0 && z.re <= 0.0 && z.re.is_finite() && z.re == z.re.trunc()
 }
@@ -117,17 +127,30 @@ fn nearest_integer_difference(z: Complex64) -> (i32, Complex64) {
 }
 
 #[inline]
+fn sin_cos_pi_real(x: f64) -> (f64, f64) {
+    let nearest = x.round();
+    let remainder = x - nearest;
+    let sign = if (nearest % 2.0).abs() == 1.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let (sine, cosine) = (core::f64::consts::PI * remainder).sin_cos();
+    (sign * sine, sign * cosine)
+}
+
+#[inline]
 fn sin_pi(z: Complex64) -> Complex64 {
-    let x = core::f64::consts::PI * (z.re % 2.0);
     let y = core::f64::consts::PI * z.im;
-    Complex64::new(x.sin() * y.cosh(), x.cos() * y.sinh())
+    let (sine, cosine) = sin_cos_pi_real(z.re);
+    Complex64::new(sine * y.cosh(), cosine * y.sinh())
 }
 
 #[inline]
 fn cos_pi(z: Complex64) -> Complex64 {
-    let x = core::f64::consts::PI * (z.re % 2.0);
     let y = core::f64::consts::PI * z.im;
-    Complex64::new(x.cos() * y.cosh(), -x.sin() * y.sinh())
+    let (sine, cosine) = sin_cos_pi_real(z.re);
+    Complex64::new(cosine * y.cosh(), -sine * y.sinh())
 }
 
 fn log_sin_pi(z: Complex64) -> Complex64 {
@@ -135,14 +158,16 @@ fn log_sin_pi(z: Complex64) -> Complex64 {
     if y.abs() < 20.0 {
         return sin_pi(z).ln();
     }
-    let x = core::f64::consts::PI * (z.re % 2.0);
-    let phase = z.im.signum() * x.cos();
-    Complex64::new(y.abs() - core::f64::consts::LN_2, phase.atan2(x.sin()))
+    let (sine, cosine) = sin_cos_pi_real(z.re);
+    Complex64::new(
+        y.abs() - core::f64::consts::LN_2,
+        (z.im.signum() * cosine).atan2(sine),
+    )
 }
 
 #[inline]
 fn cot_pi(z: Complex64) -> Complex64 {
-    let two_x = 2.0 * core::f64::consts::PI * (z.re % 1.0);
+    let two_x = 2.0 * core::f64::consts::PI * (z.re - z.re.round());
     let two_y = 2.0 * core::f64::consts::PI * z.im;
     if two_y.abs() > 350.0 {
         return Complex64::new(0.0, -z.im.signum());
@@ -330,20 +355,39 @@ fn pochhammer_difference_ratio(z: Complex64, epsilon: Complex64, order: i32) -> 
     if order == 0 {
         return Complex64::ZERO;
     }
+    let pole_index = -z.re.round() as i32;
     if epsilon == Complex64::ZERO {
-        let mut derivative = Complex64::ZERO;
-        for index in 0..order {
+        if z.im == 0.0 && (0..order).contains(&pole_index) {
             let mut product = Complex64::ONE;
-            for other in 0..order {
-                if other != index {
-                    product *= z + other as f64;
+            for index in 0..order {
+                if index != pole_index {
+                    product *= z + index as f64;
                 }
             }
-            derivative += product;
+            return product;
         }
-        return derivative;
+        let mut reciprocal_sum = Complex64::ZERO;
+        for index in 0..order {
+            reciprocal_sum += Complex64::ONE / (z + index as f64);
+        }
+        return pochhammer(z, order) * reciprocal_sum;
     }
-    (pochhammer(z + epsilon, order) - pochhammer(z, order)) / epsilon
+    if z.im == 0.0 && (0..order).contains(&pole_index) {
+        let mut shifted_product = Complex64::ONE;
+        let mut log_sum = Complex64::ZERO;
+        for index in 0..order {
+            if index != pole_index {
+                shifted_product *= z + epsilon + index as f64;
+                log_sum += complex_log1p(epsilon / (z + index as f64));
+            }
+        }
+        return shifted_product + pochhammer(z, order) * complex_expm1(log_sum) / epsilon;
+    }
+    let mut log_sum = Complex64::ZERO;
+    for index in 0..order {
+        log_sum += complex_log1p(epsilon / (z + index as f64));
+    }
+    pochhammer(z, order) * complex_expm1(log_sum) / epsilon
 }
 
 #[inline]
@@ -352,6 +396,343 @@ fn exponential_difference_ratio(z: Complex64, epsilon: Complex64) -> Complex64 {
         z
     } else {
         complex_expm1(epsilon * z) / epsilon
+    }
+}
+
+#[inline]
+fn integer_sign(power: i32) -> f64 {
+    if power.rem_euclid(2) == 0 { 1.0 } else { -1.0 }
+}
+
+fn one_alpha_zero(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> Complex64 {
+    if epsilon == Complex64::ZERO {
+        integer_sign(m) * gamma(Complex64::new(m as f64, 0.0)) * gamma(c)
+            / (gamma(a + m as f64) * gamma(b + m as f64))
+    } else {
+        gamma(c)
+            / (epsilon
+                * gamma(1.0 - m as f64 - epsilon)
+                * gamma(a + m as f64 + epsilon)
+                * gamma(b + m as f64 + epsilon))
+    }
+}
+
+fn one_beta_zero(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> Complex64 {
+    let mf = m as f64;
+    if complex_abs(epsilon) > 0.1 {
+        return (pochhammer(a, m) * pochhammer(b, m)
+            / (gamma(1.0 - epsilon)
+                * gamma(a + mf + epsilon)
+                * gamma(b + mf + epsilon)
+                * gamma(Complex64::new(mf + 1.0, 0.0)))
+            - complex_pow(w, epsilon) / (gamma(a) * gamma(b) * gamma(mf + 1.0 + epsilon)))
+            * gamma(c)
+            * complex_pow(w, Complex64::new(mf, 0.0))
+            / epsilon;
+    }
+    ((gamma_difference_ratio(Complex64::ONE, -epsilon) / gamma(Complex64::new(mf + 1.0, 0.0))
+        + gamma_difference_ratio(Complex64::new(mf + 1.0, 0.0), epsilon))
+        / (gamma(a + mf + epsilon) * gamma(b + mf + epsilon))
+        - (gamma_difference_ratio(a + mf, epsilon) / gamma(b + mf + epsilon)
+            + gamma_difference_ratio(b + mf, epsilon) / gamma(a + mf))
+            / gamma(mf + 1.0 + epsilon)
+        - exponential_difference_ratio(w.ln(), epsilon)
+            / (gamma(a + mf) * gamma(b + mf) * gamma(mf + 1.0 + epsilon)))
+        * gamma(c)
+        * pochhammer(a, m)
+        * pochhammer(b, m)
+        * complex_pow(w, Complex64::new(mf, 0.0))
+}
+
+fn one_gamma_zero(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> Complex64 {
+    let mf = m as f64;
+    gamma(c) * pochhammer(a, m) * pochhammer(b, m) * complex_pow(w, Complex64::new(mf, 0.0))
+        / (gamma(a + mf + epsilon)
+            * gamma(b + mf + epsilon)
+            * gamma(Complex64::new(mf + 1.0, 0.0))
+            * gamma(1.0 - epsilon))
+}
+
+fn one_finite_part(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> EvalOutcome {
+    if m <= 0 {
+        return EvalOutcome::success(Complex64::ZERO);
+    }
+    let mut term = one_alpha_zero(a, b, c, m, epsilon);
+    let mut sum = CompensatedSum::new(term);
+    for n in 0..(m - 1) {
+        let nf = n as f64;
+        let denominator = (nf + 1.0) * (1.0 - m as f64 - epsilon + nf);
+        if denominator == Complex64::ZERO {
+            return EvalOutcome::failure();
+        }
+        term *= (a + nf) * (b + nf) * w / denominator;
+        sum.add(term);
+        if !finite(term) || !finite(sum.value()) {
+            return EvalOutcome::failure();
+        }
+    }
+    EvalOutcome::success(sum.value())
+}
+
+fn one_infinite_part(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> EvalOutcome {
+    let mf = m as f64;
+    let mut beta = one_beta_zero(a, b, c, w, m, epsilon);
+    let mut gamma_term = one_gamma_zero(a, b, c, w, m, epsilon) * w;
+    let mut sum = CompensatedSum::new(beta);
+    let mut small_terms = 0;
+    for n in 0..MAX_SERIES_ITERATIONS {
+        let nf = n as f64;
+        let amn = a + mf + nf;
+        let bmn = b + mf + nf;
+        let shifted_a = amn + epsilon;
+        let shifted_b = bmn + epsilon;
+        let denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0);
+        let correction_denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0 - epsilon);
+        if denominator == Complex64::ZERO || correction_denominator == Complex64::ZERO {
+            return EvalOutcome::failure();
+        }
+        beta = shifted_a * shifted_b * w * beta / denominator
+            + (amn * bmn / (mf + nf + 1.0) - amn - bmn - epsilon
+                + shifted_a * shifted_b / (nf + 1.0))
+                * gamma_term
+                / correction_denominator;
+        sum.add(beta);
+        gamma_term *= amn * bmn * w / ((mf + nf + 1.0) * (nf + 1.0 - epsilon));
+        if !finite(beta) || !finite(gamma_term) || !finite(sum.value()) {
+            return EvalOutcome::failure();
+        }
+        let sum_abs = complex_abs(sum.value());
+        if sum_abs > 0.0 && complex_abs(beta) <= REL_TOL * sum_abs {
+            small_terms += 1;
+            if small_terms >= 2 {
+                return EvalOutcome::success(sum.value());
+            }
+        } else {
+            small_terms = 0;
+        }
+    }
+    EvalOutcome::failure()
+}
+
+fn one_expansion(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
+    let (m, epsilon) = nearest_integer_difference(c - a - b);
+    if m < 0 {
+        return EvalOutcome::failure();
+    }
+    let w = Complex64::ONE - z;
+    let finite_part = one_finite_part(a, b, c, w, m, epsilon);
+    let infinite_part = one_infinite_part(a, b, c, w, m, epsilon);
+    if !finite_part.converged || !infinite_part.converged {
+        return EvalOutcome::failure();
+    }
+    let value = integer_sign(m) * (finite_part.value + infinite_part.value) / sinc_pi(epsilon);
+    if finite(value) {
+        EvalOutcome::success(value)
+    } else {
+        EvalOutcome::failure()
+    }
+}
+
+fn infinity_alpha_zero(a: Complex64, c: Complex64, m: i32, epsilon: Complex64) -> Complex64 {
+    if epsilon == Complex64::ZERO {
+        integer_sign(m) * gamma(Complex64::new(m as f64, 0.0)) * gamma(c)
+            / (gamma(a + m as f64) * gamma(c - a))
+    } else {
+        gamma(c)
+            / (epsilon
+                * gamma(1.0 - m as f64 - epsilon)
+                * gamma(a + m as f64 + epsilon)
+                * gamma(c - a))
+    }
+}
+
+fn infinity_beta_zero(
+    a: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> Complex64 {
+    let mf = m as f64;
+    let d = 1.0 - c + a;
+    if complex_abs(epsilon) > 0.1 {
+        return (pochhammer(a, m) * pochhammer(d, m)
+            / (gamma(1.0 - epsilon)
+                * gamma(a + mf + epsilon)
+                * gamma(c - a)
+                * gamma(Complex64::new(mf + 1.0, 0.0)))
+            - complex_pow(-w, epsilon) * pochhammer(d + epsilon, m)
+                / (gamma(a) * gamma(c - a - epsilon) * gamma(mf + 1.0 + epsilon)))
+            * gamma(c)
+            * complex_pow(w, Complex64::new(mf, 0.0))
+            / epsilon;
+    }
+    ((pochhammer(d + epsilon, m) * gamma_difference_ratio(Complex64::ONE, -epsilon)
+        - pochhammer_difference_ratio(d, epsilon, m) / gamma(1.0 - epsilon))
+        / (gamma(c - a) * gamma(a + mf + epsilon) * gamma(Complex64::new(mf + 1.0, 0.0)))
+        + pochhammer(d + epsilon, m)
+            * ((gamma_difference_ratio(Complex64::new(mf + 1.0, 0.0), epsilon)
+                / gamma(a + mf + epsilon)
+                - gamma_difference_ratio(a + mf, epsilon) / gamma(mf + 1.0 + epsilon))
+                / gamma(c - a)
+                - (gamma_difference_ratio(c - a, -epsilon)
+                    - exponential_difference_ratio(-(-w).ln(), -epsilon) / gamma(c - a - epsilon))
+                    / (gamma(mf + 1.0 + epsilon) * gamma(a + mf))))
+        * gamma(c)
+        * pochhammer(a, m)
+        * complex_pow(w, Complex64::new(mf, 0.0))
+}
+
+fn infinity_gamma_zero(
+    a: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> Complex64 {
+    let mf = m as f64;
+    gamma(c)
+        * pochhammer(a, m)
+        * pochhammer(1.0 - c + a, m)
+        * complex_pow(w, Complex64::new(mf, 0.0))
+        / (gamma(a + mf + epsilon)
+            * gamma(c - a)
+            * gamma(Complex64::new(mf + 1.0, 0.0))
+            * gamma(1.0 - epsilon))
+}
+
+fn infinity_finite_part(
+    a: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> EvalOutcome {
+    if m <= 0 {
+        return EvalOutcome::success(Complex64::ZERO);
+    }
+    let mut term = infinity_alpha_zero(a, c, m, epsilon);
+    let mut sum = CompensatedSum::new(term);
+    for n in 0..(m - 1) {
+        let nf = n as f64;
+        let denominator = (nf + 1.0) * (1.0 - m as f64 - epsilon + nf);
+        if denominator == Complex64::ZERO {
+            return EvalOutcome::failure();
+        }
+        term *= (a + nf) * (1.0 - c + a + nf) * w / denominator;
+        sum.add(term);
+        if !finite(term) || !finite(sum.value()) {
+            return EvalOutcome::failure();
+        }
+    }
+    EvalOutcome::success(sum.value())
+}
+
+fn infinity_infinite_part(
+    a: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> EvalOutcome {
+    let mf = m as f64;
+    let mut beta = infinity_beta_zero(a, c, w, m, epsilon);
+    let mut gamma_term = infinity_gamma_zero(a, c, w, m, epsilon) * w;
+    let mut sum = CompensatedSum::new(beta);
+    let mut small_terms = 0;
+    for n in 0..MAX_SERIES_ITERATIONS {
+        let nf = n as f64;
+        let amn = a + mf + nf;
+        let dmn = 1.0 - c + a + mf + nf;
+        let shifted_a = amn + epsilon;
+        let shifted_d = dmn + epsilon;
+        let denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0);
+        let correction_denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0 - epsilon);
+        if denominator == Complex64::ZERO || correction_denominator == Complex64::ZERO {
+            return EvalOutcome::failure();
+        }
+        beta = shifted_a * shifted_d * w * beta / denominator
+            + (amn * dmn / (mf + nf + 1.0) - amn - dmn - epsilon
+                + shifted_a * shifted_d / (nf + 1.0))
+                * gamma_term
+                / correction_denominator;
+        sum.add(beta);
+        gamma_term *= amn * dmn * w / ((mf + nf + 1.0) * (nf + 1.0 - epsilon));
+        if !finite(beta) || !finite(gamma_term) || !finite(sum.value()) {
+            return EvalOutcome::failure();
+        }
+        let sum_abs = complex_abs(sum.value());
+        if sum_abs > 0.0 && complex_abs(beta) <= REL_TOL * sum_abs {
+            small_terms += 1;
+            if small_terms >= 2 {
+                return EvalOutcome::success(sum.value());
+            }
+        } else {
+            small_terms = 0;
+        }
+    }
+    EvalOutcome::failure()
+}
+
+fn infinity_expansion(
+    mut a: Complex64,
+    mut b: Complex64,
+    c: Complex64,
+    z: Complex64,
+) -> EvalOutcome {
+    if (b - a).re < 0.0 {
+        core::mem::swap(&mut a, &mut b);
+    }
+    let (m, epsilon) = nearest_integer_difference(b - a);
+    if m < 0 {
+        return EvalOutcome::failure();
+    }
+    let w = complex_inverse(z);
+    let finite_part = infinity_finite_part(a, c, w, m, epsilon);
+    let infinite_part = infinity_infinite_part(a, c, w, m, epsilon);
+    if !finite_part.converged || !infinite_part.converged {
+        return EvalOutcome::failure();
+    }
+    let value = integer_sign(m) * complex_pow(-w, a) * (finite_part.value + infinite_part.value)
+        / sinc_pi(epsilon);
+    if finite(value) {
+        EvalOutcome::success(value)
+    } else {
+        EvalOutcome::failure()
     }
 }
 
@@ -466,6 +847,94 @@ fn direct_series(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> Eval
     direct_series_with_limit(a, b, c, z, MAX_SERIES_ITERATIONS)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EvalPath {
+    Direct,
+    PfaffDirect,
+    Infinity,
+    PfaffInfinity,
+    One,
+    PfaffOne,
+    Uncovered,
+}
+
+fn select_path(z: Complex64) -> EvalPath {
+    let one_minus_z = Complex64::ONE - z;
+    let inverse_z = complex_inverse(z);
+    let pfaff_z = Complex64::ONE + complex_inverse(z - 1.0);
+    let candidates = [
+        (EvalPath::Direct, complex_abs(z)),
+        (EvalPath::PfaffDirect, complex_abs(pfaff_z)),
+        (EvalPath::Infinity, complex_abs(inverse_z)),
+        (EvalPath::PfaffInfinity, complex_abs(1.0 - inverse_z)),
+        (EvalPath::One, complex_abs(one_minus_z)),
+        (
+            EvalPath::PfaffOne,
+            complex_abs(complex_inverse(one_minus_z)),
+        ),
+    ];
+    let mut selected = EvalPath::Uncovered;
+    let mut selected_modulus = f64::INFINITY;
+    for (path, modulus) in candidates {
+        if modulus <= DIRECT_RADIUS {
+            let tie = 32.0 * f64::EPSILON * selected_modulus.max(modulus).max(1.0);
+            if selected == EvalPath::Uncovered || modulus + tie < selected_modulus {
+                selected = path;
+                selected_modulus = modulus;
+            }
+        }
+    }
+    selected
+}
+
+fn general_evaluation(
+    mut a: Complex64,
+    mut b: Complex64,
+    c: Complex64,
+    z: Complex64,
+) -> EvalOutcome {
+    let mut outer_prefactor = Complex64::ONE;
+    let balance = c - a - b;
+    if balance.re < 0.0 {
+        outer_prefactor = (balance * complex_log1p(-z)).exp();
+        a = c - a;
+        b = c - b;
+    }
+    if (b - a).re < 0.0 {
+        core::mem::swap(&mut a, &mut b);
+    }
+
+    let path = select_path(z);
+    let pfaff_z = Complex64::ONE + complex_inverse(z - 1.0);
+    let pfaff_prefactor = (-a * complex_log1p(-z)).exp();
+    let result = match path {
+        EvalPath::Direct => direct_series(a, b, c, z),
+        EvalPath::PfaffDirect => direct_series(a, c - b, c, pfaff_z),
+        EvalPath::Infinity => infinity_expansion(a, b, c, z),
+        EvalPath::PfaffInfinity => infinity_expansion(a, c - b, c, pfaff_z),
+        EvalPath::One => one_expansion(a, b, c, z),
+        EvalPath::PfaffOne => one_expansion(a, c - b, c, pfaff_z),
+        EvalPath::Uncovered => EvalOutcome::failure(),
+    };
+    if !result.converged {
+        return result;
+    }
+    let inner_prefactor = if matches!(
+        path,
+        EvalPath::PfaffDirect | EvalPath::PfaffInfinity | EvalPath::PfaffOne
+    ) {
+        pfaff_prefactor
+    } else {
+        Complex64::ONE
+    };
+    let value = outer_prefactor * inner_prefactor * result.value;
+    if finite(value) {
+        EvalOutcome::success_with_cancellation(value, result.cancellation_estimate)
+    } else {
+        EvalOutcome::failure()
+    }
+}
+
 /// Evaluate Gauss's hypergeometric function on its principal branch.
 ///
 /// All four arguments may be complex. Values on the branch cut distinguish
@@ -510,10 +979,7 @@ pub fn hyp2f1_scalar(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> 
     if c == b {
         return (-a * complex_log1p(-z)).exp();
     }
-    if complex_abs(z) > DIRECT_RADIUS {
-        return NAN;
-    }
-    let result = direct_series(a, b, c, z);
+    let result = general_evaluation(a, b, c, z);
     if result.converged { result.value } else { NAN }
 }
 
@@ -695,6 +1161,17 @@ mod tests {
     #[test]
     fn stabilized_difference_helpers_have_finite_zero_limits() {
         let z = Complex64::new(1.2, -0.4);
+        let tiny = Complex64::new(0.0, 1e-9);
+        assert_close(
+            gamma_difference_ratio(Complex64::ONE, -tiny),
+            Complex64::new(-0.577_215_664_901_532_9, -6.558_780_715_202_539e-10),
+            2e-14,
+        );
+        assert_close(
+            gamma_difference_ratio(Complex64::new(3.0, 0.0), tiny),
+            Complex64::new(0.461_392_167_549_233_57, -1.141_492_155_637_234e-10),
+            2e-14,
+        );
         assert_close(
             gamma_difference_ratio(z, Complex64::ZERO),
             digamma(z) * reciprocal_gamma(z),
@@ -720,6 +1197,64 @@ mod tests {
                 row.tolerance,
             );
         }
+    }
+
+    #[test]
+    fn transformed_fixtures_match_reference() {
+        for row in parse_hyp_fixture().into_iter().filter(|row| {
+            matches!(
+                row.label,
+                "pfaff"
+                    | "infinity"
+                    | "one"
+                    | "one-near-integer"
+                    | "infinity-near-integer"
+                    | "euler"
+                    | "moderate"
+                    | "scipy-1561"
+                    | "upper-cut"
+                    | "lower-cut"
+            )
+        }) {
+            assert_close(
+                hyp2f1_scalar(row.a, row.b, row.c, row.z),
+                row.expected,
+                row.tolerance,
+            );
+        }
+    }
+
+    #[test]
+    fn every_transformed_selector_path_is_reachable() {
+        assert_eq!(select_path(Complex64::new(0.2, 0.1)), EvalPath::Direct);
+        assert_eq!(
+            select_path(Complex64::new(-0.5, 0.1)),
+            EvalPath::PfaffDirect
+        );
+        assert_eq!(select_path(Complex64::new(3.0, 4.0)), EvalPath::Infinity);
+        assert_eq!(
+            select_path(Complex64::new(1.2, 0.4)),
+            EvalPath::PfaffInfinity
+        );
+        assert_eq!(select_path(Complex64::new(0.95, 0.05)), EvalPath::One);
+        assert_eq!(select_path(Complex64::new(-3.0, 0.4)), EvalPath::PfaffOne);
+    }
+
+    #[test]
+    fn symmetry_euler_and_pfaff_identities_agree() {
+        let a = Complex64::new(0.4, 0.2);
+        let b = Complex64::new(0.9, -0.1);
+        let c = Complex64::new(2.4, 0.3);
+        let z = Complex64::new(-0.7, 0.2);
+        let value = hyp2f1_scalar(a, b, c, z);
+        assert_close(hyp2f1_scalar(b, a, c, z), value, 5e-13);
+
+        let euler = ((c - a - b) * complex_log1p(-z)).exp() * hyp2f1_scalar(c - a, c - b, c, z);
+        assert_close(euler, value, 2e-12);
+
+        let transformed_z = Complex64::ONE + complex_inverse(z - 1.0);
+        let pfaff = (-a * complex_log1p(-z)).exp() * hyp2f1_scalar(a, c - b, c, transformed_z);
+        assert_close(pfaff, value, 2e-12);
     }
 
     #[test]

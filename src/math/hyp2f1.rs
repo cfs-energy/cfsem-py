@@ -1074,13 +1074,12 @@ enum EvalPath {
     Taylor,
 }
 
-fn select_path(z: Complex64) -> EvalPath {
+/// Return every transformed path and the modulus of its local series variable.
+fn path_candidates(z: Complex64) -> [(EvalPath, f64); 6] {
     let one_minus_z = one_minus(z);
     let inverse_z = complex_inverse(z);
     let pfaff_z = pfaff_argument(z);
-    // The ordering is also the deterministic tie-break policy at region
-    // boundaries, which prevents small roundoff changes from switching paths.
-    let candidates = [
+    [
         (EvalPath::Direct, complex_abs(z)),
         (EvalPath::PfaffDirect, complex_abs(pfaff_z)),
         // Prefer the Pfaff form when the two infinity coordinates tie (notably
@@ -1093,10 +1092,15 @@ fn select_path(z: Complex64) -> EvalPath {
             EvalPath::PfaffOne,
             complex_abs(complex_inverse(one_minus_z)),
         ),
-    ];
+    ]
+}
+
+fn select_path(z: Complex64) -> EvalPath {
+    // The ordering is also the deterministic tie-break policy at region
+    // boundaries, which prevents small roundoff changes from switching paths.
     let mut selected = EvalPath::Taylor;
     let mut selected_modulus = f64::INFINITY;
-    for (path, modulus) in candidates {
+    for (path, modulus) in path_candidates(z) {
         if modulus <= DIRECT_RADIUS {
             let tie = 32.0 * f64::EPSILON * selected_modulus.max(modulus).max(1.0);
             if selected == EvalPath::Taylor || modulus + tie < selected_modulus {
@@ -1197,6 +1201,45 @@ fn general_evaluation(a: Complex64, b: Complex64, c: Complex64, z: Complex64) ->
     general_evaluation_impl(a, b, c, z, true)
 }
 
+/// Evaluate one selector path, including its path-specific Pfaff prefactor.
+fn evaluate_path(
+    path: EvalPath,
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    z: Complex64,
+    allow_taylor: bool,
+) -> EvalOutcome {
+    let (result, prefactor) = match path {
+        EvalPath::Direct => (direct_series(a, b, c, z), Complex64::ONE),
+        EvalPath::PfaffDirect => (
+            direct_series(a, c - b, c, pfaff_argument(z)),
+            (-a * complex_log1p(-z)).exp(),
+        ),
+        EvalPath::Infinity => (infinity_expansion(a, b, c, z), Complex64::ONE),
+        EvalPath::PfaffInfinity => (
+            infinity_expansion(a, c - b, c, pfaff_argument(z)),
+            (-a * complex_log1p(-z)).exp(),
+        ),
+        EvalPath::One => (one_expansion(a, b, c, z), Complex64::ONE),
+        EvalPath::PfaffOne => (
+            one_expansion(a, c - b, c, pfaff_argument(z)),
+            (-a * complex_log1p(-z)).exp(),
+        ),
+        EvalPath::Taylor if allow_taylor => (taylor_continuation(a, b, c, z), Complex64::ONE),
+        EvalPath::Taylor => (EvalOutcome::failure(), Complex64::ONE),
+    };
+    if !result.converged {
+        return result;
+    }
+    let value = prefactor * result.value;
+    if finite(value) {
+        EvalOutcome::success(value)
+    } else {
+        EvalOutcome::failure()
+    }
+}
+
 fn general_evaluation_impl(
     mut a: Complex64,
     mut b: Complex64,
@@ -1238,29 +1281,25 @@ fn general_evaluation_impl(
     }
 
     let path = select_path(z);
-    let (result, inner_prefactor) = match path {
-        EvalPath::Direct => (direct_series(a, b, c, z), Complex64::ONE),
-        EvalPath::PfaffDirect => (
-            direct_series(a, c - b, c, pfaff_argument(z)),
-            (-a * complex_log1p(-z)).exp(),
-        ),
-        EvalPath::Infinity => (infinity_expansion(a, b, c, z), Complex64::ONE),
-        EvalPath::PfaffInfinity => (
-            infinity_expansion(a, c - b, c, pfaff_argument(z)),
-            (-a * complex_log1p(-z)).exp(),
-        ),
-        EvalPath::One => (one_expansion(a, b, c, z), Complex64::ONE),
-        EvalPath::PfaffOne => (
-            one_expansion(a, c - b, c, pfaff_argument(z)),
-            (-a * complex_log1p(-z)).exp(),
-        ),
-        EvalPath::Taylor if allow_taylor => (taylor_continuation(a, b, c, z), Complex64::ONE),
-        EvalPath::Taylor => (EvalOutcome::failure(), Complex64::ONE),
-    };
+    let mut result = evaluate_path(path, a, b, c, z, allow_taylor);
+    if !result.converged {
+        // A small local coordinate predicts convergence, not numerical
+        // success. If the preferred expansion encounters a removable pole or
+        // unstable seed, try every other admissible series before reporting
+        // failure. The normal successful path still pays no retry cost.
+        for (fallback, modulus) in path_candidates(z) {
+            if fallback != path && modulus <= DIRECT_RADIUS {
+                result = evaluate_path(fallback, a, b, c, z, allow_taylor);
+                if result.converged {
+                    break;
+                }
+            }
+        }
+    }
     if !result.converged {
         return result;
     }
-    let value = outer_prefactor * inner_prefactor * result.value;
+    let value = outer_prefactor * result.value;
     if finite(value) {
         EvalOutcome::success(value)
     } else {
@@ -1738,6 +1777,23 @@ mod tests {
         );
         assert_eq!(select_path(Complex64::new(0.95, 0.05)), EvalPath::One);
         assert_eq!(select_path(Complex64::new(-3.0, 0.4)), EvalPath::PfaffOne);
+    }
+
+    #[test]
+    fn failed_selected_connection_path_retries_admissible_direct_series() {
+        let a = Complex64::new(0.2, 0.0);
+        let b = Complex64::new(0.3, 0.0);
+        let c = Complex64::new(48.5, 0.0);
+        let z = Complex64::new(0.6, 0.0);
+
+        assert_eq!(select_path(z), EvalPath::One);
+        assert!(!one_expansion(a, b, c, z).converged);
+        assert!(direct_series(a, b, c, z).converged);
+        assert_close(
+            hyp2f1_scalar(a, b, c, z),
+            Complex64::new(1.000_749_430_996_130_3, 0.0),
+            3e-14,
+        );
     }
 
     #[test]

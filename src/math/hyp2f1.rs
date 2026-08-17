@@ -10,6 +10,7 @@ use crate::{chunksize, macros::check_length};
 
 const NAN: Complex64 = Complex64::new(f64::NAN, f64::NAN);
 const REL_TOL: f64 = 8.0 * f64::EPSILON;
+const DIRECT_RADIUS: f64 = 0.9;
 const MAX_SERIES_ITERATIONS: usize = 10_000;
 const LANCZOS_G_MINUS_HALF: f64 = 4.242_187_5;
 const LOG_SQRT_TWO_PI: f64 = 0.918_938_533_204_672_7;
@@ -35,6 +36,7 @@ const LANCZOS_COEFFICIENTS: [f64; 15] = [
 struct EvalOutcome {
     value: Complex64,
     converged: bool,
+    cancellation_estimate: f64,
 }
 
 impl EvalOutcome {
@@ -43,6 +45,16 @@ impl EvalOutcome {
         Self {
             value,
             converged: true,
+            cancellation_estimate: 1.0,
+        }
+    }
+
+    #[inline]
+    const fn success_with_cancellation(value: Complex64, cancellation_estimate: f64) -> Self {
+        Self {
+            value,
+            converged: true,
+            cancellation_estimate,
         }
     }
 
@@ -51,6 +63,7 @@ impl EvalOutcome {
         Self {
             value: NAN,
             converged: false,
+            cancellation_estimate: f64::INFINITY,
         }
     }
 }
@@ -342,36 +355,115 @@ fn exponential_difference_ratio(z: Complex64, epsilon: Complex64) -> Complex64 {
     }
 }
 
-#[inline]
-fn direct_series(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
-    let mut term = Complex64::ONE;
-    let mut sum = Complex64::ONE;
-    let mut small_terms = 0;
+#[derive(Clone, Copy, Debug)]
+struct CompensatedSum {
+    sum: Complex64,
+    correction: Complex64,
+}
 
-    for n in 0..MAX_SERIES_ITERATIONS {
+impl CompensatedSum {
+    #[inline]
+    const fn new(value: Complex64) -> Self {
+        Self {
+            sum: value,
+            correction: Complex64::ZERO,
+        }
+    }
+
+    #[inline]
+    fn add(&mut self, value: Complex64) {
+        let adjusted = value - self.correction;
+        let next = self.sum + adjusted;
+        self.correction = (next - self.sum) - adjusted;
+        self.sum = next;
+    }
+
+    #[inline]
+    fn value(self) -> Complex64 {
+        self.sum
+    }
+}
+
+#[inline]
+fn negative_integer_degree(z: Complex64) -> Option<usize> {
+    if is_nonpositive_integer(z) && -z.re <= usize::MAX as f64 {
+        Some((-z.re) as usize)
+    } else {
+        None
+    }
+}
+
+fn terminating_series(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    z: Complex64,
+    degree: usize,
+) -> EvalOutcome {
+    let mut term = Complex64::ONE;
+    let mut sum = CompensatedSum::new(Complex64::ONE);
+    for n in 0..degree {
         let nf = n as f64;
         let denominator = (c + nf) * (nf + 1.0);
         if denominator == Complex64::ZERO {
             return EvalOutcome::failure();
         }
         term *= (a + nf) * (b + nf) * z / denominator;
-        sum += term;
-        if !finite(term) || !finite(sum) {
+        sum.add(term);
+        if !finite(term) || !finite(sum.value()) {
+            return EvalOutcome::failure();
+        }
+    }
+    EvalOutcome::success(sum.value())
+}
+
+#[inline]
+fn direct_series_with_limit(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    z: Complex64,
+    iteration_limit: usize,
+) -> EvalOutcome {
+    let mut term = Complex64::ONE;
+    let mut sum = CompensatedSum::new(Complex64::ONE);
+    let mut small_terms = 0;
+    let mut largest_term: f64 = 1.0;
+
+    for n in 0..iteration_limit {
+        let nf = n as f64;
+        let denominator = (c + nf) * (nf + 1.0);
+        if denominator == Complex64::ZERO {
+            return EvalOutcome::failure();
+        }
+        term *= (a + nf) * (b + nf) * z / denominator;
+        sum.add(term);
+        let value = sum.value();
+        let term_abs = complex_abs(term);
+        largest_term = largest_term.max(term_abs);
+        if !finite(term) || !finite(value) {
             return EvalOutcome::failure();
         }
 
-        if term == Complex64::ZERO
-            || (sum != Complex64::ZERO && term.norm() <= REL_TOL * sum.norm())
-        {
+        let value_abs = complex_abs(value);
+        let converged =
+            term == Complex64::ZERO || (value_abs > 0.0 && term_abs <= REL_TOL * value_abs);
+        if converged {
             small_terms += 1;
-            if small_terms >= 2 {
-                return EvalOutcome::success(sum);
+            if small_terms >= 2 && n >= 1 {
+                let cancellation = largest_term / value_abs.max(f64::MIN_POSITIVE);
+                return EvalOutcome::success_with_cancellation(value, cancellation);
             }
         } else {
             small_terms = 0;
         }
     }
     EvalOutcome::failure()
+}
+
+#[inline]
+fn direct_series(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
+    direct_series_with_limit(a, b, c, z, MAX_SERIES_ITERATIONS)
 }
 
 /// Evaluate Gauss's hypergeometric function on its principal branch.
@@ -386,6 +478,40 @@ pub fn hyp2f1_scalar(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> 
     }
     if z == Complex64::ZERO || a == Complex64::ZERO || b == Complex64::ZERO {
         return Complex64::ONE;
+    }
+
+    let terminating_degree = match (negative_integer_degree(a), negative_integer_degree(b)) {
+        (Some(a_degree), Some(b_degree)) => Some(a_degree.min(b_degree)),
+        (Some(degree), None) | (None, Some(degree)) => Some(degree),
+        (None, None) => None,
+    };
+    if let Some(degree) = terminating_degree {
+        if let Some(pole_degree) = negative_integer_degree(c)
+            && degree > pole_degree
+        {
+            return NAN;
+        }
+        let result = terminating_series(a, b, c, z, degree);
+        return if result.converged { result.value } else { NAN };
+    }
+    if is_nonpositive_integer(c) {
+        return NAN;
+    }
+    if z == Complex64::ONE {
+        let balance = c - a - b;
+        if balance.re <= 0.0 {
+            return NAN;
+        }
+        return gamma_ratio(&[c, balance], &[c - a, c - b]);
+    }
+    if c == a {
+        return (-b * complex_log1p(-z)).exp();
+    }
+    if c == b {
+        return (-a * complex_log1p(-z)).exp();
+    }
+    if complex_abs(z) > DIRECT_RADIUS {
+        return NAN;
     }
     let result = direct_series(a, b, c, z);
     if result.converged { result.value } else { NAN }
@@ -468,6 +594,54 @@ mod tests {
         rows
     }
 
+    #[derive(Debug)]
+    struct HypFixtureRow<'a> {
+        a: Complex64,
+        b: Complex64,
+        c: Complex64,
+        z: Complex64,
+        expected: Complex64,
+        tolerance: f64,
+        label: &'a str,
+    }
+
+    fn parse_hyp_fixture() -> Vec<HypFixtureRow<'static>> {
+        let fixture = include_str!("../../test/data/hyp2f1_reference.csv");
+        let mut rows = Vec::new();
+        for (line_index, line) in fixture.lines().enumerate() {
+            if line.starts_with('#') || line_index == 1 || line.is_empty() {
+                continue;
+            }
+            let fields: Vec<_> = line.split(',').collect();
+            assert_eq!(
+                fields.len(),
+                12,
+                "hyp2f1_reference.csv row {} has wrong field count",
+                line_index + 1
+            );
+            let mut values = [0.0; 11];
+            for (field_index, field) in fields[..11].iter().enumerate() {
+                values[field_index] = field.parse().unwrap_or_else(|error| {
+                    panic!(
+                        "hyp2f1_reference.csv row {}, field {} is not f64: {error}",
+                        line_index + 1,
+                        field_index + 1
+                    )
+                });
+            }
+            rows.push(HypFixtureRow {
+                a: Complex64::new(values[0], values[1]),
+                b: Complex64::new(values[2], values[3]),
+                c: Complex64::new(values[4], values[5]),
+                z: Complex64::new(values[6], values[7]),
+                expected: Complex64::new(values[8], values[9]),
+                tolerance: values[10],
+                label: fields[11],
+            });
+        }
+        rows
+    }
+
     #[test]
     fn complex_gamma_and_digamma_match_reference() {
         for [
@@ -532,6 +706,75 @@ mod tests {
             2e-14,
         );
         assert_eq!(exponential_difference_ratio(z, Complex64::ZERO), z);
+    }
+
+    #[test]
+    fn direct_and_polynomial_fixtures_match_reference() {
+        for row in parse_hyp_fixture()
+            .into_iter()
+            .filter(|row| matches!(row.label, "direct" | "polynomial"))
+        {
+            assert_close(
+                hyp2f1_scalar(row.a, row.b, row.c, row.z),
+                row.expected,
+                row.tolerance,
+            );
+        }
+    }
+
+    #[test]
+    fn exceptional_cases_follow_documented_precedence() {
+        let a = Complex64::new(1.2, 0.3);
+        let b = Complex64::new(0.7, -0.2);
+        assert_eq!(hyp2f1_scalar(a, b, a, Complex64::ZERO), Complex64::ONE);
+        assert_close(
+            hyp2f1_scalar(a, b, a, Complex64::new(0.2, -0.1)),
+            (-b * complex_log1p(Complex64::new(-0.2, 0.1))).exp(),
+            2e-14,
+        );
+
+        let valid = hyp2f1_scalar(
+            Complex64::new(-2.0, 0.0),
+            b,
+            Complex64::new(-2.0, 0.0),
+            Complex64::new(2.0, 0.5),
+        );
+        assert!(finite(valid));
+        let invalid = hyp2f1_scalar(
+            Complex64::new(-3.0, 0.0),
+            b,
+            Complex64::new(-2.0, 0.0),
+            Complex64::new(0.2, 0.0),
+        );
+        assert!(invalid.re.is_nan() && invalid.im.is_nan());
+
+        let non_finite = hyp2f1_scalar(Complex64::new(f64::INFINITY, 0.0), b, a, Complex64::ZERO);
+        assert!(non_finite.re.is_nan() && non_finite.im.is_nan());
+    }
+
+    #[test]
+    fn argument_unity_uses_gauss_ratio() {
+        let a = Complex64::new(0.2, 0.1);
+        let b = Complex64::new(0.3, -0.2);
+        let c = Complex64::new(2.0, 0.4);
+        let expected = gamma_ratio(&[c, c - a - b], &[c - a, c - b]);
+        assert_close(hyp2f1_scalar(a, b, c, Complex64::ONE), expected, 2e-14);
+        let divergent = hyp2f1_scalar(a, b, a + b, Complex64::ONE);
+        assert!(divergent.re.is_nan() && divergent.im.is_nan());
+    }
+
+    #[test]
+    fn direct_series_iteration_cap_reports_failure() {
+        let result = direct_series_with_limit(
+            Complex64::new(0.7, 0.2),
+            Complex64::new(1.1, -0.3),
+            Complex64::new(2.4, 0.1),
+            Complex64::new(0.8, 0.1),
+            1,
+        );
+        assert!(!result.converged);
+        assert!(result.value.re.is_nan() && result.value.im.is_nan());
+        assert!(result.cancellation_estimate.is_infinite());
     }
 
     #[test]

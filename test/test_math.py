@@ -89,6 +89,29 @@ def test_hyp2f1_rejects_unequal_shapes():
 
 
 @pytest.mark.parametrize("par", [False, True])
+def test_hyp2f1_rejects_self_overlapping_output(par):
+    backing = np.full(4, 7.0 + 8.0j, dtype=np.complex128)
+    outputs = [
+        np.lib.stride_tricks.as_strided(backing[:1], shape=(4,), strides=(0,), writeable=True),
+        np.lib.stride_tricks.as_strided(
+            backing, shape=(4,), strides=(backing.itemsize // 2,), writeable=True
+        ),
+        np.lib.stride_tricks.as_strided(
+            backing[:3],
+            shape=(2, 2),
+            strides=(backing.itemsize, backing.itemsize),
+            writeable=True,
+        ),
+    ]
+
+    for out in outputs:
+        before = backing.copy()
+        with pytest.raises(ValueError, match="non-overlapping"):
+            cfsem.hyp2f1(0.5 + 0.2j, 1.1 - 0.1j, 2.4 + 0.3j, 0.2 + 0.1j, par=par, out=out)
+        np.testing.assert_array_equal(backing, before)
+
+
+@pytest.mark.parametrize("par", [False, True])
 def test_hyp2f1_multidimensional_strided_inputs_and_output(par):
     a = np.array([0.5 + 0.2j, 0.7 - 0.1j, 1.2 + 0.3j, 0.8 - 0.2j, 1.1 + 0.1j, 0.6 - 0.4j]).reshape(2, 3)
     b = np.asfortranarray(

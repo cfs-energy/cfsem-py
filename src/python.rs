@@ -3392,6 +3392,34 @@ fn hyp2f1_output_shape(
     Ok(shape.to_vec())
 }
 
+/// Conservatively detect whether an array's logical elements may overlap.
+///
+/// Axes are considered from smallest to largest absolute byte stride. Each
+/// successive axis must step beyond the full byte span reachable through the
+/// preceding axes, including the width of one element. Strides which are not a
+/// whole number of elements are also rejected because ndarray cannot represent
+/// them exactly. A `false` result therefore guarantees non-overlap; unusual
+/// injective layouts may conservatively return `true`.
+fn array_may_self_overlap(shape: &[usize], strides: &[isize]) -> bool {
+    if shape.contains(&0) {
+        return false;
+    }
+
+    let mut axes: Vec<_> = (0..shape.len()).filter(|&axis| shape[axis] > 1).collect();
+    axes.sort_unstable_by_key(|&axis| strides[axis].unsigned_abs());
+
+    let element_size = std::mem::size_of::<Complex64>();
+    let mut preceding_span = element_size - 1;
+    for axis in axes {
+        let stride = strides[axis].unsigned_abs();
+        if stride % element_size != 0 || stride <= preceding_span {
+            return true;
+        }
+        preceding_span = preceding_span.saturating_add((shape[axis] - 1).saturating_mul(stride));
+    }
+    false
+}
+
 /// Fill an output array using ndarray's shape-aware serial or parallel `Zip`.
 fn hyp2f1_fill(
     out: &mut PyReadwriteArrayDyn<'_, Complex64>,
@@ -3425,10 +3453,11 @@ fn hyp2f1_fill(
 /// parameter magnitudes.
 ///
 /// Pass a writable `complex128` array with the result shape as `out` to reuse
-/// its storage. The output may be arbitrarily strided, and the same array object
-/// is returned. If `out` is `None`, a new C-contiguous output is allocated. If
-/// every input is scalar, `out` may define any result shape; without `out`, the
-/// result is a zero-dimensional array. `out` must not alias an input array.
+/// its storage. The output may be strided but must not contain overlapping
+/// elements, and the same array object is returned. If `out` is `None`, a new
+/// C-contiguous output is allocated. If every input is scalar, `out` may define
+/// any result shape; without `out`, the result is a zero-dimensional array.
+/// `out` must not alias an input array.
 #[pyfunction(signature = (a, b, c, z, par = true, *, out = None))]
 fn hyp2f1(
     py: Python<'_>,
@@ -3447,6 +3476,15 @@ fn hyp2f1(
     let z = Hyp2f1Input::extract(z, "z")?;
     let inputs = [&a, &b, &c, &z];
     let shape = hyp2f1_output_shape(inputs, out.as_ref().map(|out| out.shape()))?;
+
+    if out
+        .as_ref()
+        .is_some_and(|out| array_may_self_overlap(out.shape(), out.strides()))
+    {
+        return Err(exceptions::PyValueError::new_err(
+            "out must have a non-overlapping memory layout",
+        ));
+    }
 
     match out {
         Some(out) => {

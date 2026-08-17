@@ -36,7 +36,7 @@ def generate_hyp2f1() -> None:
     path = DATA / "hyp2f1_reference.csv"
     with path.open("w", newline="") as stream:
         stream.write(f"# mpmath={MPMATH_VERSION}, dps={PRECISION}\n")
-        writer = csv.writer(stream)
+        writer = csv.writer(stream, lineterminator="\n")
         writer.writerow(
             [
                 "a_re", "a_im", "b_re", "b_im", "c_re", "c_im",
@@ -57,14 +57,43 @@ def generate_hyp2f1() -> None:
 
 def generate_gamma() -> None:
     path = DATA / "complex_gamma_reference.csv"
-    points = [0.2 + 0.3j, 1.2 - 2.5j, 8.5 + 1.25j, -0.3 + 0.7j, -4.0 + 1e-8j]
+    points = [
+        0.2 + 0.3j,
+        0.2 - 0.3j,
+        1.2 - 2.5j,
+        1.2 + 2.5j,
+        8.5 + 1.25j,
+        -0.3 + 0.7j,
+        -0.3 - 0.7j,
+        -4.0 + 1e-8j,
+        -4.0 - 1e-8j,
+    ]
     with path.open("w", newline="") as stream:
         stream.write(f"# mpmath={MPMATH_VERSION}, dps={PRECISION}\n")
-        writer = csv.writer(stream)
-        writer.writerow(["z_re", "z_im", "gamma_re", "gamma_im", "digamma_re", "digamma_im"])
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(
+            [
+                "z_re",
+                "z_im",
+                "gamma_re",
+                "gamma_im",
+                "rgamma_re",
+                "rgamma_im",
+                "digamma_re",
+                "digamma_im",
+            ]
+        )
         for z in points:
             value = mp.mpc(z)
-            writer.writerow([z.real, z.imag, *parts(mp.gamma(value)), *parts(mp.digamma(value))])
+            writer.writerow(
+                [
+                    z.real,
+                    z.imag,
+                    *parts(mp.gamma(value)),
+                    *parts(mp.rgamma(value)),
+                    *parts(mp.digamma(value)),
+                ]
+            )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,14 @@
 use numpy::Element as NumpyElement;
-use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadwriteArray1};
-use numpy::{Complex64, PyArray1, PyArrayMethods};
+use numpy::borrow::{
+    PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadonlyArrayDyn, PyReadwriteArray1,
+    PyReadwriteArrayDyn,
+};
+use numpy::ndarray::{ArrayView0, ArrayViewD, IxDyn, Zip};
+use numpy::{Complex64, PyArray1, PyArrayDyn, PyArrayMethods, PyUntypedArray};
 use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyTuple};
+use pyo3::types::{PyComplex, PyComplexMethods, PyDict, PyTuple};
 use std::ffi::CString;
 use std::fmt::Debug;
 
@@ -3315,55 +3319,148 @@ fn ellipk(x: f64) -> f64 {
     math::ellipk(x)
 }
 
+/// A borrowed NumPy `complex128` array or a scalar complex value.
+///
+/// Scalars become zero-dimensional ndarray views so that `Zip` can broadcast
+/// them without allocating expanded parameter arrays.
+enum Hyp2f1Input<'py> {
+    Array(PyReadonlyArrayDyn<'py, Complex64>),
+    Scalar(Complex64),
+}
+
+impl<'py> Hyp2f1Input<'py> {
+    /// Extract a strictly complex scalar or `complex128` NumPy array.
+    fn extract(value: &Bound<'py, PyAny>, name: &str) -> PyResult<Self> {
+        if let Ok(array) = value.cast::<PyArrayDyn<Complex64>>() {
+            return Ok(Self::Array(array.try_readonly()?));
+        }
+        if value.cast::<PyUntypedArray>().is_ok() {
+            return Err(exceptions::PyTypeError::new_err(format!(
+                "{name} must have dtype complex128"
+            )));
+        }
+        if let Ok(value) = value.cast::<PyComplex>() {
+            return Ok(Self::Scalar(Complex64::new(value.real(), value.imag())));
+        }
+        Err(exceptions::PyTypeError::new_err(format!(
+            "{name} must be a complex scalar or complex128 ndarray"
+        )))
+    }
+
+    /// Return the shape that this input requires, ignoring scalar inputs.
+    fn nonscalar_shape(&self) -> Option<&[usize]> {
+        use numpy::PyUntypedArrayMethods as _;
+
+        match self {
+            Self::Array(array) if array.ndim() != 0 => Some(array.shape()),
+            Self::Array(_) | Self::Scalar(_) => None,
+        }
+    }
+
+    /// Return an ndarray view suitable for `Zip::and_broadcast`.
+    fn view(&self) -> ArrayViewD<'_, Complex64> {
+        match self {
+            Self::Array(array) => array.as_array(),
+            Self::Scalar(value) => ArrayView0::from_shape((), std::slice::from_ref(value))
+                .expect("one value always forms a scalar view")
+                .into_dyn(),
+        }
+    }
+}
+
+/// Determine and validate the exact elementwise output shape.
+///
+/// Non-scalar inputs must have identical shapes. If every input is scalar, a
+/// supplied output defines the shape; otherwise the result is zero-dimensional.
+fn hyp2f1_output_shape(
+    inputs: [&Hyp2f1Input<'_>; 4],
+    out_shape: Option<&[usize]>,
+) -> PyResult<Vec<usize>> {
+    let input_shape = inputs.iter().find_map(|input| input.nonscalar_shape());
+    let shape = input_shape.or(out_shape).unwrap_or_default();
+
+    if inputs
+        .iter()
+        .filter_map(|input| input.nonscalar_shape())
+        .any(|input_shape| input_shape != shape)
+        || out_shape.is_some_and(|out_shape| out_shape != shape)
+    {
+        return Err(exceptions::PyValueError::new_err(
+            "all non-scalar inputs and out must have the same shape",
+        ));
+    }
+    Ok(shape.to_vec())
+}
+
+/// Fill an output array using ndarray's shape-aware serial or parallel `Zip`.
+fn hyp2f1_fill(
+    out: &mut PyReadwriteArrayDyn<'_, Complex64>,
+    inputs: [&Hyp2f1Input<'_>; 4],
+    par: bool,
+) {
+    let zip = Zip::from(out.as_array_mut())
+        .and_broadcast(inputs[0].view())
+        .and_broadcast(inputs[1].view())
+        .and_broadcast(inputs[2].view())
+        .and_broadcast(inputs[3].view());
+    let evaluate =
+        |out: &mut Complex64, &a: &Complex64, &b: &Complex64, &c: &Complex64, &z: &Complex64| {
+            *out = math::hyp2f1_scalar(a, b, c, z);
+        };
+    if par {
+        zip.par_for_each(evaluate);
+    } else {
+        zip.for_each(evaluate);
+    }
+}
+
 /// Evaluate Gauss's hypergeometric function elementwise on its principal branch.
 ///
-/// All four inputs must be equal-length, one-dimensional, C-contiguous NumPy
-/// `complex128` arrays. This function does not broadcast or cast. Values on the
-/// cut `[1, +inf)` distinguish the sign of zero in `z.imag`; mathematical
-/// singularities and unsupported numerical failures produce complex NaN values.
-/// Accuracy is not guaranteed uniformly for unbounded parameter magnitudes.
+/// Each input may be a complex scalar or an arbitrarily strided NumPy
+/// `complex128` array of any dimensionality. All non-scalar arrays must have the
+/// same shape; scalars are broadcast across that shape without being expanded.
+/// Values on the cut `[1, +inf)` distinguish the sign of zero in `z.imag`;
+/// mathematical singularities and unsupported numerical failures produce
+/// complex NaN values. Accuracy is not guaranteed uniformly for unbounded
+/// parameter magnitudes.
 ///
-/// Pass a writable, one-dimensional, C-contiguous `complex128` array as `out`
-/// to reuse its storage. The same array object is returned. If `out` is `None`,
-/// a new output array is allocated. `out` must not alias an input array.
+/// Pass a writable `complex128` array with the result shape as `out` to reuse
+/// its storage. The output may be arbitrarily strided, and the same array object
+/// is returned. If `out` is `None`, a new C-contiguous output is allocated. If
+/// every input is scalar, `out` may define any result shape; without `out`, the
+/// result is a zero-dimensional array. `out` must not alias an input array.
 #[pyfunction(signature = (a, b, c, z, par = true, *, out = None))]
 fn hyp2f1(
     py: Python<'_>,
-    a: PyReadonlyArray1<'_, Complex64>,
-    b: PyReadonlyArray1<'_, Complex64>,
-    c: PyReadonlyArray1<'_, Complex64>,
-    z: PyReadonlyArray1<'_, Complex64>,
+    a: &Bound<'_, PyAny>,
+    b: &Bound<'_, PyAny>,
+    c: &Bound<'_, PyAny>,
+    z: &Bound<'_, PyAny>,
     par: bool,
-    out: Option<Bound<'_, PyArray1<Complex64>>>,
-) -> PyResult<Py<PyArray1<Complex64>>> {
-    let a = a.as_slice()?;
-    let b = b.as_slice()?;
-    let c = c.as_slice()?;
-    let z = z.as_slice()?;
+    out: Option<Bound<'_, PyArrayDyn<Complex64>>>,
+) -> PyResult<Py<PyArrayDyn<Complex64>>> {
+    use numpy::PyUntypedArrayMethods as _;
+
+    let a = Hyp2f1Input::extract(a, "a")?;
+    let b = Hyp2f1Input::extract(b, "b")?;
+    let c = Hyp2f1Input::extract(c, "c")?;
+    let z = Hyp2f1Input::extract(z, "z")?;
+    let inputs = [&a, &b, &c, &z];
+    let shape = hyp2f1_output_shape(inputs, out.as_ref().map(|out| out.shape()))?;
+
     match out {
         Some(out) => {
             let returned = out.clone().unbind();
             let mut out = out.try_into_readwrite()?;
-            let result = {
-                let out_slice = out.as_slice_mut()?;
-                if par {
-                    math::hyp2f1_par(a, b, c, z, out_slice)
-                } else {
-                    math::hyp2f1(a, b, c, z, out_slice)
-                }
-            };
-            result.map_err(exceptions::PyValueError::new_err)?;
+            hyp2f1_fill(&mut out, inputs, par);
             Ok(returned)
         }
         None => {
-            let mut out = vec![Complex64::ZERO; a.len()];
-            let result = if par {
-                math::hyp2f1_par(a, b, c, z, &mut out)
-            } else {
-                math::hyp2f1(a, b, c, z, &mut out)
-            };
-            result.map_err(exceptions::PyValueError::new_err)?;
-            Ok(PyArray1::from_vec(py, out).unbind())
+            let out = PyArrayDyn::<Complex64>::zeros(py, IxDyn(&shape), false);
+            let returned = out.clone().unbind();
+            let mut out = out.try_into_readwrite()?;
+            hyp2f1_fill(&mut out, inputs, par);
+            Ok(returned)
         }
     }
 }

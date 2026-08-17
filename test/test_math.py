@@ -52,28 +52,20 @@ def test_hyp2f1_writes_optional_output_and_returns_same_array(par):
     np.testing.assert_array_equal(out, expected)
 
 
-def test_hyp2f1_output_length_mismatch_is_transactional():
-    inputs = [np.ones(2, dtype=np.complex128) for _ in range(4)]
-    out = np.full(3, 7.0 + 8.0j, dtype=np.complex128)
+def test_hyp2f1_output_shape_mismatch_is_transactional():
+    inputs = [np.ones((2, 3), dtype=np.complex128) for _ in range(4)]
+    out = np.full((3, 2), 7.0 + 8.0j, dtype=np.complex128)
 
-    with pytest.raises(ValueError, match="Length mismatch"):
+    with pytest.raises(ValueError, match="same shape"):
         cfsem.hyp2f1(inputs[0], inputs[1], inputs[2], inputs[3], out=out)
 
-    np.testing.assert_array_equal(out, np.full(3, 7.0 + 8.0j, dtype=np.complex128))
+    np.testing.assert_array_equal(out, np.full((3, 2), 7.0 + 8.0j, dtype=np.complex128))
 
 
-@pytest.mark.parametrize(
-    "bad_out",
-    [
-        np.ones(3, dtype=np.float64),
-        np.ones((1, 3), dtype=np.complex128),
-        np.ones(6, dtype=np.complex128)[::2],
-    ],
-)
-def test_hyp2f1_rejects_invalid_output(bad_out):
+def test_hyp2f1_rejects_non_complex128_output():
     valid = np.ones(3, dtype=np.complex128)
-    with pytest.raises((TypeError, ValueError)):
-        cfsem.hyp2f1(valid, valid, valid, valid, out=bad_out)
+    with pytest.raises(TypeError):
+        cfsem.hyp2f1(valid, valid, valid, valid, out=np.ones(3, dtype=np.float64))
 
 
 @pytest.mark.parametrize(
@@ -81,21 +73,73 @@ def test_hyp2f1_rejects_invalid_output(bad_out):
     [
         np.ones(3, dtype=np.float64),
         np.ones(3, dtype=np.complex64),
-        np.ones((1, 3), dtype=np.complex128),
-        np.ones(6, dtype=np.complex128)[::2],
     ],
 )
-def test_hyp2f1_rejects_non_complex128_vector_inputs(bad):
+def test_hyp2f1_rejects_non_complex128_array_inputs(bad):
     valid = np.ones(3, dtype=np.complex128)
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(TypeError):
         cfsem.hyp2f1(bad, valid, valid, valid)
 
 
-def test_hyp2f1_rejects_unequal_lengths():
-    short = np.ones(2, dtype=np.complex128)
-    long = np.ones(3, dtype=np.complex128)
-    with pytest.raises(ValueError, match="Length mismatch"):
-        cfsem.hyp2f1(short, long, short, short)
+def test_hyp2f1_rejects_unequal_shapes():
+    matrix = np.ones((2, 3), dtype=np.complex128)
+    vector = np.ones(6, dtype=np.complex128)
+    with pytest.raises(ValueError, match="same shape"):
+        cfsem.hyp2f1(matrix, vector, matrix, matrix)
+
+
+@pytest.mark.parametrize("par", [False, True])
+def test_hyp2f1_multidimensional_strided_inputs_and_output(par):
+    a = np.array([0.5 + 0.2j, 0.7 - 0.1j, 1.2 + 0.3j, 0.8 - 0.2j, 1.1 + 0.1j, 0.6 - 0.4j]).reshape(2, 3)
+    b = np.asfortranarray(
+        np.array([1.1 - 0.1j, 0.9 + 0.2j, 0.7 + 0.4j, 1.3 - 0.2j, 0.6 + 0.1j, 1.0 - 0.3j]).reshape(2, 3)
+    )
+    c_storage = np.full((2, 6), np.nan + 1j * np.nan, dtype=np.complex128)
+    c = c_storage[:, ::2]
+    c[...] = np.array([2.4 + 0.3j, 2.8 - 0.2j, 3.1 + 0.1j, 2.2 + 0.4j, 2.7 - 0.3j, 3.3 + 0.2j]).reshape(2, 3)
+    z = np.array([0.1 + 0.1j, 0.2 - 0.2j, 0.4 + 0.1j, 0.3 - 0.1j, 0.5 + 0.2j, 0.6 - 0.1j]).reshape(2, 3)[
+        :, ::-1
+    ]
+    out_storage = np.full((2, 6), np.nan + 1j * np.nan, dtype=np.complex128)
+    out = out_storage[:, ::2]
+    expected = np.empty(a.shape, dtype=np.complex128)
+    for index in np.ndindex(a.shape):
+        expected[index] = cfsem.hyp2f1(
+            complex(a[index]), complex(b[index]), complex(c[index]), complex(z[index])
+        ).item()
+
+    returned = cfsem.hyp2f1(a, b, c, z, par=par, out=out)
+
+    assert returned is out
+    np.testing.assert_array_equal(out, expected)
+
+
+@pytest.mark.parametrize("par", [False, True])
+def test_hyp2f1_broadcasts_complex_scalars(par):
+    a = 0.5 + 0.2j
+    b = np.complex128(1.1 - 0.1j)
+    c = np.array(2.4 + 0.3j, dtype=np.complex128)
+    z = np.array([[0.1 + 0.1j, 0.2 - 0.2j], [0.4 + 0.1j, 0.3 - 0.1j]])
+    expected = np.empty(z.shape, dtype=np.complex128)
+    for index in np.ndindex(z.shape):
+        expected[index] = cfsem.hyp2f1(a, b, c, complex(z[index]), par=False).item()
+
+    actual = cfsem.hyp2f1(a, b, c, z, par=par)
+
+    assert actual.shape == z.shape
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_hyp2f1_all_scalar_output_shape():
+    arguments = (0.5 + 0.2j, 1.1 - 0.1j, 2.4 + 0.3j, 0.2 + 0.1j)
+    scalar_result = cfsem.hyp2f1(*arguments)
+    out = np.empty((2, 3), dtype=np.complex128)
+
+    returned = cfsem.hyp2f1(*arguments, out=out)
+
+    assert scalar_result.shape == ()
+    assert returned is out
+    np.testing.assert_array_equal(out, np.full(out.shape, scalar_result.item()))
 
 
 def _hyp2f1_reference_rows():

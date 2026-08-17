@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 
 FloatArray: TypeAlias = NDArray[float64]
 ComplexArray: TypeAlias = NDArray[complex128]
+ComplexInput: TypeAlias = complex | complex128 | ComplexArray
 Float32Array: TypeAlias = NDArray[float32]
 IntArray: TypeAlias = NDArray[int64]
 UIntArray: TypeAlias = NDArray[uint64]
@@ -212,10 +213,10 @@ def body_force_density_linear_filament(
 def ellipe(x: float) -> float: ...
 def ellipk(x: float) -> float: ...
 def hyp2f1(
-    a: ComplexArray,
-    b: ComplexArray,
-    c: ComplexArray,
-    z: ComplexArray,
+    a: ComplexInput,
+    b: ComplexInput,
+    c: ComplexInput,
+    z: ComplexInput,
     par: bool = True,
     *,
     out: ComplexArray | None = None,

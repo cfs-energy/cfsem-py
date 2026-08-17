@@ -65,5 +65,9 @@ harness = false
 name = "boundary_element"
 harness = false
 
+[[bench]]
+name = "hyp2f1"
+harness = false
+
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "katex-header.html" ]

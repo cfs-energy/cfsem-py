@@ -3315,7 +3315,13 @@ fn ellipk(x: f64) -> f64 {
     math::ellipk(x)
 }
 
-/// Evaluate Gauss's hypergeometric function elementwise for complex arrays.
+/// Evaluate Gauss's hypergeometric function elementwise on its principal branch.
+///
+/// All four inputs must be equal-length, one-dimensional, C-contiguous NumPy
+/// `complex128` arrays. This function does not broadcast or cast. Values on the
+/// cut `[1, +inf)` distinguish the sign of zero in `z.imag`; mathematical
+/// singularities and unsupported numerical failures produce complex NaN values.
+/// Accuracy is not guaranteed uniformly for unbounded parameter magnitudes.
 #[pyfunction(signature = (a, b, c, z, par = true))]
 fn hyp2f1(
     py: Python<'_>,

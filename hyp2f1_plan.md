@@ -6,7 +6,9 @@
 
 **Branch:** jlogan/hyp2f1
 
-**Status:** Ready
+**Status:** COMPLETE
+
+**Completed:** 2026-08-17
 
 ## Feature Request
 

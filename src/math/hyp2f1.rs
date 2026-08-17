@@ -20,6 +20,8 @@ use crate::{chunksize, macros::check_length};
 const NAN: Complex64 = Complex64::new(f64::NAN, f64::NAN);
 const REL_TOL: f64 = 8.0 * f64::EPSILON;
 const DIRECT_RADIUS: f64 = 0.9;
+const TAYLOR_INNER_ANCHOR_RADIUS: f64 = 0.875;
+const TAYLOR_OUTER_ANCHOR_RADIUS: f64 = 1.1;
 const MAX_SERIES_ITERATIONS: usize = 10_000;
 const MAX_TAYLOR_ITERATIONS: usize = 512;
 const LANCZOS_G_MINUS_HALF: f64 = 4.242_187_5;
@@ -275,6 +277,22 @@ fn complex_inverse(z: Complex64) -> Complex64 {
         let denominator = z.im + z.re * ratio;
         Complex64::new(ratio / denominator, -1.0 / denominator)
     }
+}
+
+/// Forms `1 - z` while retaining the negated sign of an exactly zero
+/// imaginary part. Ordinary complex subtraction rounds `+0.0 - +0.0` back to
+/// `+0.0`, which loses the upper/lower-lip distinction on the branch cut.
+#[inline]
+fn one_minus(z: Complex64) -> Complex64 {
+    Complex64::new(1.0 - z.re, -z.im)
+}
+
+/// Forms the Pfaff argument `z / (z - 1) = 1 + 1 / (z - 1)` without allowing
+/// addition of the real unit to erase the inverse's signed imaginary zero.
+#[inline]
+fn pfaff_argument(z: Complex64) -> Complex64 {
+    let inverse = complex_inverse(z - 1.0);
+    Complex64::new(1.0 + inverse.re, inverse.im)
 }
 
 // Private gamma machinery. The connection formulas need complex gamma,
@@ -734,7 +752,7 @@ fn one_expansion(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> Eval
     if m < 0 {
         return EvalOutcome::failure();
     }
-    let w = Complex64::ONE - z;
+    let w = one_minus(z);
     let finite_part = one_finite_part(a, b, c, w, m, epsilon);
     let infinite_part = one_infinite_part(a, b, c, w, m, epsilon);
     if !finite_part.converged || !infinite_part.converged {
@@ -1057,16 +1075,19 @@ enum EvalPath {
 }
 
 fn select_path(z: Complex64) -> EvalPath {
-    let one_minus_z = Complex64::ONE - z;
+    let one_minus_z = one_minus(z);
     let inverse_z = complex_inverse(z);
-    let pfaff_z = Complex64::ONE + complex_inverse(z - 1.0);
+    let pfaff_z = pfaff_argument(z);
     // The ordering is also the deterministic tie-break policy at region
     // boundaries, which prevents small roundoff changes from switching paths.
     let candidates = [
         (EvalPath::Direct, complex_abs(z)),
         (EvalPath::PfaffDirect, complex_abs(pfaff_z)),
+        // Prefer the Pfaff form when the two infinity coordinates tie (notably
+        // at z = 2); its connection terms cancel less severely for large
+        // parameters in the mpmath reference grid.
+        (EvalPath::PfaffInfinity, complex_abs(one_minus(inverse_z))),
         (EvalPath::Infinity, complex_abs(inverse_z)),
-        (EvalPath::PfaffInfinity, complex_abs(1.0 - inverse_z)),
         (EvalPath::One, complex_abs(one_minus_z)),
         (
             EvalPath::PfaffOne,
@@ -1088,13 +1109,10 @@ fn select_path(z: Complex64) -> EvalPath {
 }
 
 fn forced_anchor_evaluation(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
-    // Anchors deliberately bypass select_path so Taylor fallback cannot recurse
-    // back into itself.
-    if complex_abs(z) <= 1.0 {
-        direct_series(a, b, c, z)
-    } else {
-        infinity_expansion(a, b, c, z)
-    }
+    // Anchor construction guarantees a non-Taylor path. Keep that condition
+    // explicit so a future selector change fails rather than recursing.
+    debug_assert_ne!(select_path(z), EvalPath::Taylor);
+    general_evaluation_impl(a, b, c, z, false)
 }
 
 fn taylor_continuation_with_limit(
@@ -1108,8 +1126,20 @@ fn taylor_continuation_with_limit(
     if z_abs == 0.0 {
         return EvalOutcome::success(Complex64::ONE);
     }
-    let anchor_radius = if z_abs < 1.0 { 0.9 } else { 1.1 };
-    let z0 = (anchor_radius / z_abs) * z;
+    let preferred_radius = if z_abs < 1.0 {
+        TAYLOR_INNER_ANCHOR_RADIUS
+    } else {
+        TAYLOR_OUTER_ANCHOR_RADIUS
+    };
+    let preferred_anchor = (preferred_radius / z_abs) * z;
+    // The outer anchor is close to the target and usually admits a transformed
+    // series. If it remains in the Taylor gap, move inside the direct disk;
+    // this guarantees a stable, nonrecursive selector path.
+    let z0 = if select_path(preferred_anchor) == EvalPath::Taylor {
+        (TAYLOR_INNER_ANCHOR_RADIUS / z_abs) * z
+    } else {
+        preferred_anchor
+    };
     let q0_outcome = forced_anchor_evaluation(a, b, c, z0);
     let shifted_outcome = forced_anchor_evaluation(a + 1.0, b + 1.0, c + 1.0, z0);
     if !q0_outcome.converged || !shifted_outcome.converged || c == Complex64::ZERO {
@@ -1124,7 +1154,7 @@ fn taylor_continuation_with_limit(
     let mut delta_power = delta;
     let mut sum = CompensatedSum::new(q0);
     sum.add(q1 * delta);
-    let differential_denominator = z0 * (1.0 - z0);
+    let differential_denominator = z0 * one_minus(z0);
     if differential_denominator == Complex64::ZERO || !finite(sum.value()) {
         return EvalOutcome::failure();
     }
@@ -1168,11 +1198,16 @@ fn taylor_continuation(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -
     taylor_continuation_with_limit(a, b, c, z, MAX_TAYLOR_ITERATIONS)
 }
 
-fn general_evaluation(
+fn general_evaluation(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
+    general_evaluation_impl(a, b, c, z, true)
+}
+
+fn general_evaluation_impl(
     mut a: Complex64,
     mut b: Complex64,
     c: Complex64,
     z: Complex64,
+    allow_taylor: bool,
 ) -> EvalOutcome {
     // Euler's transformation makes Re(c-a-b) nonnegative; symmetry in a and b
     // then gives the stable parameter ordering assumed by the expansions.
@@ -1188,7 +1223,7 @@ fn general_evaluation(
     }
 
     let path = select_path(z);
-    let pfaff_z = Complex64::ONE + complex_inverse(z - 1.0);
+    let pfaff_z = pfaff_argument(z);
     let pfaff_prefactor = (-a * complex_log1p(-z)).exp();
     let result = match path {
         EvalPath::Direct => direct_series(a, b, c, z),
@@ -1197,7 +1232,8 @@ fn general_evaluation(
         EvalPath::PfaffInfinity => infinity_expansion(a, c - b, c, pfaff_z),
         EvalPath::One => one_expansion(a, b, c, z),
         EvalPath::PfaffOne => one_expansion(a, c - b, c, pfaff_z),
-        EvalPath::Taylor => taylor_continuation(a, b, c, z),
+        EvalPath::Taylor if allow_taylor => taylor_continuation(a, b, c, z),
+        EvalPath::Taylor => EvalOutcome::failure(),
     };
     if !result.converged {
         return result;
@@ -1342,6 +1378,13 @@ mod tests {
             Complex64::new(0.0, 2.0_f64.sqrt()),
             2e-15,
         );
+
+        let upper_cut = Complex64::new(1.3, 0.0);
+        let lower_cut = Complex64::new(1.3, -0.0);
+        assert!(one_minus(upper_cut).im.is_sign_negative());
+        assert!(one_minus(lower_cut).im.is_sign_positive());
+        assert!(pfaff_argument(upper_cut).im.is_sign_negative());
+        assert!(pfaff_argument(lower_cut).im.is_sign_positive());
     }
 
     #[test]
@@ -1415,6 +1458,8 @@ mod tests {
                     | "scipy-1561"
                     | "upper-cut"
                     | "lower-cut"
+                    | "pfaff-upper-cut"
+                    | "pfaff-lower-cut"
             )
         }) {
             assert_close(
@@ -1429,7 +1474,7 @@ mod tests {
     fn taylor_gap_fixtures_match_reference() {
         for row in parse_hyp_fixture()
             .into_iter()
-            .filter(|row| row.label == "taylor")
+            .filter(|row| row.label.starts_with("taylor"))
         {
             assert_eq!(select_path(row.z), EvalPath::Taylor);
             assert_close(
@@ -1438,6 +1483,28 @@ mod tests {
                 row.tolerance,
             );
         }
+    }
+
+    #[test]
+    fn broad_mpmath_grid_matches_reference() {
+        let rows: Vec<_> = parse_hyp_fixture()
+            .into_iter()
+            .filter(|row| row.label.starts_with("grid-"))
+            .collect();
+        assert_eq!(rows.len(), 290);
+        let mut failures = Vec::new();
+        for row in rows {
+            let actual = hyp2f1_scalar(row.a, row.b, row.c, row.z);
+            let scale = complex_abs(row.expected).max(1.0);
+            let relative_error = complex_abs(actual - row.expected) / scale;
+            if relative_error > row.tolerance {
+                failures.push(format!(
+                    "{}: actual={:?}, expected={:?}, error={}, tolerance={}",
+                    row.label, actual, row.expected, relative_error, row.tolerance
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]
@@ -1490,7 +1557,7 @@ mod tests {
         let euler = ((c - a - b) * complex_log1p(-z)).exp() * hyp2f1_scalar(c - a, c - b, c, z);
         assert_close(euler, value, 2e-12);
 
-        let transformed_z = Complex64::ONE + complex_inverse(z - 1.0);
+        let transformed_z = pfaff_argument(z);
         let pfaff = (-a * complex_log1p(-z)).exp() * hyp2f1_scalar(a, c - b, c, transformed_z);
         assert_close(pfaff, value, 2e-12);
     }

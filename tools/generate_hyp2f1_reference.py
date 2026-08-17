@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from pathlib import Path
 
 import mpmath as mp
@@ -11,13 +12,43 @@ MPMATH_VERSION = "1.3.0"
 PRECISION = 100
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "test" / "data"
+HypRow = tuple[complex, complex, complex, complex, str, float]
 
 
 def parts(value: mp.mpc) -> tuple[str, str]:
     return mp.nstr(value.real, 80), mp.nstr(value.imag, 80)
 
 
-def hyp_rows() -> list[tuple[complex, complex, complex, complex, str, float]]:
+def broad_hyp_rows() -> list[HypRow]:
+    """Build a broad cross-product of parameter families and argument regions."""
+
+    parameter_families = [
+        ("generic", 0.5 + 0.25j, 1.25 - 0.5j, 2.0 + 0.75j, 2e-9),
+        ("euler", 1.4 + 0.2j, 1.2 - 0.3j, 1.1 + 0.4j, 5e-9),
+        ("near-one-integer", 0.4 + 0.2j, 0.9 - 0.1j, 3.3 + 0.100000001j, 8e-9),
+        ("near-infinity-integer", 0.4 + 0.2j, 2.400000001 + 0.2j, 3.1 - 0.3j, 8e-9),
+        ("large-taylor", 12.0 - 3.4j, 10.0 - 0.8j, -1.6 + 4.6j, 2e-7),
+    ]
+    arguments = [
+        complex(real, imag)
+        for real in (-3.0, -0.5, 0.25, 0.59, 0.9, 1.3, 3.0)
+        for imag in (-2.0, -0.81, -0.2, 0.2, 0.81, 2.0)
+    ]
+    arguments.extend(complex(real, 0.0) for real in (-3.0, -0.5, 0.0, 0.5, 0.9, 0.99))
+    for real in (1.01, 1.3, 1.9, 2.0, 4.0):
+        arguments.extend((complex(real, 0.0), complex(real, -0.0)))
+
+    rows = []
+    for family, a, b, c, tolerance in parameter_families:
+        for index, z in enumerate(arguments):
+            lip = ""
+            if z.real > 1.0 and z.imag == 0.0:
+                lip = "-lower-cut" if math.copysign(1.0, z.imag) < 0.0 else "-upper-cut"
+            rows.append((a, b, c, z, f"grid-{family}-{index:03d}{lip}", tolerance))
+    return rows
+
+
+def hyp_rows() -> list[HypRow]:
     points = [
         (0.5 + 0.25j, 1.25 - 0.5j, 2.0 + 0.75j, 0.1 + 0.2j, "direct", 2e-13),
         (-2.0 + 0j, 1.2 + 0.4j, 3.5 - 0.2j, 2.0 + 0.5j, "polynomial", 2e-13),
@@ -56,11 +87,21 @@ def hyp_rows() -> list[tuple[complex, complex, complex, complex, str, float]]:
         (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.495 - 0.8573651497465942j, "taylor", 5e-12),
         (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.505 + 0.874685657822283j, "taylor", 5e-12),
         (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.505 - 0.874685657822283j, "taylor", 5e-12),
+        (
+            12.0 - 3.4j,
+            10.0 - 0.8j,
+            -1.6 + 4.6j,
+            0.59 - 0.81j,
+            "taylor-large-parameter-regression",
+            2e-8,
+        ),
         (1.0 + 0j, 1.0 + 0j, 4.0 + 0j, 3.0 + 4.0j, "scipy-1561", 3e-12),
         (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 2.0 + 0.0j, "upper-cut", 5e-12),
         (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 2.0 - 0.0j, "lower-cut", 5e-12),
+        (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 1.3 + 0.0j, "pfaff-upper-cut", 5e-11),
+        (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 1.3 - 0.0j, "pfaff-lower-cut", 5e-11),
     ]
-    return points
+    return points + broad_hyp_rows()
 
 
 def generate_hyp2f1() -> None:
@@ -86,9 +127,9 @@ def generate_hyp2f1() -> None:
         )
         for a, b, c, z, label, rtol in hyp_rows():
             mz = mp.mpc(z.real, z.imag)
-            if label == "upper-cut":
+            if label.endswith("upper-cut"):
                 mz = mp.mpc(z.real, mp.mpf("1e-80"))
-            elif label == "lower-cut":
+            elif label.endswith("lower-cut"):
                 mz = mp.mpc(z.real, -mp.mpf("1e-80"))
             expected = mp.hyp2f1(mp.mpc(a), mp.mpc(b), mp.mpc(c), mz)
             writer.writerow(
@@ -100,7 +141,7 @@ def generate_hyp2f1() -> None:
                     c.real,
                     c.imag,
                     z.real,
-                    "-0.0" if label == "lower-cut" else z.imag,
+                    "-0.0" if label.endswith("lower-cut") else z.imag,
                     *parts(expected),
                     rtol,
                     label,

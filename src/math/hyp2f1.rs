@@ -109,6 +109,9 @@ pub fn hyp2f1_scalar(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> 
         if balance.re <= 0.0 {
             return NAN;
         }
+        if terminating_degree(c - a, c - b).is_some() {
+            return Complex64::ZERO;
+        }
         return gamma_ratio(&[c, balance], &[c - a, c - b]);
     }
     if c == a {
@@ -1007,6 +1010,12 @@ fn terminating_series(
             return EvalOutcome::failure();
         }
         term *= (a + nf) * (b + nf) * z / denominator;
+        // Once finite-precision arithmetic underflows a polynomial term to
+        // exact zero, every later recurrence term remains zero. This avoids
+        // walking enormous formal degrees for a result already determined.
+        if term == Complex64::ZERO {
+            return EvalOutcome::success(sum.value());
+        }
         sum.add(term);
         if !finite(term) || !finite(sum.value()) {
             return EvalOutcome::failure();
@@ -1218,29 +1227,32 @@ fn general_evaluation_impl(
 ) -> EvalOutcome {
     // Euler's transformation makes Re(c-a-b) nonnegative; symmetry in a and b
     // then gives the stable parameter ordering assumed by the expansions.
-    let mut outer_prefactor = Complex64::ONE;
     let balance = c - a - b;
+    let euler_a = c - a;
+    let euler_b = c - b;
+
+    // Euler's identity converts c-a and c-b into numerator parameters. When
+    // either is a nonpositive integer, evaluate the resulting polynomial
+    // before selecting a connection path: those paths contain gamma poles
+    // even though the complete hypergeometric value has a removable limit.
+    if let Some(degree) = terminating_degree(euler_a, euler_b) {
+        let result = terminating_series(euler_a, euler_b, c, z, degree);
+        if !result.converged {
+            return result;
+        }
+        let value = (balance * complex_log1p(-z)).exp() * result.value;
+        return if finite(value) {
+            EvalOutcome::success_with_cancellation(value, result.cancellation_estimate)
+        } else {
+            EvalOutcome::failure()
+        };
+    }
+
+    let mut outer_prefactor = Complex64::ONE;
     if balance.re < 0.0 {
         outer_prefactor = (balance * complex_log1p(-z)).exp();
-        a = c - a;
-        b = c - b;
-
-        // Euler's transformation can introduce a nonpositive-integer
-        // numerator even when neither original numerator terminates. Evaluate
-        // that polynomial immediately: connection formulas contain gamma
-        // factors with poles for these otherwise valid transformed cases.
-        if let Some(degree) = terminating_degree(a, b) {
-            let result = terminating_series(a, b, c, z, degree);
-            if !result.converged {
-                return result;
-            }
-            let value = outer_prefactor * result.value;
-            return if finite(value) {
-                EvalOutcome::success_with_cancellation(value, result.cancellation_estimate)
-            } else {
-                EvalOutcome::failure()
-            };
-        }
+        a = euler_a;
+        b = euler_b;
     }
     if (b - a).re < 0.0 {
         core::mem::swap(&mut a, &mut b);
@@ -1477,6 +1489,71 @@ mod tests {
             ),
             Complex64::new(1.566_746_598_608_614_2, 0.060_785_011_674_705_52),
             3e-14,
+        );
+    }
+
+    #[test]
+    fn positive_and_negative_integer_connection_edges_match_mpmath() {
+        // Both c-a and c-b are negative integers in the reported removable-
+        // pole case.
+        assert_close(
+            hyp2f1_scalar(
+                Complex64::new(-2.2, 0.3),
+                Complex64::new(-2.2, 0.3),
+                Complex64::new(-3.2, 0.3),
+                Complex64::new(2.0, 0.5),
+            ),
+            Complex64::new(-0.189_614_379_742_522_02, 0.129_705_129_001_328_46),
+            3e-13,
+        );
+
+        let c = Complex64::new(-3.25, 0.25);
+        let z = Complex64::new(2.0, 0.5);
+        assert_close(
+            hyp2f1_scalar(
+                Complex64::new(-2.25, 0.25),
+                Complex64::new(-2.25, 0.25),
+                c,
+                z,
+            ),
+            Complex64::new(-0.201_770_442_240_660_46, 0.169_046_932_792_871_47),
+            3e-13,
+        );
+
+        // Positive integer differences must continue through the ordinary
+        // connection machinery rather than being mistaken for gamma poles.
+        assert_close(
+            hyp2f1_scalar(
+                Complex64::new(-4.25, 0.25),
+                Complex64::new(-4.25, 0.25),
+                c,
+                z,
+            ),
+            Complex64::new(51.557_704_317_178_434, 269.233_357_645_869_8),
+            3e-13,
+        );
+
+        assert_eq!(
+            hyp2f1_scalar(
+                Complex64::new(-2.25, 0.25),
+                Complex64::new(-2.25, 0.25),
+                c,
+                Complex64::ONE,
+            ),
+            Complex64::ZERO
+        );
+    }
+
+    #[test]
+    fn terminating_series_stops_after_term_underflows_to_zero() {
+        assert_eq!(
+            hyp2f1_scalar(
+                Complex64::new(-1_000_000_000.0, 0.0),
+                Complex64::ONE,
+                Complex64::ONE,
+                Complex64::new(1e-300, 0.0),
+            ),
+            Complex64::ONE
         );
     }
 

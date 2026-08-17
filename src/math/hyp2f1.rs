@@ -1,4 +1,16 @@
 //! Gauss hypergeometric function with complex parameters and argument.
+//!
+//! The scalar implementation is an allocation-free polyalgorithm. It combines
+//! the defining Gauss series with Euler and Pfaff transformations, stabilized
+//! connection expansions about `z = 1` and `z = infinity`, and Taylor
+//! continuation through the region in which none of those series converges
+//! rapidly. The same scalar kernel backs the serial and Rayon-parallel array
+//! interfaces.
+//!
+//! Complex powers use their principal values. Consequently, values on the
+//! conventional branch cut `[1, infinity)` depend on the sign of `z.im`,
+//! including signed zero. See [`hyp2f1_scalar`] for the complete public
+//! contract and references.
 
 use num_complex::Complex64;
 use rayon::prelude::*;
@@ -30,6 +42,146 @@ const LANCZOS_COEFFICIENTS: [f64; 15] = [
     0.000_003_689_918_265_953_162_5,
 ];
 
+/// Evaluates Gauss's hypergeometric function on its principal branch.
+///
+/// This computes
+///
+/// `2F1(a, b; c; z) = sum((a)_n (b)_n z^n / ((c)_n n!), n = 0..infinity)`
+///
+/// by selecting among the defining series, Euler/Pfaff transformations,
+/// stabilized connection expansions about `z = 1` and `z = infinity`, and a
+/// Taylor continuation fallback. All four arguments may be complex, and `a`
+/// and `b` are interchangeable.
+///
+/// Complex powers take their principal values. On the conventional branch cut
+/// `z` in `[1, infinity)`, positive and negative zero in `z.im` therefore select
+/// the upper and lower limiting values, respectively.
+///
+/// A complex NaN is returned for non-finite inputs, mathematical singularities
+/// (including a nonpositive-integer `c` unless the series terminates before its
+/// pole), or failure of an internal expansion to converge within its limit.
+///
+/// # References
+///
+/// \[1\] N. Michel and M. V. Stoitsov, “Fast computation of the Gauss
+///       hypergeometric function with all its parameters complex with
+///       application to the Pöschl–Teller–Ginocchio potential wave functions,”
+///       *Computer Physics Communications*, vol. 178, no. 7, pp. 535–551,
+///       Apr. 2008, doi:
+///       [10.1016/j.cpc.2007.11.007](https://doi.org/10.1016/j.cpc.2007.11.007).
+///
+/// \[2\] NIST Digital Library of Mathematical Functions, “§15.2 Definitions
+///       and Analytical Properties,” NIST. Accessed: Aug. 17, 2026. \[Online\].
+///       Available: <https://dlmf.nist.gov/15.2>
+///
+/// \[3\] JuliaMath, “HypergeometricFunctions.jl,” ver. 0.3.30, GitHub.
+///       Accessed: Aug. 17, 2026. \[Online\]. Available:
+///       <https://github.com/JuliaMath/HypergeometricFunctions.jl>
+///
+/// \[4\] SciPy Developers, “scipy.special.hyp2f1,” *SciPy API Reference*.
+///       Accessed: Aug. 17, 2026. \[Online\]. Available:
+///       <https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.hyp2f1.html>
+#[inline]
+pub fn hyp2f1_scalar(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> Complex64 {
+    if !finite(a) || !finite(b) || !finite(c) || !finite(z) {
+        return NAN;
+    }
+    if z == Complex64::ZERO || a == Complex64::ZERO || b == Complex64::ZERO {
+        return Complex64::ONE;
+    }
+
+    let terminating_degree = match (negative_integer_degree(a), negative_integer_degree(b)) {
+        (Some(a_degree), Some(b_degree)) => Some(a_degree.min(b_degree)),
+        (Some(degree), None) | (None, Some(degree)) => Some(degree),
+        (None, None) => None,
+    };
+    if let Some(degree) = terminating_degree {
+        if let Some(pole_degree) = negative_integer_degree(c)
+            && degree > pole_degree
+        {
+            return NAN;
+        }
+        let result = terminating_series(a, b, c, z, degree);
+        return if result.converged { result.value } else { NAN };
+    }
+    if is_nonpositive_integer(c) {
+        return NAN;
+    }
+    if z == Complex64::ONE {
+        let balance = c - a - b;
+        if balance.re <= 0.0 {
+            return NAN;
+        }
+        return gamma_ratio(&[c, balance], &[c - a, c - b]);
+    }
+    if c == a {
+        return (-b * complex_log1p(-z)).exp();
+    }
+    if c == b {
+        return (-a * complex_log1p(-z)).exp();
+    }
+    let result = general_evaluation(a, b, c, z);
+    if result.converged { result.value } else { NAN }
+}
+
+/// Evaluates Gauss's hypergeometric function elementwise on equal-length,
+/// contiguous slices.
+///
+/// Each output element is `hyp2f1_scalar(a[i], b[i], c[i], z[i])`. See
+/// [`hyp2f1_scalar`] for the mathematical definition, branch convention,
+/// failure policy, implementation notes, and references.
+///
+/// Returns `Err("Length mismatch")` without modifying `out` if any input slice
+/// has a different length from `out`.
+pub fn hyp2f1(
+    a: &[Complex64],
+    b: &[Complex64],
+    c: &[Complex64],
+    z: &[Complex64],
+    out: &mut [Complex64],
+) -> Result<(), &'static str> {
+    check_length!(out.len(), a, b, c, z);
+    for i in 0..out.len() {
+        out[i] = hyp2f1_scalar(a[i], b[i], c[i], z[i]);
+    }
+    Ok(())
+}
+
+/// Evaluates Gauss's hypergeometric function elementwise in parallel on
+/// equal-length, contiguous slices.
+///
+/// Work is split into Rayon chunks and each chunk is evaluated by [`hyp2f1`].
+/// See [`hyp2f1_scalar`] for the mathematical definition, branch convention,
+/// failure policy, implementation notes, and references.
+///
+/// Returns `Err("Length mismatch")` without modifying `out` if any input slice
+/// has a different length from `out`.
+pub fn hyp2f1_par(
+    a: &[Complex64],
+    b: &[Complex64],
+    c: &[Complex64],
+    z: &[Complex64],
+    out: &mut [Complex64],
+) -> Result<(), &'static str> {
+    check_length!(out.len(), a, b, c, z);
+    let chunk = chunksize(out.len());
+    out.par_chunks_mut(chunk)
+        .zip(a.par_chunks(chunk))
+        .zip(b.par_chunks(chunk))
+        .zip(c.par_chunks(chunk))
+        .zip(z.par_chunks(chunk))
+        .for_each(|((((out, a), b), c), z)| {
+            hyp2f1(a, b, c, z, out).expect("validated equal chunk lengths");
+        });
+    Ok(())
+}
+
+/// A value returned by one candidate expansion together with convergence
+/// status and a coarse measure of cancellation in its partial sums.
+///
+/// Keeping failure information separate from the value lets the path selector
+/// map all internal singularities and iteration-limit failures to the public
+/// complex-NaN policy in one place.
 #[derive(Clone, Copy, Debug)]
 struct EvalOutcome {
     value: Complex64,
@@ -66,6 +218,9 @@ impl EvalOutcome {
     }
 }
 
+// Branch-aware complex primitives. These small helpers preserve precision or
+// signed-zero information that the straightforward formulas can lose.
+
 #[inline]
 fn finite(z: Complex64) -> bool {
     z.re.is_finite() && z.im.is_finite()
@@ -76,6 +231,10 @@ fn complex_abs(z: Complex64) -> f64 {
     z.re.hypot(z.im)
 }
 
+/// Computes `ln(1 + z)` without first rounding `1 + z` near the origin.
+///
+/// The `atan2` expression also preserves which side of the negative real axis
+/// was approached, which is required for the branch cut of `hyp2f1`.
 #[inline]
 fn complex_log1p(z: Complex64) -> Complex64 {
     if z == -Complex64::ONE {
@@ -103,6 +262,8 @@ fn complex_pow(base: Complex64, exponent: Complex64) -> Complex64 {
     (exponent * base.ln()).exp()
 }
 
+/// Computes `1 / z` with scaled complex division to reduce avoidable overflow
+/// and underflow when the real and imaginary components have unlike sizes.
 #[inline]
 fn complex_inverse(z: Complex64) -> Complex64 {
     if z.re.abs() >= z.im.abs() {
@@ -115,6 +276,10 @@ fn complex_inverse(z: Complex64) -> Complex64 {
         Complex64::new(ratio / denominator, -1.0 / denominator)
     }
 }
+
+// Private gamma machinery. The connection formulas need complex gamma,
+// digamma, and differences of nearly equal reciprocal-gamma values; keeping
+// them local avoids adding a second public special-function API.
 
 #[inline]
 fn is_nonpositive_integer(z: Complex64) -> bool {
@@ -159,6 +324,8 @@ fn log_sin_pi(z: Complex64) -> Complex64 {
     if y.abs() < 20.0 {
         return sin_pi(z).ln();
     }
+    // For large imaginary parts, evaluating sinh/cosh before taking the log
+    // would overflow. Use the leading exponential form directly instead.
     let (sine, cosine) = sin_cos_pi_real(z.re);
     Complex64::new(
         y.abs() - core::f64::consts::LN_2,
@@ -194,6 +361,8 @@ fn lanczos_sum(z: Complex64) -> Complex64 {
     sum
 }
 
+/// Principal complex log-gamma from a 15-term Lanczos approximation, with the
+/// reflection formula used to move arguments out of the left half-plane.
 fn log_gamma(z: Complex64) -> Complex64 {
     if is_nonpositive_integer(z) {
         return Complex64::new(f64::INFINITY, f64::NAN);
@@ -287,6 +456,8 @@ fn lanczos_ratio(z: Complex64, epsilon: Complex64) -> Complex64 {
     numerator / denominator
 }
 
+/// Evaluates `(Gamma(z + epsilon) / Gamma(z) - 1) / epsilon` in a form that
+/// remains finite and accurate as `epsilon` tends to zero.
 fn log_gamma_difference_over_epsilon(z: Complex64, epsilon: Complex64) -> Complex64 {
     let shifted = z + epsilon;
     let base = z - 0.5;
@@ -317,6 +488,8 @@ fn log_gamma_difference_over_epsilon(z: Complex64, epsilon: Complex64) -> Comple
     value
 }
 
+/// Evaluates `(1/Gamma(z) - 1/Gamma(z + epsilon)) / epsilon`, including the
+/// removable limits at gamma poles and at `epsilon = 0`.
 fn gamma_difference_ratio(z: Complex64, epsilon: Complex64) -> Complex64 {
     let shifted = z + epsilon;
     if complex_abs(epsilon) > 0.1 {
@@ -404,6 +577,11 @@ fn exponential_difference_ratio(z: Complex64, epsilon: Complex64) -> Complex64 {
 fn integer_sign(power: i32) -> f64 {
     if power.rem_euclid(2) == 0 { 1.0 } else { -1.0 }
 }
+
+// Stable connection formula about z = 1. Writing c - a - b = m + epsilon
+// separates the finite polynomial part from the infinite tail. The paired
+// beta/gamma recurrence evaluates their cancellation before epsilon reaches
+// machine precision, rather than subtracting two singular connection terms.
 
 fn one_alpha_zero(
     a: Complex64,
@@ -502,6 +680,8 @@ fn one_finite_part(
     EvalOutcome::success(sum.value())
 }
 
+/// Evaluates the stabilized infinite tail of the connection expansion at
+/// `w = 1 - z` using coupled beta and gamma recurrences.
 fn one_infinite_part(
     a: Complex64,
     b: Complex64,
@@ -567,6 +747,10 @@ fn one_expansion(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> Eval
         EvalOutcome::failure()
     }
 }
+
+// Stable connection formula about z = infinity. This has the same
+// m + epsilon construction as the z = 1 expansion, now for b - a, and is
+// evaluated in the reciprocal coordinate w = 1 / z.
 
 fn infinity_alpha_zero(a: Complex64, c: Complex64, m: i32, epsilon: Complex64) -> Complex64 {
     if epsilon == Complex64::ZERO {
@@ -709,6 +893,8 @@ fn infinity_infinite_part(
     EvalOutcome::failure()
 }
 
+/// Evaluates the reciprocal-coordinate connection expansion, swapping `a`
+/// and `b` first so that the integer part of `b - a` is nonnegative.
 fn infinity_expansion(
     mut a: Complex64,
     mut b: Complex64,
@@ -737,6 +923,11 @@ fn infinity_expansion(
     }
 }
 
+// Direct and terminating series use compensated addition because intermediate
+// terms can be much larger than the final answer for complex parameters.
+
+/// Kahan-style compensated accumulation applied componentwise by complex
+/// arithmetic.
 #[derive(Clone, Copy, Debug)]
 struct CompensatedSum {
     sum: Complex64,
@@ -799,6 +990,8 @@ fn terminating_series(
     EvalOutcome::success(sum.value())
 }
 
+/// Sums the defining Gauss series and records the largest-term/final-value
+/// ratio as an inexpensive warning that the result suffered cancellation.
 #[inline]
 fn direct_series_with_limit(
     a: Complex64,
@@ -848,6 +1041,10 @@ fn direct_series(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> Eval
     direct_series_with_limit(a, b, c, z, MAX_SERIES_ITERATIONS)
 }
 
+// Region selection and Taylor continuation. Each transformed candidate is
+// scored by the modulus of its local series variable; the Taylor path fills
+// the compact gap left when every candidate lies outside DIRECT_RADIUS.
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EvalPath {
     Direct,
@@ -863,6 +1060,8 @@ fn select_path(z: Complex64) -> EvalPath {
     let one_minus_z = Complex64::ONE - z;
     let inverse_z = complex_inverse(z);
     let pfaff_z = Complex64::ONE + complex_inverse(z - 1.0);
+    // The ordering is also the deterministic tie-break policy at region
+    // boundaries, which prevents small roundoff changes from switching paths.
     let candidates = [
         (EvalPath::Direct, complex_abs(z)),
         (EvalPath::PfaffDirect, complex_abs(pfaff_z)),
@@ -889,6 +1088,8 @@ fn select_path(z: Complex64) -> EvalPath {
 }
 
 fn forced_anchor_evaluation(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
+    // Anchors deliberately bypass select_path so Taylor fallback cannot recurse
+    // back into itself.
     if complex_abs(z) <= 1.0 {
         direct_series(a, b, c, z)
     } else {
@@ -915,6 +1116,8 @@ fn taylor_continuation_with_limit(
         return EvalOutcome::failure();
     }
 
+    // q0 and q1 are the function and its first derivative at z0. Higher
+    // derivatives follow from the hypergeometric differential equation.
     let mut q0 = q0_outcome.value;
     let mut q1 = a * b * shifted_outcome.value / c;
     let delta = z - z0;
@@ -971,6 +1174,8 @@ fn general_evaluation(
     c: Complex64,
     z: Complex64,
 ) -> EvalOutcome {
+    // Euler's transformation makes Re(c-a-b) nonnegative; symmetry in a and b
+    // then gives the stable parameter ordering assumed by the expansions.
     let mut outer_prefactor = Complex64::ONE;
     let balance = c - a - b;
     if balance.re < 0.0 {
@@ -1011,90 +1216,6 @@ fn general_evaluation(
     } else {
         EvalOutcome::failure()
     }
-}
-
-/// Evaluate Gauss's hypergeometric function on its principal branch.
-///
-/// All four arguments may be complex. Values on the branch cut distinguish
-/// positive and negative zero in `z.im`. Mathematical singularities,
-/// non-finite inputs, and numerical nonconvergence return a complex NaN.
-#[inline]
-pub fn hyp2f1_scalar(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> Complex64 {
-    if !finite(a) || !finite(b) || !finite(c) || !finite(z) {
-        return NAN;
-    }
-    if z == Complex64::ZERO || a == Complex64::ZERO || b == Complex64::ZERO {
-        return Complex64::ONE;
-    }
-
-    let terminating_degree = match (negative_integer_degree(a), negative_integer_degree(b)) {
-        (Some(a_degree), Some(b_degree)) => Some(a_degree.min(b_degree)),
-        (Some(degree), None) | (None, Some(degree)) => Some(degree),
-        (None, None) => None,
-    };
-    if let Some(degree) = terminating_degree {
-        if let Some(pole_degree) = negative_integer_degree(c)
-            && degree > pole_degree
-        {
-            return NAN;
-        }
-        let result = terminating_series(a, b, c, z, degree);
-        return if result.converged { result.value } else { NAN };
-    }
-    if is_nonpositive_integer(c) {
-        return NAN;
-    }
-    if z == Complex64::ONE {
-        let balance = c - a - b;
-        if balance.re <= 0.0 {
-            return NAN;
-        }
-        return gamma_ratio(&[c, balance], &[c - a, c - b]);
-    }
-    if c == a {
-        return (-b * complex_log1p(-z)).exp();
-    }
-    if c == b {
-        return (-a * complex_log1p(-z)).exp();
-    }
-    let result = general_evaluation(a, b, c, z);
-    if result.converged { result.value } else { NAN }
-}
-
-/// Evaluate Gauss's hypergeometric function elementwise on equal-length slices.
-pub fn hyp2f1(
-    a: &[Complex64],
-    b: &[Complex64],
-    c: &[Complex64],
-    z: &[Complex64],
-    out: &mut [Complex64],
-) -> Result<(), &'static str> {
-    check_length!(out.len(), a, b, c, z);
-    for i in 0..out.len() {
-        out[i] = hyp2f1_scalar(a[i], b[i], c[i], z[i]);
-    }
-    Ok(())
-}
-
-/// Parallel elementwise evaluation of Gauss's hypergeometric function.
-pub fn hyp2f1_par(
-    a: &[Complex64],
-    b: &[Complex64],
-    c: &[Complex64],
-    z: &[Complex64],
-    out: &mut [Complex64],
-) -> Result<(), &'static str> {
-    check_length!(out.len(), a, b, c, z);
-    let chunk = chunksize(out.len());
-    out.par_chunks_mut(chunk)
-        .zip(a.par_chunks(chunk))
-        .zip(b.par_chunks(chunk))
-        .zip(c.par_chunks(chunk))
-        .zip(z.par_chunks(chunk))
-        .for_each(|((((out, a), b), c), z)| {
-            hyp2f1(a, b, c, z, out).expect("validated equal chunk lengths");
-        });
-    Ok(())
 }
 
 #[cfg(test)]

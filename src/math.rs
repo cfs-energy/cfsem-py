@@ -1,5 +1,9 @@
 //! Pure-math functions supporting physics calculations.
 
+mod hyp2f1;
+
+pub use hyp2f1::{hyp2f1, hyp2f1_par, hyp2f1_scalar};
+
 use core::ops::{Add, Div, Mul, Sub};
 use num_traits::{Float, FromPrimitive};
 

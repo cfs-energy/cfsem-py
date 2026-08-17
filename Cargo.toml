@@ -26,6 +26,7 @@ rayon = "^1.12.0"
 num_cpus = "^1.17.0"
 libm = "^0.2"
 num-traits = { version = "0.2.19", features = ["libm"] }
+num-complex = "0.4.6"
 faer = "0.24.4"
 faer-traits = "0.24.0"
 

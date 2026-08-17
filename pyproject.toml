@@ -47,6 +47,7 @@ features = ["python"]
 module-name = "cfsem.cfsem"
 version = "cargo"
 profile = "release"
+include = [{ path = "THIRD_PARTY_NOTICES.md", format = ["sdist", "wheel"] }]
 
 [tool.ruff]
 line-length = 110

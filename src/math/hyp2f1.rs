@@ -92,12 +92,7 @@ pub fn hyp2f1_scalar(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> 
         return Complex64::ONE;
     }
 
-    let terminating_degree = match (negative_integer_degree(a), negative_integer_degree(b)) {
-        (Some(a_degree), Some(b_degree)) => Some(a_degree.min(b_degree)),
-        (Some(degree), None) | (None, Some(degree)) => Some(degree),
-        (None, None) => None,
-    };
-    if let Some(degree) = terminating_degree {
+    if let Some(degree) = terminating_degree(a, b) {
         if let Some(pole_degree) = negative_integer_degree(c)
             && degree > pole_degree
         {
@@ -548,8 +543,11 @@ fn pochhammer_difference_ratio(z: Complex64, epsilon: Complex64, order: i32) -> 
         return Complex64::ZERO;
     }
     let pole_index = -z.re.round() as i32;
+    // Rounding locates a possible zero factor, but the pole-limit formula is
+    // valid only when the base itself is exactly a nonpositive integer.
+    let contains_pole = is_nonpositive_integer(z) && (0..order).contains(&pole_index);
     if epsilon == Complex64::ZERO {
-        if z.im == 0.0 && (0..order).contains(&pole_index) {
+        if contains_pole {
             let mut product = Complex64::ONE;
             for index in 0..order {
                 if index != pole_index {
@@ -564,7 +562,7 @@ fn pochhammer_difference_ratio(z: Complex64, epsilon: Complex64, order: i32) -> 
         }
         return pochhammer(z, order) * reciprocal_sum;
     }
-    if z.im == 0.0 && (0..order).contains(&pole_index) {
+    if contains_pole {
         let mut shifted_product = Complex64::ONE;
         let mut log_sum = Complex64::ZERO;
         for index in 0..order {
@@ -984,6 +982,15 @@ fn negative_integer_degree(z: Complex64) -> Option<usize> {
     }
 }
 
+#[inline]
+fn terminating_degree(a: Complex64, b: Complex64) -> Option<usize> {
+    match (negative_integer_degree(a), negative_integer_degree(b)) {
+        (Some(a_degree), Some(b_degree)) => Some(a_degree.min(b_degree)),
+        (Some(degree), None) | (None, Some(degree)) => Some(degree),
+        (None, None) => None,
+    }
+}
+
 fn terminating_series(
     a: Complex64,
     b: Complex64,
@@ -1217,6 +1224,23 @@ fn general_evaluation_impl(
         outer_prefactor = (balance * complex_log1p(-z)).exp();
         a = c - a;
         b = c - b;
+
+        // Euler's transformation can introduce a nonpositive-integer
+        // numerator even when neither original numerator terminates. Evaluate
+        // that polynomial immediately: connection formulas contain gamma
+        // factors with poles for these otherwise valid transformed cases.
+        if let Some(degree) = terminating_degree(a, b) {
+            let result = terminating_series(a, b, c, z, degree);
+            if !result.converged {
+                return result;
+            }
+            let value = outer_prefactor * result.value;
+            return if finite(value) {
+                EvalOutcome::success_with_cancellation(value, result.cancellation_estimate)
+            } else {
+                EvalOutcome::failure()
+            };
+        }
     }
     if (b - a).re < 0.0 {
         core::mem::swap(&mut a, &mut b);
@@ -1424,7 +1448,36 @@ mod tests {
             3.0 * z * z + 6.0 * z + 2.0,
             2e-14,
         );
+        assert_close(
+            pochhammer_difference_ratio(Complex64::new(-0.5, 0.0), Complex64::ZERO, 2),
+            Complex64::ZERO,
+            2e-14,
+        );
         assert_eq!(exponential_difference_ratio(z, Complex64::ZERO), z);
+    }
+
+    #[test]
+    fn transformed_terminating_and_exact_integer_infinity_cases_match_mpmath() {
+        assert_close(
+            hyp2f1_scalar(
+                Complex64::new(3.0, 0.0),
+                Complex64::new(0.5, 0.0),
+                Complex64::new(2.0, 0.0),
+                Complex64::new(0.95, 0.02),
+            ),
+            Complex64::new(20.007_751_880_108_815, 11.419_384_341_915_018),
+            3e-14,
+        );
+        assert_close(
+            hyp2f1_scalar(
+                Complex64::new(-0.5, 0.0),
+                Complex64::new(-0.5, 0.0),
+                Complex64::ONE,
+                Complex64::new(1.9, 0.0),
+            ),
+            Complex64::new(1.566_746_598_608_614_2, 0.060_785_011_674_705_52),
+            3e-14,
+        );
     }
 
     #[test]

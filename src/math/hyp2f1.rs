@@ -9,6 +9,7 @@ const NAN: Complex64 = Complex64::new(f64::NAN, f64::NAN);
 const REL_TOL: f64 = 8.0 * f64::EPSILON;
 const DIRECT_RADIUS: f64 = 0.9;
 const MAX_SERIES_ITERATIONS: usize = 10_000;
+const MAX_TAYLOR_ITERATIONS: usize = 512;
 const LANCZOS_G_MINUS_HALF: f64 = 4.242_187_5;
 const LOG_SQRT_TWO_PI: f64 = 0.918_938_533_204_672_7;
 const LANCZOS_COEFFICIENTS: [f64; 15] = [
@@ -855,7 +856,7 @@ enum EvalPath {
     PfaffInfinity,
     One,
     PfaffOne,
-    Uncovered,
+    Taylor,
 }
 
 fn select_path(z: Complex64) -> EvalPath {
@@ -873,18 +874,95 @@ fn select_path(z: Complex64) -> EvalPath {
             complex_abs(complex_inverse(one_minus_z)),
         ),
     ];
-    let mut selected = EvalPath::Uncovered;
+    let mut selected = EvalPath::Taylor;
     let mut selected_modulus = f64::INFINITY;
     for (path, modulus) in candidates {
         if modulus <= DIRECT_RADIUS {
             let tie = 32.0 * f64::EPSILON * selected_modulus.max(modulus).max(1.0);
-            if selected == EvalPath::Uncovered || modulus + tie < selected_modulus {
+            if selected == EvalPath::Taylor || modulus + tie < selected_modulus {
                 selected = path;
                 selected_modulus = modulus;
             }
         }
     }
     selected
+}
+
+fn forced_anchor_evaluation(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
+    if complex_abs(z) <= 1.0 {
+        direct_series(a, b, c, z)
+    } else {
+        infinity_expansion(a, b, c, z)
+    }
+}
+
+fn taylor_continuation_with_limit(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    z: Complex64,
+    iteration_limit: usize,
+) -> EvalOutcome {
+    let z_abs = complex_abs(z);
+    if z_abs == 0.0 {
+        return EvalOutcome::success(Complex64::ONE);
+    }
+    let anchor_radius = if z_abs < 1.0 { 0.9 } else { 1.1 };
+    let z0 = (anchor_radius / z_abs) * z;
+    let q0_outcome = forced_anchor_evaluation(a, b, c, z0);
+    let shifted_outcome = forced_anchor_evaluation(a + 1.0, b + 1.0, c + 1.0, z0);
+    if !q0_outcome.converged || !shifted_outcome.converged || c == Complex64::ZERO {
+        return EvalOutcome::failure();
+    }
+
+    let mut q0 = q0_outcome.value;
+    let mut q1 = a * b * shifted_outcome.value / c;
+    let delta = z - z0;
+    let mut delta_power = delta;
+    let mut sum = CompensatedSum::new(q0);
+    sum.add(q1 * delta);
+    let differential_denominator = z0 * (1.0 - z0);
+    if differential_denominator == Complex64::ZERO || !finite(sum.value()) {
+        return EvalOutcome::failure();
+    }
+
+    let mut small_terms = 0;
+    let mut largest_term = complex_abs(q0).max(complex_abs(q1 * delta));
+    for n in 0..iteration_limit {
+        let nf = n as f64;
+        let q2 = ((nf * (2.0 * z0 - 1.0) - c + (a + b + 1.0) * z0) * q1
+            + (a + nf) * (b + nf) * q0 / (nf + 1.0))
+            / (differential_denominator * (nf + 2.0));
+        delta_power *= delta;
+        let term = q2 * delta_power;
+        sum.add(term);
+        let value = sum.value();
+        if !finite(q2) || !finite(term) || !finite(value) {
+            return EvalOutcome::failure();
+        }
+        let term_abs = complex_abs(term);
+        let value_abs = complex_abs(value);
+        largest_term = largest_term.max(term_abs);
+        if value_abs > 0.0 && term_abs <= REL_TOL * value_abs {
+            small_terms += 1;
+            if small_terms >= 2 {
+                return EvalOutcome::success_with_cancellation(
+                    value,
+                    largest_term / value_abs.max(f64::MIN_POSITIVE),
+                );
+            }
+        } else {
+            small_terms = 0;
+        }
+        q0 = q1;
+        q1 = q2;
+    }
+    EvalOutcome::failure()
+}
+
+#[inline]
+fn taylor_continuation(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
+    taylor_continuation_with_limit(a, b, c, z, MAX_TAYLOR_ITERATIONS)
 }
 
 fn general_evaluation(
@@ -914,7 +992,7 @@ fn general_evaluation(
         EvalPath::PfaffInfinity => infinity_expansion(a, c - b, c, pfaff_z),
         EvalPath::One => one_expansion(a, b, c, z),
         EvalPath::PfaffOne => one_expansion(a, c - b, c, pfaff_z),
-        EvalPath::Uncovered => EvalOutcome::failure(),
+        EvalPath::Taylor => taylor_continuation(a, b, c, z),
     };
     if !result.converged {
         return result;
@@ -1222,6 +1300,43 @@ mod tests {
                 row.tolerance,
             );
         }
+    }
+
+    #[test]
+    fn taylor_gap_fixtures_match_reference() {
+        for row in parse_hyp_fixture()
+            .into_iter()
+            .filter(|row| row.label == "taylor")
+        {
+            assert_eq!(select_path(row.z), EvalPath::Taylor);
+            assert_close(
+                hyp2f1_scalar(row.a, row.b, row.c, row.z),
+                row.expected,
+                row.tolerance,
+            );
+        }
+    }
+
+    #[test]
+    fn taylor_cap_and_differential_equation_residual() {
+        let a = Complex64::new(0.7, 0.2);
+        let b = Complex64::new(1.2, -0.3);
+        let c = Complex64::new(2.1, 0.1);
+        let z = Complex64::new(0.5, 0.866_025_403_784_438_6);
+        assert!(!taylor_continuation_with_limit(a, b, c, z, 1).converged);
+
+        let step = 1e-4;
+        let center = hyp2f1_scalar(a, b, c, z);
+        let plus = hyp2f1_scalar(a, b, c, z + step);
+        let minus = hyp2f1_scalar(a, b, c, z - step);
+        let first = (plus - minus) / (2.0 * step);
+        let second = (plus - 2.0 * center + minus) / (step * step);
+        let residual = z * (1.0 - z) * second + (c - (a + b + 1.0) * z) * first - a * b * center;
+        let scale = complex_abs(a * b * center).max(1.0);
+        assert!(
+            complex_abs(residual) <= 5e-7 * scale,
+            "residual={residual:?}"
+        );
     }
 
     #[test]

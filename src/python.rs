@@ -1,6 +1,6 @@
 use numpy::Element as NumpyElement;
-use numpy::PyArray1;
 use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadwriteArray1};
+use numpy::{Complex64, PyArray1};
 use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
@@ -3315,6 +3315,30 @@ fn ellipk(x: f64) -> f64 {
     math::ellipk(x)
 }
 
+/// Evaluate Gauss's hypergeometric function elementwise for complex arrays.
+#[pyfunction(signature = (a, b, c, z, par = true))]
+fn hyp2f1(
+    py: Python<'_>,
+    a: PyReadonlyArray1<'_, Complex64>,
+    b: PyReadonlyArray1<'_, Complex64>,
+    c: PyReadonlyArray1<'_, Complex64>,
+    z: PyReadonlyArray1<'_, Complex64>,
+    par: bool,
+) -> PyResult<Py<PyArray1<Complex64>>> {
+    let a = a.as_slice()?;
+    let b = b.as_slice()?;
+    let c = c.as_slice()?;
+    let z = z.as_slice()?;
+    let mut out = vec![Complex64::ZERO; a.len()];
+    let result = if par {
+        math::hyp2f1_par(a, b, c, z, &mut out)
+    } else {
+        math::hyp2f1(a, b, c, z, &mut out)
+    };
+    result.map_err(exceptions::PyValueError::new_err)?;
+    Ok(PyArray1::from_vec(py, out).unbind())
+}
+
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian
 #[pyfunction]
 fn flux_density_circular_filament_cartesian(
@@ -4420,6 +4444,7 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     // Pure math
     m.add_function(wrap_pyfunction!(ellipe, m.clone())?)?;
     m.add_function(wrap_pyfunction!(ellipk, m.clone())?)?;
+    m.add_function(wrap_pyfunction!(hyp2f1, m.clone())?)?;
 
     // Filamentization and meshing
     m.add_function(wrap_pyfunction!(filament_helix_path, m.clone())?)?;

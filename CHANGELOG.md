@@ -1,5 +1,12 @@
 # Changelog
 
+## 12.1.0 2026-08-17
+
+* Rust
+    * Add complex hyp2f1 hypergeometric function and supporting complex implementations of special functions
+* Python
+    * Add bindings to hyp2f1
+
 ## 12.0.0 2026-08-11
 
 * Rust

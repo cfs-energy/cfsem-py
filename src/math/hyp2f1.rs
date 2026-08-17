@@ -1447,5 +1447,61 @@ mod tests {
             Err("Length mismatch")
         );
         assert_eq!(out, [Complex64::new(7.0, 8.0); 2]);
+
+        assert_eq!(
+            hyp2f1_par(&input, &input, &input, &input, &mut out),
+            Err("Length mismatch")
+        );
+        assert_eq!(out, [Complex64::new(7.0, 8.0); 2]);
+    }
+
+    #[test]
+    fn vector_apis_match_scalar_across_regions() {
+        let rows: Vec<_> = parse_hyp_fixture().into_iter().take(12).collect();
+        let a: Vec<_> = rows.iter().map(|row| row.a).collect();
+        let b: Vec<_> = rows.iter().map(|row| row.b).collect();
+        let c: Vec<_> = rows.iter().map(|row| row.c).collect();
+        let z: Vec<_> = rows.iter().map(|row| row.z).collect();
+        let expected: Vec<_> = (0..rows.len())
+            .map(|index| hyp2f1_scalar(a[index], b[index], c[index], z[index]))
+            .collect();
+        let mut serial = vec![NAN; rows.len()];
+        let mut parallel = vec![NAN; rows.len()];
+        hyp2f1(&a, &b, &c, &z, &mut serial).unwrap();
+        hyp2f1_par(&a, &b, &c, &z, &mut parallel).unwrap();
+        assert_eq!(serial, expected);
+        assert_eq!(parallel, expected);
+    }
+
+    #[test]
+    fn vector_apis_cover_empty_singleton_subslice_and_nan() {
+        let empty: [Complex64; 0] = [];
+        let mut empty_out = [];
+        assert_eq!(
+            hyp2f1(&empty, &empty, &empty, &empty, &mut empty_out),
+            Ok(())
+        );
+        assert_eq!(
+            hyp2f1_par(&empty, &empty, &empty, &empty, &mut empty_out),
+            Ok(())
+        );
+
+        let a = [Complex64::new(0.5, 0.2); 3];
+        let b = [Complex64::new(1.1, -0.3); 3];
+        let c = [Complex64::new(2.4, 0.1); 3];
+        let z = [
+            Complex64::new(99.0, 0.0),
+            Complex64::new(0.3, 0.2),
+            Complex64::new(f64::NAN, 0.0),
+        ];
+        let mut out = [Complex64::new(7.0, 8.0); 3];
+        hyp2f1(&a[1..], &b[1..], &c[1..], &z[1..], &mut out[1..]).unwrap();
+        assert_eq!(out[0], Complex64::new(7.0, 8.0));
+        assert_eq!(out[1], hyp2f1_scalar(a[1], b[1], c[1], z[1]));
+        assert!(out[2].re.is_nan() && out[2].im.is_nan());
+
+        let mut singleton = [NAN];
+        hyp2f1_par(&a[1..2], &b[1..2], &c[1..2], &z[1..2], &mut singleton).unwrap();
+        assert_eq!(singleton[0], out[1]);
     }
 }

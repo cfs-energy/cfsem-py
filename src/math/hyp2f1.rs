@@ -15,7 +15,7 @@
 use num_complex::Complex64;
 use rayon::prelude::*;
 
-use crate::{chunksize, macros::check_length};
+use crate::macros::check_length;
 
 const NAN: Complex64 = Complex64::new(f64::NAN, f64::NAN);
 const REL_TOL: f64 = 8.0 * f64::EPSILON;
@@ -24,6 +24,7 @@ const TAYLOR_INNER_ANCHOR_RADIUS: f64 = 0.875;
 const TAYLOR_OUTER_ANCHOR_RADIUS: f64 = 1.1;
 const MAX_SERIES_ITERATIONS: usize = 10_000;
 const MAX_TAYLOR_ITERATIONS: usize = 512;
+const MAX_PARAMETER_ITERATIONS: usize = 10_000;
 const LANCZOS_G_MINUS_HALF: f64 = 4.242_187_5;
 const LOG_SQRT_TWO_PI: f64 = 0.918_938_533_204_672_7;
 const LANCZOS_COEFFICIENTS: [f64; 15] = [
@@ -150,9 +151,10 @@ pub fn hyp2f1(
 /// Evaluates Gauss's hypergeometric function elementwise in parallel on
 /// equal-length, contiguous slices.
 ///
-/// Work is split into Rayon chunks and each chunk is evaluated by [`hyp2f1`].
-/// See [`hyp2f1_scalar`] for the mathematical definition, branch convention,
-/// failure policy, implementation notes, and references.
+/// Rayon dynamically partitions the elementwise work so that expensive
+/// continuation cases do not pin an entire worker. See [`hyp2f1_scalar`] for
+/// the mathematical definition, branch convention, failure policy,
+/// implementation notes, and references.
 ///
 /// Returns `Err("Length mismatch")` without modifying `out` if any input slice
 /// has a different length from `out`.
@@ -164,20 +166,19 @@ pub fn hyp2f1_par(
     out: &mut [Complex64],
 ) -> Result<(), &'static str> {
     check_length!(out.len(), a, b, c, z);
-    let chunk = chunksize(out.len());
-    out.par_chunks_mut(chunk)
-        .zip(a.par_chunks(chunk))
-        .zip(b.par_chunks(chunk))
-        .zip(c.par_chunks(chunk))
-        .zip(z.par_chunks(chunk))
+    out.par_iter_mut()
+        .zip(a.par_iter())
+        .zip(b.par_iter())
+        .zip(c.par_iter())
+        .zip(z.par_iter())
         .for_each(|((((out, a), b), c), z)| {
-            hyp2f1(a, b, c, z, out).expect("validated equal chunk lengths");
+            *out = hyp2f1_scalar(*a, *b, *c, *z);
         });
     Ok(())
 }
 
 /// A value returned by one candidate expansion together with convergence
-/// status and a coarse measure of cancellation in its partial sums.
+/// status.
 ///
 /// Keeping failure information separate from the value lets the path selector
 /// map all internal singularities and iteration-limit failures to the public
@@ -186,7 +187,6 @@ pub fn hyp2f1_par(
 struct EvalOutcome {
     value: Complex64,
     converged: bool,
-    cancellation_estimate: f64,
 }
 
 impl EvalOutcome {
@@ -195,16 +195,6 @@ impl EvalOutcome {
         Self {
             value,
             converged: true,
-            cancellation_estimate: 1.0,
-        }
-    }
-
-    #[inline]
-    const fn success_with_cancellation(value: Complex64, cancellation_estimate: f64) -> Self {
-        Self {
-            value,
-            converged: true,
-            cancellation_estimate,
         }
     }
 
@@ -213,7 +203,6 @@ impl EvalOutcome {
         Self {
             value: NAN,
             converged: false,
-            cancellation_estimate: f64::INFINITY,
         }
     }
 }
@@ -671,18 +660,17 @@ fn one_gamma_zero(
             * gamma(1.0 - epsilon))
 }
 
-fn one_finite_part(
+/// Evaluates the finite portion shared by the `z = 1` and `z = infinity`
+/// connection formulas after their formula-specific initial term is known.
+fn connection_finite_part(
     a: Complex64,
-    b: Complex64,
-    c: Complex64,
+    second: Complex64,
     w: Complex64,
     m: i32,
     epsilon: Complex64,
+    mut term: Complex64,
 ) -> EvalOutcome {
-    if m <= 0 {
-        return EvalOutcome::success(Complex64::ZERO);
-    }
-    let mut term = one_alpha_zero(a, b, c, m, epsilon);
+    debug_assert!(m > 0);
     let mut sum = CompensatedSum::new(term);
     for n in 0..(m - 1) {
         let nf = n as f64;
@@ -690,7 +678,7 @@ fn one_finite_part(
         if denominator == Complex64::ZERO {
             return EvalOutcome::failure();
         }
-        term *= (a + nf) * (b + nf) * w / denominator;
+        term *= (a + nf) * (second + nf) * w / denominator;
         sum.add(term);
         if !finite(term) || !finite(sum.value()) {
             return EvalOutcome::failure();
@@ -699,39 +687,38 @@ fn one_finite_part(
     EvalOutcome::success(sum.value())
 }
 
-/// Evaluates the stabilized infinite tail of the connection expansion at
-/// `w = 1 - z` using coupled beta and gamma recurrences.
-fn one_infinite_part(
+/// Evaluates the infinite tail shared by both connection formulas after their
+/// formula-specific beta and gamma seeds are known.
+fn connection_infinite_part(
     a: Complex64,
-    b: Complex64,
-    c: Complex64,
+    second: Complex64,
     w: Complex64,
     m: i32,
     epsilon: Complex64,
+    mut beta: Complex64,
+    mut gamma_term: Complex64,
 ) -> EvalOutcome {
     let mf = m as f64;
-    let mut beta = one_beta_zero(a, b, c, w, m, epsilon);
-    let mut gamma_term = one_gamma_zero(a, b, c, w, m, epsilon) * w;
     let mut sum = CompensatedSum::new(beta);
     let mut small_terms = 0;
     for n in 0..MAX_SERIES_ITERATIONS {
         let nf = n as f64;
         let amn = a + mf + nf;
-        let bmn = b + mf + nf;
+        let second_mn = second + mf + nf;
         let shifted_a = amn + epsilon;
-        let shifted_b = bmn + epsilon;
+        let shifted_second = second_mn + epsilon;
         let denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0);
         let correction_denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0 - epsilon);
         if denominator == Complex64::ZERO || correction_denominator == Complex64::ZERO {
             return EvalOutcome::failure();
         }
-        beta = shifted_a * shifted_b * w * beta / denominator
-            + (amn * bmn / (mf + nf + 1.0) - amn - bmn - epsilon
-                + shifted_a * shifted_b / (nf + 1.0))
+        beta = shifted_a * shifted_second * w * beta / denominator
+            + (amn * second_mn / (mf + nf + 1.0) - amn - second_mn - epsilon
+                + shifted_a * shifted_second / (nf + 1.0))
                 * gamma_term
                 / correction_denominator;
         sum.add(beta);
-        gamma_term *= amn * bmn * w / ((mf + nf + 1.0) * (nf + 1.0 - epsilon));
+        gamma_term *= amn * second_mn * w / ((mf + nf + 1.0) * (nf + 1.0 - epsilon));
         if !finite(beta) || !finite(gamma_term) || !finite(sum.value()) {
             return EvalOutcome::failure();
         }
@@ -748,9 +735,42 @@ fn one_infinite_part(
     EvalOutcome::failure()
 }
 
+fn one_finite_part(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> EvalOutcome {
+    if m <= 0 {
+        return EvalOutcome::success(Complex64::ZERO);
+    }
+    connection_finite_part(a, b, w, m, epsilon, one_alpha_zero(a, b, c, m, epsilon))
+}
+
+fn one_infinite_part(
+    a: Complex64,
+    b: Complex64,
+    c: Complex64,
+    w: Complex64,
+    m: i32,
+    epsilon: Complex64,
+) -> EvalOutcome {
+    connection_infinite_part(
+        a,
+        b,
+        w,
+        m,
+        epsilon,
+        one_beta_zero(a, b, c, w, m, epsilon),
+        one_gamma_zero(a, b, c, w, m, epsilon) * w,
+    )
+}
+
 fn one_expansion(a: Complex64, b: Complex64, c: Complex64, z: Complex64) -> EvalOutcome {
     let (m, epsilon) = nearest_integer_difference(c - a - b);
-    if m < 0 {
+    if m < 0 || m as usize > MAX_PARAMETER_ITERATIONS {
         return EvalOutcome::failure();
     }
     let w = one_minus(z);
@@ -849,21 +869,14 @@ fn infinity_finite_part(
     if m <= 0 {
         return EvalOutcome::success(Complex64::ZERO);
     }
-    let mut term = infinity_alpha_zero(a, c, m, epsilon);
-    let mut sum = CompensatedSum::new(term);
-    for n in 0..(m - 1) {
-        let nf = n as f64;
-        let denominator = (nf + 1.0) * (1.0 - m as f64 - epsilon + nf);
-        if denominator == Complex64::ZERO {
-            return EvalOutcome::failure();
-        }
-        term *= (a + nf) * (1.0 - c + a + nf) * w / denominator;
-        sum.add(term);
-        if !finite(term) || !finite(sum.value()) {
-            return EvalOutcome::failure();
-        }
-    }
-    EvalOutcome::success(sum.value())
+    connection_finite_part(
+        a,
+        1.0 - c + a,
+        w,
+        m,
+        epsilon,
+        infinity_alpha_zero(a, c, m, epsilon),
+    )
 }
 
 fn infinity_infinite_part(
@@ -873,43 +886,15 @@ fn infinity_infinite_part(
     m: i32,
     epsilon: Complex64,
 ) -> EvalOutcome {
-    let mf = m as f64;
-    let mut beta = infinity_beta_zero(a, c, w, m, epsilon);
-    let mut gamma_term = infinity_gamma_zero(a, c, w, m, epsilon) * w;
-    let mut sum = CompensatedSum::new(beta);
-    let mut small_terms = 0;
-    for n in 0..MAX_SERIES_ITERATIONS {
-        let nf = n as f64;
-        let amn = a + mf + nf;
-        let dmn = 1.0 - c + a + mf + nf;
-        let shifted_a = amn + epsilon;
-        let shifted_d = dmn + epsilon;
-        let denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0);
-        let correction_denominator = (mf + nf + 1.0 + epsilon) * (nf + 1.0 - epsilon);
-        if denominator == Complex64::ZERO || correction_denominator == Complex64::ZERO {
-            return EvalOutcome::failure();
-        }
-        beta = shifted_a * shifted_d * w * beta / denominator
-            + (amn * dmn / (mf + nf + 1.0) - amn - dmn - epsilon
-                + shifted_a * shifted_d / (nf + 1.0))
-                * gamma_term
-                / correction_denominator;
-        sum.add(beta);
-        gamma_term *= amn * dmn * w / ((mf + nf + 1.0) * (nf + 1.0 - epsilon));
-        if !finite(beta) || !finite(gamma_term) || !finite(sum.value()) {
-            return EvalOutcome::failure();
-        }
-        let sum_abs = complex_abs(sum.value());
-        if sum_abs > 0.0 && complex_abs(beta) <= REL_TOL * sum_abs {
-            small_terms += 1;
-            if small_terms >= 2 {
-                return EvalOutcome::success(sum.value());
-            }
-        } else {
-            small_terms = 0;
-        }
-    }
-    EvalOutcome::failure()
+    connection_infinite_part(
+        a,
+        1.0 - c + a,
+        w,
+        m,
+        epsilon,
+        infinity_beta_zero(a, c, w, m, epsilon),
+        infinity_gamma_zero(a, c, w, m, epsilon) * w,
+    )
 }
 
 /// Evaluates the reciprocal-coordinate connection expansion, swapping `a`
@@ -924,7 +909,7 @@ fn infinity_expansion(
         core::mem::swap(&mut a, &mut b);
     }
     let (m, epsilon) = nearest_integer_difference(b - a);
-    if m < 0 {
+    if m < 0 || m as usize > MAX_PARAMETER_ITERATIONS {
         return EvalOutcome::failure();
     }
     let w = complex_inverse(z);
@@ -1001,6 +986,9 @@ fn terminating_series(
     z: Complex64,
     degree: usize,
 ) -> EvalOutcome {
+    if degree > MAX_PARAMETER_ITERATIONS {
+        return EvalOutcome::failure();
+    }
     let mut term = Complex64::ONE;
     let mut sum = CompensatedSum::new(Complex64::ONE);
     for n in 0..degree {
@@ -1024,8 +1012,7 @@ fn terminating_series(
     EvalOutcome::success(sum.value())
 }
 
-/// Sums the defining Gauss series and records the largest-term/final-value
-/// ratio as an inexpensive warning that the result suffered cancellation.
+/// Sums the defining Gauss series up to the supplied iteration limit.
 #[inline]
 fn direct_series_with_limit(
     a: Complex64,
@@ -1037,7 +1024,6 @@ fn direct_series_with_limit(
     let mut term = Complex64::ONE;
     let mut sum = CompensatedSum::new(Complex64::ONE);
     let mut small_terms = 0;
-    let mut largest_term: f64 = 1.0;
 
     for n in 0..iteration_limit {
         let nf = n as f64;
@@ -1049,7 +1035,6 @@ fn direct_series_with_limit(
         sum.add(term);
         let value = sum.value();
         let term_abs = complex_abs(term);
-        largest_term = largest_term.max(term_abs);
         if !finite(term) || !finite(value) {
             return EvalOutcome::failure();
         }
@@ -1060,8 +1045,7 @@ fn direct_series_with_limit(
         if converged {
             small_terms += 1;
             if small_terms >= 2 && n >= 1 {
-                let cancellation = largest_term / value_abs.max(f64::MIN_POSITIVE);
-                return EvalOutcome::success_with_cancellation(value, cancellation);
+                return EvalOutcome::success(value);
             }
         } else {
             small_terms = 0;
@@ -1176,7 +1160,6 @@ fn taylor_continuation_with_limit(
     }
 
     let mut small_terms = 0;
-    let mut largest_term = complex_abs(q0).max(complex_abs(q1 * delta));
     for n in 0..iteration_limit {
         let nf = n as f64;
         let q2 = ((nf * (2.0 * z0 - 1.0) - c + (a + b + 1.0) * z0) * q1
@@ -1191,14 +1174,10 @@ fn taylor_continuation_with_limit(
         }
         let term_abs = complex_abs(term);
         let value_abs = complex_abs(value);
-        largest_term = largest_term.max(term_abs);
         if value_abs > 0.0 && term_abs <= REL_TOL * value_abs {
             small_terms += 1;
             if small_terms >= 2 {
-                return EvalOutcome::success_with_cancellation(
-                    value,
-                    largest_term / value_abs.max(f64::MIN_POSITIVE),
-                );
+                return EvalOutcome::success(value);
             }
         } else {
             small_terms = 0;
@@ -1242,7 +1221,7 @@ fn general_evaluation_impl(
         }
         let value = (balance * complex_log1p(-z)).exp() * result.value;
         return if finite(value) {
-            EvalOutcome::success_with_cancellation(value, result.cancellation_estimate)
+            EvalOutcome::success(value)
         } else {
             EvalOutcome::failure()
         };
@@ -1259,32 +1238,31 @@ fn general_evaluation_impl(
     }
 
     let path = select_path(z);
-    let pfaff_z = pfaff_argument(z);
-    let pfaff_prefactor = (-a * complex_log1p(-z)).exp();
-    let result = match path {
-        EvalPath::Direct => direct_series(a, b, c, z),
-        EvalPath::PfaffDirect => direct_series(a, c - b, c, pfaff_z),
-        EvalPath::Infinity => infinity_expansion(a, b, c, z),
-        EvalPath::PfaffInfinity => infinity_expansion(a, c - b, c, pfaff_z),
-        EvalPath::One => one_expansion(a, b, c, z),
-        EvalPath::PfaffOne => one_expansion(a, c - b, c, pfaff_z),
-        EvalPath::Taylor if allow_taylor => taylor_continuation(a, b, c, z),
-        EvalPath::Taylor => EvalOutcome::failure(),
+    let (result, inner_prefactor) = match path {
+        EvalPath::Direct => (direct_series(a, b, c, z), Complex64::ONE),
+        EvalPath::PfaffDirect => (
+            direct_series(a, c - b, c, pfaff_argument(z)),
+            (-a * complex_log1p(-z)).exp(),
+        ),
+        EvalPath::Infinity => (infinity_expansion(a, b, c, z), Complex64::ONE),
+        EvalPath::PfaffInfinity => (
+            infinity_expansion(a, c - b, c, pfaff_argument(z)),
+            (-a * complex_log1p(-z)).exp(),
+        ),
+        EvalPath::One => (one_expansion(a, b, c, z), Complex64::ONE),
+        EvalPath::PfaffOne => (
+            one_expansion(a, c - b, c, pfaff_argument(z)),
+            (-a * complex_log1p(-z)).exp(),
+        ),
+        EvalPath::Taylor if allow_taylor => (taylor_continuation(a, b, c, z), Complex64::ONE),
+        EvalPath::Taylor => (EvalOutcome::failure(), Complex64::ONE),
     };
     if !result.converged {
         return result;
     }
-    let inner_prefactor = if matches!(
-        path,
-        EvalPath::PfaffDirect | EvalPath::PfaffInfinity | EvalPath::PfaffOne
-    ) {
-        pfaff_prefactor
-    } else {
-        Complex64::ONE
-    };
     let value = outer_prefactor * inner_prefactor * result.value;
     if finite(value) {
-        EvalOutcome::success_with_cancellation(value, result.cancellation_estimate)
+        EvalOutcome::success(value)
     } else {
         EvalOutcome::failure()
     }
@@ -1465,6 +1443,13 @@ mod tests {
             Complex64::ZERO,
             2e-14,
         );
+        // Rounding -1.3 locates the nearby factor at index 1, but it is not an
+        // exact zero. The zero-epsilon limit is the full derivative of (z)_3.
+        assert_close(
+            pochhammer_difference_ratio(Complex64::new(-1.3, 0.0), Complex64::ZERO, 3),
+            Complex64::new(-0.73, 0.0),
+            2e-14,
+        );
         assert_eq!(exponential_difference_ratio(z, Complex64::ZERO), z);
     }
 
@@ -1490,6 +1475,49 @@ mod tests {
             Complex64::new(1.566_746_598_608_614_2, 0.060_785_011_674_705_52),
             3e-14,
         );
+    }
+
+    #[test]
+    fn real_parameter_infinity_cases_near_pochhammer_zeros_match_mpmath() {
+        // These cases exercise the infinity expansion with b-a an integer and
+        // 1-c+a near, but not equal to, a nonpositive integer. Reference values
+        // were generated with mpmath 1.3.0 at 50 decimal digits.
+        let cases = [
+            (
+                0.3,
+                2.3,
+                0.9,
+                Complex64::new(4.0, 0.5),
+                Complex64::new(0.247_877_616_659_031_27, 0.297_556_752_826_444_6),
+            ),
+            (
+                0.5,
+                2.5,
+                1.2,
+                Complex64::new(5.0, 1.0),
+                Complex64::new(0.024_577_322_512_199_99, 0.222_224_334_815_688_8),
+            ),
+            (
+                0.3,
+                3.3,
+                0.9,
+                Complex64::new(4.0, 0.5),
+                Complex64::new(0.213_813_644_541_913_16, 0.277_550_319_435_210_5),
+            ),
+        ];
+
+        for (a, b, c, z, expected) in cases {
+            assert_close(
+                hyp2f1_scalar(
+                    Complex64::new(a, 0.0),
+                    Complex64::new(b, 0.0),
+                    Complex64::new(c, 0.0),
+                    z,
+                ),
+                expected,
+                3e-14,
+            );
+        }
     }
 
     #[test]
@@ -1548,13 +1576,50 @@ mod tests {
     fn terminating_series_stops_after_term_underflows_to_zero() {
         assert_eq!(
             hyp2f1_scalar(
-                Complex64::new(-1_000_000_000.0, 0.0),
+                Complex64::new(-(MAX_PARAMETER_ITERATIONS as f64), 0.0),
                 Complex64::ONE,
                 Complex64::ONE,
                 Complex64::new(1e-300, 0.0),
             ),
             Complex64::ONE
         );
+    }
+
+    #[test]
+    fn parameter_magnitude_iteration_caps_report_failure() {
+        let excessive = MAX_PARAMETER_ITERATIONS + 1;
+        assert!(
+            !terminating_series(
+                Complex64::new(-(excessive as f64), 0.0),
+                Complex64::ONE,
+                Complex64::ONE,
+                Complex64::new(1e-300, 0.0),
+                excessive,
+            )
+            .converged
+        );
+
+        let a = Complex64::new(0.3, 0.0);
+        let b = Complex64::new(0.4, 0.0);
+        let excessive = excessive as f64;
+        assert!(!one_expansion(a, b, a + b + excessive, Complex64::new(0.5, 0.1)).converged);
+        assert!(
+            !infinity_expansion(
+                a,
+                a + excessive,
+                Complex64::new(0.9, 0.0),
+                Complex64::new(4.0, 0.5),
+            )
+            .converged
+        );
+
+        let public_value = hyp2f1_scalar(
+            Complex64::new(-1_000_000_000.0, 0.0),
+            Complex64::ONE,
+            Complex64::ONE,
+            Complex64::new(1e-300, 0.0),
+        );
+        assert!(public_value.re.is_nan() && public_value.im.is_nan());
     }
 
     #[test]
@@ -1744,7 +1809,6 @@ mod tests {
         );
         assert!(!result.converged);
         assert!(result.value.re.is_nan() && result.value.im.is_nan());
-        assert!(result.cancellation_estimate.is_infinite());
     }
 
     #[test]

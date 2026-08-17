@@ -81,6 +81,18 @@ def test_hyp2f1_rejects_non_complex128_array_inputs(bad):
         cfsem.hyp2f1(bad, valid, valid, valid)
 
 
+@pytest.mark.parametrize("bad", [0.5, 1, np.float64(0.5)])
+def test_hyp2f1_requires_complex_scalar_inputs(bad):
+    arguments = [0.5 + 0.0j, 1.1 + 0.0j, 2.4 + 0.0j, 0.2 + 0.0j]
+    names = ["a", "b", "c", "z"]
+
+    for index, name in enumerate(names):
+        invalid = arguments.copy()
+        invalid[index] = bad
+        with pytest.raises(TypeError, match=rf"^{name} must be a complex scalar"):
+            cfsem.hyp2f1(invalid[0], invalid[1], invalid[2], invalid[3])
+
+
 def test_hyp2f1_rejects_unequal_shapes():
     matrix = np.ones((2, 3), dtype=np.complex128)
     vector = np.ones(6, dtype=np.complex128)

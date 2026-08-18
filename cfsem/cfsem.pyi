@@ -1,9 +1,11 @@
 from typing import TypeAlias, TypedDict
 
-from numpy import float32, float64, int64, uint64
+from numpy import complex128, float32, float64, int64, uint64
 from numpy.typing import NDArray
 
 FloatArray: TypeAlias = NDArray[float64]
+ComplexArray: TypeAlias = NDArray[complex128]
+ComplexInput: TypeAlias = complex | complex128 | ComplexArray
 Float32Array: TypeAlias = NDArray[float32]
 IntArray: TypeAlias = NDArray[int64]
 UIntArray: TypeAlias = NDArray[uint64]
@@ -210,6 +212,15 @@ def body_force_density_linear_filament(
 ) -> ArrayTriple: ...
 def ellipe(x: float) -> float: ...
 def ellipk(x: float) -> float: ...
+def hyp2f1(
+    a: ComplexInput,
+    b: ComplexInput,
+    c: ComplexInput,
+    z: ComplexInput,
+    par: bool = True,
+    *,
+    out: ComplexArray | None = None,
+) -> ComplexArray: ...
 def filament_helix_path(
     path: ArrayTriple,
     helix_start_offset: tuple[float, float, float],

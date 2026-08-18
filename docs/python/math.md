@@ -5,3 +5,5 @@
 ::: cfsem.ellipe
 
 ::: cfsem.ellipk
+
+::: cfsem.hyp2f1

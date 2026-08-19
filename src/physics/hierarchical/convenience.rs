@@ -15,9 +15,10 @@ use super::kernels::{
     LinearFilamentSources, LinearFilamentVectorPotentialKernel,
 };
 use super::{
-    BuildMethod, ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, Scalar,
-    Skip, SourceCollection, SourceMomentCollection, SourceNodeSummaries, TargetCollection, eval,
-    eval_par, scratch_len, scratch_len_par, update_summaries,
+    BuildMethod, ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel,
+    NearFieldInteractionMap, Scalar, Skip, SourceCollection, SourceMomentCollection,
+    SourceNodeSummaries, TargetCollection, TraversalDiagnostics, eval, eval_par, scratch_len,
+    scratch_len_par, traversal_diagnostics, traversal_diagnostics_par, update_summaries,
 };
 
 /// Diagnostic information returned by stateless hierarchical solves.
@@ -32,6 +33,8 @@ pub struct Diagnostics<K: HierarchicalKernel> {
     pub source_count: usize,
     /// Number of targets in the solve.
     pub target_count: usize,
+    /// Accepted levels and direct near-field sparsity, when requested.
+    traversal_diagnostics: Option<TraversalDiagnostics<K::Scalar>>,
 }
 
 impl<K: HierarchicalKernel> Diagnostics<K> {
@@ -39,6 +42,33 @@ impl<K: HierarchicalKernel> Diagnostics<K> {
     #[inline]
     pub fn source_tree(&self) -> &ClusterTree<K::Scalar> {
         &self.source_tree
+    }
+
+    /// Borrow the requested traversal diagnostics, if they were collected.
+    #[inline]
+    pub fn traversal_diagnostics(&self) -> Option<&TraversalDiagnostics<K::Scalar>> {
+        self.traversal_diagnostics.as_ref()
+    }
+
+    /// Borrow the mean accepted source-tree level per target, if requested.
+    #[inline]
+    pub fn accepted_levels(&self) -> Option<&[K::Scalar]> {
+        self.traversal_diagnostics()
+            .map(|diagnostics| diagnostics.accepted_levels.as_slice())
+    }
+
+    /// Borrow the direct near-field interaction pattern, if requested.
+    #[inline]
+    pub fn near_field_interaction_map(&self) -> Option<&NearFieldInteractionMap> {
+        self.traversal_diagnostics()
+            .map(|diagnostics| &diagnostics.near_field_interaction_map)
+    }
+
+    /// Move traversal diagnostics into an in-crate result adapter.
+    #[cfg(feature = "python")]
+    #[inline]
+    pub(crate) fn take_traversal_diagnostics(&mut self) -> Option<TraversalDiagnostics<K::Scalar>> {
+        self.traversal_diagnostics.take()
     }
 }
 
@@ -61,10 +91,11 @@ impl<K: HierarchicalKernel> Diagnostics<K> {
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
+///     extra_diagnostics: Whether to collect accepted levels and the near-field interaction map.
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Source-tree diagnostics and construction/evaluation timing on success.
+///     Source-tree metadata, optional traversal diagnostics, and timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -77,6 +108,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
     construction_method: BuildMethod,
     theta: T,
     par: bool,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<DipoleFluxDensityKernel<T>>, HierarchicalError> {
     let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
@@ -91,6 +123,7 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
         theta,
         par,
         None,
+        extra_diagnostics,
         out,
     )
 }
@@ -114,10 +147,11 @@ pub fn flux_density_dipole_hierarchical<T: Scalar>(
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
+///     extra_diagnostics: Whether to collect accepted levels and the near-field interaction map.
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Source-tree diagnostics and construction/evaluation timing on success.
+///     Source-tree metadata, optional traversal diagnostics, and timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -130,6 +164,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
     construction_method: BuildMethod,
     theta: T,
     par: bool,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<DipoleVectorPotentialKernel<T>>, HierarchicalError> {
     let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
@@ -144,6 +179,7 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
         theta,
         par,
         None,
+        extra_diagnostics,
         out,
     )
 }
@@ -168,10 +204,11 @@ pub fn vector_potential_dipole_hierarchical<T: Scalar>(
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
+///     extra_diagnostics: Whether to collect accepted levels and the near-field interaction map.
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Source-tree diagnostics and construction/evaluation timing on success.
+///     Source-tree metadata, optional traversal diagnostics, and timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -185,6 +222,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
     construction_method: BuildMethod,
     theta: T,
     par: bool,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<LinearFilamentFluxDensityKernel<T>>, HierarchicalError> {
     let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
@@ -198,6 +236,7 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
         theta,
         par,
         None,
+        extra_diagnostics,
         out,
     )
 }
@@ -222,10 +261,11 @@ pub fn flux_density_linear_filament_hierarchical<T: Scalar>(
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
+///     extra_diagnostics: Whether to collect accepted levels and the near-field interaction map.
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Source-tree diagnostics and construction/evaluation timing on success.
+///     Source-tree metadata, optional traversal diagnostics, and timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, tree construction fails,
@@ -239,6 +279,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
     construction_method: BuildMethod,
     theta: T,
     par: bool,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<LinearFilamentVectorPotentialKernel<T>>, HierarchicalError> {
     let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
@@ -252,6 +293,7 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
         theta,
         par,
         None,
+        extra_diagnostics,
         out,
     )
 }
@@ -282,10 +324,11 @@ pub fn vector_potential_linear_filament_hierarchical<T: Scalar>(
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
+///     extra_diagnostics: Whether to collect accepted levels and the near-field interaction map.
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Source-tree diagnostics and construction/evaluation timing on success.
+///     Source-tree metadata, optional traversal diagnostics, and timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, mesh conversion fails,
@@ -297,6 +340,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
     construction_method: BuildMethod,
     theta: f64,
     par: bool,
+    extra_diagnostics: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<Diagnostics<BoundaryElementFluxDensityKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
@@ -313,6 +357,7 @@ pub fn flux_density_triangle_mesh_hierarchical(
         theta,
         par,
         None,
+        extra_diagnostics,
         out,
     )
 }
@@ -343,10 +388,11 @@ pub fn flux_density_triangle_mesh_hierarchical(
 ///     construction_method: Source-tree construction method.
 ///     theta: Barnes-Hut acceptance angle. Smaller values are more accurate and slower.
 ///     par: Whether to evaluate target batches in parallel.
+///     extra_diagnostics: Whether to collect accepted levels and the near-field interaction map.
 ///     out: Output component slices to fill.
 ///
 /// Returns:
-///     Source-tree diagnostics and construction/evaluation timing on success.
+///     Source-tree metadata, optional traversal diagnostics, and timing on success.
 ///
 /// Errors:
 ///     Returns [`HierarchicalError`] when input lengths are inconsistent, mesh conversion fails,
@@ -358,6 +404,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
     construction_method: BuildMethod,
     theta: f64,
     par: bool,
+    extra_diagnostics: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<Diagnostics<BoundaryElementVectorPotentialKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
@@ -374,6 +421,7 @@ pub fn vector_potential_triangle_mesh_hierarchical(
         theta,
         par,
         None,
+        extra_diagnostics,
         out,
     )
 }
@@ -388,6 +436,7 @@ pub fn flux_density_dipole_hierarchical_with_skip<T: Scalar>(
     theta: T,
     par: bool,
     skip: Skip,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<DipoleFluxDensityKernel<T>>, HierarchicalError> {
     let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
@@ -402,6 +451,7 @@ pub fn flux_density_dipole_hierarchical_with_skip<T: Scalar>(
         theta,
         par,
         Some(skip),
+        extra_diagnostics,
         out,
     )
 }
@@ -416,6 +466,7 @@ pub fn vector_potential_dipole_hierarchical_with_skip<T: Scalar>(
     theta: T,
     par: bool,
     skip: Skip,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<DipoleVectorPotentialKernel<T>>, HierarchicalError> {
     let sources = DipoleSources::new(loc.0, loc.1, loc.2, outer_radius);
@@ -430,6 +481,7 @@ pub fn vector_potential_dipole_hierarchical_with_skip<T: Scalar>(
         theta,
         par,
         Some(skip),
+        extra_diagnostics,
         out,
     )
 }
@@ -445,6 +497,7 @@ pub fn flux_density_linear_filament_hierarchical_with_skip<T: Scalar>(
     theta: T,
     par: bool,
     skip: Skip,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<LinearFilamentFluxDensityKernel<T>>, HierarchicalError> {
     let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
@@ -458,6 +511,7 @@ pub fn flux_density_linear_filament_hierarchical_with_skip<T: Scalar>(
         theta,
         par,
         Some(skip),
+        extra_diagnostics,
         out,
     )
 }
@@ -473,6 +527,7 @@ pub fn vector_potential_linear_filament_hierarchical_with_skip<T: Scalar>(
     theta: T,
     par: bool,
     skip: Skip,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<LinearFilamentVectorPotentialKernel<T>>, HierarchicalError> {
     let sources = LinearFilamentSources::new(xyzfil, dlxyzfil, wire_radius);
@@ -486,6 +541,7 @@ pub fn vector_potential_linear_filament_hierarchical_with_skip<T: Scalar>(
         theta,
         par,
         Some(skip),
+        extra_diagnostics,
         out,
     )
 }
@@ -499,6 +555,7 @@ pub fn flux_density_triangle_mesh_hierarchical_with_skip(
     theta: f64,
     par: bool,
     skip: Skip,
+    extra_diagnostics: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<Diagnostics<BoundaryElementFluxDensityKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
@@ -515,6 +572,7 @@ pub fn flux_density_triangle_mesh_hierarchical_with_skip(
         theta,
         par,
         Some(skip),
+        extra_diagnostics,
         out,
     )
 }
@@ -528,6 +586,7 @@ pub fn vector_potential_triangle_mesh_hierarchical_with_skip(
     theta: f64,
     par: bool,
     skip: Skip,
+    extra_diagnostics: bool,
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<Diagnostics<BoundaryElementVectorPotentialKernel<f64>>, HierarchicalError> {
     mesh.validate_nodal_values(s)
@@ -544,6 +603,7 @@ pub fn vector_potential_triangle_mesh_hierarchical_with_skip(
         theta,
         par,
         Some(skip),
+        extra_diagnostics,
         out,
     )
 }
@@ -558,6 +618,7 @@ pub(crate) fn one_shot_vec3<K, T, S, M, C>(
     theta: T,
     par: bool,
     skip: Option<Skip>,
+    extra_diagnostics: bool,
     out: (&mut [T], &mut [T], &mut [T]),
 ) -> Result<Diagnostics<K>, HierarchicalError>
 where
@@ -584,7 +645,7 @@ where
         BuildMethod::LongestAxis => ClusterTree::build(sources)?,
         BuildMethod::MortonLbvh => ClusterTree::build_morton_lbvh(sources)?,
     };
-    let source_summaries = if skip == Some(Skip::Both) {
+    let source_summaries = if skip == Some(Skip::Both) && !extra_diagnostics {
         None
     } else {
         let mut source_summaries = SourceNodeSummaries::<K>::new(source_tree.as_view());
@@ -603,7 +664,10 @@ where
     let construction_seconds = construction_start.elapsed().as_secs_f64();
 
     let evaluation_start = Instant::now();
-    if let Some(source_summaries) = source_summaries {
+    if skip != Some(Skip::Both) {
+        let source_summaries = source_summaries
+            .as_ref()
+            .expect("non-skipped evaluation requires source summaries");
         let scratch_len = match par {
             true => scratch_len_par(targets.len()),
             false => scratch_len(),
@@ -675,11 +739,36 @@ where
     }
     let evaluation_seconds = evaluation_start.elapsed().as_secs_f64();
 
+    let traversal_diagnostics = if extra_diagnostics {
+        let source_summaries = source_summaries
+            .as_ref()
+            .expect("requested traversal diagnostics require source summaries");
+        Some(match par {
+            true => traversal_diagnostics_par(
+                &kernel,
+                source_tree.as_view(),
+                &source_summaries.node_summaries,
+                targets,
+                theta,
+            )?,
+            false => traversal_diagnostics(
+                &kernel,
+                source_tree.as_view(),
+                &source_summaries.node_summaries,
+                targets,
+                theta,
+            )?,
+        })
+    } else {
+        None
+    };
+
     Ok(Diagnostics {
         source_tree,
         construction_seconds,
         evaluation_seconds,
         source_count: sources.len(),
         target_count: targets.len(),
+        traversal_diagnostics,
     })
 }

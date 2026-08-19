@@ -187,6 +187,7 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 false,
+                                false,
                                 (&mut bx, &mut by, &mut bz),
                             )
                             .unwrap(),
@@ -217,6 +218,7 @@ fn bench_flux_density_linear_filament(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 true,
+                                false,
                                 (&mut bx, &mut by, &mut bz),
                             )
                             .unwrap(),
@@ -323,6 +325,7 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 false,
+                                false,
                                 (&mut ax, &mut ay, &mut az),
                             )
                             .unwrap(),
@@ -354,6 +357,7 @@ fn bench_vector_potential_linear_filament(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 true,
+                                false,
                                 (&mut ax, &mut ay, &mut az),
                             )
                             .unwrap(),

@@ -21,7 +21,7 @@ pub mod kernels;
 pub mod tree;
 
 pub use convenience::{
-    flux_density_dipole_hierarchical, flux_density_dipole_hierarchical_with_skip,
+    Diagnostics, flux_density_dipole_hierarchical, flux_density_dipole_hierarchical_with_skip,
     flux_density_linear_filament_hierarchical, flux_density_linear_filament_hierarchical_with_skip,
     flux_density_triangle_mesh_hierarchical, flux_density_triangle_mesh_hierarchical_with_skip,
     vector_potential_dipole_hierarchical, vector_potential_dipole_hierarchical_with_skip,

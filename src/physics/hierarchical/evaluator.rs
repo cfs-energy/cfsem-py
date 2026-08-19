@@ -93,8 +93,9 @@ where
 /// as a single target leaf, walked against the source tree, and written directly
 /// into caller-provided component slices. [`Skip::Near`] retains accepted far-summary
 /// contributions only, [`Skip::Far`] retains direct leaf contributions only, and `None`
-/// evaluates both interaction classes. The output slice count must match the kernel output
-/// dimension `D`.
+/// evaluates both interaction classes. [`Skip::Both`] zeroes the output without target
+/// summarization, source-tree traversal, or contribution scratch. The output slice count must
+/// match the kernel output dimension `D`.
 #[inline]
 pub fn eval<K, T, S, M, C, const D: usize>(
     kernel: &K,
@@ -211,6 +212,12 @@ where
         if out[component].len() != targets.len() {
             return HierarchicalError::LengthMismatch;
         }
+    }
+    if !EVALUATE_NEAR && !EVALUATE_FAR {
+        for component in out {
+            component.fill(T::ZERO);
+        }
+        return HierarchicalError::Ok;
     }
     if source_summaries.len() < source_tree.n_nodes() || scratch.contribution.is_empty() {
         return HierarchicalError::ScratchTooSmall;
@@ -418,7 +425,8 @@ where
 /// runs the serial source-tree evaluator on that slice. It shares the source
 /// tree and source summaries between workers, and avoids any cross-thread output accumulation.
 /// [`Skip::Near`] retains accepted far-summary contributions only, [`Skip::Far`] retains direct
-/// leaf contributions only, and `None` evaluates both interaction classes.
+/// leaf contributions only, and `None` evaluates both interaction classes. [`Skip::Both`] zeroes
+/// the output without target summarization, source-tree traversal, or parallel scratch use.
 #[inline]
 pub fn eval_par<K, T, S, M, C, const D: usize>(
     kernel: &K,
@@ -457,6 +465,12 @@ where
         if out[component].len() != targets.len() {
             return HierarchicalError::LengthMismatch;
         }
+    }
+    if skip == Some(Skip::Both) {
+        for component in out {
+            component.fill(T::ZERO);
+        }
+        return HierarchicalError::Ok;
     }
     if source_summaries.len() < source_tree.n_nodes() {
         return HierarchicalError::ScratchTooSmall;
@@ -512,19 +526,7 @@ where
             chunk_size,
             &error_code,
         ),
-        Some(Skip::Both) => eval_par_chunks::<K, T, S, M, C, D, false, false>(
-            kernel,
-            source_tree,
-            source_summaries,
-            sources,
-            targets,
-            moments,
-            theta,
-            out,
-            &mut scratch.contribution[..chunk_count],
-            chunk_size,
-            &error_code,
-        ),
+        Some(Skip::Both) => unreachable!("Skip::Both returns before parallel evaluation"),
     }
 
     HierarchicalError::from_u32(error_code.load(Ordering::Relaxed))

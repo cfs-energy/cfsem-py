@@ -378,6 +378,62 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
 }
 
 #[test]
+fn skip_both_evaluators_bypass_summaries_scratch_and_traversal() {
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let source_tree = ClusterTree::build(sources.as_slice()).unwrap();
+    let mut contributions: [[f64; 3]; 0] = [];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut contributions,
+    };
+    let mut out0 = [f64::NAN; 2];
+    let mut out1 = [f64::NAN; 2];
+    let mut out2 = [f64::NAN; 2];
+
+    assert_eq!(
+        super::eval(
+            &NoFieldTraversalKernel,
+            source_tree.as_view(),
+            &[],
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Some(Skip::Both),
+            [&mut out0, &mut out1, &mut out2],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(out0, [0.0; 2]);
+    assert_eq!(out1, [0.0; 2]);
+    assert_eq!(out2, [0.0; 2]);
+
+    out0.fill(f64::NAN);
+    out1.fill(f64::NAN);
+    out2.fill(f64::NAN);
+    assert_eq!(
+        super::eval_par(
+            &NoFieldTraversalKernel,
+            source_tree.as_view(),
+            &[],
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Some(Skip::Both),
+            [&mut out0, &mut out1, &mut out2],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(out0, [0.0; 2]);
+    assert_eq!(out1, [0.0; 2]);
+    assert_eq!(out2, [0.0; 2]);
+}
+
+#[test]
 fn one_shot_skip_both_bypasses_field_traversal_and_zeroes_outputs() {
     let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
     let targets = points_f64(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
@@ -395,6 +451,7 @@ fn one_shot_skip_both_bypasses_field_traversal_and_zeroes_outputs() {
         0.5,
         true,
         Some(Skip::Both),
+        false,
         (&mut out0, &mut out1, &mut out2),
     )
     .unwrap();
@@ -404,6 +461,47 @@ fn one_shot_skip_both_bypasses_field_traversal_and_zeroes_outputs() {
     assert_eq!(out2, [0.0; 2]);
     assert_eq!(diagnostics.source_count, 2);
     assert_eq!(diagnostics.target_count, 2);
+    assert!(diagnostics.traversal_diagnostics().is_none());
+    assert!(diagnostics.accepted_levels().is_none());
+    assert!(diagnostics.near_field_interaction_map().is_none());
+}
+
+#[test]
+fn one_shot_skip_both_collects_requested_traversal_diagnostics() {
+    let source_x = [0.0, 10.0];
+    let source_yz = [0.0; 2];
+    let moment_xz = [0.0; 2];
+    let moment_y = [2.0, 3.0];
+    let outer_radius = [0.0; 2];
+    let target_x = [0.0, 10.0, 5.0];
+    let target_yz = [0.0; 3];
+
+    for par in [false, true] {
+        let mut out0 = [f64::NAN; 3];
+        let mut out1 = [f64::NAN; 3];
+        let mut out2 = [f64::NAN; 3];
+        let diagnostics = super::vector_potential_dipole_hierarchical_with_skip(
+            (&source_x, &source_yz, &source_yz),
+            (&moment_xz, &moment_y, &moment_xz),
+            (&target_x, &target_yz, &target_yz),
+            &outer_radius,
+            BuildMethod::LongestAxis,
+            0.5,
+            par,
+            Skip::Both,
+            true,
+            (&mut out0, &mut out1, &mut out2),
+        )
+        .unwrap();
+
+        assert_eq!(out0, [0.0; 3]);
+        assert_eq!(out1, [0.0; 3]);
+        assert_eq!(out2, [0.0; 3]);
+        assert_eq!(diagnostics.accepted_levels().unwrap().len(), 3);
+        let interaction_map = diagnostics.near_field_interaction_map().unwrap();
+        assert_eq!(interaction_map.row_indices, vec![0, 1]);
+        assert_eq!(interaction_map.column_pointers, vec![0, 1, 2, 2]);
+    }
 }
 
 #[test]

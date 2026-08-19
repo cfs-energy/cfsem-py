@@ -654,56 +654,7 @@ fn parse_hierarchical_skip(
     }
 }
 
-/// Compute traversal diagnostics after rebuilding source summaries for the returned tree.
-fn traversal_diagnostics_for_python<K, S, C, M>(
-    kernel: K,
-    source_tree: &physics::hierarchical::tree::ClusterTree<f64>,
-    sources: S,
-    targets: C,
-    moments: M,
-    theta: f64,
-    par: bool,
-) -> PyResult<physics::hierarchical::TraversalDiagnostics<f64>>
-where
-    K: physics::hierarchical::kernel::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
-    S: physics::hierarchical::kernel::SourceCollection<K> + Copy,
-    M: physics::hierarchical::kernel::SourceMomentCollection<K> + Copy,
-    K::TargetGeometry: Copy,
-    C: physics::hierarchical::kernel::TargetCollection<K>,
-{
-    let mut source_summaries =
-        physics::hierarchical::evaluator::SourceNodeSummaries::<K>::new(source_tree.as_view());
-    let err = physics::hierarchical::evaluator::update_summaries(
-        &kernel,
-        source_tree.as_view(),
-        sources,
-        moments,
-        &mut source_summaries.node_summaries,
-    );
-    if err != physics::hierarchical::kernel::HierarchicalError::Ok {
-        return Err(py_hierarchical_error("source summary update", err));
-    }
-
-    let diagnostics = match par {
-        true => physics::hierarchical::traversal_diagnostics_par(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            targets,
-            theta,
-        ),
-        false => physics::hierarchical::traversal_diagnostics(
-            &kernel,
-            source_tree.as_view(),
-            &source_summaries.node_summaries,
-            targets,
-            theta,
-        ),
-    };
-    diagnostics.map_err(|err| py_hierarchical_error("hierarchical traversal diagnostic", err))
-}
-
-/// Convert an owned CSC interaction pattern into a SciPy sparse matrix.
+/// Move a CSC interaction pattern into a SciPy sparse matrix.
 fn near_field_interaction_map_object(
     py: Python<'_>,
     map: physics::hierarchical::NearFieldInteractionMap,
@@ -726,48 +677,26 @@ type OptionalDiagnosticsPy = (
     Option<Py<PyAny>>,
 );
 
-struct HierarchicalDiagnosticRequest<'a, K, S, C, M> {
-    kernel: K,
-    source_tree: &'a physics::hierarchical::tree::ClusterTree<f64>,
-    sources: S,
-    targets: C,
-    moments: M,
-    theta: f64,
-    par: bool,
-}
-
-/// Return diagnostics only when requested by the Python caller.
-fn optional_hierarchical_diagnostics<K, S, C, M>(
+/// Convert optional diagnostics collected by a Rust one-shot solve for Python.
+fn hierarchical_diagnostics_objects<K>(
     py: Python<'_>,
-    extra_diagnostics: bool,
-    request: HierarchicalDiagnosticRequest<'_, K, S, C, M>,
+    diagnostics: &mut physics::hierarchical::Diagnostics<K>,
 ) -> PyResult<OptionalDiagnosticsPy>
 where
-    K: physics::hierarchical::kernel::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
-    S: physics::hierarchical::kernel::SourceCollection<K> + Copy,
-    M: physics::hierarchical::kernel::SourceMomentCollection<K> + Copy,
-    K::TargetGeometry: Copy,
-    C: physics::hierarchical::kernel::TargetCollection<K>,
+    K: physics::hierarchical::kernel::HierarchicalKernel<Scalar = f64>,
 {
-    if !extra_diagnostics {
+    let Some(traversal) = diagnostics.take_traversal_diagnostics() else {
         return Ok((None, None, None));
-    }
-
-    let diagnostics = traversal_diagnostics_for_python(
-        request.kernel,
-        request.source_tree,
-        request.sources,
-        request.targets,
-        request.moments,
-        request.theta,
-        request.par,
-    )?;
+    };
     Ok((
-        Some(source_tree_diagnostics_object(py, request.source_tree)?),
-        Some(PyArray1::from_vec(py, diagnostics.accepted_levels).unbind()),
+        Some(source_tree_diagnostics_object(
+            py,
+            &diagnostics.source_tree,
+        )?),
+        Some(PyArray1::from_vec(py, traversal.accepted_levels).unbind()),
         Some(near_field_interaction_map_object(
             py,
-            diagnostics.near_field_interaction_map,
+            traversal.near_field_interaction_map,
         )?),
     ))
 }
@@ -809,7 +738,7 @@ fn flux_density_dipole_hierarchical(
     let obs = read_xyz_tuple(py, &obs, "obs")?;
     let construction_method = parse_build_method(construction_method)?;
     let skip = parse_hierarchical_skip(skip)?;
-    let (field, diagnostics) =
+    let (field, mut diagnostics) =
         evaluate_hierarchical_vec3(py, out, obs.len(), "flux_density", |out| {
             match skip {
                 Some(skip) => physics::hierarchical::flux_density_dipole_hierarchical_with_skip(
@@ -821,6 +750,7 @@ fn flux_density_dipole_hierarchical(
                     theta,
                     par,
                     skip,
+                    extra_diagnostics,
                     out,
                 ),
                 None => physics::hierarchical::flux_density_dipole_hierarchical(
@@ -831,41 +761,14 @@ fn flux_density_dipole_hierarchical(
                     construction_method,
                     theta,
                     par,
+                    extra_diagnostics,
                     out,
                 ),
             }
             .map_err(|err| py_hierarchical_error("hierarchical dipole flux density", err))
         })?;
-    let sources = physics::hierarchical::kernels::DipoleSources::new(
-        loc.as_tuple().0,
-        loc.as_tuple().1,
-        loc.as_tuple().2,
-        outer_radius.as_slice(),
-    );
-    let targets = physics::hierarchical::kernels::DipoleTargets::new(
-        obs.as_tuple().0,
-        obs.as_tuple().1,
-        obs.as_tuple().2,
-    );
-    let moments = physics::hierarchical::kernels::DipoleMoments::new(
-        moment.as_tuple().0,
-        moment.as_tuple().1,
-        moment.as_tuple().2,
-    );
     let (source_tree, accepted_levels, near_field_interaction_map) =
-        optional_hierarchical_diagnostics(
-            py,
-            extra_diagnostics,
-            HierarchicalDiagnosticRequest {
-                kernel: physics::hierarchical::kernels::DipoleFluxDensityKernel::<f64>::new(),
-                source_tree: &diagnostics.source_tree,
-                sources,
-                targets,
-                moments,
-                theta,
-                par,
-            },
-        )?;
+        hierarchical_diagnostics_objects(py, &mut diagnostics)?;
     solve_result_from_field(
         py,
         field,
@@ -916,7 +819,7 @@ fn vector_potential_dipole_hierarchical(
     let obs = read_xyz_tuple(py, &obs, "obs")?;
     let construction_method = parse_build_method(construction_method)?;
     let skip = parse_hierarchical_skip(skip)?;
-    let (field, diagnostics) =
+    let (field, mut diagnostics) =
         evaluate_hierarchical_vec3(py, out, obs.len(), "vector_potential", |out| {
             match skip {
                 Some(skip) => {
@@ -929,6 +832,7 @@ fn vector_potential_dipole_hierarchical(
                         theta,
                         par,
                         skip,
+                        extra_diagnostics,
                         out,
                     )
                 }
@@ -940,41 +844,14 @@ fn vector_potential_dipole_hierarchical(
                     construction_method,
                     theta,
                     par,
+                    extra_diagnostics,
                     out,
                 ),
             }
             .map_err(|err| py_hierarchical_error("hierarchical dipole vector potential", err))
         })?;
-    let sources = physics::hierarchical::kernels::DipoleSources::new(
-        loc.as_tuple().0,
-        loc.as_tuple().1,
-        loc.as_tuple().2,
-        outer_radius.as_slice(),
-    );
-    let targets = physics::hierarchical::kernels::DipoleTargets::new(
-        obs.as_tuple().0,
-        obs.as_tuple().1,
-        obs.as_tuple().2,
-    );
-    let moments = physics::hierarchical::kernels::DipoleMoments::new(
-        moment.as_tuple().0,
-        moment.as_tuple().1,
-        moment.as_tuple().2,
-    );
     let (source_tree, accepted_levels, near_field_interaction_map) =
-        optional_hierarchical_diagnostics(
-            py,
-            extra_diagnostics,
-            HierarchicalDiagnosticRequest {
-                kernel: physics::hierarchical::kernels::DipoleVectorPotentialKernel::<f64>::new(),
-                source_tree: &diagnostics.source_tree,
-                sources,
-                targets,
-                moments,
-                theta,
-                par,
-            },
-        )?;
+        hierarchical_diagnostics_objects(py, &mut diagnostics)?;
     solve_result_from_field(
         py,
         field,
@@ -1027,7 +904,7 @@ fn flux_density_linear_filament_hierarchical(
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
     let construction_method = parse_build_method(construction_method)?;
     let skip = parse_hierarchical_skip(skip)?;
-    let (field, diagnostics) =
+    let (field, mut diagnostics) =
         evaluate_hierarchical_vec3(py, out, xyzp.len(), "flux_density", |out| {
             match skip {
                 Some(skip) => {
@@ -1041,6 +918,7 @@ fn flux_density_linear_filament_hierarchical(
                         theta,
                         par,
                         skip,
+                        extra_diagnostics,
                         out,
                     )
                 }
@@ -1053,36 +931,14 @@ fn flux_density_linear_filament_hierarchical(
                     construction_method,
                     theta,
                     par,
+                    extra_diagnostics,
                     out,
                 ),
             }
             .map_err(|err| py_hierarchical_error("hierarchical linear-filament flux density", err))
         })?;
-    let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
-        xyzfil.as_tuple(),
-        dlxyzfil.as_tuple(),
-        wire_radius.as_slice(),
-    );
-    let targets = physics::hierarchical::kernels::DipoleTargets::new(
-        xyzp.as_tuple().0,
-        xyzp.as_tuple().1,
-        xyzp.as_tuple().2,
-    );
     let (source_tree, accepted_levels, near_field_interaction_map) =
-        optional_hierarchical_diagnostics(
-            py,
-            extra_diagnostics,
-            HierarchicalDiagnosticRequest {
-                kernel: physics::hierarchical::kernels::LinearFilamentFluxDensityKernel::<f64>::new(
-                ),
-                source_tree: &diagnostics.source_tree,
-                sources,
-                targets,
-                moments: ifil.as_slice(),
-                theta,
-                par,
-            },
-        )?;
+        hierarchical_diagnostics_objects(py, &mut diagnostics)?;
     solve_result_from_field(
         py,
         field,
@@ -1135,7 +991,7 @@ fn vector_potential_linear_filament_hierarchical(
     let wire_radius = read_float_input_array1(py, &wire_radius, "wire_radius")?;
     let construction_method = parse_build_method(construction_method)?;
     let skip = parse_hierarchical_skip(skip)?;
-    let (field, diagnostics) =
+    let (field, mut diagnostics) =
         evaluate_hierarchical_vec3(py, out, xyzp.len(), "vector_potential", |out| {
             match skip {
                 Some(skip) => {
@@ -1149,6 +1005,7 @@ fn vector_potential_linear_filament_hierarchical(
                         theta,
                         par,
                         skip,
+                        extra_diagnostics,
                         out,
                     )
                 }
@@ -1161,6 +1018,7 @@ fn vector_potential_linear_filament_hierarchical(
                     construction_method,
                     theta,
                     par,
+                    extra_diagnostics,
                     out,
                 ),
             }
@@ -1168,32 +1026,8 @@ fn vector_potential_linear_filament_hierarchical(
                 py_hierarchical_error("hierarchical linear-filament vector potential", err)
             })
         })?;
-    let sources = physics::hierarchical::kernels::LinearFilamentSources::new(
-        xyzfil.as_tuple(),
-        dlxyzfil.as_tuple(),
-        wire_radius.as_slice(),
-    );
-    let targets = physics::hierarchical::kernels::DipoleTargets::new(
-        xyzp.as_tuple().0,
-        xyzp.as_tuple().1,
-        xyzp.as_tuple().2,
-    );
     let (source_tree, accepted_levels, near_field_interaction_map) =
-        optional_hierarchical_diagnostics(
-            py,
-            extra_diagnostics,
-            HierarchicalDiagnosticRequest {
-                kernel:
-                    physics::hierarchical::kernels::LinearFilamentVectorPotentialKernel::<f64>::new(
-                    ),
-                source_tree: &diagnostics.source_tree,
-                sources,
-                targets,
-                moments: ifil.as_slice(),
-                theta,
-                par,
-            },
-        )?;
+        hierarchical_diagnostics_objects(py, &mut diagnostics)?;
     solve_result_from_field(
         py,
         field,
@@ -1237,7 +1071,7 @@ fn flux_density_triangle_mesh_hierarchical(
     let targets = physics::hierarchical::kernels::DipoleTargetRows::new(obs.as_slice());
     let moments =
         physics::hierarchical::kernels::BoundaryElementNodalValues::new(sources, s.as_slice());
-    let (field, diagnostics) =
+    let (field, mut diagnostics) =
         evaluate_hierarchical_vec3(py, out, obs.nrows(), "flux_density", |out| {
             physics::hierarchical::convenience::one_shot_vec3(
                 physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(),
@@ -1248,25 +1082,13 @@ fn flux_density_triangle_mesh_hierarchical(
                 theta,
                 par,
                 skip,
+                extra_diagnostics,
                 out,
             )
             .map_err(|err| py_hierarchical_error("hierarchical triangle-mesh flux density", err))
         })?;
     let (source_tree, accepted_levels, near_field_interaction_map) =
-        optional_hierarchical_diagnostics(
-            py,
-            extra_diagnostics,
-            HierarchicalDiagnosticRequest {
-                kernel:
-                    physics::hierarchical::kernels::BoundaryElementFluxDensityKernel::<f64>::new(),
-                source_tree: &diagnostics.source_tree,
-                sources,
-                targets,
-                moments,
-                theta,
-                par,
-            },
-        )?;
+        hierarchical_diagnostics_objects(py, &mut diagnostics)?;
     solve_result_from_field(
         py,
         field,
@@ -1310,7 +1132,7 @@ fn vector_potential_triangle_mesh_hierarchical(
     let targets = physics::hierarchical::kernels::DipoleTargetRows::new(obs.as_slice());
     let moments =
         physics::hierarchical::kernels::BoundaryElementNodalValues::new(sources, s.as_slice());
-    let (field, diagnostics) =
+    let (field, mut diagnostics) =
         evaluate_hierarchical_vec3(py, out, obs.nrows(), "vector_potential", |out| {
             physics::hierarchical::convenience::one_shot_vec3(
                 physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(),
@@ -1321,6 +1143,7 @@ fn vector_potential_triangle_mesh_hierarchical(
                 theta,
                 par,
                 skip,
+                extra_diagnostics,
                 out,
             )
             .map_err(|err| {
@@ -1328,21 +1151,7 @@ fn vector_potential_triangle_mesh_hierarchical(
             })
         })?;
     let (source_tree, accepted_levels, near_field_interaction_map) =
-        optional_hierarchical_diagnostics(
-            py,
-            extra_diagnostics,
-            HierarchicalDiagnosticRequest {
-                kernel:
-                    physics::hierarchical::kernels::BoundaryElementVectorPotentialKernel::<f64>::new(
-                    ),
-                source_tree: &diagnostics.source_tree,
-                sources,
-                targets,
-                moments,
-                theta,
-                par,
-            },
-        )?;
+        hierarchical_diagnostics_objects(py, &mut diagnostics)?;
     solve_result_from_field(
         py,
         field,

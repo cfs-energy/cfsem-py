@@ -1,10 +1,10 @@
 # Changelog
 
-## 12.2.0 2026-08-13
+## 13.0.0 2026-08-13
 
 * Rust
     * Add near-field interaction map to hierarchical diagnostics outputs
-    * Add option for hierarchical evaluator to skip evaluating kernels for near-field, far-field, or both
+    * !Add option for hierarchical evaluator to skip evaluating kernels for near-field, far-field, or both
     * Add sparse inductance matrix for linear filaments using CSC interaction map
 * Python
     * Plumb in bindings to new `skip` option and sparse inductance matrix

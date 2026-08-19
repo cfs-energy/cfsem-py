@@ -1055,7 +1055,8 @@ def test_inductance_linear_filaments_matrix_contracts_to_vector(par):
 
 
 @mark.parametrize("par", [True, False])
-def test_inductance_linear_filaments_sparse_preserves_csc_pattern(par):
+@mark.parametrize("csc_type", [sparse.csc_matrix, sparse.csc_array])
+def test_inductance_linear_filaments_sparse_preserves_csc_pattern(par, csc_type):
     xyzfil_src = (
         np.array([0.0, 1.0, 2.0]),
         np.array([0.0, 0.1, -0.1]),
@@ -1074,7 +1075,7 @@ def test_inductance_linear_filaments_sparse_preserves_csc_pattern(par):
     )
     row_indices = np.array([0, 2, 1, 0, 1, 2], dtype=np.int32)
     column_pointers = np.array([0, 2, 2, 3, 6], dtype=np.int32)
-    interaction_map = sparse.csc_matrix(
+    interaction_map = csc_type(
         (np.full(row_indices.size, np.nan), row_indices, column_pointers),
         shape=(3, 4),
     )
@@ -1129,7 +1130,7 @@ def test_inductance_linear_filaments_sparse_validates_map():
     xyz = (np.array([0.0, 1.0]), np.zeros(2), np.zeros(2))
     dlxyz = (np.zeros(2), np.zeros(2), np.ones(2))
     csr_map = sparse.eye(2, format="csr")
-    with raises(TypeError, match="must be a scipy.sparse.csc_matrix"):
+    with raises(TypeError, match="must be a scipy.sparse.csc_matrix or csc_array"):
         cfsem.inductance_linear_filaments_sparse(xyz, dlxyz, xyz, dlxyz, csr_map)
 
     wrong_shape = sparse.eye(3, format="csc")

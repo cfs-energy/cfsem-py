@@ -12,7 +12,7 @@ from typing import Literal
 
 from numpy import asarray, ascontiguousarray, column_stack, float64, full, int64, uint64, zeros_like
 from numpy.typing import NDArray
-from scipy.sparse import csc_matrix
+from scipy.sparse import csc_array, csc_matrix
 
 from cfsem.types import Array3xN
 
@@ -1112,7 +1112,7 @@ def inductance_linear_filaments_sparse(
     dlxyzfil_tgt: Array3xN,
     xyzfil_src: Array3xN,
     dlxyzfil_src: Array3xN,
-    interaction_map: csc_matrix,
+    interaction_map: csc_matrix | csc_array,
     wire_radius_src: float | NDArray[float64] = 0.0,
     par: bool = True,
 ) -> csc_matrix:
@@ -1136,12 +1136,12 @@ def inductance_linear_filaments_sparse(
         [H] CSC inductance matrix with the supplied sparsity pattern
 
     Raises:
-        TypeError: If ``interaction_map`` is not a SciPy ``csc_matrix``.
+        TypeError: If ``interaction_map`` is not a SciPy ``csc_matrix`` or ``csc_array``.
         ValueError: If the map is non-canonical or has the wrong shape.
         DimensionalityError: If filament geometry or radius lengths are inconsistent.
     """
-    if not isinstance(interaction_map, csc_matrix):
-        raise TypeError("interaction_map must be a scipy.sparse.csc_matrix")
+    if not isinstance(interaction_map, csc_matrix | csc_array):
+        raise TypeError("interaction_map must be a scipy.sparse.csc_matrix or csc_array")
     if not interaction_map.has_canonical_format:
         raise ValueError("interaction_map must have sorted, unique row indices in each column")
 

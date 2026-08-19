@@ -59,7 +59,7 @@ from cfsem.flux_solver import (
 )
 from cfsem.types import Array3xN
 
-from .cfsem import ellipe, ellipk
+from .cfsem import ellipe, ellipk, hyp2f1
 from .cfsem import DimensionalityError
 
 MU_0 = 4.0 * np.pi * 1e-7 * (1.0 + 5.5e-10)
@@ -111,6 +111,7 @@ __all__ = [
     "self_inductance_distributed_axisymmetric_conductor",
     "ellipe",
     "ellipk",
+    "hyp2f1",
     "rotate_filaments_about_path",
     "vector_potential_linear_filament",
     "vector_potential_linear_filament_hierarchical",

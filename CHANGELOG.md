@@ -1,6 +1,6 @@
 # Changelog
 
-## 12.1.0 2026-08-13
+## 12.2.0 2026-08-13
 
 * Rust
     * Add near-field interaction map to hierarchical diagnostics outputs
@@ -8,6 +8,13 @@
     * Add sparse inductance matrix for linear filaments using CSC interaction map
 * Python
     * Plumb in bindings to new `skip` option and sparse inductance matrix
+
+## 12.1.0 2026-08-17
+
+* Rust
+    * Add allocation-free `hyp2f1_scalar`, `hyp2f1`, and `hyp2f1_par` for fully complex parameters and arguments
+* Python
+    * Add a `complex128` array binding for `hyp2f1`
 
 ## 12.0.0 2026-08-11
 

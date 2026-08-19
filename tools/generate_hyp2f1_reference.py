@@ -1,0 +1,201 @@
+"""Regenerate complex hyp2f1 and gamma reference fixtures with mpmath 1.3.0."""
+
+from __future__ import annotations
+
+import csv
+import math
+from pathlib import Path
+
+import mpmath as mp
+
+MPMATH_VERSION = "1.3.0"
+PRECISION = 100
+ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "test" / "data"
+HypRow = tuple[complex, complex, complex, complex, str, float]
+
+
+def parts(value: mp.mpc) -> tuple[str, str]:
+    return mp.nstr(value.real, 80), mp.nstr(value.imag, 80)
+
+
+def broad_hyp_rows() -> list[HypRow]:
+    """Build a broad cross-product of parameter families and argument regions."""
+
+    parameter_families = [
+        ("generic", 0.5 + 0.25j, 1.25 - 0.5j, 2.0 + 0.75j, 2e-9),
+        ("integer-c1", 0.5 + 0.25j, 1.25 - 0.5j, 1.0 + 0.0j, 5e-9),
+        ("integer-c2", 1.4 + 0.2j, 0.7 - 0.3j, 2.0 + 0.0j, 5e-9),
+        ("euler", 1.4 + 0.2j, 1.2 - 0.3j, 1.1 + 0.4j, 5e-9),
+        ("near-one-integer", 0.4 + 0.2j, 0.9 - 0.1j, 3.3 + 0.100000001j, 8e-9),
+        ("near-infinity-integer", 0.4 + 0.2j, 2.400000001 + 0.2j, 3.1 - 0.3j, 8e-9),
+        ("large-taylor", 12.0 - 3.4j, 10.0 - 0.8j, -1.6 + 4.6j, 2e-7),
+    ]
+    arguments = [
+        complex(real, imag)
+        for real in (-3.0, -0.5, 0.25, 0.59, 0.9, 1.3, 3.0)
+        for imag in (-2.0, -0.81, -0.2, 0.2, 0.81, 2.0)
+    ]
+    arguments.extend(complex(real, 0.0) for real in (-3.0, -0.5, 0.0, 0.5, 0.9, 0.99))
+    for real in (1.01, 1.3, 1.9, 2.0, 4.0):
+        arguments.extend((complex(real, 0.0), complex(real, -0.0)))
+
+    rows = []
+    for family, a, b, c, tolerance in parameter_families:
+        for index, z in enumerate(arguments):
+            lip = ""
+            if z.real > 1.0 and z.imag == 0.0:
+                lip = "-lower-cut" if math.copysign(1.0, z.imag) < 0.0 else "-upper-cut"
+            rows.append((a, b, c, z, f"grid-{family}-{index:03d}{lip}", tolerance))
+    return rows
+
+
+def hyp_rows() -> list[HypRow]:
+    points = [
+        (0.5 + 0.25j, 1.25 - 0.5j, 2.0 + 0.75j, 0.1 + 0.2j, "direct", 2e-13),
+        (-2.0 + 0j, 1.2 + 0.4j, 3.5 - 0.2j, 2.0 + 0.5j, "polynomial", 2e-13),
+        (0.7 + 0.2j, 1.3 - 0.1j, 2.4 + 0.3j, -3.0 + 0.4j, "pfaff", 2e-12),
+        (0.4 + 0.2j, 1.1 + 0.3j, 2.7 - 0.2j, 4.0 + 2.0j, "infinity", 3e-12),
+        (0.4 + 0.2j, 0.4 + 0.2j, 2.7 - 0.2j, 4.0 + 2.0j, "infinity-equal-m0", 8e-11),
+        (0.4 + 0.2j, 1.1 + 0.3j, 2.5 + 0.5j, 0.98 + 0.03j, "one", 3e-12),
+        (0.4 + 0.2j, 0.9 - 0.1j, 1.3 + 0.1j, 0.98 + 0.03j, "one-balanced-m0", 8e-11),
+        (
+            0.4 + 0.2j,
+            0.9 - 0.1j,
+            3.3 + 0.100000001j,
+            0.97 + 0.02j,
+            "one-near-integer",
+            8e-11,
+        ),
+        (0.4 + 0.2j, 0.9 - 0.1j, 3.300000001 + 0.1j, 0.97 + 0.02j, "one-near-integer", 8e-11),
+        (0.4 + 0.2j, 0.9 - 0.1j, 3.299999999 + 0.1j, 0.97 + 0.02j, "one-near-integer", 8e-11),
+        (0.4 + 0.2j, 0.9 - 0.1j, 3.3 + 0.099999999j, 0.97 + 0.02j, "one-near-integer", 8e-11),
+        (
+            0.4 + 0.2j,
+            2.400000001 + 0.200000001j,
+            3.1 - 0.3j,
+            5.0 + 1.0j,
+            "infinity-near-integer",
+            8e-11,
+        ),
+        (0.4 + 0.2j, 2.400000001 + 0.2j, 3.1 - 0.3j, 5.0 + 1.0j, "infinity-near-integer", 8e-11),
+        (0.4 + 0.2j, 2.399999999 + 0.2j, 3.1 - 0.3j, 5.0 + 1.0j, "infinity-near-integer", 8e-11),
+        (0.4 + 0.2j, 2.4 + 0.199999999j, 3.1 - 0.3j, 5.0 + 1.0j, "infinity-near-integer", 8e-11),
+        (1.4 + 0.2j, 1.2 - 0.3j, 1.1 + 0.4j, 0.6 + 0.2j, "euler", 8e-11),
+        (12.5 + 2.0j, 9.25 - 1.5j, 17.0 + 0.5j, 0.4 + 0.2j, "moderate", 2e-10),
+        (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.5 + 0.8660254037844386j, "taylor", 5e-12),
+        (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.5 - 0.8660254037844386j, "taylor", 5e-12),
+        (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.495 + 0.8573651497465942j, "taylor", 5e-12),
+        (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.495 - 0.8573651497465942j, "taylor", 5e-12),
+        (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.505 + 0.874685657822283j, "taylor", 5e-12),
+        (0.7 + 0.2j, 1.2 - 0.3j, 2.1 + 0.1j, 0.505 - 0.874685657822283j, "taylor", 5e-12),
+        (
+            12.0 - 3.4j,
+            10.0 - 0.8j,
+            -1.6 + 4.6j,
+            0.59 - 0.81j,
+            "taylor-large-parameter-regression",
+            2e-8,
+        ),
+        (1.0 + 0j, 1.0 + 0j, 4.0 + 0j, 3.0 + 4.0j, "scipy-1561", 3e-12),
+        (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 2.0 + 0.0j, "upper-cut", 5e-12),
+        (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 2.0 - 0.0j, "lower-cut", 5e-12),
+        (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 1.3 + 0.0j, "pfaff-upper-cut", 5e-11),
+        (1.2 + 0.3j, 0.7 - 0.1j, 2.8 + 0.2j, 1.3 - 0.0j, "pfaff-lower-cut", 5e-11),
+    ]
+    return points + broad_hyp_rows()
+
+
+def generate_hyp2f1() -> None:
+    path = DATA / "hyp2f1_reference.csv"
+    with path.open("w", newline="") as stream:
+        stream.write(f"# mpmath={MPMATH_VERSION}, dps={PRECISION}\n")
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(
+            [
+                "a_re",
+                "a_im",
+                "b_re",
+                "b_im",
+                "c_re",
+                "c_im",
+                "z_re",
+                "z_im",
+                "expected_re",
+                "expected_im",
+                "rtol",
+                "label",
+            ]
+        )
+        for a, b, c, z, label, rtol in hyp_rows():
+            mz = mp.mpc(z.real, z.imag)
+            if label.endswith("upper-cut"):
+                mz = mp.mpc(z.real, mp.mpf("1e-80"))
+            elif label.endswith("lower-cut"):
+                mz = mp.mpc(z.real, -mp.mpf("1e-80"))
+            expected = mp.hyp2f1(mp.mpc(a), mp.mpc(b), mp.mpc(c), mz)
+            writer.writerow(
+                [
+                    a.real,
+                    a.imag,
+                    b.real,
+                    b.imag,
+                    c.real,
+                    c.imag,
+                    z.real,
+                    "-0.0" if label.endswith("lower-cut") else z.imag,
+                    *parts(expected),
+                    rtol,
+                    label,
+                ]
+            )
+
+
+def generate_gamma() -> None:
+    path = DATA / "complex_gamma_reference.csv"
+    points = [
+        0.2 + 0.3j,
+        0.2 - 0.3j,
+        1.2 - 2.5j,
+        1.2 + 2.5j,
+        8.5 + 1.25j,
+        -0.3 + 0.7j,
+        -0.3 - 0.7j,
+        -4.0 + 1e-8j,
+        -4.0 - 1e-8j,
+    ]
+    with path.open("w", newline="") as stream:
+        stream.write(f"# mpmath={MPMATH_VERSION}, dps={PRECISION}\n")
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(
+            [
+                "z_re",
+                "z_im",
+                "gamma_re",
+                "gamma_im",
+                "rgamma_re",
+                "rgamma_im",
+                "digamma_re",
+                "digamma_im",
+            ]
+        )
+        for z in points:
+            value = mp.mpc(z)
+            writer.writerow(
+                [
+                    z.real,
+                    z.imag,
+                    *parts(mp.gamma(value)),
+                    *parts(mp.rgamma(value)),
+                    *parts(mp.digamma(value)),
+                ]
+            )
+
+
+if __name__ == "__main__":
+    if mp.__version__ != MPMATH_VERSION:
+        raise RuntimeError(f"expected mpmath {MPMATH_VERSION}, found {mp.__version__}")
+    mp.mp.dps = PRECISION
+    DATA.mkdir(parents=True, exist_ok=True)
+    generate_hyp2f1()
+    generate_gamma()

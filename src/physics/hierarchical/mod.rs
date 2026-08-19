@@ -40,7 +40,7 @@ pub(crate) use evaluator::{
 };
 pub use evaluator::{
     NearFieldInteractionMap, TraversalDiagnostics, eval, eval_par, eval_par_with_skip,
-    eval_with_skip, traversal_diagnostics,
+    eval_with_skip, traversal_diagnostics, traversal_diagnostics_par,
 };
 pub use kernel::Skip;
 pub(crate) use kernel::{

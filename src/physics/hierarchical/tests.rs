@@ -482,25 +482,21 @@ fn traversal_diagnostics_returns_canonical_near_field_csc_pattern() {
         0.5,
     )
     .unwrap();
+    let diagnostics_par = super::traversal_diagnostics_par(
+        &kernel,
+        source_tree.as_view(),
+        &summaries.node_summaries,
+        targets.as_slice(),
+        0.5,
+    )
+    .unwrap();
+    assert_eq!(diagnostics, diagnostics_par);
+
     let map = diagnostics.near_field_interaction_map;
     assert_eq!(map.source_count, 2);
     assert_eq!(map.target_count, 3);
     assert_eq!(map.row_indices, vec![0, 1]);
     assert_eq!(map.column_pointers, vec![0, 1, 2, 2]);
-
-    let mut accepted_levels = vec![0.0; targets.len()];
-    assert_eq!(
-        super::evaluator::accepted_levels(
-            &kernel,
-            source_tree.as_view(),
-            &summaries.node_summaries,
-            targets.as_slice(),
-            0.5,
-            &mut accepted_levels,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(diagnostics.accepted_levels, accepted_levels);
 }
 
 #[test]

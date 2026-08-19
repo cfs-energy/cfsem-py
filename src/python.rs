@@ -662,6 +662,7 @@ fn traversal_diagnostics_for_python<K, S, C, M>(
     targets: C,
     moments: M,
     theta: f64,
+    par: bool,
 ) -> PyResult<physics::hierarchical::TraversalDiagnostics<f64>>
 where
     K: physics::hierarchical::kernel::HierarchicalKernel<Scalar = f64, Output = [f64; 3]> + Sync,
@@ -683,14 +684,23 @@ where
         return Err(py_hierarchical_error("source summary update", err));
     }
 
-    physics::hierarchical::traversal_diagnostics(
-        &kernel,
-        source_tree.as_view(),
-        &source_summaries.node_summaries,
-        targets,
-        theta,
-    )
-    .map_err(|err| py_hierarchical_error("hierarchical traversal diagnostic", err))
+    let diagnostics = match par {
+        true => physics::hierarchical::traversal_diagnostics_par(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            targets,
+            theta,
+        ),
+        false => physics::hierarchical::traversal_diagnostics(
+            &kernel,
+            source_tree.as_view(),
+            &source_summaries.node_summaries,
+            targets,
+            theta,
+        ),
+    };
+    diagnostics.map_err(|err| py_hierarchical_error("hierarchical traversal diagnostic", err))
 }
 
 /// Convert an owned CSC interaction pattern into a SciPy sparse matrix.
@@ -723,6 +733,7 @@ struct HierarchicalDiagnosticRequest<'a, K, S, C, M> {
     targets: C,
     moments: M,
     theta: f64,
+    par: bool,
 }
 
 /// Return diagnostics only when requested by the Python caller.
@@ -749,6 +760,7 @@ where
         request.targets,
         request.moments,
         request.theta,
+        request.par,
     )?;
     Ok((
         Some(source_tree_diagnostics_object(py, request.source_tree)?),
@@ -851,6 +863,7 @@ fn flux_density_dipole_hierarchical(
                 targets,
                 moments,
                 theta,
+                par,
             },
         )?;
     solve_result_from_field(
@@ -959,6 +972,7 @@ fn vector_potential_dipole_hierarchical(
                 targets,
                 moments,
                 theta,
+                par,
             },
         )?;
     solve_result_from_field(
@@ -1066,6 +1080,7 @@ fn flux_density_linear_filament_hierarchical(
                 targets,
                 moments: ifil.as_slice(),
                 theta,
+                par,
             },
         )?;
     solve_result_from_field(
@@ -1176,6 +1191,7 @@ fn vector_potential_linear_filament_hierarchical(
                 targets,
                 moments: ifil.as_slice(),
                 theta,
+                par,
             },
         )?;
     solve_result_from_field(
@@ -1248,6 +1264,7 @@ fn flux_density_triangle_mesh_hierarchical(
                 targets,
                 moments,
                 theta,
+                par,
             },
         )?;
     solve_result_from_field(
@@ -1323,6 +1340,7 @@ fn vector_potential_triangle_mesh_hierarchical(
                 targets,
                 moments,
                 theta,
+                par,
             },
         )?;
     solve_result_from_field(

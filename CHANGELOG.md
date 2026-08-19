@@ -19,9 +19,6 @@
 ## 12.0.0 2026-08-11
 
 * Rust
-    * Add evaluator-level near/far filtering for hierarchical solves through required `Skip::{Near, Far, Both}` filtered APIs
-    * Add canonical `(nsrc, ntgt)` CSC near-field traversal diagnostics using original source indices
-    * Add serial and parallel sparse CSC linear-filament inductance evaluation with three-point target-segment quadrature
     * Fix BEM triangle inductance for touching and near high-aspect-ratio triangles with an exact uniform-triangle source potential
         * Near-field defers to fixed D5 target integration at subdivision depth 2
         * Bound near/self work at 28 exact-potential observations per directed pair
@@ -30,9 +27,6 @@
     * Evaluate direct triangle B fields from the analytic potential gradient and define as zero directly on the surface
         * Protects zero self-force per Newton's third law
 * Python
-    * Add optional `skip="near"`, `skip="far"`, and diagnostics-only `skip="both"` filtering to all hierarchical field solvers
-    * Add `HierarchicalDiagnostics.near_field_interaction_map` when extra diagnostics are requested
-    * Add `inductance_linear_filaments_sparse` with exact CSC sparsity preservation
     * Add an absolute aspect-67 annular stored-energy regression test
     * !Remove `quad` from triangle-mesh direct, mapping, and hierarchical B-field and vector potential functions
 

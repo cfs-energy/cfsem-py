@@ -3438,8 +3438,8 @@ fn inductance_linear_filaments_sparse_csc(
         PyReadonlyArray1<f64>,
     ),
     wire_radius_src: PyReadonlyArray1<f64>,
-    row_indices: PyReadonlyArray1<usize>,
-    column_pointers: PyReadonlyArray1<usize>,
+    row_indices: PyReadonlyArray1<u64>,
+    column_pointers: PyReadonlyArray1<u64>,
     par: bool,
 ) -> PyResult<Py<PyArray1<f64>>> {
     _3tup_slice_ro!(xyzfil_tgt);
@@ -3447,8 +3447,8 @@ fn inductance_linear_filaments_sparse_csc(
     _3tup_slice_ro!(xyzfil_src);
     _3tup_slice_ro!(dlxyzfil_src);
     let wire_radius_src = wire_radius_src.as_slice()?;
-    let row_indices = row_indices.as_slice()?;
-    let column_pointers = column_pointers.as_slice()?;
+    let row_indices = read_usize_indices("row_indices", row_indices)?;
+    let column_pointers = read_usize_indices("column_pointers", column_pointers)?;
     let mut out = vec![0.0; row_indices.len()];
 
     let func = match par {
@@ -3461,8 +3461,8 @@ fn inductance_linear_filaments_sparse_csc(
         xyzfil_src,
         dlxyzfil_src,
         wire_radius_src,
-        row_indices,
-        column_pointers,
+        &row_indices,
+        &column_pointers,
         &mut out,
     )
     .map_err(|msg| PyInteropError::DimensionalityError {

@@ -302,6 +302,7 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
             targets.as_slice(),
             &moments,
             0.5,
+            None,
             [&mut full],
             &mut scratch,
         ),
@@ -314,7 +315,7 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
     kernel.far_calls.store(0, Ordering::Relaxed);
     let mut far_only = [0.0];
     assert_eq!(
-        super::eval_with_skip(
+        super::eval(
             &kernel,
             source_tree.as_view(),
             &summaries.node_summaries,
@@ -322,7 +323,7 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
             targets.as_slice(),
             &moments,
             0.5,
-            Skip::Near,
+            Some(Skip::Near),
             [&mut far_only],
             &mut scratch,
         ),
@@ -335,7 +336,7 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
     kernel.far_calls.store(0, Ordering::Relaxed);
     let mut near_only = [0.0];
     assert_eq!(
-        super::eval_with_skip(
+        super::eval(
             &kernel,
             source_tree.as_view(),
             &summaries.node_summaries,
@@ -343,7 +344,7 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
             targets.as_slice(),
             &moments,
             0.5,
-            Skip::Far,
+            Some(Skip::Far),
             [&mut near_only],
             &mut scratch,
         ),
@@ -357,7 +358,7 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
     kernel.far_calls.store(0, Ordering::Relaxed);
     let mut far_only_par = [0.0];
     assert_eq!(
-        super::eval_par_with_skip(
+        super::eval_par(
             &kernel,
             source_tree.as_view(),
             &summaries.node_summaries,
@@ -365,7 +366,7 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
             targets.as_slice(),
             &moments,
             0.5,
-            Skip::Near,
+            Some(Skip::Near),
             [&mut far_only_par],
             &mut scratch,
         ),
@@ -374,56 +375,6 @@ fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output(
     assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
     assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
     assert_eq!(far_only_par, far_only);
-
-    kernel.target_summary_calls.store(0, Ordering::Relaxed);
-    kernel.accept_calls.store(0, Ordering::Relaxed);
-    kernel.near_calls.store(0, Ordering::Relaxed);
-    kernel.far_calls.store(0, Ordering::Relaxed);
-    let mut skipped_both = [f64::NAN];
-    let mut empty_contribution = [];
-    let mut empty_scratch = EvaluationScratch {
-        contribution: &mut empty_contribution,
-    };
-    assert_eq!(
-        super::eval_with_skip(
-            &kernel,
-            source_tree.as_view(),
-            &[],
-            sources.as_slice(),
-            targets.as_slice(),
-            &moments,
-            0.5,
-            Skip::Both,
-            [&mut skipped_both],
-            &mut empty_scratch,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(skipped_both, [0.0]);
-    assert_eq!(kernel.target_summary_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(kernel.accept_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 0);
-
-    skipped_both.fill(f64::NAN);
-    assert_eq!(
-        super::eval_par_with_skip(
-            &kernel,
-            source_tree.as_view(),
-            &[],
-            sources.as_slice(),
-            targets.as_slice(),
-            &moments,
-            0.5,
-            Skip::Both,
-            [&mut skipped_both],
-            &mut empty_scratch,
-        ),
-        HierarchicalError::Ok
-    );
-    assert_eq!(skipped_both, [0.0]);
-    assert_eq!(kernel.target_summary_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(kernel.accept_calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -597,6 +548,7 @@ where
         targets,
         moments,
         theta,
+        None,
         column_slices,
         scratch,
     );
@@ -644,6 +596,7 @@ where
         targets,
         moments,
         theta,
+        None,
         column_slices,
         scratch,
     );

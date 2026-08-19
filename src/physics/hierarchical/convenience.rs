@@ -17,7 +17,7 @@ use super::kernels::{
 use super::{
     BuildMethod, ClusterTree, EvaluationScratch, HierarchicalError, HierarchicalKernel, Scalar,
     Skip, SourceCollection, SourceMomentCollection, SourceNodeSummaries, TargetCollection, eval,
-    eval_par, eval_par_with_skip, eval_with_skip, scratch_len, scratch_len_par, update_summaries,
+    eval_par, scratch_len, scratch_len_par, update_summaries,
 };
 
 /// Diagnostic information returned by stateless hierarchical solves.
@@ -613,8 +613,10 @@ where
             contribution: &mut scratch_values,
         };
         let out_components = [out.0, out.1, out.2];
+        // Keep the filter variant visible at this boundary so inlining can remove the terminal-node
+        // filter checks from unfiltered solves while the evaluator API remains consolidated.
         let err = match (par, skip) {
-            (true, Some(skip)) => eval_par_with_skip(
+            (true, Some(skip)) => eval_par(
                 &kernel,
                 source_tree.as_view(),
                 &source_summaries.node_summaries,
@@ -622,7 +624,7 @@ where
                 targets,
                 moments,
                 theta,
-                skip,
+                Some(skip),
                 out_components,
                 &mut scratch,
             ),
@@ -634,10 +636,11 @@ where
                 targets,
                 moments,
                 theta,
+                None,
                 out_components,
                 &mut scratch,
             ),
-            (false, Some(skip)) => eval_with_skip(
+            (false, Some(skip)) => eval(
                 &kernel,
                 source_tree.as_view(),
                 &source_summaries.node_summaries,
@@ -645,7 +648,7 @@ where
                 targets,
                 moments,
                 theta,
-                skip,
+                Some(skip),
                 out_components,
                 &mut scratch,
             ),
@@ -657,6 +660,7 @@ where
                 targets,
                 moments,
                 theta,
+                None,
                 out_components,
                 &mut scratch,
             ),

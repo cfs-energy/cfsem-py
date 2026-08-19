@@ -91,85 +91,12 @@ where
 ///
 /// This is the public hierarchical evaluation path. Each target is summarized
 /// as a single target leaf, walked against the source tree, and written directly
-/// into caller-provided component slices. The output slice count must match the
-/// kernel output dimension `D`.
+/// into caller-provided component slices. [`Skip::Near`] retains accepted far-summary
+/// contributions only, [`Skip::Far`] retains direct leaf contributions only, and `None`
+/// evaluates both interaction classes. The output slice count must match the kernel output
+/// dimension `D`.
 #[inline]
 pub fn eval<K, T, S, M, C, const D: usize>(
-    kernel: &K,
-    source_tree: ClusterTreeView<'_, T>,
-    source_summaries: &[K::SourceSummary],
-    sources: S,
-    targets: C,
-    moments: M,
-    theta: T,
-    out: [&mut [T]; D],
-    scratch: &mut EvaluationScratch<'_, [T; D]>,
-) -> HierarchicalError
-where
-    K: HierarchicalKernel<Scalar = T, Output = [T; D]>,
-    T: Scalar,
-    K::TargetGeometry: Copy,
-    S: SourceCollection<K>,
-    M: SourceMomentCollection<K>,
-    C: TargetCollection<K>,
-{
-    eval_optional_skip(
-        kernel,
-        source_tree,
-        source_summaries,
-        sources,
-        targets,
-        moments,
-        theta,
-        None,
-        out,
-        scratch,
-    )
-}
-
-/// Evaluate vector-valued targets while omitting one interaction class.
-///
-/// The source tree is still traversed normally so acceptance decisions do not
-/// change. [`Skip::Near`] returns accepted far-summary contributions only;
-/// [`Skip::Far`] returns direct leaf contributions only. [`Skip::Both`] zeroes the output without
-/// target summarization or source-tree traversal.
-#[inline]
-pub fn eval_with_skip<K, T, S, M, C, const D: usize>(
-    kernel: &K,
-    source_tree: ClusterTreeView<'_, T>,
-    source_summaries: &[K::SourceSummary],
-    sources: S,
-    targets: C,
-    moments: M,
-    theta: T,
-    skip: Skip,
-    out: [&mut [T]; D],
-    scratch: &mut EvaluationScratch<'_, [T; D]>,
-) -> HierarchicalError
-where
-    K: HierarchicalKernel<Scalar = T, Output = [T; D]>,
-    T: Scalar,
-    K::TargetGeometry: Copy,
-    S: SourceCollection<K>,
-    M: SourceMomentCollection<K>,
-    C: TargetCollection<K>,
-{
-    eval_optional_skip(
-        kernel,
-        source_tree,
-        source_summaries,
-        sources,
-        targets,
-        moments,
-        theta,
-        Some(skip),
-        out,
-        scratch,
-    )
-}
-
-#[inline]
-fn eval_optional_skip<K, T, S, M, C, const D: usize>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, T>,
     source_summaries: &[K::SourceSummary],
@@ -193,23 +120,66 @@ where
     if err != HierarchicalError::Ok {
         return err;
     }
-    eval_validated(
-        kernel,
-        source_tree,
-        source_summaries,
-        sources,
-        targets,
-        moments,
-        theta,
-        skip,
-        out,
-        scratch,
-    )
+    match skip {
+        None => eval_validated::<K, T, S, M, C, D, true, true>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            scratch,
+        ),
+        Some(Skip::Near) => eval_validated::<K, T, S, M, C, D, false, true>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            scratch,
+        ),
+        Some(Skip::Far) => eval_validated::<K, T, S, M, C, D, true, false>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            scratch,
+        ),
+        Some(Skip::Both) => eval_validated::<K, T, S, M, C, D, false, false>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            scratch,
+        ),
+    }
 }
 
 #[inline]
 /// Evaluate validated source-target rows with the hierarchical tree walk.
-fn eval_validated<K, T, S, M, C, const D: usize>(
+fn eval_validated<
+    K,
+    T,
+    S,
+    M,
+    C,
+    const D: usize,
+    const EVALUATE_NEAR: bool,
+    const EVALUATE_FAR: bool,
+>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, T>,
     source_summaries: &[K::SourceSummary],
@@ -217,7 +187,6 @@ fn eval_validated<K, T, S, M, C, const D: usize>(
     targets: C,
     moments: M,
     theta: T,
-    skip: Option<Skip>,
     out: [&mut [T]; D],
     scratch: &mut EvaluationScratch<'_, [T; D]>,
 ) -> HierarchicalError
@@ -243,12 +212,6 @@ where
             return HierarchicalError::LengthMismatch;
         }
     }
-    if skip == Some(Skip::Both) {
-        for component in out {
-            component.fill(T::ZERO);
-        }
-        return HierarchicalError::Ok;
-    }
     if source_summaries.len() < source_tree.n_nodes() || scratch.contribution.is_empty() {
         return HierarchicalError::ScratchTooSmall;
     }
@@ -260,7 +223,7 @@ where
 
     for target_id in 0..targets.len() {
         let target = targets.target(target_id);
-        let err = eval_scalar(
+        let err = eval_scalar::<K, S, M, EVALUATE_NEAR, EVALUATE_FAR>(
             kernel,
             source_tree,
             source_summaries,
@@ -268,7 +231,6 @@ where
             target,
             moments,
             theta,
-            skip,
             &mut target_out,
             &mut scratch.contribution[0],
             &mut target_summary,
@@ -345,7 +307,7 @@ fn traverse_source_tree<K, V>(
 }
 
 /// Terminal-node visitor that evaluates far summaries and direct leaf sources.
-struct EvaluationTraversalVisitor<'a, K, S, M>
+struct EvaluationTraversalVisitor<'a, K, S, M, const EVALUATE_NEAR: bool, const EVALUATE_FAR: bool>
 where
     K: HierarchicalKernel,
 {
@@ -353,13 +315,13 @@ where
     sources: S,
     target: K::TargetGeometry,
     moments: M,
-    skip: Option<Skip>,
     out: &'a mut K::Output,
     contribution: &'a mut K::Output,
     target_summary: &'a K::TargetSummary,
 }
 
-impl<K, S, M> TraversalVisitor<K> for EvaluationTraversalVisitor<'_, K, S, M>
+impl<K, S, M, const EVALUATE_NEAR: bool, const EVALUATE_FAR: bool> TraversalVisitor<K>
+    for EvaluationTraversalVisitor<'_, K, S, M, EVALUATE_NEAR, EVALUATE_FAR>
 where
     K: HierarchicalKernel,
     S: SourceCollection<K>,
@@ -372,7 +334,7 @@ where
         _source_level: u32,
         source_summary: &K::SourceSummary,
     ) {
-        if self.skip != Some(Skip::Far) {
+        if EVALUATE_FAR {
             self.kernel
                 .eval_far(self.target_summary, source_summary, self.contribution);
             self.kernel.accumulate(self.out, self.contribution);
@@ -381,7 +343,7 @@ where
 
     #[inline]
     fn on_near_leaf(&mut self, _source_node_index: usize, _source_level: u32, source_ids: &[u32]) {
-        if self.skip == Some(Skip::Near) {
+        if !EVALUATE_NEAR {
             return;
         }
         for &source_id in source_ids {
@@ -400,7 +362,7 @@ where
 /// Serial and parallel vector evaluators both call this helper, and its
 /// terminal-node actions use the same traversal as diagnostics.
 #[inline]
-fn eval_scalar<K, S, M>(
+fn eval_scalar<K, S, M, const EVALUATE_NEAR: bool, const EVALUATE_FAR: bool>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, K::Scalar>,
     source_summaries: &[K::SourceSummary],
@@ -408,7 +370,6 @@ fn eval_scalar<K, S, M>(
     target: K::TargetGeometry,
     moments: M,
     theta: K::Scalar,
-    skip: Option<Skip>,
     out: &mut K::Output,
     contribution: &mut K::Output,
     target_summary: &mut K::TargetSummary,
@@ -428,12 +389,11 @@ where
         return err;
     }
 
-    let mut visitor = EvaluationTraversalVisitor {
+    let mut visitor = EvaluationTraversalVisitor::<K, S, M, EVALUATE_NEAR, EVALUATE_FAR> {
         kernel,
         sources,
         target,
         moments,
-        skip,
         out,
         contribution,
         target_summary,
@@ -456,83 +416,11 @@ where
 /// This is intentionally the simplest parallelization of the single-tree
 /// solver: each worker owns disjoint target and component output slices and
 /// runs the serial source-tree evaluator on that slice. It shares the source
-/// tree and source summaries between workers, and avoids any cross-thread
-/// output accumulation.
+/// tree and source summaries between workers, and avoids any cross-thread output accumulation.
+/// [`Skip::Near`] retains accepted far-summary contributions only, [`Skip::Far`] retains direct
+/// leaf contributions only, and `None` evaluates both interaction classes.
 #[inline]
 pub fn eval_par<K, T, S, M, C, const D: usize>(
-    kernel: &K,
-    source_tree: ClusterTreeView<'_, T>,
-    source_summaries: &[K::SourceSummary],
-    sources: S,
-    targets: C,
-    moments: M,
-    theta: T,
-    out: [&mut [T]; D],
-    scratch: &mut EvaluationScratch<'_, [T; D]>,
-) -> HierarchicalError
-where
-    K: HierarchicalKernel<Scalar = T, Output = [T; D]> + Sync,
-    T: Scalar,
-    K::TargetGeometry: Copy,
-    S: SourceCollection<K>,
-    M: SourceMomentCollection<K>,
-    C: TargetCollection<K>,
-{
-    eval_par_optional_skip(
-        kernel,
-        source_tree,
-        source_summaries,
-        sources,
-        targets,
-        moments,
-        theta,
-        None,
-        out,
-        scratch,
-    )
-}
-
-/// Evaluate vector-valued targets in parallel while omitting interaction classes.
-///
-/// [`Skip::Both`] zeroes the output without target summarization, source-tree traversal, or
-/// parallel scratch use.
-#[inline]
-pub fn eval_par_with_skip<K, T, S, M, C, const D: usize>(
-    kernel: &K,
-    source_tree: ClusterTreeView<'_, T>,
-    source_summaries: &[K::SourceSummary],
-    sources: S,
-    targets: C,
-    moments: M,
-    theta: T,
-    skip: Skip,
-    out: [&mut [T]; D],
-    scratch: &mut EvaluationScratch<'_, [T; D]>,
-) -> HierarchicalError
-where
-    K: HierarchicalKernel<Scalar = T, Output = [T; D]> + Sync,
-    T: Scalar,
-    K::TargetGeometry: Copy,
-    S: SourceCollection<K>,
-    M: SourceMomentCollection<K>,
-    C: TargetCollection<K>,
-{
-    eval_par_optional_skip(
-        kernel,
-        source_tree,
-        source_summaries,
-        sources,
-        targets,
-        moments,
-        theta,
-        Some(skip),
-        out,
-        scratch,
-    )
-}
-
-#[inline]
-fn eval_par_optional_skip<K, T, S, M, C, const D: usize>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, T>,
     source_summaries: &[K::SourceSummary],
@@ -570,12 +458,6 @@ where
             return HierarchicalError::LengthMismatch;
         }
     }
-    if skip == Some(Skip::Both) {
-        for component in out {
-            component.fill(T::ZERO);
-        }
-        return HierarchicalError::Ok;
-    }
     if source_summaries.len() < source_tree.n_nodes() {
         return HierarchicalError::ScratchTooSmall;
     }
@@ -590,27 +472,76 @@ where
     }
 
     let error_code = AtomicU32::new(HierarchicalError::Ok as u32);
-    eval_par_chunks(
-        kernel,
-        source_tree,
-        source_summaries,
-        sources,
-        targets,
-        moments,
-        theta,
-        skip,
-        out,
-        &mut scratch.contribution[..chunk_count],
-        chunk_size,
-        &error_code,
-    );
+    match skip {
+        None => eval_par_chunks::<K, T, S, M, C, D, true, true>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            &mut scratch.contribution[..chunk_count],
+            chunk_size,
+            &error_code,
+        ),
+        Some(Skip::Near) => eval_par_chunks::<K, T, S, M, C, D, false, true>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            &mut scratch.contribution[..chunk_count],
+            chunk_size,
+            &error_code,
+        ),
+        Some(Skip::Far) => eval_par_chunks::<K, T, S, M, C, D, true, false>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            &mut scratch.contribution[..chunk_count],
+            chunk_size,
+            &error_code,
+        ),
+        Some(Skip::Both) => eval_par_chunks::<K, T, S, M, C, D, false, false>(
+            kernel,
+            source_tree,
+            source_summaries,
+            sources,
+            targets,
+            moments,
+            theta,
+            out,
+            &mut scratch.contribution[..chunk_count],
+            chunk_size,
+            &error_code,
+        ),
+    }
 
     HierarchicalError::from_u32(error_code.load(Ordering::Relaxed))
 }
 
 #[inline]
 /// Evaluate validated output chunks in parallel and preserve the first error code.
-fn eval_par_chunks<K, T, S, M, C, const D: usize>(
+fn eval_par_chunks<
+    K,
+    T,
+    S,
+    M,
+    C,
+    const D: usize,
+    const EVALUATE_NEAR: bool,
+    const EVALUATE_FAR: bool,
+>(
     kernel: &K,
     source_tree: ClusterTreeView<'_, T>,
     source_summaries: &[K::SourceSummary],
@@ -618,7 +549,6 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
     targets: C,
     moments: M,
     theta: T,
-    skip: Option<Skip>,
     out: [&mut [T]; D],
     scratch_contributions: &mut [[T; D]],
     chunk_size: usize,
@@ -640,7 +570,7 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
         let mut chunk_scratch = EvaluationScratch {
             contribution: &mut scratch_contributions[..1],
         };
-        let err = eval_validated(
+        let err = eval_validated::<K, T, S, M, C, D, EVALUATE_NEAR, EVALUATE_FAR>(
             kernel,
             source_tree,
             source_summaries,
@@ -648,7 +578,6 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
             targets,
             moments,
             theta,
-            skip,
             out,
             &mut chunk_scratch,
         );
@@ -673,7 +602,7 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
 
     rayon::join(
         || {
-            eval_par_chunks(
+            eval_par_chunks::<K, T, S, M, C, D, EVALUATE_NEAR, EVALUATE_FAR>(
                 kernel,
                 source_tree,
                 source_summaries,
@@ -681,7 +610,6 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
                 left_targets,
                 moments,
                 theta,
-                skip,
                 left_out,
                 left_scratch,
                 chunk_size,
@@ -689,7 +617,7 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
             );
         },
         || {
-            eval_par_chunks(
+            eval_par_chunks::<K, T, S, M, C, D, EVALUATE_NEAR, EVALUATE_FAR>(
                 kernel,
                 source_tree,
                 source_summaries,
@@ -697,7 +625,6 @@ fn eval_par_chunks<K, T, S, M, C, const D: usize>(
                 right_targets,
                 moments,
                 theta,
-                skip,
                 right_out,
                 right_scratch,
                 chunk_size,

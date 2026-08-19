@@ -1,9 +1,7 @@
 //! Magnetics calculations for piecewise-linear current filaments.
 
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-    },
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
@@ -399,6 +397,42 @@ fn validate_sparse_inductance_inputs(
     Ok((nsrc, ntgt))
 }
 
+/// Evaluate one stored CSC source-target interaction.
+#[inline]
+fn inductance_linear_filaments_sparse_entry(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    target: usize,
+    source: usize,
+) -> f64 {
+    inductance_linear_filament_pair(
+        (
+            xyzfil_src.0[source],
+            xyzfil_src.1[source],
+            xyzfil_src.2[source],
+        ),
+        (
+            dlxyzfil_src.0[source],
+            dlxyzfil_src.1[source],
+            dlxyzfil_src.2[source],
+        ),
+        wire_radius_src[source],
+        (
+            xyzfil_tgt.0[target],
+            xyzfil_tgt.1[target],
+            xyzfil_tgt.2[target],
+        ),
+        (
+            dlxyzfil_tgt.0[target],
+            dlxyzfil_tgt.1[target],
+            dlxyzfil_tgt.2[target],
+        ),
+    )
+}
+
 /// Evaluate selected source-target filament inductances into CSC value storage.
 ///
 /// `row_indices` and `column_pointers` describe a canonical CSC matrix with shape
@@ -428,32 +462,15 @@ pub fn inductance_linear_filaments_sparse_csc(
     )?;
 
     for target in 0..ntgt {
-        let tgt_start = (
-            xyzfil_tgt.0[target],
-            xyzfil_tgt.1[target],
-            xyzfil_tgt.2[target],
-        );
-        let tgt_delta = (
-            dlxyzfil_tgt.0[target],
-            dlxyzfil_tgt.1[target],
-            dlxyzfil_tgt.2[target],
-        );
         for entry in column_pointers[target]..column_pointers[target + 1] {
-            let source = row_indices[entry];
-            out[entry] = inductance_linear_filament_pair(
-                (
-                    xyzfil_src.0[source],
-                    xyzfil_src.1[source],
-                    xyzfil_src.2[source],
-                ),
-                (
-                    dlxyzfil_src.0[source],
-                    dlxyzfil_src.1[source],
-                    dlxyzfil_src.2[source],
-                ),
-                wire_radius_src[source],
-                tgt_start,
-                tgt_delta,
+            out[entry] = inductance_linear_filaments_sparse_entry(
+                xyzfil_tgt,
+                dlxyzfil_tgt,
+                xyzfil_src,
+                dlxyzfil_src,
+                wire_radius_src,
+                target,
+                row_indices[entry],
             );
         }
     }
@@ -483,33 +500,30 @@ pub fn inductance_linear_filaments_sparse_csc_par(
         out,
     )?;
 
-    out.par_iter_mut().enumerate().for_each(|(entry, value)| {
-        let target = column_pointers.partition_point(|&pointer| pointer <= entry) - 1;
-        let source = row_indices[entry];
-        *value = inductance_linear_filament_pair(
-            (
-                xyzfil_src.0[source],
-                xyzfil_src.1[source],
-                xyzfil_src.2[source],
-            ),
-            (
-                dlxyzfil_src.0[source],
-                dlxyzfil_src.1[source],
-                dlxyzfil_src.2[source],
-            ),
-            wire_radius_src[source],
-            (
-                xyzfil_tgt.0[target],
-                xyzfil_tgt.1[target],
-                xyzfil_tgt.2[target],
-            ),
-            (
-                dlxyzfil_tgt.0[target],
-                dlxyzfil_tgt.1[target],
-                dlxyzfil_tgt.2[target],
-            ),
-        );
-    });
+    // Partition by stored entries instead of columns so a single dense column still uses all
+    // workers. Each chunk locates its first target once, then follows the CSC boundaries linearly.
+    let entry_chunk_size = chunksize(out.len());
+    out.par_chunks_mut(entry_chunk_size)
+        .enumerate()
+        .for_each(|(chunk_id, values)| {
+            let entry_start = chunk_id * entry_chunk_size;
+            let mut target = column_pointers.partition_point(|&pointer| pointer <= entry_start) - 1;
+            for (offset, value) in values.iter_mut().enumerate() {
+                let entry = entry_start + offset;
+                while column_pointers[target + 1] <= entry {
+                    target += 1;
+                }
+                *value = inductance_linear_filaments_sparse_entry(
+                    xyzfil_tgt,
+                    dlxyzfil_tgt,
+                    xyzfil_src,
+                    dlxyzfil_src,
+                    wire_radius_src,
+                    target,
+                    row_indices[entry],
+                );
+            }
+        });
 
     Ok(())
 }

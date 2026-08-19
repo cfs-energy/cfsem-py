@@ -1,6 +1,6 @@
 # Changelog
 
-## 13.0.0 2026-08-13
+## 13.0.0 2026-08-19
 
 * Rust
     * Add near-field interaction map to hierarchical diagnostics outputs

@@ -1,5 +1,11 @@
 # Boundary Element
 
+Hierarchical boundary-element solvers accept `skip="near"` for a far-only result and `skip="far"`
+for a direct near-only result; `skip=None` evaluates both. `skip="both"` returns zero field arrays
+without a field traversal. Extra diagnostics include the resulting direct-interaction pattern as a
+canonical `(ntri, ntgt)` SciPy CSC matrix; when both interactions are skipped, only the diagnostic
+traversal runs.
+
 ## Fields
 
 Triangle B-field evaluation is analytic away from each finite source triangle. At a

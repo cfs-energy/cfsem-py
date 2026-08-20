@@ -1,5 +1,16 @@
 use super::{Aabb, Scalar};
 
+/// Hierarchical interaction class to omit during a filtered evaluation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Skip {
+    /// Omit exact source interactions reached through direct leaves.
+    Near,
+    /// Omit accepted source-summary interactions.
+    Far,
+    /// Omit both interaction classes, producing zero field output without a tree walk.
+    Both,
+}
+
 /// Runtime error code for hierarchical tree operations.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

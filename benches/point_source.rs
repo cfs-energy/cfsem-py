@@ -113,6 +113,7 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 false,
+                                false,
                                 (&mut outx, &mut outy, &mut outz),
                             )
                             .unwrap(),
@@ -140,6 +141,7 @@ fn bench_flux_density_dipole(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 true,
+                                false,
                                 (&mut outx, &mut outy, &mut outz),
                             )
                             .unwrap(),
@@ -251,6 +253,7 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 false,
+                                false,
                                 (&mut outx, &mut outy, &mut outz),
                             )
                             .unwrap(),
@@ -278,6 +281,7 @@ fn bench_vector_potential_dipole(c: &mut Criterion) {
                                 BuildMethod::LongestAxis,
                                 HIERARCHICAL_THETA,
                                 true,
+                                false,
                                 (&mut outx, &mut outy, &mut outz),
                             )
                             .unwrap(),

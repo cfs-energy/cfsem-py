@@ -1,6 +1,7 @@
 """Tests of standalone electromagnetics calcs"""
 
 import numpy as np
+import scipy.sparse as sparse
 from pytest import approx, mark, raises
 
 import cfsem
@@ -840,9 +841,9 @@ def test_vector_potential_linear_self_inductance_against_wien(ndiscr, par):
         par=par,
     )
     l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))  # [H]
-    assert l_from_a == approx(l_wien, rel=8e-2), (
-        f"ndiscr={ndiscr}, L_from_A={l_from_a:.6e}, L_wien={l_wien:.6e}"
-    )
+    assert l_from_a == approx(
+        l_wien, rel=8e-2
+    ), f"ndiscr={ndiscr}, L_from_A={l_from_a:.6e}, L_wien={l_wien:.6e}"
 
 
 @mark.parametrize("ndiscr_coarse", [100, 200, 400])
@@ -880,9 +881,7 @@ def test_linear_filament_self_inductance_against_wien(r, a, n):
     y = major_radius * np.sin(phi)
     z = np.zeros_like(x)
 
-    l_self = float(
-        cfsem.self_inductance_piecewise_linear_filaments((x, y, z), wire_radius=minor_radius)
-    )
+    l_self = float(cfsem.self_inductance_piecewise_linear_filaments((x, y, z), wire_radius=minor_radius))
     l_wien = float(cfsem.self_inductance_circular_ring_wien(major_radius, minor_radius))
 
     assert l_self == approx(l_wien, rel=8e-2)
@@ -1053,6 +1052,98 @@ def test_inductance_linear_filaments_matrix_contracts_to_vector(par):
             wire_radius_src=2e-3,
             output="bad",
         )
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("csc_type", [sparse.csc_matrix, sparse.csc_array])
+def test_inductance_linear_filaments_sparse_preserves_csc_pattern(par, csc_type):
+    xyzfil_src = (
+        np.array([0.0, 1.0, 2.0]),
+        np.array([0.0, 0.1, -0.1]),
+        np.zeros(3),
+    )
+    dlxyzfil_src = (np.zeros(3), np.zeros(3), np.full(3, 0.8))
+    xyzfil_tgt = (
+        np.array([0.2, 1.2, 2.2, 3.2]),
+        np.array([0.3, -0.2, 0.1, 0.0]),
+        np.array([0.1, 0.2, -0.1, 0.3]),
+    )
+    dlxyzfil_tgt = (
+        np.full(4, 0.1),
+        np.full(4, 0.05),
+        np.array([0.4, 0.4, 0.0, 0.4]),
+    )
+    row_indices = np.array([0, 2, 1, 0, 1, 2], dtype=np.int32)
+    column_pointers = np.array([0, 2, 2, 3, 6], dtype=np.int32)
+    interaction_map = csc_type(
+        (np.full(row_indices.size, np.nan), row_indices, column_pointers),
+        shape=(3, 4),
+    )
+
+    actual = cfsem.inductance_linear_filaments_sparse(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        interaction_map,
+        wire_radius_src=np.array([0.01, 0.02, 0.03]),
+        par=par,
+    )
+    dense = cfsem.inductance_linear_filaments(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src=np.array([0.01, 0.02, 0.03]),
+        par=par,
+        output="matrix",
+    )
+
+    assert sparse.isspmatrix_csc(actual)
+    assert actual.shape == interaction_map.shape
+    np.testing.assert_array_equal(actual.indices, interaction_map.indices)
+    np.testing.assert_array_equal(actual.indptr, interaction_map.indptr)
+    for target in range(actual.shape[1]):
+        start, end = actual.indptr[target : target + 2]
+        np.testing.assert_allclose(
+            actual.data[start:end],
+            dense[actual.indices[start:end], target],
+            rtol=1e-14,
+            atol=1e-18,
+        )
+    assert actual.nnz == interaction_map.nnz
+    assert actual.data[2] == 0.0
+
+    scalar_radius = cfsem.inductance_linear_filaments_sparse(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        interaction_map,
+        wire_radius_src=0.01,
+        par=par,
+    )
+    assert scalar_radius.shape == interaction_map.shape
+
+
+def test_inductance_linear_filaments_sparse_validates_map():
+    xyz = (np.array([0.0, 1.0]), np.zeros(2), np.zeros(2))
+    dlxyz = (np.zeros(2), np.zeros(2), np.ones(2))
+    csr_map = sparse.eye(2, format="csr")
+    with raises(TypeError, match="must be a scipy.sparse.csc_matrix or csc_array"):
+        cfsem.inductance_linear_filaments_sparse(xyz, dlxyz, xyz, dlxyz, csr_map)
+
+    wrong_shape = sparse.eye(3, format="csc")
+    with raises(ValueError, match="must have shape"):
+        cfsem.inductance_linear_filaments_sparse(xyz, dlxyz, xyz, dlxyz, wrong_shape)
+
+    duplicate_rows = sparse.csc_matrix(
+        (np.ones(2), np.array([0, 0]), np.array([0, 2, 2])),
+        shape=(2, 2),
+    )
+    assert not duplicate_rows.has_canonical_format
+    with raises(ValueError, match="sorted, unique row indices"):
+        cfsem.inductance_linear_filaments_sparse(xyz, dlxyz, xyz, dlxyz, duplicate_rows)
 
 
 @mark.parametrize("ndiscr", [128, 200])

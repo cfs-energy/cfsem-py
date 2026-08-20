@@ -10,6 +10,7 @@ use crate::physics::hierarchical::kernels::{
     LinearFilamentVectorPotentialSummary,
 };
 use crate::physics::point_source::segment::flux_density_point_segment_scalar;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy)]
 struct MockPoint<T: Scalar> {
@@ -43,12 +44,20 @@ struct TargetSummary<T: Scalar> {
 
 struct MockKernel<T: Scalar> {
     _marker: core::marker::PhantomData<T>,
+    target_summary_calls: AtomicUsize,
+    accept_calls: AtomicUsize,
+    near_calls: AtomicUsize,
+    far_calls: AtomicUsize,
 }
 
 impl<T: Scalar> MockKernel<T> {
     fn new() -> Self {
         Self {
             _marker: core::marker::PhantomData,
+            target_summary_calls: AtomicUsize::new(0),
+            accept_calls: AtomicUsize::new(0),
+            near_calls: AtomicUsize::new(0),
+            far_calls: AtomicUsize::new(0),
         }
     }
 }
@@ -119,6 +128,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         targets: &[Self::TargetGeometry],
         out: &mut Self::TargetSummary,
     ) -> HierarchicalError {
+        self.target_summary_calls.fetch_add(1, Ordering::Relaxed);
         *out = TargetSummary::default();
         for i in 0..target_ids.len() {
             let id = target_ids[i] as usize;
@@ -135,6 +145,17 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         HierarchicalError::Ok
     }
 
+    fn accept_far(
+        &self,
+        target_aabb: Aabb<T>,
+        source_aabb: Aabb<T>,
+        _source: &Self::SourceSummary,
+        theta: T,
+    ) -> bool {
+        self.accept_calls.fetch_add(1, Ordering::Relaxed);
+        geometric_accept_far(target_aabb, source_aabb, theta)
+    }
+
     fn eval_near(
         &self,
         target: &Self::TargetGeometry,
@@ -142,6 +163,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         moment: &Self::SourceMoment,
         out: &mut Self::Output,
     ) {
+        self.near_calls.fetch_add(1, Ordering::Relaxed);
         let r2 = dist2(target.point, source.point);
         out[0] = *moment / (T::ONE + r2);
     }
@@ -152,6 +174,7 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
         source: &Self::SourceSummary,
         out: &mut Self::Output,
     ) {
+        self.far_calls.fetch_add(1, Ordering::Relaxed);
         let r2 = dist2(target.centroid, source.centroid);
         out[0] = source.moment / (T::ONE + r2);
     }
@@ -163,6 +186,366 @@ impl<T: Scalar> HierarchicalKernel for MockKernel<T> {
     fn accumulate(&self, out: &mut Self::Output, contribution: &Self::Output) {
         out[0] = out[0] + contribution[0];
     }
+}
+
+struct NoFieldTraversalKernel;
+
+impl HierarchicalKernel for NoFieldTraversalKernel {
+    type Scalar = f64;
+    type SourceGeometry = MockPoint<f64>;
+    type TargetGeometry = MockPoint<f64>;
+    type SourceMoment = f64;
+    type SourceSummary = SourceSummary<f64>;
+    type TargetSummary = TargetSummary<f64>;
+    type Output = [f64; 3];
+
+    fn summarize_leaf_sources<S, M>(
+        &self,
+        source_ids: &[u32],
+        sources: S,
+        moments: M,
+        out: &mut Self::SourceSummary,
+    ) -> HierarchicalError
+    where
+        S: SourceCollection<Self>,
+        M: SourceMomentCollection<Self>,
+    {
+        let _ = (source_ids, sources, moments, out);
+        panic!("Skip::Both must not summarize source leaves")
+    }
+
+    fn combine_source_summaries(
+        &self,
+        _children: &[Self::SourceSummary],
+        _out: &mut Self::SourceSummary,
+    ) -> HierarchicalError {
+        panic!("Skip::Both must not combine source summaries")
+    }
+
+    fn summarize_leaf_targets(
+        &self,
+        _target_ids: &[u32],
+        _targets: &[Self::TargetGeometry],
+        _out: &mut Self::TargetSummary,
+    ) -> HierarchicalError {
+        panic!("Skip::Both must not summarize field targets")
+    }
+
+    fn eval_near(
+        &self,
+        _target: &Self::TargetGeometry,
+        _source: &Self::SourceGeometry,
+        _moment: &Self::SourceMoment,
+        _out: &mut Self::Output,
+    ) {
+        panic!("Skip::Both must not evaluate near interactions")
+    }
+
+    fn eval_far(
+        &self,
+        _target: &Self::TargetSummary,
+        _source: &Self::SourceSummary,
+        _out: &mut Self::Output,
+    ) {
+        panic!("Skip::Both must not evaluate far interactions")
+    }
+
+    fn accept_far(
+        &self,
+        _target_aabb: Aabb<f64>,
+        _source_aabb: Aabb<f64>,
+        _source: &Self::SourceSummary,
+        _theta: f64,
+    ) -> bool {
+        panic!("Skip::Both must not traverse the source tree")
+    }
+
+    fn zero_output(&self, _out: &mut Self::Output) {
+        panic!("Skip::Both must zero component arrays without invoking the kernel")
+    }
+
+    fn accumulate(&self, _out: &mut Self::Output, _contribution: &Self::Output) {
+        panic!("Skip::Both must not accumulate field interactions")
+    }
+}
+
+#[test]
+fn filtered_evaluation_skips_required_kernel_calls_and_reconstructs_full_output() {
+    let kernel = MockKernel::<f64>::new();
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let source_tree = ClusterTree::build(sources.as_slice()).unwrap();
+    let mut summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
+    assert_eq!(
+        update_summaries(
+            &kernel,
+            source_tree.as_view(),
+            sources.as_slice(),
+            &moments,
+            &mut summaries.node_summaries,
+        ),
+        HierarchicalError::Ok
+    );
+
+    let mut contribution = [[0.0; 1]];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut contribution,
+    };
+    let mut full = [0.0];
+    assert_eq!(
+        super::eval(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            None,
+            [&mut full],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
+
+    kernel.near_calls.store(0, Ordering::Relaxed);
+    kernel.far_calls.store(0, Ordering::Relaxed);
+    let mut far_only = [0.0];
+    assert_eq!(
+        super::eval(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Some(Skip::Near),
+            [&mut far_only],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
+
+    kernel.near_calls.store(0, Ordering::Relaxed);
+    kernel.far_calls.store(0, Ordering::Relaxed);
+    let mut near_only = [0.0];
+    assert_eq!(
+        super::eval(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Some(Skip::Far),
+            [&mut near_only],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 0);
+    assert!((full[0] - near_only[0] - far_only[0]).abs() < 1.0e-15);
+
+    kernel.near_calls.store(0, Ordering::Relaxed);
+    kernel.far_calls.store(0, Ordering::Relaxed);
+    let mut far_only_par = [0.0];
+    assert_eq!(
+        super::eval_par(
+            &kernel,
+            source_tree.as_view(),
+            &summaries.node_summaries,
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Some(Skip::Near),
+            [&mut far_only_par],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(kernel.near_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(kernel.far_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(far_only_par, far_only);
+}
+
+#[test]
+fn skip_both_evaluators_bypass_summaries_scratch_and_traversal() {
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let source_tree = ClusterTree::build(sources.as_slice()).unwrap();
+    let mut contributions: [[f64; 3]; 0] = [];
+    let mut scratch = EvaluationScratch {
+        contribution: &mut contributions,
+    };
+    let mut out0 = [f64::NAN; 2];
+    let mut out1 = [f64::NAN; 2];
+    let mut out2 = [f64::NAN; 2];
+
+    assert_eq!(
+        super::eval(
+            &NoFieldTraversalKernel,
+            source_tree.as_view(),
+            &[],
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Some(Skip::Both),
+            [&mut out0, &mut out1, &mut out2],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(out0, [0.0; 2]);
+    assert_eq!(out1, [0.0; 2]);
+    assert_eq!(out2, [0.0; 2]);
+
+    out0.fill(f64::NAN);
+    out1.fill(f64::NAN);
+    out2.fill(f64::NAN);
+    assert_eq!(
+        super::eval_par(
+            &NoFieldTraversalKernel,
+            source_tree.as_view(),
+            &[],
+            sources.as_slice(),
+            targets.as_slice(),
+            &moments,
+            0.5,
+            Some(Skip::Both),
+            [&mut out0, &mut out1, &mut out2],
+            &mut scratch,
+        ),
+        HierarchicalError::Ok
+    );
+    assert_eq!(out0, [0.0; 2]);
+    assert_eq!(out1, [0.0; 2]);
+    assert_eq!(out2, [0.0; 2]);
+}
+
+#[test]
+fn one_shot_skip_both_bypasses_field_traversal_and_zeroes_outputs() {
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let mut out0 = [f64::NAN; 2];
+    let mut out1 = [f64::NAN; 2];
+    let mut out2 = [f64::NAN; 2];
+
+    let diagnostics = super::convenience::one_shot_vec3(
+        NoFieldTraversalKernel,
+        sources.as_slice(),
+        moments.as_slice(),
+        targets.as_slice(),
+        BuildMethod::LongestAxis,
+        0.5,
+        true,
+        Some(Skip::Both),
+        false,
+        (&mut out0, &mut out1, &mut out2),
+    )
+    .unwrap();
+
+    assert_eq!(out0, [0.0; 2]);
+    assert_eq!(out1, [0.0; 2]);
+    assert_eq!(out2, [0.0; 2]);
+    assert_eq!(diagnostics.source_count, 2);
+    assert_eq!(diagnostics.target_count, 2);
+    assert!(diagnostics.traversal_diagnostics().is_none());
+    assert!(diagnostics.accepted_levels().is_none());
+    assert!(diagnostics.near_field_interaction_map().is_none());
+}
+
+#[test]
+fn one_shot_skip_both_collects_requested_traversal_diagnostics() {
+    let source_x = [0.0, 10.0];
+    let source_yz = [0.0; 2];
+    let moment_xz = [0.0; 2];
+    let moment_y = [2.0, 3.0];
+    let outer_radius = [0.0; 2];
+    let target_x = [0.0, 10.0, 5.0];
+    let target_yz = [0.0; 3];
+
+    for par in [false, true] {
+        let mut out0 = [f64::NAN; 3];
+        let mut out1 = [f64::NAN; 3];
+        let mut out2 = [f64::NAN; 3];
+        let diagnostics = super::vector_potential_dipole_hierarchical_with_skip(
+            (&source_x, &source_yz, &source_yz),
+            (&moment_xz, &moment_y, &moment_xz),
+            (&target_x, &target_yz, &target_yz),
+            &outer_radius,
+            BuildMethod::LongestAxis,
+            0.5,
+            par,
+            Skip::Both,
+            true,
+            (&mut out0, &mut out1, &mut out2),
+        )
+        .unwrap();
+
+        assert_eq!(out0, [0.0; 3]);
+        assert_eq!(out1, [0.0; 3]);
+        assert_eq!(out2, [0.0; 3]);
+        assert_eq!(diagnostics.accepted_levels().unwrap().len(), 3);
+        let interaction_map = diagnostics.near_field_interaction_map().unwrap();
+        assert_eq!(interaction_map.row_indices, vec![0, 1]);
+        assert_eq!(interaction_map.column_pointers, vec![0, 1, 2, 2]);
+    }
+}
+
+#[test]
+fn traversal_diagnostics_returns_canonical_near_field_csc_pattern() {
+    let kernel = MockKernel::<f64>::new();
+    let sources = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let targets = points_f64(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
+    let moments = [2.0, 3.0];
+    let source_tree = ClusterTree::build(sources.as_slice()).unwrap();
+    let mut summaries = SourceNodeSummaries::<MockKernel<f64>>::new(source_tree.as_view());
+    assert_eq!(
+        update_summaries(
+            &kernel,
+            source_tree.as_view(),
+            sources.as_slice(),
+            &moments,
+            &mut summaries.node_summaries,
+        ),
+        HierarchicalError::Ok
+    );
+
+    let diagnostics = super::traversal_diagnostics(
+        &kernel,
+        source_tree.as_view(),
+        &summaries.node_summaries,
+        targets.as_slice(),
+        0.5,
+    )
+    .unwrap();
+    let diagnostics_par = super::traversal_diagnostics_par(
+        &kernel,
+        source_tree.as_view(),
+        &summaries.node_summaries,
+        targets.as_slice(),
+        0.5,
+    )
+    .unwrap();
+    assert_eq!(diagnostics, diagnostics_par);
+
+    let map = diagnostics.near_field_interaction_map;
+    assert_eq!(map.source_count, 2);
+    assert_eq!(map.target_count, 3);
+    assert_eq!(map.row_indices, vec![0, 1]);
+    assert_eq!(map.column_pointers, vec![0, 1, 2, 2]);
 }
 
 #[test]
@@ -263,6 +646,7 @@ where
         targets,
         moments,
         theta,
+        None,
         column_slices,
         scratch,
     );
@@ -310,6 +694,7 @@ where
         targets,
         moments,
         theta,
+        None,
         column_slices,
         scratch,
     );

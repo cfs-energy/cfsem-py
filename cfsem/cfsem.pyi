@@ -1,7 +1,8 @@
-from typing import TypeAlias, TypedDict
+from typing import Literal, TypeAlias, TypedDict
 
 from numpy import complex128, float32, float64, int64, uint64
 from numpy.typing import NDArray
+from scipy.sparse import csc_matrix
 
 FloatArray: TypeAlias = NDArray[float64]
 ComplexArray: TypeAlias = NDArray[complex128]
@@ -48,6 +49,8 @@ class HierarchicalDiagnostics:
     def source_tree(self) -> SourceTreeDiagnostics | None: ...
     @property
     def accepted_levels(self) -> FloatArray | None: ...
+    @property
+    def near_field_interaction_map(self) -> csc_matrix | None: ...
 
 class SolveResult:
     """Field arrays and diagnostics returned by a hierarchical solve."""
@@ -292,6 +295,7 @@ def flux_density_dipole_hierarchical(
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
+    skip: Literal["near", "far", "both"] | None = None,
 ) -> SolveResult:
     """Hierarchical magnetic flux density of dipoles in Cartesian coordinates.
 
@@ -312,6 +316,8 @@ def flux_density_dipole_hierarchical(
         par: Whether to evaluate target batches in parallel.
         out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
+        skip: Interaction class to omit. `"near"` returns far-only, `"far"` returns
+            near-only, `"both"` returns zero field arrays, and `None` returns both contributions.
 
     Returns:
         Field component arrays and diagnostics. If `out` is provided, returns `out` in
@@ -329,6 +335,7 @@ def vector_potential_dipole_hierarchical(
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
+    skip: Literal["near", "far", "both"] | None = None,
 ) -> SolveResult:
     """Hierarchical magnetic vector potential of dipoles in Cartesian coordinates.
 
@@ -349,6 +356,8 @@ def vector_potential_dipole_hierarchical(
         par: Whether to evaluate target batches in parallel.
         out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
+        skip: Interaction class to omit. `"near"` returns far-only, `"far"` returns
+            near-only, `"both"` returns zero field arrays, and `None` returns both contributions.
 
     Returns:
         Field component arrays and diagnostics. If `out` is provided, returns `out` in
@@ -375,6 +384,7 @@ def flux_density_linear_filament_hierarchical(
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
+    skip: Literal["near", "far", "both"] | None = None,
 ) -> SolveResult:
     """Hierarchical B-field calculation for many linear filament segments.
 
@@ -396,6 +406,8 @@ def flux_density_linear_filament_hierarchical(
         par: Whether to evaluate target batches in parallel.
         out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
+        skip: Interaction class to omit. `"near"` returns far-only, `"far"` returns
+            near-only, `"both"` returns zero field arrays, and `None` returns both contributions.
 
     Returns:
         Field component arrays and diagnostics. If `out` is provided, returns `out` in
@@ -437,6 +449,7 @@ def vector_potential_linear_filament_hierarchical(
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
+    skip: Literal["near", "far", "both"] | None = None,
 ) -> SolveResult:
     """Hierarchical A-field calculation for many linear filament segments.
 
@@ -458,6 +471,8 @@ def vector_potential_linear_filament_hierarchical(
         par: Whether to evaluate target batches in parallel.
         out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
+        skip: Interaction class to omit. `"near"` returns far-only, `"far"` returns
+            near-only, `"both"` returns zero field arrays, and `None` returns both contributions.
 
     Returns:
         Field component arrays and diagnostics. If `out` is provided, returns `out` in
@@ -502,6 +517,16 @@ def inductance_linear_filaments_matrix(
     wire_radius_src: FloatArray,
     par: bool = True,
 ) -> FloatArray: ...
+def inductance_linear_filaments_sparse_csc(
+    xyzfil_tgt: ArrayTriple,
+    dlxyzfil_tgt: ArrayTriple,
+    xyzfil_src: ArrayTriple,
+    dlxyzfil_src: ArrayTriple,
+    wire_radius_src: FloatArray,
+    row_indices: UIntArray,
+    column_pointers: UIntArray,
+    par: bool = True,
+) -> FloatArray: ...
 def gs_operator_order2(rs: FloatArray, zs: FloatArray) -> tuple[FloatArray, UIntArray, UIntArray]: ...
 def gs_operator_order4(rs: FloatArray, zs: FloatArray) -> tuple[FloatArray, UIntArray, UIntArray]: ...
 def flux_density_triangle_mesh(
@@ -528,6 +553,7 @@ def flux_density_triangle_mesh_hierarchical(
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
+    skip: Literal["near", "far", "both"] | None = None,
 ) -> SolveResult:
     """Hierarchical B-field calculation for a triangle mesh with nodal stream-function values.
 
@@ -557,6 +583,8 @@ def flux_density_triangle_mesh_hierarchical(
         par: Whether to evaluate target batches in parallel.
         out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
+        skip: Interaction class to omit. `"near"` returns far-only, `"far"` returns
+            near-only, `"both"` returns zero field arrays, and `None` returns both contributions.
 
     Returns:
         Field component arrays and diagnostics. If `out` is provided, returns `out` in
@@ -574,6 +602,7 @@ def vector_potential_triangle_mesh_hierarchical(
     par: bool = True,
     out: ArrayTriple | None = None,
     extra_diagnostics: bool = False,
+    skip: Literal["near", "far", "both"] | None = None,
 ) -> SolveResult:
     """Hierarchical A-field calculation for a triangle mesh with nodal stream-function values.
 
@@ -603,6 +632,8 @@ def vector_potential_triangle_mesh_hierarchical(
         par: Whether to evaluate target batches in parallel.
         out: Optional contiguous and aligned output component arrays to fill.
         extra_diagnostics: Whether to populate source-tree diagnostics that require extra data.
+        skip: Interaction class to omit. `"near"` returns far-only, `"far"` returns
+            near-only, `"both"` returns zero field arrays, and `None` returns both contributions.
 
     Returns:
         Field component arrays and diagnostics. If `out` is provided, returns `out` in

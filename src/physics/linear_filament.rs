@@ -17,6 +17,38 @@ use crate::{MU0_OVER_4PI, macros::*};
 /// (m) minimum representable nonzero wire thickness.
 const MIN_WIRE_THICKNESS: f64 = 1e-10;
 
+/// Three-point target-segment integral for one unit-current source segment.
+#[inline]
+fn inductance_linear_filament_pair(
+    src_start: (f64, f64, f64),
+    src_delta: (f64, f64, f64),
+    wire_radius_src: f64,
+    tgt_start: (f64, f64, f64),
+    tgt_delta: (f64, f64, f64),
+) -> f64 {
+    let src_end = (
+        src_start.0 + src_delta.0,
+        src_start.1 + src_delta.1,
+        src_start.2 + src_delta.2,
+    );
+    let gl3_unit = gauss_legendre_unit_interval_table(GaussLegendreRule::Gauss3);
+    let mut inductance = 0.0;
+    for &[tq, wq] in gl3_unit {
+        let obs = (
+            tgt_delta.0.mul_add(tq, tgt_start.0),
+            tgt_delta.1.mul_add(tq, tgt_start.1),
+            tgt_delta.2.mul_add(tq, tgt_start.2),
+        );
+        let (ax, ay, az) = vector_potential_linear_filament_scalar(
+            (src_start, src_end, 1.0),
+            wire_radius_src,
+            obs,
+        );
+        inductance += wq * (ax * tgt_delta.0 + ay * tgt_delta.1 + az * tgt_delta.2);
+    }
+    inductance
+}
+
 /// Estimate the inductive coupling between two piecewise-linear current filaments.
 ///
 /// This uses the vector-potential line-integral form
@@ -69,35 +101,17 @@ pub fn inductance_piecewise_linear_filaments(
     let (xfil0, yfil0, zfil0) = xyzfil0;
     let (dlxfil0, dlyfil0, dlzfil0) = dlxyzfil0;
     let mut inductance = 0.0; // [H]
-    let gl3_unit = gauss_legendre_unit_interval_table(GaussLegendreRule::Gauss3);
-
     for j in 0..m {
-        let dltgt = (dlxfil1[j], dlyfil1[j], dlzfil1[j]); // [m]
-        for &[tq, wq] in gl3_unit {
-            let obs = (
-                dltgt.0.mul_add(tq, xfil1[j]), // [m]
-                dltgt.1.mul_add(tq, yfil1[j]), // [m]
-                dltgt.2.mul_add(tq, zfil1[j]), // [m]
+        let tgt_start = (xfil1[j], yfil1[j], zfil1[j]);
+        let tgt_delta = (dlxfil1[j], dlyfil1[j], dlzfil1[j]);
+        for i in 0..n {
+            inductance += inductance_linear_filament_pair(
+                (xfil0[i], yfil0[i], zfil0[i]),
+                (dlxfil0[i], dlyfil0[i], dlzfil0[i]),
+                wire_radius[i],
+                tgt_start,
+                tgt_delta,
             );
-            let mut ax = 0.0; // [V-s/m]
-            let mut ay = 0.0; // [V-s/m]
-            let mut az = 0.0; // [V-s/m]
-
-            for i in 0..n {
-                let fil0 = (xfil0[i], yfil0[i], zfil0[i]); // [m]
-                let fil1 = (
-                    fil0.0 + dlxfil0[i],
-                    fil0.1 + dlyfil0[i],
-                    fil0.2 + dlzfil0[i],
-                ); // [m]
-                let (axc, ayc, azc) =
-                    vector_potential_linear_filament_scalar((fil0, fil1, 1.0), wire_radius[i], obs);
-                ax += axc; // [V-s/m]
-                ay += ayc; // [V-s/m]
-                az += azc; // [V-s/m]
-            }
-
-            inductance += wq * (ax * dltgt.0 + ay * dltgt.1 + az * dltgt.2); // [H]
         }
     }
 
@@ -315,6 +329,201 @@ pub fn inductance_linear_filaments_matrix_par(
                 row,
             )
         })?;
+
+    Ok(())
+}
+
+/// Validate filament geometry and a canonical CSC interaction pattern.
+fn validate_sparse_inductance_inputs(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    row_indices: &[usize],
+    column_pointers: &[usize],
+    out: &[f64],
+) -> Result<(usize, usize), &'static str> {
+    let ntgt = xyzfil_tgt.0.len();
+    check_length!(
+        ntgt,
+        xyzfil_tgt.0,
+        xyzfil_tgt.1,
+        xyzfil_tgt.2,
+        dlxyzfil_tgt.0,
+        dlxyzfil_tgt.1,
+        dlxyzfil_tgt.2
+    );
+
+    let nsrc = xyzfil_src.0.len();
+    check_length!(
+        nsrc,
+        xyzfil_src.0,
+        xyzfil_src.1,
+        xyzfil_src.2,
+        dlxyzfil_src.0,
+        dlxyzfil_src.1,
+        dlxyzfil_src.2,
+        wire_radius_src
+    );
+    check_length!(row_indices.len(), out);
+
+    if column_pointers.len() != ntgt + 1 {
+        return Err("CSC column pointer length must equal target count plus one");
+    }
+    if column_pointers.first() != Some(&0) {
+        return Err("CSC column pointers must start at zero");
+    }
+    if column_pointers.last() != Some(&row_indices.len()) {
+        return Err("CSC final column pointer must equal the stored-entry count");
+    }
+    if column_pointers
+        .windows(2)
+        .any(|pointers| pointers[0] > pointers[1])
+    {
+        return Err("CSC column pointers must be nondecreasing");
+    }
+
+    for column in 0..ntgt {
+        let rows = &row_indices[column_pointers[column]..column_pointers[column + 1]];
+        if rows.iter().any(|&row| row >= nsrc) {
+            return Err("CSC row index exceeds the source count");
+        }
+        if rows.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err("CSC row indices must be sorted and unique within each column");
+        }
+    }
+
+    Ok((nsrc, ntgt))
+}
+
+/// Evaluate one stored CSC source-target interaction.
+#[inline]
+fn inductance_linear_filaments_sparse_entry(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    target: usize,
+    source: usize,
+) -> f64 {
+    inductance_linear_filament_pair(
+        (
+            xyzfil_src.0[source],
+            xyzfil_src.1[source],
+            xyzfil_src.2[source],
+        ),
+        (
+            dlxyzfil_src.0[source],
+            dlxyzfil_src.1[source],
+            dlxyzfil_src.2[source],
+        ),
+        wire_radius_src[source],
+        (
+            xyzfil_tgt.0[target],
+            xyzfil_tgt.1[target],
+            xyzfil_tgt.2[target],
+        ),
+        (
+            dlxyzfil_tgt.0[target],
+            dlxyzfil_tgt.1[target],
+            dlxyzfil_tgt.2[target],
+        ),
+    )
+}
+
+/// Evaluate selected source-target filament inductances into CSC value storage.
+///
+/// `row_indices` and `column_pointers` describe a canonical CSC matrix with shape
+/// `(nsrc, ntgt)`, where source segments are rows and target segments are columns. Each stored
+/// coordinate is evaluated with the finite-radius source kernel and three-point Gauss--Legendre
+/// integration over the complete target segment. `out` has one value per stored coordinate and
+/// retains explicit numerical zeros.
+pub fn inductance_linear_filaments_sparse_csc(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    row_indices: &[usize],
+    column_pointers: &[usize],
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let (_, ntgt) = validate_sparse_inductance_inputs(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src,
+        row_indices,
+        column_pointers,
+        out,
+    )?;
+
+    for target in 0..ntgt {
+        for entry in column_pointers[target]..column_pointers[target + 1] {
+            out[entry] = inductance_linear_filaments_sparse_entry(
+                xyzfil_tgt,
+                dlxyzfil_tgt,
+                xyzfil_src,
+                dlxyzfil_src,
+                wire_radius_src,
+                target,
+                row_indices[entry],
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Parallel variant of [`inductance_linear_filaments_sparse_csc`].
+pub fn inductance_linear_filaments_sparse_csc_par(
+    xyzfil_tgt: (&[f64], &[f64], &[f64]),
+    dlxyzfil_tgt: (&[f64], &[f64], &[f64]),
+    xyzfil_src: (&[f64], &[f64], &[f64]),
+    dlxyzfil_src: (&[f64], &[f64], &[f64]),
+    wire_radius_src: &[f64],
+    row_indices: &[usize],
+    column_pointers: &[usize],
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    validate_sparse_inductance_inputs(
+        xyzfil_tgt,
+        dlxyzfil_tgt,
+        xyzfil_src,
+        dlxyzfil_src,
+        wire_radius_src,
+        row_indices,
+        column_pointers,
+        out,
+    )?;
+
+    // Partition by stored entries instead of columns so a single dense column still uses all
+    // workers. Each chunk locates its first target once, then follows the CSC boundaries linearly.
+    let entry_chunk_size = chunksize(out.len());
+    out.par_chunks_mut(entry_chunk_size)
+        .enumerate()
+        .for_each(|(chunk_id, values)| {
+            let entry_start = chunk_id * entry_chunk_size;
+            let mut target = column_pointers.partition_point(|&pointer| pointer <= entry_start) - 1;
+            for (offset, value) in values.iter_mut().enumerate() {
+                let entry = entry_start + offset;
+                while column_pointers[target + 1] <= entry {
+                    target += 1;
+                }
+                *value = inductance_linear_filaments_sparse_entry(
+                    xyzfil_tgt,
+                    dlxyzfil_tgt,
+                    xyzfil_src,
+                    dlxyzfil_src,
+                    wire_radius_src,
+                    target,
+                    row_indices[entry],
+                );
+            }
+        });
 
     Ok(())
 }
@@ -2847,5 +3056,92 @@ mod test {
             let contracted = (0..NSRC).map(|i| mm[i * NTGT + j]).sum::<f64>();
             assert!(approx(out[j], contracted, 1e-12, 1e-15));
         }
+    }
+
+    #[test]
+    fn test_sparse_csc_inductance_matches_selected_dense_entries() {
+        let xyzsrc = (&[0.0, 1.0, 2.0][..], &[0.0, 0.1, -0.1][..], &[0.0; 3][..]);
+        let dlxyzsrc = (&[0.0; 3][..], &[0.0; 3][..], &[0.8; 3][..]);
+        let wire_radius = [0.01, 0.02, 0.03];
+        let xyztgt = (
+            &[0.2, 1.2, 2.2, 3.2][..],
+            &[0.3, -0.2, 0.1, 0.0][..],
+            &[0.1, 0.2, -0.1, 0.3][..],
+        );
+        let dlxyztgt = (&[0.1; 4][..], &[0.05; 4][..], &[0.4, 0.4, 0.0, 0.4][..]);
+        let row_indices = [0, 2, 1, 0, 1, 2];
+        let column_pointers = [0, 2, 2, 3, 6];
+
+        let mut dense = vec![0.0; 3 * 4];
+        inductance_linear_filaments_matrix(
+            xyztgt,
+            dlxyztgt,
+            xyzsrc,
+            dlxyzsrc,
+            &wire_radius,
+            &mut dense,
+        )
+        .unwrap();
+
+        let mut sparse = vec![f64::NAN; row_indices.len()];
+        let mut sparse_par = vec![f64::NAN; row_indices.len()];
+        inductance_linear_filaments_sparse_csc(
+            xyztgt,
+            dlxyztgt,
+            xyzsrc,
+            dlxyzsrc,
+            &wire_radius,
+            &row_indices,
+            &column_pointers,
+            &mut sparse,
+        )
+        .unwrap();
+        inductance_linear_filaments_sparse_csc_par(
+            xyztgt,
+            dlxyztgt,
+            xyzsrc,
+            dlxyzsrc,
+            &wire_radius,
+            &row_indices,
+            &column_pointers,
+            &mut sparse_par,
+        )
+        .unwrap();
+
+        assert_eq!(sparse, sparse_par);
+        for target in 0..4 {
+            for entry in column_pointers[target]..column_pointers[target + 1] {
+                let source = row_indices[entry];
+                assert!(approx(
+                    sparse[entry],
+                    dense[source * 4 + target],
+                    1e-14,
+                    1e-18
+                ));
+            }
+        }
+        assert_eq!(sparse[2], 0.0);
+    }
+
+    #[test]
+    fn test_sparse_csc_inductance_rejects_noncanonical_pattern() {
+        let xyz = (&[0.0, 1.0][..], &[0.0; 2][..], &[0.0; 2][..]);
+        let dlxyz = (&[0.0; 2][..], &[0.0; 2][..], &[1.0; 2][..]);
+        let mut out = [0.0; 2];
+        let err = inductance_linear_filaments_sparse_csc(
+            xyz,
+            dlxyz,
+            xyz,
+            dlxyz,
+            &[0.01; 2],
+            &[1, 1],
+            &[0, 2, 2],
+            &mut out,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "CSC row indices must be sorted and unique within each column"
+        );
     }
 }

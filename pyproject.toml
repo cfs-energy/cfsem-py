@@ -13,11 +13,10 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 dependencies = [
-    "numpy >= 2",
+    "numpy >= 1.23.5",
     "interpn[pydantic]>=0.8.2,<0.12",
     "findiff ~= 0.13.1",
     "pydantic ~= 2.0",
-    "pydantic-numpy ~= 6.0",
     "scipy ~= 1.8",
 ]
 license = "MIT"

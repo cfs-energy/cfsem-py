@@ -1,5 +1,11 @@
 # Changelog
 
+## 13.1.0 2026-08-27
+
+* Python
+    * Remove dep on pydantic-numpy to loosen numpy dep range
+    * Loosen numpy dep requirement to >=1.23.5
+
 ## 13.0.0 2026-08-19
 
 * Rust

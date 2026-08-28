@@ -6,6 +6,7 @@ import numpy as np
 from interpn import MultilinearRectilinear
 from numpy.typing import NDArray
 from scipy.constants import mu_0
+from scipy.integrate import trapezoid
 from scipy.special import ellipe, ellipk
 
 import cfsem
@@ -109,10 +110,10 @@ def _flux_density_circular_filament_numerical(
     a1 = (a**2 + r**2 + z**2 - 2.0 * r * a * np.sin(phis)) ** -1.5  # Shared denominator
 
     Brs = a0 * z * np.sin(phis) * a1
-    Br = np.trapezoid(x=phis, y=Brs)  # [T]
+    Br = trapezoid(x=phis, y=Brs)  # [T]
 
     Bzs = a0 * (a - r * np.sin(phis)) * a1
-    Bz = np.trapezoid(x=phis, y=Bzs)  # [T]
+    Bz = trapezoid(x=phis, y=Bzs)  # [T]
 
     return Br, Bz  # [T]
 

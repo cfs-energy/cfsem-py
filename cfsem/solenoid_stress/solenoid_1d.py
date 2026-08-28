@@ -30,9 +30,7 @@ from collections.abc import Callable
 import findiff
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import ConfigDict
-from pydantic_numpy.model import NumpyModel
-from pydantic_numpy.typing import NpNDArray  # Array of any type or dimensionality
+from pydantic import BaseModel, ConfigDict, Field
 from scipy import io, sparse
 from scipy.sparse import csc_matrix as CSC
 from scipy.sparse import csr_matrix as CSR
@@ -96,10 +94,16 @@ def solenoid_1d_structural_rhs(
     return rhs
 
 
-class SolenoidStress1D(NumpyModel):
-    model_config = ConfigDict(validate_assignment=True, frozen=True, extra="forbid")
+class SolenoidStress1D(BaseModel):
+    model_config = ConfigDict(
+        validate_assignment=True,
+        frozen=True,
+        extra="forbid",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
 
-    rgrid: NpNDArray
+    rgrid_: list[float] = Field(alias="rgrid")
     """[m] 1D grid of r-coordinates"""
     elasticity_modulus: float
     """[Pa] diagonal terms in material property matrix"""
@@ -112,6 +116,11 @@ class SolenoidStress1D(NumpyModel):
     """Whether to generate fully-dense direct inverse of the system, which
     can be useful as a linear operator. Alternatively, the system can be solved
     using an LU solver with reduced memory usage and better numerical conditioning."""
+
+    @cached_property
+    def rgrid(self) -> NDArray[np.float64]:
+        """[m] 1D grid of r-coordinates."""
+        return np.asarray(self.rgrid_)
 
     @cached_property
     def operators(self) -> SolenoidStress1DOperators:

@@ -3,6 +3,7 @@
 ##  2026-09-28
 
 * Rust
+    * Add `vector_potential_circular_filament_finite_thickness_scalar` for the Hurwitz circular-section interior and near-exterior vector potential, with the existing ideal-filament formula at zero wire radius
     * !Require a per-source `wire_radius` slice in `flux_density_circular_filament` and `_par`
         * Preserve the thin-filament vector kernel as a private test reference
     * Add `flux_density_circular_filament_finite_radius_scalar` for the Hurwitz circular-section interior and near-exterior field approximation

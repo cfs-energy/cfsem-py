@@ -108,7 +108,7 @@ The table summarizes sources cited in the implementation, tests, examples, and d
 | [16](#ref-16) | Wesson — Tokamaks | Recovering magnetic-field components from poloidal-flux derivatives. |
 | [17](#ref-17) | van Nugteren and Deelen — rat-mlfmm | Inspiration for the linear-filament kernel's geometric evaluation and finite-radius handling. |
 | [18](#ref-18) | Zahn — The Vector Potential | Finite straight-wire field and vector-potential relationships. |
-| [19](#ref-19) | Hurwitz et al. — Coil Self-Field, Circular Section | Finite-thickness circular-section circular conductor interior and near-exterior field; thin-conductor approximation in Rust scalar/vector calculations and Python's optional `wire_radius` input. |
+| [19](#ref-19) | Hurwitz et al. — Coil Self-Field, Circular Section | Finite-thickness circular-section circular conductor interior and near-exterior field and vector potential; thin-conductor approximation. B-field available in Rust scalar/vector calculations and Python's optional `wire_radius` input; vector potential available as a Rust scalar. |
 | [20](#ref-20) | Landreman et al. — Coil Self-Field, Rectangular Section | Finite-thickness rectangular-section circular conductor interior field; thin-conductor approximation; not yet implemented. |
 | [21](#ref-21) | Mousavi and Sukumar — Generalized Duffy Transformation | Background for integrating singular boundary-element kernels. |
 | [22](#ref-22) | Graglia — Triangle Green's-Function Integrals | Background for triangle potential and potential-gradient integrals. |
@@ -178,7 +178,7 @@ The table summarizes sources cited in the implementation, tests, examples, and d
 
 18. <a id="ref-18"></a> M. Zahn, [“5.4: The Vector Potential,” *Electromagnetic Field Theory: A Problem Solving Approach*](https://eng.libretexts.org/Bookshelves/Electrical_Engineering/Electro-Optics/Electromagnetic_Field_Theory%3A_A_Problem_Solving_Approach_(Zahn)/05%3A_The_Magnetic_Field/5.04%3A_The_Vector_Potential), Engineering LibreTexts.
 
-19. <a id="ref-19"></a> S. Hurwitz, M. Landreman, and T. M. Antonsen Jr., [“Efficient calculation of the self magnetic field, self-force, and self-inductance for electromagnetic coils”](https://arxiv.org/abs/2310.09313), arXiv:2310.09313, 2023. Equations 16–19 give the field inside and near a conductor with circular cross-section; implemented by `flux_density_circular_filament_finite_radius_scalar`.
+19. <a id="ref-19"></a> S. Hurwitz, M. Landreman, and T. M. Antonsen Jr., [“Efficient calculation of the self magnetic field, self-force, and self-inductance for electromagnetic coils”](https://arxiv.org/abs/2310.09313), arXiv:2310.09313, 2023. Equations 16–19 give the field inside and near a conductor with circular cross-section; implemented by `flux_density_circular_filament_finite_radius_scalar`. Appendix A, equations 35 and 53, gives the vector potential, specialized to a circular loop in `vector_potential_circular_filament_finite_thickness_scalar`.
 
 20. <a id="ref-20"></a> M. Landreman, S. Hurwitz, and T. M. Antonsen Jr., [“Efficient calculation of self magnetic field, self-force, and self-inductance for electromagnetic coils. II. Rectangular cross-section”](https://arxiv.org/abs/2310.12087), arXiv:2310.12087, 2023. Equations 15–21 give the interior field for rectangular cross-section; retained for future implementation.
 

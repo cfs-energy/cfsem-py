@@ -946,6 +946,73 @@ pub fn vector_potential_circular_filament_scalar(
     c0 * c1 // Other components are zero
 }
 
+/// A_phi inside and near a circular loop with a finite circular conductor section.
+///
+/// Assumes uniform azimuthal current density in vacuum, `0 < wire_radius < rfil`,
+/// `wire_radius / rfil << 1`, and observation distance comparable to the wire radius.
+/// Positive radii use the Hurwitz near-conductor approximation throughout; this
+/// is not a global thick-torus solution. Zero radius delegates to
+/// [vector_potential_circular_filament_scalar], preserving its singularities.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) loop major radius, z-coord, and total current
+/// * `wire_radius`: (m) circular cross-section radius; zero for an ideal filament
+/// * `rzobs`: (m, m) cylindrical observation coordinates
+///
+/// # Returns
+///
+/// * `a_phi`: (V-s/m) azimuthal magnetic vector potential
+///
+/// # Formula
+///
+/// With major radius $a$, wire radius $b$, $x=R-a$, $s^2=x^2+(Z-Z_\mathrm{fil})^2$,
+/// $q=x/a$, and $t=s^2/b^2$, specializing equations 35 and 53 of \[1\] gives
+///
+/// $$A_\phi=\frac{\mu_0 I}{4\pi}\begin{cases}
+/// (2-q)[\ln(8a/b)-2]+1+q-t(1-q/4), & s\le b,\\
+/// (2-q)[\ln(8a/s)-2]+q+q/(4t), & s>b.
+/// \end{cases}$$
+///
+/// The far integral contributes $(2-q)[\ln(4/\phi_0)-2]$; its cutoff cancels
+/// the $\ln(2\phi_0)$ in equation 53. The exterior uses $\ln(a/s)$ from
+/// equation 53b (the summary equation 30 instead prints $\ln(a/b)$).
+/// Both branches and their first derivatives agree at the surface. At the
+/// centerline, $A_\phi=\mu_0 I[2\ln(8a/b)-3]/(4\pi)$ is finite.
+///
+/// # References
+///
+/// \[1\] S. Hurwitz, M. Landreman, and T. M. Antonsen Jr.,
+/// “Efficient calculation of the self magnetic field, self-force, and
+/// self-inductance for electromagnetic coils,” 2023, Appendix A, equations 35 and 53.
+/// Available: <https://arxiv.org/abs/2310.09313>.
+#[inline]
+pub fn vector_potential_circular_filament_finite_thickness_scalar(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> f64 {
+    if wire_radius == 0.0 {
+        return vector_potential_circular_filament_scalar(rzifil, rzobs);
+    }
+
+    let (rfil, zfil, ifil) = rzifil;
+    let x = rzobs.0 - rfil; // [m], outward from centerline
+    let u = x / wire_radius;
+    let v = (rzobs.1 - zfil) / wire_radius;
+    let t = u.mul_add(u, v * v); // [nondim], s^2 / wire_radius^2
+    let q = x / rfil; // [nondim], negative of kappa*s*cos(theta) in the paper
+    let log_radius = (8.0 * (rfil / wire_radius)).ln();
+
+    let potential = if t <= 1.0 {
+        (2.0 - q) * (log_radius - 2.0) + 1.0 + q - t * (1.0 - 0.25 * q)
+    } else {
+        // ln(8a/s) = ln(8a/b) - ln(t)/2, retaining the exterior thickness term.
+        (2.0 - q) * (log_radius - 0.5 * t.ln() - 2.0) + q + 0.25 * q / t
+    };
+    MU0_OVER_4PI * ifil * potential // [V-s/m]
+}
+
 /// Mutual inductance between a circular filament and a linear filament.
 /// This method is much faster (~100x typically) than discretizing the circular loop
 /// into linear segments and using Neumann's formula.
@@ -1259,6 +1326,151 @@ mod test {
 
     use super::*;
     use crate::{physics::linear_filament::body_force_density_linear_filament, testing::*};
+
+    #[test]
+    fn test_finite_thickness_potential_zero_matches_ideal() {
+        for scale in [1e-6, 1.0, 1e6] {
+            for current in [-3.0, 0.0, 2.0] {
+                let filament = (scale, -0.4 * scale, current);
+                for (r, z) in [
+                    (0.0, 0.3),
+                    (1e-5, -0.4),
+                    (0.5, 0.7),
+                    (1.0, -0.4),
+                    (1.001, -0.398),
+                    (10.0, 20.0),
+                ] {
+                    let obs = (r * scale, z * scale);
+                    let expected = vector_potential_circular_filament_scalar(filament, obs);
+                    for radius in [0.0, -0.0] {
+                        let actual = vector_potential_circular_filament_finite_thickness_scalar(
+                            filament, radius, obs,
+                        );
+                        // Preserve all existing behavior, including NaN on the
+                        // symmetry axis and the ideal source singularity.
+                        assert_eq!(actual.to_bits(), expected.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_against_cross_section_integral() {
+        // Uniform-J disk average of exact unit-current loop potentials, a=I=1,
+        // normalized by mu0*I/(4*pi). SciPy ellipkm1(d2/Q), ellipe(1-d2/Q),
+        // 256-point Gauss-Legendre radial quadrature, 1024 midpoint angles.
+        // Interior quadrature uses observation-centered polar coordinates to
+        // integrate the logarithmic singularity; exterior uses disk-centered
+        // coordinates. Doubling orders from 128/512 changes results by <1e-7.
+        let cases = [
+            (0.01, 0.0, 0.0, 10.3693163884398),
+            (0.01, 0.3, 0.4, 10.1085274488821),
+            (0.01, -0.5, 0.5, 9.88728781974263),
+            (0.01, 0.0, 1.0, 9.36953373854208),
+            (0.01, 0.9, 1.2, 8.53051493483393),
+            (0.01, 1.2, 0.0, 8.96535750309147),
+            (0.1, 0.0, 0.0, 5.77046965840007),
+            (0.1, 0.3, 0.4, 5.48459527448686),
+            (0.1, -0.5, 0.5, 5.34282513259251),
+            (0.1, 0.0, 1.0, 4.78355172239662),
+            (0.1, 0.9, 1.2, 3.90920314136678),
+            (0.1, 1.2, 0.0, 4.30512798795341),
+        ];
+        for (b, u, v, expected) in cases {
+            let actual = vector_potential_circular_filament_finite_thickness_scalar(
+                (1.0, 0.0, 1.0),
+                b,
+                (1.0 + b * u, b * v),
+            ) / MU0_OVER_4PI;
+            // O((b/a)^2) model error: 0.01% at b/a=.01, 1% at b/a=.1.
+            assert!(
+                (actual - expected).abs() < b * b * expected,
+                "b={b}, u={u}, v={v}, actual={actual}, expected={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_surface_continuity() {
+        let b = 0.01;
+        let h = b * 1e-5;
+        for i in 0..16 {
+            let theta = 2.0 * PI * i as f64 / 16.0;
+            let potential = |s: f64| {
+                vector_potential_circular_filament_finite_thickness_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0 + s * theta.cos(), s * theta.sin()),
+                )
+            };
+            let (inside, surface, outside) = (potential(b - h), potential(b), potential(b + h));
+            assert!((inside - surface).abs() < 3e-5 * MU0_OVER_4PI);
+            assert!((outside - surface).abs() < 3e-5 * MU0_OVER_4PI);
+            let derivative_inside = (surface - inside) / h;
+            let derivative_outside = (outside - surface) / h;
+            assert!((derivative_inside - derivative_outside).abs() < 1e-4 * MU0_OVER_4PI / b);
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_curl_matches_field_to_retained_order() {
+        for b in [0.01_f64, 0.001] {
+            let h = b * 1e-4;
+            for (u, v) in [(0.0, 0.0), (0.3, 0.4), (-0.5, 0.5), (0.9, 1.2)] {
+                let (r, z) = (1.0 + b * u, b * v);
+                let potential = |r, z| {
+                    vector_potential_circular_filament_finite_thickness_scalar(
+                        (1.0, 0.0, 1.0),
+                        b,
+                        (r, z),
+                    )
+                };
+                let br = -(potential(r, z + h) - potential(r, z - h)) / (2.0 * h);
+                let bz =
+                    ((r + h) * potential(r + h, z) - (r - h) * potential(r - h, z)) / (2.0 * h * r);
+                let expected =
+                    flux_density_circular_filament_finite_radius_scalar((1.0, 0.0, 1.0), b, (r, z));
+                // The two asymptotic models retain different higher-order
+                // terms. Their curl agreement is O(b*ln(8/b)) in these units,
+                // or O(b^2*ln(8/b)) relative to the local cylinder field.
+                let tol = 2.0 * MU0_OVER_4PI * b * (8.0 / b).ln();
+                assert!((br - expected.0).hypot(bz - expected.1) < tol);
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_centerline_and_scaling() {
+        for b in [0.01, 1e-8, 1e-12] {
+            let centerline = vector_potential_circular_filament_finite_thickness_scalar(
+                (1.0, 0.0, 1.0),
+                b,
+                (1.0, 0.0),
+            );
+            assert!(centerline.is_finite());
+            assert!((centerline / MU0_OVER_4PI - (2.0 * (8.0 / b).ln() - 3.0)).abs() < 1e-13);
+        }
+        for (u, v) in [(0.0, 0.0), (0.3, 0.4), (-0.9, 1.2)] {
+            let base = vector_potential_circular_filament_finite_thickness_scalar(
+                (1.0, 0.0, 1.0),
+                0.01,
+                (1.0 + 0.01 * u, 0.01 * v),
+            );
+            for scale in [1e-6, 1.0, 1e6] {
+                for current in [-3.0, 0.0, 2.0] {
+                    // A is invariant under uniform geometric scaling and
+                    // even under reflection about the loop plane.
+                    let actual = vector_potential_circular_filament_finite_thickness_scalar(
+                        (scale, 0.7 * scale, current),
+                        0.01 * scale,
+                        ((1.0 + 0.01 * u) * scale, (0.7 - 0.01 * v) * scale),
+                    );
+                    assert!((actual - current * base).abs() < 1e-12 * base.abs());
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_zero_radius_vectors_against_preserved_thin_kernel() {

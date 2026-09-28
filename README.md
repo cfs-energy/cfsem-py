@@ -23,6 +23,31 @@ To include this library in a Rust project, add an entry to your Cargo.toml's `[d
 cfsem = "*"
 ```
 
+## Oriented circular conductors
+
+The Cartesian B-field and body-force APIs accept independently positioned and
+oriented loops. `rfil` is the loop major radius, `loc` is its center, and
+`normal` is its nonzero plane normal. Centers and normals are each tuples of
+three arrays with one entry per source. Normals are normalized internally;
+positive current follows the right-hand rule about the normal. Observations,
+current-density vectors, and returned fields and forces use world coordinates.
+Invalid geometry propagates as NaNs; inconsistent array lengths raise an error.
+
+```python
+bx, by, bz = cfsem.flux_density_circular_filament_cartesian(
+    ifil, rfil, loc, normal, xyzobs, wire_radius=wire_radius
+)
+fx, fy, fz = cfsem.body_force_density_circular_filament_cartesian(
+    ifil, rfil, loc, normal, xyzobs, jobs, wire_radius=wire_radius
+)
+```
+
+This changes the Python call signatures: replace the old `zfil` argument with
+`loc=(zeros, zeros, zfil)` and `normal=(zeros, zeros, ones)` to retain loops
+centered on the z-axis. Here `zeros` and `ones` have one entry per source.
+`wire_radius` remains optional and defaults to ideal filaments. Positive wire
+radii retain the thin-conductor model's interior and near-exterior validity limits.
+
 ## Benchmarking - Rust
 
 Benchmarks are configured in Cargo.toml, and can be run via cargo:

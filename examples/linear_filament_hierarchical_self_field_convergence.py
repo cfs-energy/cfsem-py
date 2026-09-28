@@ -483,7 +483,8 @@ def run_near_field_study(par: bool) -> NearFieldStudy:
         cfsem.flux_density_circular_filament_cartesian(
             np.array([CURRENT], dtype=np.float64),
             np.array([LOOP_RADIUS], dtype=np.float64),
-            np.array([0.0], dtype=np.float64),
+            (np.zeros(1), np.zeros(1), np.zeros(1)),
+            (np.zeros(1), np.zeros(1), np.ones(1)),
             obs,
             par=par,
         )

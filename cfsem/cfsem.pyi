@@ -199,7 +199,8 @@ class SolenoidStress2dModelF32:
 def body_force_density_circular_filament_cartesian(
     current: FloatArray,
     rfil: FloatArray,
-    zfil: FloatArray,
+    loc: ArrayTriple,
+    normal: ArrayTriple,
     obs: ArrayTriple,
     j: ArrayTriple,
     par: bool,
@@ -263,7 +264,8 @@ def flux_density_circular_filament(
 def flux_density_circular_filament_cartesian(
     current: FloatArray,
     rfil: FloatArray,
-    zfil: FloatArray,
+    loc: ArrayTriple,
+    normal: ArrayTriple,
     xyzobs: ArrayTriple,
     par: bool,
     wire_radius: FloatArray | None = None,

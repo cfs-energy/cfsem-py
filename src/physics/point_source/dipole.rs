@@ -373,12 +373,19 @@ mod test {
         let outx_circ = &mut vec![0.0; nobs][..];
         let outy_circ = &mut vec![0.0; nobs][..];
         let outz_circ = &mut vec![0.0; nobs][..];
-        crate::physics::circular_filament::flux_density_circular_filament_cartesian_par(
-            (&[rfil], &[zfil], &[ifil]),
-            &[0.0],
-            (&xmesh[..], &ymesh[..], &zmesh[..]),
-            (outx_circ, outy_circ, outz_circ),
-        )
+        {
+            let (r, z, current) = (&[rfil], &[zfil], &[ifil]);
+            let zero = vec![0.0; r.len()];
+            let one = vec![1.0; r.len()];
+            crate::physics::circular_filament::flux_density_circular_filament_cartesian_par(
+                (r, current),
+                (&zero, &zero, z),
+                (&zero, &zero, &one),
+                &[0.0],
+                (&xmesh[..], &ymesh[..], &zmesh[..]),
+                (outx_circ, outy_circ, outz_circ),
+            )
+        }
         .unwrap();
 
         let outx_dipole = &mut vec![0.0; nobs][..];

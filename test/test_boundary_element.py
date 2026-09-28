@@ -258,7 +258,16 @@ def test_triangle_mesh_far_field_against_circular_filament(par):
         cfsem.flux_density_circular_filament_cartesian(
             np.array([loop_current], dtype=np.float64),
             np.array([radius], dtype=np.float64),
-            np.array([0.0], dtype=np.float64),
+            (
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.array([0.0], dtype=np.float64),
+            ),
+            (
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.ones_like(np.array([0.0], dtype=np.float64)),
+            ),
             (obs[:, 0], obs[:, 1], obs[:, 2]),
             par,
         )
@@ -698,7 +707,8 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
         cfsem.flux_density_circular_filament_cartesian(
             icirc,
             rfil,
-            zfil,
+            (np.zeros_like(zfil), np.zeros_like(zfil), zfil),
+            (np.zeros_like(zfil), np.zeros_like(zfil), np.ones_like(zfil)),
             xyzp,
             False,
         )

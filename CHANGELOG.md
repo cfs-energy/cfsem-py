@@ -2,9 +2,12 @@
 
 ## 14.0.0 2026-09-28
 
-Implement finite-wire-radius circular filament calcs and resolve on-axis singularity.
+Upgrade circular filament calcs to be faster, more robust, and increase functionality.
+Adds finite-wire-radius circular filament calcs, resolve on-axis singularity, and
+adds arbitrary location and orientation for circular filament cartesian-frame calcs.
 
 * Rust
+    * !Cartesian circular-filament B-field and body-force calculations now take per-source Cartesian centers and normals
     * !Require per-source `wire_radius` in circular-filament calcs
         * Both polar and cartesian variants; flux, vector potential, flux density, body force density
     * Add _finite_radius circular filament calc variants using Hurwitz formula
@@ -15,6 +18,8 @@ Implement finite-wire-radius circular filament calcs and resolve on-axis singula
         * Use the on-axis approximation for R/a <= 1e-4
         * Expose the scalar `flux_density_circular_filament_on_axis` calculation
 * Python
+    * !Replace `zfil` with required `loc` and `normal` component arrays in Cartesian circular-filament B-field and body-force functions
+        * Normals are normalized internally; positive current follows the right-hand rule
     * Add optional per-source `wire_radius` to circular filament calcs; `None` defaults to zero radius
         * Include Cartesian B-field and circular-filament body force density; append the input after `par`
         * Non-breaking change; existing calls produce the same or better result

@@ -3558,11 +3558,20 @@ fn hyp2f1(
 }
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian
-#[pyfunction(signature = (current, rfil, zfil, xyzobs, par, wire_radius=None))]
+#[pyfunction(signature = (current, rfil, loc, normal, xyzobs, par, wire_radius=None))]
 fn flux_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
-    zfil: PyReadonlyArray1<f64>,
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    normal: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
     xyzobs: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -3573,9 +3582,10 @@ fn flux_density_circular_filament_cartesian(
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
-    let rzifil = (rfil, zfil, current);
-    _3tup_slice_ro!(rzifil);
-    let (rfil, zfil, current) = rzifil;
+    let rfil = rfil.as_slice()?;
+    let current = current.as_slice()?;
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(normal);
     let default_wire_radius;
     let wire_radius = match wire_radius.as_ref() {
         Some(radius) => radius.as_slice()?,
@@ -3598,7 +3608,9 @@ fn flux_density_circular_filament_cartesian(
 
     // Do calculations
     match func(
-        (&rfil, &zfil, &current),
+        (rfil, current),
+        loc,
+        normal,
         wire_radius,
         xyzobs,
         (&mut bx, &mut by, &mut bz),
@@ -3761,11 +3773,20 @@ fn vector_potential_dipole(
 }
 
 /// Python bindings for cfsemrs::physics::body_force_density_circular_filament_cartesian
-#[pyfunction(signature = (current, rfil, zfil, obs, j, par, wire_radius=None))]
+#[pyfunction(signature = (current, rfil, loc, normal, obs, j, par, wire_radius=None))]
 fn body_force_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
-    zfil: PyReadonlyArray1<f64>,
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    normal: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
     obs: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -3781,9 +3802,10 @@ fn body_force_density_circular_filament_cartesian(
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
-    let rzifil = (rfil, zfil, current);
-    _3tup_slice_ro!(rzifil);
-    let (rfil, zfil, current) = rzifil;
+    let rfil = rfil.as_slice()?;
+    let current = current.as_slice()?;
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(normal);
     let default_wire_radius;
     let wire_radius = match wire_radius.as_ref() {
         Some(radius) => radius.as_slice()?,
@@ -3806,7 +3828,7 @@ fn body_force_density_circular_filament_cartesian(
     let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     let out = (&mut outx[..], &mut outy[..], &mut outz[..]);
 
-    match func((&rfil, &zfil, &current), wire_radius, obs, j, out) {
+    match func((rfil, current), loc, normal, wire_radius, obs, j, out) {
         Ok(_) => (),
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

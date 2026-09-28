@@ -2609,7 +2609,9 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
     for point in obs {
         b_strip.push(strip_flux_density(&strip, point));
         let b_ref = flux_density_circular_filament_cartesian_scalar(
-            (radius, 0.0, loop_current),
+            (radius, loop_current),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
             0.0,
             (point[0], point[1], point[2]),
         );
@@ -2714,7 +2716,9 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_near_axis
     for (i, point) in obs.iter().copied().enumerate() {
         let b_strip = strip_flux_density(&strip, point);
         let b_ref = flux_density_circular_filament_cartesian_scalar(
-            (radius, 0.0, loop_current),
+            (radius, loop_current),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
             0.0,
             (point[0], point[1], point[2]),
         );

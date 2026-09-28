@@ -1303,7 +1303,8 @@ def rotate_filaments_about_path(path: Array3xN, angle_offset: float, fils: Array
 def flux_density_circular_filament_cartesian(
     ifil: NDArray[float64],
     rfil: NDArray[float64],
-    zfil: NDArray[float64],
+    loc: Array3xN,
+    normal: Array3xN,
     xyzp: Array3xN,
     par: bool = True,
     wire_radius: NDArray[float64] | None = None,
@@ -1319,14 +1320,22 @@ def flux_density_circular_filament_cartesian(
     [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_cartesian_scalar.html
     [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_finite_radius_scalar.html
 
+    Observation coordinates, current densities (when supplied), and returned
+    vectors use the world Cartesian frame. Each loop has its own center and normal.
+
     Positive wire radii use the uniform-current circular-section approximation,
     valid inside and near conductors with wire radius small relative to loop radius.
     Zero radii use the ideal-filament field, including its on-axis treatment.
 
+    Invalid geometry propagates as NaNs; inconsistent array lengths raise an error.
+
     Args:
         ifil: [A] filament current
-        rfil: [m] filament R-coord
-        zfil: [m] filament Z-coord
+        rfil: [m] loop major radius
+        loc: [m] loop centers as (x, y, z) arrays, one entry per source
+        normal: Loop normals as (nx, ny, nz) arrays, one entry per source.
+            Finite nonzero vectors are normalized internally. Positive current
+            follows the right-hand rule about the normal.
         xyzp: [m] x,y,z coords of observation points
         par: Whether to use CPU parallelism
         wire_radius: [m] circular cross-section radius per source, same length as
@@ -1335,12 +1344,16 @@ def flux_density_circular_filament_cartesian(
     Returns:
         [T] flux density
     """
-    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    ifil, rfil = _2tup_contig((ifil, rfil))
+    loc = _3tup_contig(loc)
+    normal = _3tup_contig(normal)
     wire_radius = (
         zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
     )
     xyzp = _3tup_contig(xyzp)
-    bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, xyzp, par, wire_radius)  # [T]
+    bx, by, bz = em_flux_density_circular_filament_cartesian(
+        ifil, rfil, loc, normal, xyzp, par, wire_radius
+    )  # [T]
 
     return bx, by, bz
 
@@ -1443,7 +1456,8 @@ def vector_potential_dipole(
 def body_force_density_circular_filament_cartesian(
     ifil: NDArray[float64],
     rfil: NDArray[float64],
-    zfil: NDArray[float64],
+    loc: Array3xN,
+    normal: Array3xN,
     obs: Array3xN,
     j: Array3xN,
     par: bool = True,
@@ -1453,14 +1467,22 @@ def body_force_density_circular_filament_cartesian(
     JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
     filament segment at an observation point in cartesian form with some current density (per area).
 
+    Observation coordinates, current densities (when supplied), and returned
+    vectors use the world Cartesian frame. Each loop has its own center and normal.
+
     Positive wire radii use the uniform-current circular-section approximation,
     valid inside and near conductors with wire radius small relative to loop radius.
     Zero radii use the ideal-filament field, including its on-axis treatment.
 
+    Invalid geometry propagates as NaNs; inconsistent array lengths raise an error.
+
     Args:
         ifil: [A] filament current
-        rfil: [m] filament R-coord
-        zfil: [m] filament Z-coord
+        rfil: [m] loop major radius
+        loc: [m] loop centers as (x, y, z) arrays, one entry per source
+        normal: Loop normals as (nx, ny, nz) arrays, one entry per source.
+            Finite nonzero vectors are normalized internally. Positive current
+            follows the right-hand rule about the normal.
         obs: [m] x,y,z coords of observation locations
         j: [A/m^2] current density vector at observation locations
         par: Whether to use CPU parallelism
@@ -1470,14 +1492,16 @@ def body_force_density_circular_filament_cartesian(
     Returns:
         [N/m^3] body force density
     """
-    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    ifil, rfil = _2tup_contig((ifil, rfil))
+    loc = _3tup_contig(loc)
+    normal = _3tup_contig(normal)
     wire_radius = (
         zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
     )
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(
-        ifil, rfil, zfil, obs, j, par, wire_radius
+        ifil, rfil, loc, normal, obs, j, par, wire_radius
     )  # [N/m^3]
 
     return jxbx, jxby, jxbz

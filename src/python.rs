@@ -2632,7 +2632,7 @@ fn rotate_filaments_about_path(
 }
 
 /// Python bindings for cfsemrs::physics::flux_circular_filament
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, rprime, zprime, par, wire_radius=None))]
 fn flux_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -2640,6 +2640,7 @@ fn flux_circular_filament(
     rprime: PyReadonlyArray1<f64>,
     zprime: PyReadonlyArray1<f64>,
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<Py<PyArray1<f64>>> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
@@ -2647,6 +2648,15 @@ fn flux_circular_filament(
     _3tup_slice_ro!(rzifil);
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
+
+    let default_wire_radius;
+    let wire_radius = match wire_radius.as_ref() {
+        Some(radius) => radius.as_slice()?,
+        None => {
+            default_wire_radius = vec![0.0; rzifil.0.len()];
+            &default_wire_radius
+        }
+    };
 
     // Initialize output
     let mut psi = vec![0.0; obs.0.len()];
@@ -2658,7 +2668,7 @@ fn flux_circular_filament(
     };
 
     // Do calculations
-    match func(rzifil, obs, &mut psi[..]) {
+    match func(rzifil, wire_radius, obs, &mut psi[..]) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -2673,7 +2683,7 @@ fn flux_circular_filament(
 }
 
 /// Python bindings for cfsemrs::physics::circular_filament::vector_potential_circular_filament
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, rprime, zprime, par, wire_radius=None))]
 fn vector_potential_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -2681,6 +2691,7 @@ fn vector_potential_circular_filament(
     rprime: PyReadonlyArray1<f64>,
     zprime: PyReadonlyArray1<f64>,
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<Py<PyArray1<f64>>> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
@@ -2688,6 +2699,15 @@ fn vector_potential_circular_filament(
     _3tup_slice_ro!(rzifil);
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
+
+    let default_wire_radius;
+    let wire_radius = match wire_radius.as_ref() {
+        Some(radius) => radius.as_slice()?,
+        None => {
+            default_wire_radius = vec![0.0; rzifil.0.len()];
+            &default_wire_radius
+        }
+    };
 
     // Initialize output
     let mut out = vec![0.0; obs.0.len()];
@@ -2699,7 +2719,7 @@ fn vector_potential_circular_filament(
     };
 
     // Do calculations
-    match func(rzifil, obs, &mut out[..]) {
+    match func(rzifil, wire_radius, obs, &mut out[..]) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

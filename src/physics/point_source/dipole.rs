@@ -435,6 +435,7 @@ mod test {
         let outz_circ = &mut vec![0.0; nobs][..];
         crate::physics::circular_filament::vector_potential_circular_filament_par(
             (&[rfil], &[zfil], &[ifil]),
+            &[0.0],
             (&xmesh[..], &zmesh[..]),
             outy_circ,
         )

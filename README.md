@@ -108,7 +108,7 @@ The table summarizes sources cited in the implementation, tests, examples, and d
 | [16](#ref-16) | Wesson — Tokamaks | Recovering magnetic-field components from poloidal-flux derivatives. |
 | [17](#ref-17) | van Nugteren and Deelen — rat-mlfmm | Inspiration for the linear-filament kernel's geometric evaluation and finite-radius handling. |
 | [18](#ref-18) | Zahn — The Vector Potential | Finite straight-wire field and vector-potential relationships. |
-| [19](#ref-19) | Hurwitz et al. — Coil Self-Field, Circular Section | Finite-thickness circular-section circular conductor interior and near-exterior field and vector potential; thin-conductor approximation. B-field available in Rust scalar/vector calculations and Python's optional `wire_radius` input; vector potential available as a Rust scalar. |
+| [19](#ref-19) | Hurwitz et al. — Coil Self-Field, Circular Section | Finite-thickness circular-section circular conductor interior and near-exterior field, vector potential, and flux; thin-conductor approximation in Rust scalar/vector calculations and Python's optional `wire_radius` inputs. |
 | [20](#ref-20) | Landreman et al. — Coil Self-Field, Rectangular Section | Finite-thickness rectangular-section circular conductor interior field; thin-conductor approximation; not yet implemented. |
 | [21](#ref-21) | Mousavi and Sukumar — Generalized Duffy Transformation | Background for integrating singular boundary-element kernels. |
 | [22](#ref-22) | Graglia — Triangle Green's-Function Integrals | Background for triangle potential and potential-gradient integrals. |

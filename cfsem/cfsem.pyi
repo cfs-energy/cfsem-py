@@ -239,6 +239,7 @@ def flux_circular_filament(
     rprime: FloatArray,
     zprime: FloatArray,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> FloatArray: ...
 def vector_potential_circular_filament(
     current: FloatArray,
@@ -247,6 +248,7 @@ def vector_potential_circular_filament(
     rprime: FloatArray,
     zprime: FloatArray,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> FloatArray: ...
 def flux_density_circular_filament(
     current: FloatArray,

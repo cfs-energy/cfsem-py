@@ -3,6 +3,9 @@
 ##  2026-09-28
 
 * Rust
+    * !Require per-source `wire_radius` in circular-filament vector-potential and flux calculations, including parallel variants; require a scalar radius in `flux_circular_filament_scalar`
+        * Use finite-thickness vector potential and calculate flux as `2*pi*r_obs*A_phi`
+        * Preserve the original thin-filament kernels as private regression references
     * Add `vector_potential_circular_filament_finite_thickness_scalar` for the Hurwitz circular-section interior and near-exterior vector potential, with the existing ideal-filament formula at zero wire radius
     * !Require a per-source `wire_radius` slice in `flux_density_circular_filament` and `_par`
         * Preserve the thin-filament vector kernel as a private test reference
@@ -13,6 +16,7 @@
         * Use the on-axis approximation for R/a <= 1e-4
         * Expose the scalar `flux_density_circular_filament_on_axis` calculation
 * Python
+    * Add optional per-source `wire_radius` to `vector_potential_circular_filament` and `flux_circular_filament`; `None` defaults to zero radii and preserves existing positional calls
     * Add optional per-source `wire_radius` to `flux_density_circular_filament`; `None` defaults to zero radii and preserves existing positional calls
 
 

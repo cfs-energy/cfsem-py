@@ -183,12 +183,12 @@ def test_mutual_inductance_circular_to_linear(r, z, ndiscr, par):
     r1, z1 = (r + 0.1, abs(z) ** 0.5)
     fil, _dl = _test._filament_loop(r, z, ndiscr=ndiscr)
     fil1, dl1 = _test._filament_loop(r1, z1, ndiscr=ndiscr)
-    (x1, y1, z1) = fil1
+    (x1, y1, z1_points) = fil1
 
     m_linear = cfsem.mutual_inductance_piecewise_linear_filaments(fil, fil1)
-    m_circular = cfsem.flux_circular_filament([1.0], [r], [z], [r1], [z1])
+    m_circular = cfsem.flux_circular_filament([1.0], [r], [z], [r1], [z1], par)
     m_circular_to_linear = cfsem.mutual_inductance_circular_to_linear(
-        [r], [z], [1.0], (x1[:-1], y1[:-1], z1[:-1]), dl1, par
+        [r], [z], [1.0], (x1[:-1], y1[:-1], z1_points[:-1]), dl1, par
     )
 
     # Linear discretization really is not very good unless we use a number of discretizations that is
@@ -478,6 +478,87 @@ def test_flux_density_circular_filament_against_ideal_loop(r, par):
     _, bz_origin = cfsem.flux_density_circular_filament(ifil, rfil, zfil, np.zeros(1), np.zeros(1), par)
 
     assert np.allclose(np.array([b_ideal]), bz_origin, rtol=1e-6)
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("name", ["flux_circular_filament", "vector_potential_circular_filament"])
+def test_circular_potential_and_flux_optional_wire_radius(name, par):
+    from scipy.special import ellipe, ellipk
+
+    import cfsem.cfsem as raw
+
+    calc, raw_calc = getattr(cfsem, name), getattr(raw, name)
+    current, rfil, zfil, robs, zobs = (
+        np.asarray(x, dtype=float) for x in ([2, -3], [0.5, 1.0], [0, 0.3], [0.6, 0.7], [0.2, 0.4])
+    )
+    args = (current, rfil, zfil, robs, zobs)
+    # Independent ideal-loop reference using SciPy's elliptic integrals.
+    q = (rfil[:, None] + robs) ** 2 + (zfil[:, None] - zobs) ** 2
+    m = 4 * rfil[:, None] * robs / q
+    expected = np.sum(
+        cfsem.MU_0
+        / np.pi
+        * current[:, None]
+        * rfil[:, None]
+        / np.sqrt(q)
+        * ((2 - m) * ellipk(m) - 2 * ellipe(m))
+        / m,
+        axis=0,
+    )
+    if name == "flux_circular_filament":
+        expected *= 2 * np.pi * robs
+    legacy = calc(*args, par)  # Sixth positional argument still means `par`.
+    np.testing.assert_allclose(legacy, expected, rtol=2e-7)
+    for radius in [None, np.zeros(2), [0.0, 0.0]]:
+        np.testing.assert_array_equal(calc(*args, par, wire_radius=radius), legacy)
+    np.testing.assert_array_equal(raw_calc(*args, par), legacy)
+    np.testing.assert_array_equal(raw_calc(*args, par, wire_radius=None), legacy)
+    np.testing.assert_array_equal(raw_calc(*args, par, wire_radius=np.zeros(2)), legacy)
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("nobs", [0, 1, 3])
+def test_circular_potential_and_flux_per_source_wire_radius(par, nobs):
+    from scipy.special import ellipe, ellipk
+
+    import cfsem.cfsem as raw
+
+    current = np.array([1.0, -2.0, 0.5])
+    rfil = np.array([1.0, 1.0, 0.4])
+    zfil = np.array([0.0, 0.0, -0.3])
+    radii = np.array([0.01, 99.0, 0.02, 99.0, 0.0, 99.0])[::2]
+    robs, zobs = np.ones(nobs), np.zeros(nobs)
+    args = (current, rfil, zfil, robs, zobs)
+    # Finite loops at their centerline, plus a remote ideal loop.
+    finite = np.sum(cfsem.MU_0 * current[:2] / (4 * np.pi) * (2 * np.log(8 / radii[:2]) - 3))
+    q = (rfil[2] + robs) ** 2 + (zfil[2] - zobs) ** 2
+    m = 4 * rfil[2] * robs / q
+    thin = cfsem.MU_0 / np.pi * current[2] * rfil[2] / np.sqrt(q) * ((2 - m) * ellipk(m) - 2 * ellipe(m)) / m
+    a_phi = cfsem.vector_potential_circular_filament(*args, par, wire_radius=radii)
+    flux = cfsem.flux_circular_filament(*args, par, wire_radius=radii)
+    assert np.all(np.isfinite(a_phi))
+    np.testing.assert_allclose(a_phi, finite + thin, rtol=2e-8)
+    np.testing.assert_array_equal(flux, 2 * np.pi * robs * a_phi)
+    np.testing.assert_array_equal(
+        raw.vector_potential_circular_filament(*args, par, np.ascontiguousarray(radii)), a_phi
+    )
+    np.testing.assert_array_equal(raw.flux_circular_filament(*args, par, np.ascontiguousarray(radii)), flux)
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("name", ["flux_circular_filament", "vector_potential_circular_filament"])
+@mark.parametrize("nobs", [0, 2])
+@mark.parametrize("radii", [[], [0.01], [0.01, 0.02, 0.03]])
+def test_circular_potential_and_flux_wire_radius_length_error(name, par, nobs, radii):
+    import cfsem.cfsem as raw
+
+    args = tuple(
+        np.asarray(x, dtype=float)
+        for x in ([1.0, 2.0], [1.0, 1.1], [0.0, 0.0], np.zeros(nobs), np.zeros(nobs))
+    )
+    for calc in [getattr(cfsem, name), getattr(raw, name)]:
+        with raises(ValueError, match="Length mismatch"):
+            calc(*args, par, wire_radius=np.asarray(radii))
 
 
 @mark.parametrize("par", [True, False])

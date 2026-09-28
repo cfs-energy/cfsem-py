@@ -16,92 +16,81 @@ use crate::{MU_0, MU0_OVER_4PI};
 /// Observation-radius / filament-radius cutoff for the on-axis approximation.
 const ON_AXIS_RADIUS_RATIO: f64 = 1e-4;
 
-/// Flux contributions from some circular filaments to some observation points, which happens to be
-/// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.
-/// This variant of the function is parallelized over chunks of observation points.
+/// Poloidal flux from circular conductors with per-source circular cross-section radii.
+/// Parallelized over chunks of observation points.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
-/// * `out`:     (Wb), poloidal flux at observation location, length `n`
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (Wb) poloidal flux at each observation, length `n`
 ///
-/// # Commentary
-///
-/// Represents contribution from a current at (R, Z) to an observation point at (Rprime, Zprime)
-///
-/// Note Jardin's 4.61-4.66 presents it with a different definition of
-/// the elliptic integrals from what is used here and in scipy.
-///
-/// # References
-///
-///   \[1\] D. Kaltsas, A. Kuiroukidis, and G. Throumoulopoulos, “A tokamak pertinent analytic equilibrium with plasma flow of arbitrary direction,”
-///         Physics of Plasmas, vol. 26, p. 124501, Dec. 2019,
-///         doi: [10.1063/1.5120341](https://doi.org/10.1063/1.5120341).
-///
-///   \[2\] S. Jardin, *Computational Methods in Plasma Physics*, 1st ed. USA: CRC Press, Inc., 2010.
-///
-///   \[3\] J. Huang and J. Menard, “Development of an Auto-Convergent Free-Boundary Axisymmetric Equilibrium Solver,”
-///         Journal of Undergraduate Research, vol. 6, Jan. 2006, Accessed: May 05, 2021. \[Online\].
-///         Available: <https://www.osti.gov/biblio/1051805-development-auto-convergent-free-boundary-axisymmetric-equilibrium-solver>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius interior and near-exterior approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
+/// Flux is $2\pi R_\mathrm{obs} A_\phi$.
 pub fn flux_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
 ) -> Result<(), &'static str> {
-    // Unpack
-    let (rprime, zprime) = rzobs;
-
-    // Chunk inputs
-    let n = chunksize(rprime.len());
-    let rprimec = rprime.par_chunks(n);
-    let zprimec = zprime.par_chunks(n);
-    let outc = out.par_chunks_mut(n);
-
-    // Run calcs
-    (outc, rprimec, zprimec)
-        .into_par_iter()
-        .try_for_each(|(outc, rc, zc)| flux_circular_filament(rzifil, (rc, zc), outc))?;
-
+    vector_potential_circular_filament_par(rzifil, wire_radius, rzobs, out)?;
+    for (flux, r) in out.iter_mut().zip(rzobs.0) {
+        *flux *= 2.0 * core::f64::consts::PI * r;
+    }
     Ok(())
 }
 
-/// Flux contributions from some circular filaments to some observation points, which happens to be
-/// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.
+/// Poloidal flux from circular conductors with per-source circular cross-section radii.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
-/// * `out`:     (Wb), poloidal flux at observation location, length `n`
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (Wb) poloidal flux at each observation, length `n`
 ///
-/// # Commentary
-///
-/// Represents contribution from a current at (R, Z) to an observation point at (Rprime, Zprime)
-///
-/// Note Jardin's 4.61-4.66 presents it with a different definition of
-/// the elliptic integrals from what is used here and in scipy.
-///
-/// # References
-///
-///   \[1\] D. Kaltsas, A. Kuiroukidis, and G. Throumoulopoulos, “A tokamak pertinent analytic equilibrium with plasma flow of arbitrary direction,”
-///         Physics of Plasmas, vol. 26, p. 124501, Dec. 2019,
-///         doi: [10.1063/1.5120341](https://doi.org/10.1063/1.5120341).
-///
-///   \[2\] S. Jardin, *Computational Methods in Plasma Physics*, 1st ed. USA: CRC Press, Inc., 2010.
-///
-///   \[3\] J. Huang and J. Menard, “Development of an Auto-Convergent Free-Boundary Axisymmetric Equilibrium Solver,”
-///         Journal of Undergraduate Research, vol. 6, Jan. 2006, Accessed: May 05, 2021. \[Online\].
-///         Available: <https://www.osti.gov/biblio/1051805-development-auto-convergent-free-boundary-axisymmetric-equilibrium-solver>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius interior and near-exterior approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
+/// Flux is $2\pi R_\mathrm{obs} A_\phi$.
 pub fn flux_circular_filament(
+    rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    rzobs: (&[f64], &[f64]),
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    vector_potential_circular_filament(rzifil, wire_radius, rzobs, out)?;
+    // Radius depends only on the observation, so scale once after summing sources.
+    for (flux, r) in out.iter_mut().zip(rzobs.0) {
+        *flux *= 2.0 * core::f64::consts::PI * r;
+    }
+    Ok(())
+}
+
+/// Poloidal flux (Wb) from one circular conductor at one observation point.
+///
+/// Arguments are `(major radius, z, current)` in (m, m, A-turns), the circular
+/// cross-section `wire_radius` in m, and cylindrical `(R, Z)` observation coordinates in m.
+/// Uses $\Psi=2\pi R_\mathrm{obs} A_\phi$, with the model and validity limits of
+/// [vector_potential_circular_filament_finite_thickness_scalar]. Zero wire radius
+/// selects the ideal-filament formula in [vector_potential_circular_filament_scalar].
+#[inline]
+pub fn flux_circular_filament_scalar(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> f64 {
+    2.0 * core::f64::consts::PI
+        * rzobs.0
+        * vector_potential_circular_filament_finite_thickness_scalar(rzifil, wire_radius, rzobs)
+}
+
+// Original thin-filament kernels retained independently for regression tests.
+#[cfg(test)]
+fn flux_circular_filament_thin(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
@@ -124,50 +113,18 @@ pub fn flux_circular_filament(
         for j in 0..m {
             // The inner function is inlined, so values that are reused between iterations
             // can be pulled to the outer scope by the compiler and do not affect performance
-            out[i] +=
-                flux_circular_filament_scalar((rfil[j], zfil[j], ifil[j]), (rprime[i], zprime[i]));
+            out[i] += flux_circular_filament_thin_scalar(
+                (rfil[j], zfil[j], ifil[j]),
+                (rprime[i], zprime[i]),
+            );
         }
     }
 
     Ok(())
 }
 
-/// Flux contributions from some circular filaments to some observation points, which happens to be
-/// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.
-///
-/// # Arguments
-///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of filament
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation point
-///
-/// # Returns
-///
-/// * `psi`: (Wb) or (H-A) or (T-m^2) or (V-s), poloidal flux at observation location
-///
-/// # Commentary
-///
-/// Represents contribution from a current at (R, Z) to an observation point at (Rprime, Zprime)
-///
-/// Note Jardin's 4.61-4.66 presents it with a different definition of
-/// the elliptic integrals from what is used here and in scipy.
-///
-/// # References
-///
-///   \[1\] D. Kaltsas, A. Kuiroukidis, and G. Throumoulopoulos, “A tokamak pertinent analytic equilibrium with plasma flow of arbitrary direction,”
-///         Physics of Plasmas, vol. 26, p. 124501, Dec. 2019,
-///         doi: [10.1063/1.5120341](https://doi.org/10.1063/1.5120341).
-///
-///   \[2\] S. Jardin, *Computational Methods in Plasma Physics*, 1st ed. USA: CRC Press, Inc., 2010.
-///
-///   \[3\] J. Huang and J. Menard, “Development of an Auto-Convergent Free-Boundary Axisymmetric Equilibrium Solver,”
-///         Journal of Undergraduate Research, vol. 6, Jan. 2006, Accessed: May 05, 2021. \[Online\].
-///         Available: <https://www.osti.gov/biblio/1051805-development-auto-convergent-free-boundary-axisymmetric-equilibrium-solver>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
-#[inline]
-pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
+#[cfg(test)]
+fn flux_circular_filament_thin_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
     // Unpack
     let (rfil, zfil, ifil) = rzifil;
     let (rprime, zprime) = rzobs;
@@ -798,70 +755,90 @@ pub fn flux_density_circular_filament_cartesian_par(
     Ok(())
 }
 
-/// Off-axis A_phi component for a circular current filament in vacuum.
-/// This variant of the function is parallelized over chunks of observation points.
+/// A_phi from circular conductors with per-source circular cross-section radii.
+/// Parallelized over chunks of observation points.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation points, length `n`
-/// * `out`: (V-s/m), phi-component of magnetic vector potential at observation locations, length `n`
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (V-s/m) azimuthal vector potential at each observation, length `n`
 ///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// The vector potential of a loop has zero r- and z- components due to symmetry,
-/// and does not vary in the phi-direction.
-///
-/// # References
-///
-///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius interior and near-exterior approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 pub fn vector_potential_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
 ) -> Result<(), &'static str> {
-    // Unpack
     let (rprime, zprime) = rzobs;
+    check_length_3tup!(rzifil.2.len(), &rzifil);
+    check_length!(rzifil.2.len(), wire_radius);
+    check_length!(rprime.len(), zprime, out);
 
-    // Chunk inputs
     let n = chunksize(rprime.len());
-    let rprimec = rprime.par_chunks(n);
-    let zprimec = zprime.par_chunks(n);
-    let outc = out.par_chunks_mut(n);
-
-    // Run calcs
-    (outc, rprimec, zprimec)
+    (
+        out.par_chunks_mut(n),
+        rprime.par_chunks(n),
+        zprime.par_chunks(n),
+    )
         .into_par_iter()
         .try_for_each(|(outc, rc, zc)| {
-            vector_potential_circular_filament(rzifil, (rc, zc), outc)
-        })?;
-
-    Ok(())
+            vector_potential_circular_filament(rzifil, wire_radius, (rc, zc), outc)
+        })
 }
 
-/// Off-axis A_phi component for a circular current filament in vacuum.
+/// A_phi from circular conductors with per-source circular cross-section radii.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation points, length `n`
-/// * `out`: (V-s/m), phi-component of magnetic vector potential at observation locations, length `n`
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (V-s/m) azimuthal vector potential at each observation, length `n`
 ///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// The vector potential of a loop has zero r- and z- components due to symmetry,
-/// and does not vary in the phi-direction.
-///
-/// # References
-///
-///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius interior and near-exterior approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 pub fn vector_potential_circular_filament(
+    rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    rzobs: (&[f64], &[f64]),
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let (rfil, zfil, ifil) = rzifil;
+    let (rprime, zprime) = rzobs;
+    check_length_3tup!(ifil.len(), &rzifil);
+    check_length!(ifil.len(), wire_radius);
+    check_length!(rprime.len(), zprime, out);
+    out.fill(0.0);
+
+    for i in 0..ifil.len() {
+        let source = (rfil[i], zfil[i], ifil[i]);
+        // Dispatch once per source to preserve the thin kernel's vectorization.
+        if wire_radius[i] == 0.0 {
+            for j in 0..rprime.len() {
+                out[j] += vector_potential_circular_filament_scalar(source, (rprime[j], zprime[j]));
+            }
+        } else {
+            for j in 0..rprime.len() {
+                out[j] += vector_potential_circular_filament_finite_thickness_scalar(
+                    source,
+                    wire_radius[i],
+                    (rprime[j], zprime[j]),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+// Original thin-filament vector kernel retained for regression tests.
+#[cfg(test)]
+fn vector_potential_circular_filament_thin(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
@@ -883,7 +860,7 @@ pub fn vector_potential_circular_filament(
         for j in 0..m {
             // The inner function is inlined, so values that are reused between iterations
             // can be pulled to the outer scope by the compiler and do not affect performance
-            out[j] += vector_potential_circular_filament_scalar(
+            out[j] += vector_potential_circular_filament_thin_scalar(
                 (rfil[i], zfil[i], ifil[i]),
                 (rprime[j], zprime[j]),
             );
@@ -916,6 +893,15 @@ pub fn vector_potential_circular_filament(
 ///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn vector_potential_circular_filament_scalar(
+    rzifil: (f64, f64, f64),
+    rzobs: (f64, f64),
+) -> f64 {
+    vector_potential_circular_filament_thin_scalar(rzifil, rzobs)
+}
+
+// Original ideal-filament formula, also used by the private vector test reference.
+#[inline]
+fn vector_potential_circular_filament_thin_scalar(
     rzifil: (f64, f64, f64),
     rzobs: (f64, f64),
 ) -> f64 {
@@ -1326,6 +1312,152 @@ mod test {
 
     use super::*;
     use crate::{physics::linear_filament::body_force_density_linear_filament, testing::*};
+
+    #[test]
+    fn test_potential_and_flux_zero_radius_against_preserved_kernels() {
+        for scale in [1e-6, 1.0, 1e6] {
+            let rfil = [0.5 * scale, scale, 2.0 * scale];
+            let zfil = [-0.2 * scale, 0.3 * scale, 0.8 * scale];
+            let current = [2.0, -3.0, 0.7];
+            let robs = [0.0, 0.2 * scale, 1.003 * scale, 2.5 * scale];
+            let zobs = [0.5 * scale, -0.7 * scale, 0.305 * scale, 4.0 * scale];
+            for nfils in [0, 1, 3] {
+                let source = (&rfil[..nfils], &zfil[..nfils], &current[..nfils]);
+                for nobs in [0, 1, 4] {
+                    let obs = (&robs[..nobs], &zobs[..nobs]);
+                    let mut old_a = vec![99.0; nobs];
+                    let mut old_flux = vec![99.0; nobs];
+                    vector_potential_circular_filament_thin(source, obs, &mut old_a).unwrap();
+                    flux_circular_filament_thin(source, obs, &mut old_flux).unwrap();
+                    for radius in [0.0, -0.0] {
+                        let radii = vec![radius; nfils];
+                        for calc in [
+                            vector_potential_circular_filament,
+                            vector_potential_circular_filament_par,
+                        ] {
+                            let mut actual = vec![99.0; nobs];
+                            calc(source, &radii, obs, &mut actual).unwrap();
+                            for (a, old) in actual.iter().zip(&old_a) {
+                                assert_eq!(a.to_bits(), old.to_bits());
+                            }
+                        }
+                        for calc in [flux_circular_filament, flux_circular_filament_par] {
+                            let mut actual = vec![99.0; nobs];
+                            calc(source, &radii, obs, &mut actual).unwrap();
+                            for (flux, old) in actual.iter().zip(&old_flux) {
+                                // Scaling after summation changes rounding; preserve
+                                // the old formula's accuracy and axis singularity.
+                                assert!(
+                                    (flux.is_nan() && old.is_nan())
+                                        || approx(*flux, *old, 5e-12, 1e-18 * scale)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_potential_and_flux_mixed_radius_sources() {
+        let source = (
+            &[1.0, 1.0, 0.4][..],
+            &[0.0, 0.0, -0.3][..],
+            &[1.0, -2.0, 0.5][..],
+        );
+        let radii = [0.01, 0.02, 0.0];
+        let robs = [1.0, 1.003, 1.015];
+        let zobs = [0.0, 0.004, 0.02];
+        for nobs in [0, 1, 3] {
+            let obs = (&robs[..nobs], &zobs[..nobs]);
+            let expected: Vec<f64> = (0..nobs)
+                .map(|j| {
+                    (0..3)
+                        .map(|i| {
+                            vector_potential_circular_filament_finite_thickness_scalar(
+                                (source.0[i], source.1[i], source.2[i]),
+                                radii[i],
+                                (robs[j], zobs[j]),
+                            )
+                        })
+                        .sum()
+                })
+                .collect();
+            for calc in [
+                vector_potential_circular_filament,
+                vector_potential_circular_filament_par,
+            ] {
+                let mut actual = vec![99.0; nobs];
+                calc(source, &radii, obs, &mut actual).unwrap();
+                assert_eq!(actual, expected);
+                assert!(actual.iter().all(|a| a.is_finite()));
+            }
+            for calc in [flux_circular_filament, flux_circular_filament_par] {
+                let mut actual = vec![99.0; nobs];
+                calc(source, &radii, obs, &mut actual).unwrap();
+                for j in 0..nobs {
+                    assert_eq!(actual[j], 2.0 * PI * robs[j] * expected[j]);
+                    let scalar_sum: f64 = (0..3)
+                        .map(|i| {
+                            flux_circular_filament_scalar(
+                                (source.0[i], source.1[i], source.2[i]),
+                                radii[i],
+                                (robs[j], zobs[j]),
+                            )
+                        })
+                        .sum();
+                    assert!(approx(actual[j], scalar_sum, 1e-14, 0.0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_potential_and_flux_length_validation() {
+        for calc in [
+            vector_potential_circular_filament,
+            vector_potential_circular_filament_par,
+            flux_circular_filament,
+            flux_circular_filament_par,
+        ] {
+            for nobs in [0, 2] {
+                for radii in [&[][..], &[0.01][..], &[0.01, 0.02, 0.03][..]] {
+                    let mut out = vec![99.0; nobs];
+                    assert!(
+                        calc(
+                            (&[1.0; 2], &[0.0; 2], &[1.0; 2]),
+                            radii,
+                            (&vec![1.0; nobs], &vec![0.0; nobs]),
+                            &mut out
+                        )
+                        .is_err()
+                    );
+                    assert_eq!(out, vec![99.0; nobs]);
+                }
+                let mut out = vec![99.0; nobs];
+                assert!(
+                    calc(
+                        (&[1.0], &[0.0; 2], &[1.0; 2]),
+                        &[0.0; 2],
+                        (&vec![1.0; nobs], &vec![0.0; nobs]),
+                        &mut out
+                    )
+                    .is_err()
+                );
+                assert_eq!(out, vec![99.0; nobs]);
+            }
+            for (robs, zobs, nout) in [
+                (&[1.0][..], &[][..], 1),
+                (&[][..], &[0.0][..], 1),
+                (&[1.0][..], &[0.0][..], 2),
+            ] {
+                let mut out = vec![99.0; nout];
+                assert!(calc((&[1.0], &[0.0], &[1.0]), &[0.01], (robs, zobs), &mut out).is_err());
+                assert_eq!(out, vec![99.0; nout]);
+            }
+        }
+    }
 
     #[test]
     fn test_finite_thickness_potential_zero_matches_ideal() {
@@ -2128,8 +2260,13 @@ mod test {
         let vp = |r: f64, z: f64| {
             let mut out = [0.0];
 
-            vector_potential_circular_filament((&[rfil], &[zfil], &[1.0]), (&[r], &[z]), &mut out)
-                .unwrap();
+            vector_potential_circular_filament(
+                (&[rfil], &[zfil], &[1.0]),
+                &[0.0],
+                (&[r], &[z]),
+                &mut out,
+            )
+            .unwrap();
 
             out[0]
         };
@@ -2172,8 +2309,13 @@ mod test {
                 // psi = integral(dot(A, dL)) =  2pi * r * a
                 let psi_from_a = 2.0 * PI * *r * vp(*r, *z);
                 let mut psi = [0.0];
-                flux_circular_filament((&[rfil], &[zfil], &[1.0]), (&[*r], &[*z]), &mut psi)
-                    .unwrap();
+                flux_circular_filament(
+                    (&[rfil], &[zfil], &[1.0]),
+                    &[0.0],
+                    (&[*r], &[*z]),
+                    &mut psi,
+                )
+                .unwrap();
                 println!("{psi:?}, {psi_from_a}");
                 assert!(approx(psi_from_a, psi[0], 1e-10, 0.0)); // Should be very close to float roundoff
             }
@@ -2206,8 +2348,20 @@ mod test {
         let out3 = &mut [3.0; NOBS];
 
         // Flux
-        flux_circular_filament((&rfil, &zfil, &ifil), (&rprime, &zprime), out0).unwrap();
-        flux_circular_filament_par((&rfil, &zfil, &ifil), (&rprime, &zprime), out1).unwrap();
+        flux_circular_filament(
+            (&rfil, &zfil, &ifil),
+            &[0.0; NFIL],
+            (&rprime, &zprime),
+            out0,
+        )
+        .unwrap();
+        flux_circular_filament_par(
+            (&rfil, &zfil, &ifil),
+            &[0.0; NFIL],
+            (&rprime, &zprime),
+            out1,
+        )
+        .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out1[i]);
         }
@@ -2235,10 +2389,20 @@ mod test {
         // Vector potential
         let out0 = &mut [0.0; NOBS]; // Reinit with different values to test zeroing
         let out1 = &mut [1.0; NOBS];
-        vector_potential_circular_filament((&rfil, &zfil, &ifil), (&rprime, &zprime), out0)
-            .unwrap();
-        vector_potential_circular_filament_par((&rfil, &zfil, &ifil), (&rprime, &zprime), out1)
-            .unwrap();
+        vector_potential_circular_filament(
+            (&rfil, &zfil, &ifil),
+            &[0.0; NFIL],
+            (&rprime, &zprime),
+            out0,
+        )
+        .unwrap();
+        vector_potential_circular_filament_par(
+            (&rfil, &zfil, &ifil),
+            &[0.0; NFIL],
+            (&rprime, &zprime),
+            out1,
+        )
+        .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out1[i]);
         }

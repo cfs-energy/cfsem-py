@@ -26,6 +26,7 @@ fn bench_flux_circular_filament(c: &mut Criterion) {
             let rfil = vec![1.0 / 7.0_f64; nfils];
             let zfil = vec![1.0 / 11.0_f64; nfils];
             let current = vec![0.5_f64; nfils];
+            let wire_radius = vec![0.0; nfils];
 
             // Observation points
             let nobs = 1000;
@@ -52,6 +53,7 @@ fn bench_flux_circular_filament(c: &mut Criterion) {
                         black_box(
                             flux_circular_filament(
                                 (&rfil, &zfil, &current),
+                                &wire_radius,
                                 (&robs, &zobs),
                                 &mut out,
                             )
@@ -75,6 +77,7 @@ fn bench_flux_circular_filament(c: &mut Criterion) {
                         black_box(
                             flux_circular_filament_par(
                                 (&rfil, &zfil, &current),
+                                &wire_radius,
                                 (&robs, &zobs),
                                 &mut out,
                             )
@@ -102,6 +105,7 @@ fn bench_vector_potential_circular_filament(c: &mut Criterion) {
             let rfil = vec![1.0 / 7.0_f64; nfils];
             let zfil = vec![1.0 / 11.0_f64; nfils];
             let current = vec![0.5_f64; nfils];
+            let wire_radius = vec![0.0; nfils];
 
             // Observation points
             let nobs = 1000;
@@ -128,6 +132,7 @@ fn bench_vector_potential_circular_filament(c: &mut Criterion) {
                         black_box(
                             vector_potential_circular_filament(
                                 (&rfil, &zfil, &current),
+                                &wire_radius,
                                 (&robs, &zobs),
                                 &mut out,
                             )
@@ -151,6 +156,7 @@ fn bench_vector_potential_circular_filament(c: &mut Criterion) {
                         black_box(
                             vector_potential_circular_filament_par(
                                 (&rfil, &zfil, &current),
+                                &wire_radius,
                                 (&robs, &zobs),
                                 &mut out,
                             )
@@ -239,6 +245,45 @@ fn bench_flux_density_circular_filament(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_vector_potential_near_conductor(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Circular Filament Near Vector Potential");
+    group.sample_size(30);
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.throughput(Throughput::Elements(10_000));
+
+    // Nonsingular points in the finite-thickness model's domain of validity.
+    // Compare zero and positive per-source radii with identical geometry.
+    let wire_radius = 0.01;
+    for (region, u, v) in [("interior", 0.3, 0.4), ("near exterior", 0.9, 1.2)] {
+        for nobs in [1000, 100, 10, 1] {
+            let nfils = 10_000 / nobs;
+            let rfil = vec![1.0; nfils];
+            let zfil = vec![0.25; nfils];
+            let current = vec![3.0; nfils];
+            let robs = vec![1.0 + u * wire_radius; nobs];
+            let zobs = vec![0.25 + v * wire_radius; nobs];
+            let mut out = vec![0.0; nobs];
+            for (model, radius) in [("thin", 0.0), ("finite", wire_radius)] {
+                let radii = vec![radius; nfils];
+                group.bench_function(BenchmarkId::new(format!("{region}/{model}"), nobs), |b| {
+                    b.iter(|| {
+                        vector_potential_circular_filament(
+                            black_box((&rfil, &zfil, &current)),
+                            black_box(&radii),
+                            black_box((&robs, &zobs)),
+                            black_box(&mut out),
+                        )
+                        .unwrap();
+                        black_box(&out);
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_flux_density_finite_radius_scalar(c: &mut Criterion) {
     let mut group = c.benchmark_group("Circular Filament Scalar Field");
     group.sample_size(50);
@@ -289,9 +334,14 @@ criterion_group!(
     group_finite_radius_scalar,
     bench_flux_density_finite_radius_scalar
 );
+criterion_group!(
+    group_near_vector_potential,
+    bench_vector_potential_near_conductor
+);
 criterion_main!(
     group_flux,
     group_vector_potential,
     group_flux_density,
-    group_finite_radius_scalar
+    group_finite_radius_scalar,
+    group_near_vector_potential
 );

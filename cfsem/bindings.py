@@ -160,20 +160,19 @@ def flux_circular_filament(
     rprime: NDArray[float64],
     zprime: NDArray[float64],
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> NDArray[float64]:
     """
-    Flux contributions from some circular filaments to some observation points,
-    which happens to be the Green's function for the Grad-Shafranov solve.
+    Poloidal flux from circular conductors, calculated as 2*pi*rprime*A_phi.
 
-    This represents the integral of $\\vec{B} \\cdot \\hat{n} \\, dA$ from the z-axis to each
-    (`rprime`, `zprime`) observation location with $\\hat{n}$ oriented parallel to the z-axis.
+    For zero wire radii, this is the ideal-filament Green's function for the
+    Grad-Shafranov solve, and unit-current values give the mutual inductance
+    between source and observation loops.
 
-    A convenient interpretation of the flux is as the mutual inductance
-    between a circular filament at (`rfil`, `zfil`) and a second circular
-    filament at (`rprime`, `zprime`); this can be used to get the mutual inductance
-    between two filamentized coils as the sum of flux contributions between each coil's filaments.
-    Because mutual inductance is reflexive, the order of the coils can be reversed and
-    the same result is obtained.
+    Positive wire radii use the same uniform-current, thin-conductor approximation
+    as vector_potential_circular_filament, valid inside and near each conductor.
+    They do not provide a global thick-torus solution or the mutual inductance
+    between two finite-section conductors without averaging over the receiver.
 
     Args:
         ifil: [A] filament current
@@ -182,13 +181,18 @@ def flux_circular_filament(
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular conductor-section radius per source, same length
+            as ifil. None allocates zero radii, preserving ideal-filament behavior.
 
     Returns:
         [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    wire_radius = (
+        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
+    )
+    psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return psi  # [Wb] or [T-m^2] or [V-s]
 
 
@@ -199,22 +203,24 @@ def vector_potential_circular_filament(
     rprime: NDArray[float64],
     zprime: NDArray[float64],
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> NDArray[float64]:
     """
-    Vector potential contributions from some circular filaments to some observation points.
-    Off-axis A_phi component for a circular current filament in vacuum.
+    Azimuthal vector potential from circular conductors in vacuum.
 
-    The vector potential of a loop has zero r- and z- components due to symmetry,
-    and does not vary in the phi-direction.
+    Omitted or zero wire radii use the ideal-filament formula. Positive radii
+    use the Hurwitz uniform-current, circular-section approximation, valid inside
+    and near conductors whose wire radius is small relative to their loop radius.
+    This positive-radius model is not a global thick-torus solution.
 
-    Note that to recover the B-field as the curl of A, the curl operator for cylindrical
-    coordinates must be used with the output of this function incorporated into a full
-    3D A-field like [A_r, A_phi, A_z].
+    Only A_phi is nonzero. Recover B using the cylindrical curl; the finite-radius
+    A and B models agree to their retained asymptotic order.
 
-    References:
-        [1] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-            “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-            Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+    For formulas and references, see the Rust [finite-thickness scalar][finite_scalar]
+    and [ideal-filament scalar][thin_scalar] implementations.
+
+    [finite_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.vector_potential_circular_filament_finite_thickness_scalar.html
+    [thin_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.vector_potential_circular_filament_scalar.html
 
     Args:
         ifil: [A] filament current
@@ -223,13 +229,18 @@ def vector_potential_circular_filament(
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular conductor-section radius per source, same length
+            as ifil. None allocates zero radii, preserving ideal-filament behavior.
 
     Returns:
         [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    wire_radius = (
+        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
+    )
+    a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return a_phi  # [Wb/m] or [V-s/m]
 
 

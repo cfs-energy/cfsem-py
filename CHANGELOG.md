@@ -1,24 +1,21 @@
 # Changelog
 
-##  2026-09-28
+## 14.0.0 2026-09-28
+
+Implement finite-wire-radius circular filament calcs and resolve on-axis singularity.
 
 * Rust
-    * !Require per-source `wire_radius` in circular-filament vector-potential and flux calculations, including parallel variants; require a scalar radius in `flux_circular_filament_scalar`
-        * Use finite-thickness vector potential and calculate flux as `2*pi*r_obs*A_phi`
-        * Preserve the original thin-filament kernels as private regression references
-    * Add `vector_potential_circular_filament_finite_thickness_scalar` for the Hurwitz circular-section interior and near-exterior vector potential, with the existing ideal-filament formula at zero wire radius
-    * !Require a per-source `wire_radius` slice in `flux_density_circular_filament` and `_par`
-        * Preserve the thin-filament vector kernel as a private test reference
-    * Add `flux_density_circular_filament_finite_radius_scalar` for the Hurwitz circular-section interior and near-exterior field approximation
-        * Use the existing ideal-filament formula at zero wire radius and route circular-filament field calculations through this dispatch
+    * !Require per-source `wire_radius` in circular-filament calcs
+    * Add _finite_radius circular filament calc variants using Hurwitz formula
+        * These are now used in vector and parallel circular filament calcs
+        * ~50% speedup for large numbers of observation points
     * Resolve on-axis singularity for circular filament B-field
         * Minimal effect on performance; vectorizes over contiguous chunks
         * Use the on-axis approximation for R/a <= 1e-4
         * Expose the scalar `flux_density_circular_filament_on_axis` calculation
 * Python
-    * Add optional per-source `wire_radius` to `vector_potential_circular_filament` and `flux_circular_filament`; `None` defaults to zero radii and preserves existing positional calls
-    * Add optional per-source `wire_radius` to `flux_density_circular_filament`; `None` defaults to zero radii and preserves existing positional calls
-
+    * Add optional per-source `wire_radius` to circular filament calcs; `None` defaults to zero radius
+        * Non-breaking change; existing calls produce the same or better result
 
 ## 13.1.0 2026-08-27
 

@@ -481,6 +481,67 @@ def test_flux_density_circular_filament_against_ideal_loop(r, par):
 
 
 @mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_optional_wire_radius(par):
+    from cfsem.cfsem import flux_density_circular_filament as raw_field
+
+    args = tuple(np.asarray(x, dtype=float) for x in ([2, -3], [0.5, 1.0], [0, 0.3], [0, 0.7], [0.2, 0.4]))
+    # The legacy sixth positional argument must still mean `par`, in both APIs.
+    expected = cfsem.flux_density_circular_filament(*args, par)
+    for radius in [None, np.zeros(2), [0.0, 0.0]]:
+        actual = cfsem.flux_density_circular_filament(*args, par, wire_radius=radius)
+        np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(raw_field(*args, par), expected)
+    np.testing.assert_array_equal(raw_field(*args, par, wire_radius=None), expected)
+    np.testing.assert_array_equal(raw_field(*args, par, wire_radius=np.zeros(2)), expected)
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("nobs", [1, 3])
+def test_flux_density_circular_filament_per_source_wire_radius(par, nobs):
+    from scipy.special import ellipe, ellipkm1
+
+    current = np.array([1.0, -2.0, 0.5])
+    rfil = np.array([1.0, 1.0, 0.4])
+    zfil = np.array([0.0, 0.0, -0.3])
+    # Exercise the wrapper's contiguous conversion and different source radii.
+    radii = np.array([0.01, 99.0, 0.02, 99.0, 0.0, 99.0])[::2]
+    robs, zobs = np.ones(nobs), np.zeros(nobs)
+    actual = cfsem.flux_density_circular_filament(current, rfil, zfil, robs, zobs, par, wire_radius=radii)
+    assert np.all(np.isfinite(actual))
+
+    # Two finite-radius loops evaluated at their shared conductor centerline,
+    # plus a separate thin filament. Reference: Hurwitz 17 and 19a, using SciPy
+    # elliptic integrals independently of the Rust approximations.
+    q = 4 * rfil[:2] ** 2 + radii[:2] ** 2 / np.sqrt(np.e)
+    complement = radii[:2] ** 2 / (np.sqrt(np.e) * q)
+    bz_reg = (
+        cfsem.MU_0 * current[:2] / (2 * np.pi * np.sqrt(q)) * (ellipkm1(complement) - ellipe(1 - complement))
+    )
+    bz_finite = np.sum(bz_reg + 3 * cfsem.MU_0 * current[:2] / (16 * np.pi * rfil[:2]))
+    expected_br, expected_bz = cfsem.flux_density_circular_filament(
+        current[2:], rfil[2:], zfil[2:], robs, zobs, par
+    )
+    np.testing.assert_allclose(actual[0], expected_br, rtol=1e-12)
+    np.testing.assert_allclose(actual[1], expected_bz + bz_finite, rtol=2e-8)
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("nobs", [0, 2])
+@mark.parametrize("radii", [[], [0.01], [0.01, 0.02, 0.03]])
+def test_flux_density_circular_filament_wire_radius_length_error(par, nobs, radii):
+    with raises(ValueError, match="Length mismatch"):
+        cfsem.flux_density_circular_filament(
+            [1.0, 2.0],
+            [1.0, 1.1],
+            [0.0, 0.0],
+            np.zeros(nobs),
+            np.zeros(nobs),
+            par,
+            wire_radius=radii,
+        )
+
+
+@mark.parametrize("par", [True, False])
 def test_flux_density_circular_filament_on_axis(par):
     # Superpose translated loops with both current signs. Include signed zero,
     # loop centers, and distant axial points where elliptic terms can cancel.

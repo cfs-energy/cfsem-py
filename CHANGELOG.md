@@ -3,11 +3,16 @@
 ##  2026-09-28
 
 * Rust
+    * !Require a per-source `wire_radius` slice in `flux_density_circular_filament` and `_par`
+        * Preserve the thin-filament vector kernel as a private test reference
     * Add `flux_density_circular_filament_finite_radius_scalar` for the Hurwitz circular-section interior and near-exterior field approximation
+        * Use the existing ideal-filament formula at zero wire radius and route circular-filament field calculations through this dispatch
     * Resolve on-axis singularity for circular filament B-field
         * Minimal effect on performance; vectorizes over contiguous chunks
         * Use the on-axis approximation for R/a <= 1e-4
         * Expose the scalar `flux_density_circular_filament_on_axis` calculation
+* Python
+    * Add optional per-source `wire_radius` to `flux_density_circular_filament`; `None` defaults to zero radii and preserves existing positional calls
 
 
 ## 13.1.0 2026-08-27

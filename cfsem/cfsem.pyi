@@ -255,6 +255,7 @@ def flux_density_circular_filament(
     rprime: FloatArray,
     zprime: FloatArray,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> ArrayPair: ...
 def flux_density_circular_filament_cartesian(
     current: FloatArray,

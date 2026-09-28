@@ -2714,7 +2714,7 @@ fn vector_potential_circular_filament(
 }
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, rprime, zprime, par, wire_radius=None))]
 fn flux_density_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -2722,6 +2722,7 @@ fn flux_density_circular_filament(
     rprime: PyReadonlyArray1<f64>,
     zprime: PyReadonlyArray1<f64>,
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
@@ -2729,6 +2730,15 @@ fn flux_density_circular_filament(
     _3tup_slice_ro!(rzifil);
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
+
+    let default_wire_radius;
+    let wire_radius = match wire_radius.as_ref() {
+        Some(radius) => radius.as_slice()?,
+        None => {
+            default_wire_radius = vec![0.0; rzifil.0.len()];
+            &default_wire_radius
+        }
+    };
 
     // Initialize output
     let n = obs.0.len();
@@ -2741,7 +2751,7 @@ fn flux_density_circular_filament(
     };
 
     // Do calculations
-    match func(rzifil, obs, (&mut br, &mut bz)) {
+    match func(rzifil, wire_radius, obs, (&mut br, &mut bz)) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

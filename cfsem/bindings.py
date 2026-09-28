@@ -240,20 +240,23 @@ def flux_density_circular_filament(
     rprime: NDArray[float64],
     zprime: NDArray[float64],
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """
-    Br,Bz components for a circular current filament in vacuum, including on the axis.
+    Br,Bz components from circular conductors in vacuum.
 
-    For R/a <= 1e-4, where a is each filament's radius, returns Br=0 and the
-    analytic on-axis Bz at the same Z to avoid near-axis cancellation. The ideal
-    filament remains singular at the source location.
+    With omitted or zero wire radii, uses ideal filaments, including the on-axis
+    approximation for R/a <= 1e-4. Ideal filaments remain singular at their source.
+    Positive wire radii use the Hurwitz uniform-current, circular-section model,
+    valid inside and near conductors whose wire radius is small relative to their
+    loop radius. This positive-radius model is not a far-field approximation.
 
     For field formulas, numerical treatment, and references, see the Rust
-    [cylindrical scalar implementation][cylindrical_scalar]. For Cartesian components,
-    see the [Cartesian scalar implementation][cartesian_scalar].
+    [finite-radius scalar implementation][finite_radius_scalar] and the
+    [ideal-filament scalar implementation][cylindrical_scalar].
 
+    [finite_radius_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_finite_radius_scalar.html
     [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_scalar.html
-    [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_cartesian_scalar.html
 
     Args:
         ifil: [A] filament current
@@ -262,13 +265,18 @@ def flux_density_circular_filament(
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular conductor-section radius per source, same length
+            as ifil. None allocates zero radii, preserving ideal-filament behavior.
 
     Returns:
         [T] (Br, Bz) flux density components
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    br, bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    wire_radius = (
+        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
+    )
+    br, bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return br, bz  # [T]
 
 

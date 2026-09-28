@@ -1306,17 +1306,22 @@ def flux_density_circular_filament_cartesian(
     zfil: NDArray[float64],
     xyzp: Array3xN,
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
     """
     Flux density of a circular filament in cartesian form
     at a set of locations given in cartesian coordinates.
 
     See the Rust [Cartesian scalar implementation][cartesian_scalar] for coordinate
-    conversion and the [cylindrical scalar implementation][cylindrical_scalar] for
+    conversion and the [finite-radius scalar implementation][cylindrical_scalar] for
     field formulas and references.
 
     [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_cartesian_scalar.html
-    [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_scalar.html
+    [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_finite_radius_scalar.html
+
+    Positive wire radii use the uniform-current circular-section approximation,
+    valid inside and near conductors with wire radius small relative to loop radius.
+    Zero radii use the ideal-filament field, including its on-axis treatment.
 
     Args:
         ifil: [A] filament current
@@ -1324,13 +1329,18 @@ def flux_density_circular_filament_cartesian(
         zfil: [m] filament Z-coord
         xyzp: [m] x,y,z coords of observation points
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular cross-section radius per source, same length as
+            ifil. None allocates zero radii, preserving ideal-filament behavior.
 
     Returns:
         [T] flux density
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    wire_radius = (
+        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
+    )
     xyzp = _3tup_contig(xyzp)
-    bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, xyzp, par)  # [T]
+    bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, xyzp, par, wire_radius)  # [T]
 
     return bx, by, bz
 
@@ -1437,10 +1447,15 @@ def body_force_density_circular_filament_cartesian(
     obs: Array3xN,
     j: Array3xN,
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
     """
     JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
     filament segment at an observation point in cartesian form with some current density (per area).
+
+    Positive wire radii use the uniform-current circular-section approximation,
+    valid inside and near conductors with wire radius small relative to loop radius.
+    Zero radii use the ideal-filament field, including its on-axis treatment.
 
     Args:
         ifil: [A] filament current
@@ -1449,15 +1464,20 @@ def body_force_density_circular_filament_cartesian(
         obs: [m] x,y,z coords of observation locations
         j: [A/m^2] current density vector at observation locations
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular cross-section radius per source, same length as
+            ifil. None allocates zero radii, preserving ideal-filament behavior.
 
     Returns:
         [N/m^3] body force density
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    wire_radius = (
+        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
+    )
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(
-        ifil, rfil, zfil, obs, j, par
+        ifil, rfil, zfil, obs, j, par, wire_radius
     )  # [N/m^3]
 
     return jxbx, jxby, jxbz

@@ -569,6 +569,7 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments(
                     for i in 0..obs.0.len() {
                         let b = flux_density_circular_filament_cartesian_scalar(
                             (rfil[ifil], zfil[ifil], 1.0),
+                            0.0,
                             (obs.0[i], obs.1[i], obs.2[i]),
                         );
                         bout.0[i] = b.0; // [T/A]
@@ -627,6 +628,7 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments_par(
                         for i in 0..obs.0.len() {
                             let b = flux_density_circular_filament_cartesian_scalar(
                                 (rfil[ifil], zfil[ifil], 1.0),
+                                0.0,
                                 (obs.0[i], obs.1[i], obs.2[i]),
                             );
                             bout.0[i] = b.0;

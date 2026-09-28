@@ -203,6 +203,7 @@ def body_force_density_circular_filament_cartesian(
     obs: ArrayTriple,
     j: ArrayTriple,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> ArrayTriple: ...
 def body_force_density_linear_filament(
     xyzfil: ArrayTriple,
@@ -265,6 +266,7 @@ def flux_density_circular_filament_cartesian(
     zfil: FloatArray,
     xyzobs: ArrayTriple,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> ArrayTriple: ...
 def mutual_inductance_circular_to_linear(
     rfil: FloatArray,

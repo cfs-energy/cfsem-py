@@ -6,6 +6,7 @@ Implement finite-wire-radius circular filament calcs and resolve on-axis singula
 
 * Rust
     * !Require per-source `wire_radius` in circular-filament calcs
+        * Both polar and cartesian variants; flux, vector potential, flux density, body force density
     * Add _finite_radius circular filament calc variants using Hurwitz formula
         * These are now used in vector and parallel circular filament calcs
         * ~50% speedup for large numbers of observation points
@@ -15,6 +16,7 @@ Implement finite-wire-radius circular filament calcs and resolve on-axis singula
         * Expose the scalar `flux_density_circular_filament_on_axis` calculation
 * Python
     * Add optional per-source `wire_radius` to circular filament calcs; `None` defaults to zero radius
+        * Include Cartesian B-field and circular-filament body force density; append the input after `par`
         * Non-breaking change; existing calls produce the same or better result
 
 ## 13.1.0 2026-08-27

@@ -647,15 +647,18 @@ fn flux_density_circular_filament_off_axis(
 /// Flux density of a circular filament in cartesian form
 /// at a location given in cartesian coordinates.
 ///
-/// Evaluates [flux_density_circular_filament_scalar] at
+/// Evaluates [flux_density_circular_filament_finite_radius_scalar] at
 /// $R = \sqrt{x^2 + y^2}$ and rotates the radial component into
 /// $B_x = B_R \cos\phi$, $B_y = B_R \sin\phi$, with $\phi = \operatorname{atan2}(y, x)$.
-/// On the axis, $B_x = B_y = 0$ and $B_z$ is the analytic axial field.
-/// See [flux_density_circular_filament_scalar] for field formulas and references.
+/// Zero wire radius preserves the ideal filament's analytic axis treatment.
+/// Positive radii use the interior and near-exterior thin-conductor approximation.
+/// See [flux_density_circular_filament_finite_radius_scalar] and
+/// [flux_density_circular_filament_scalar] for field formulas and references.
 ///
 /// # Arguments
 ///
 /// * `rzifil`: (m, m, A-turns) radius, z-coord, and current of the filament
+/// * `wire_radius`: (m) circular cross-section radius; zero for an ideal filament
 /// * `xyzobs`: (m, m, m) Cartesian coordinates of the observation point
 ///
 /// # Returns
@@ -664,6 +667,7 @@ fn flux_density_circular_filament_off_axis(
 #[inline]
 pub fn flux_density_circular_filament_cartesian_scalar(
     rzifil: (f64, f64, f64),
+    wire_radius: f64,
     xyzobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
     // Unpack
@@ -671,7 +675,8 @@ pub fn flux_density_circular_filament_cartesian_scalar(
     // Convert cartesian point to cylindrical
     let [robs, phiobs, zobs] = crate::math::cartesian_to_cylindrical([x, y, z]);
     // Get axisymmetric B-field
-    let (br, bz) = flux_density_circular_filament_scalar(rzifil, (robs, zobs));
+    let (br, bz) =
+        flux_density_circular_filament_finite_radius_scalar(rzifil, wire_radius, (robs, zobs));
     // Convert axisymmetric B-field to cartesian
     let (bx, by, bz) = (br * libm::cos(phiobs), br * libm::sin(phiobs), bz);
     (bx, by, bz)
@@ -681,9 +686,12 @@ pub fn flux_density_circular_filament_cartesian_scalar(
 /// at a set of locations given in cartesian coordinates.
 ///
 /// See [flux_density_circular_filament_cartesian_scalar] for coordinate conversion
-/// and [flux_density_circular_filament_scalar] for field formulas and references.
+/// and [flux_density_circular_filament_finite_radius_scalar] for field formulas,
+/// validity limits, and references. `wire_radius` has one entry per source;
+/// zero entries select the ideal-filament field.
 pub fn flux_density_circular_filament_cartesian(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     bxyz_out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
@@ -694,6 +702,7 @@ pub fn flux_density_circular_filament_cartesian(
 
     // Check lengths
     let n = ifil.len();
+    check_length!(n, wire_radius);
     check_length_3tup!(n, &rzifil);
 
     let m = x.len();
@@ -717,7 +726,7 @@ pub fn flux_density_circular_filament_cartesian(
             let rzifil_i = (rfil[i], zfil[i], ifil[i]);
             let xyzobs_j = (x[j], y[j], z[j]);
             let (bxo, byo, bzo) =
-                flux_density_circular_filament_cartesian_scalar(rzifil_i, xyzobs_j);
+                flux_density_circular_filament_cartesian_scalar(rzifil_i, wire_radius[i], xyzobs_j);
             bx[j] += bxo;
             by[j] += byo;
             bz[j] += bzo;
@@ -732,12 +741,20 @@ pub fn flux_density_circular_filament_cartesian(
 /// Parallelized over chunks of observation points.
 ///
 /// See [flux_density_circular_filament_cartesian_scalar] for coordinate conversion
-/// and [flux_density_circular_filament_scalar] for field formulas and references.
+/// and [flux_density_circular_filament_finite_radius_scalar] for field formulas,
+/// validity limits, and references. `wire_radius` has one entry per source;
+/// zero entries select the ideal-filament field.
 pub fn flux_density_circular_filament_cartesian_par(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     bxyz_out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
+    check_length_3tup!(rzifil.2.len(), &rzifil);
+    check_length!(rzifil.2.len(), wire_radius);
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &bxyz_out);
+
     // Chunk
     let n = chunksize(xyzobs.0.len());
     let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
@@ -749,7 +766,7 @@ pub fn flux_density_circular_filament_cartesian_par(
         .try_for_each(|(xci, yci, zci, bxci, byci, bzci)| {
             let xyzobs_i = (xci, yci, zci);
             let bxyz_out_i = (bxci, byci, bzci);
-            flux_density_circular_filament_cartesian(rzifil, xyzobs_i, bxyz_out_i)
+            flux_density_circular_filament_cartesian(rzifil, wire_radius, xyzobs_i, bxyz_out_i)
         })?;
 
     Ok(())
@@ -1196,19 +1213,24 @@ pub fn mutual_inductance_circular_to_linear_par(
 /// # Arguments
 ///
 /// * `rzifil`:    (m, m, A-turns) r-coord, z-coord, and current of filament
+/// * `wire_radius`: (m) circular source cross-section radius; zero for ideal filaments
 /// * `xyzobs`:    (m) Observation point coords
 /// * `jobs`:      (A/m^2) Current density vector at observation point
 ///
 /// # Returns
 ///
 /// * `jxb`:        (N/m^3) Body force density in cartesian form
+///
+/// Uses [flux_density_circular_filament_cartesian_scalar] for the source field,
+/// including its finite-radius model and validity limits.
 pub fn body_force_density_circular_filament_cartesian_scalar(
     rzifil: (f64, f64, f64),
+    wire_radius: f64,
     xyzobs: (f64, f64, f64),
     jobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
     // Get flux density in cartesian coordinates
-    let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(rzifil, xyzobs);
+    let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(rzifil, wire_radius, xyzobs);
 
     // Take JxB Lorentz force
     let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
@@ -1221,14 +1243,19 @@ pub fn body_force_density_circular_filament_cartesian_scalar(
 /// # Arguments
 ///
 /// * `rzifil`:    (m, m, A-turns) r-coord, z-coord, and current of filament, each length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for ideal filaments
 /// * `xyzobs`:    (m) Observation point coords, each length `n`
 /// * `jobs`:      (A/m^2) Current density vector at observation point, each length `n`
 ///
 /// # Returns
 ///
 /// * `jxb`:        (N/m^3) Body force density in cartesian form
+///
+/// Uses [flux_density_circular_filament_cartesian_scalar] for the source field,
+/// including its finite-radius model and validity limits.
 pub fn body_force_density_circular_filament_cartesian(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
@@ -1241,6 +1268,7 @@ pub fn body_force_density_circular_filament_cartesian(
 
     // Check lengths
     let n = ifil.len();
+    check_length!(n, wire_radius);
     check_length!(n, rfil, zfil);
     let m = x.len();
     check_length!(m, x, y, z, jx, jy, jz, outx, outy, outz);
@@ -1258,8 +1286,12 @@ pub fn body_force_density_circular_filament_cartesian(
             let rzifil_i = (rfil[i], zfil[i], ifil[i]);
             let xyzobs_j = (x[j], y[j], z[j]);
             let jj = (jx[j], jy[j], jz[j]);
-            let (jxbx, jxby, jxbz) =
-                body_force_density_circular_filament_cartesian_scalar(rzifil_i, xyzobs_j, jj);
+            let (jxbx, jxby, jxbz) = body_force_density_circular_filament_cartesian_scalar(
+                rzifil_i,
+                wire_radius[i],
+                xyzobs_j,
+                jj,
+            );
             outx[j] += jxbx;
             outy[j] += jxby;
             outz[j] += jxbz;
@@ -1276,15 +1308,26 @@ pub fn body_force_density_circular_filament_cartesian(
 /// # Arguments
 ///
 /// * `rzifil`:    (m, m, A-turns) r-coord, z-coord, and current of filament, each length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for ideal filaments
 /// * `xyzobs`:    (m) Observation point coords, each length `n`
 /// * `jobs`:      (A/m^2) Current density vector at observation point, each length `n`
 /// * `out`:        (N/m^3) Body force density in cartesian form, each length `n`
+///
+/// Uses [flux_density_circular_filament_cartesian_scalar] for the source field,
+/// including its finite-radius model and validity limits.
 pub fn body_force_density_circular_filament_cartesian_par(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
+    check_length_3tup!(rzifil.2.len(), &rzifil);
+    check_length!(rzifil.2.len(), wire_radius);
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &jobs);
+    check_length_3tup!(xyzobs.0.len(), &out);
+
     // Chunk inputs
     let n = chunksize(xyzobs.0.len());
     let (xpc, ypc, zpc) = par_chunks_3tup!(xyzobs, n);
@@ -1297,6 +1340,7 @@ pub fn body_force_density_circular_filament_cartesian_par(
         .try_for_each(|(outx, outy, outz, xp, yp, zp, jx, jy, jz)| {
             body_force_density_circular_filament_cartesian(
                 rzifil,
+                wire_radius,
                 (xp, yp, zp),
                 (jx, jy, jz),
                 (outx, outy, outz),
@@ -1312,6 +1356,159 @@ mod test {
 
     use super::*;
     use crate::{physics::linear_filament::body_force_density_linear_filament, testing::*};
+
+    #[test]
+    fn test_cartesian_finite_radius_field_and_force() {
+        let source = (
+            &[1.0, 1.0, 0.4][..],
+            &[0.0, 0.0, -0.3][..],
+            &[1.0, -2.0, 0.5][..],
+        );
+        let radii = [0.01, 0.02, 0.0];
+        let r = [1.0, 1.003, 1.015, 0.997, 0.985, 1.0];
+        let z = [0.0, 0.004, 0.02, -0.004, -0.02, 0.005];
+        let phi = [0.0_f64, 0.7, 2.3, PI, 4.5, -0.7];
+        let x: Vec<_> = r.iter().zip(phi).map(|(r, p)| r * p.cos()).collect();
+        let y: Vec<_> = r.iter().zip(phi).map(|(r, p)| r * p.sin()).collect();
+        let jx = [1.0, 2.0, 3.0, -1.0, 0.0, 0.5];
+        let jy = [-0.5, 0.0, 1.0, 2.0, -3.0, 0.7];
+        let jz = [0.2, -0.3, 1.0, 0.0, 3.0, -2.0];
+        for nobs in [0, 1, 6] {
+            let obs = (&x[..nobs], &y[..nobs], &z[..nobs]);
+            let jobs = (&jx[..nobs], &jy[..nobs], &jz[..nobs]);
+            let mut expected_b = Vec::new();
+            let mut expected_force = Vec::new();
+            for j in 0..nobs {
+                let mut sum_b = [0.0; 3];
+                for i in 0..3 {
+                    let filament = (source.0[i], source.1[i], source.2[i]);
+                    let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+                        filament,
+                        radii[i],
+                        (r[j], z[j]),
+                    );
+                    let b = [br * phi[j].cos(), br * phi[j].sin(), bz];
+                    let force = cross3([jx[j], jy[j], jz[j]], b);
+                    let actual_b = flux_density_circular_filament_cartesian_scalar(
+                        filament,
+                        radii[i],
+                        (x[j], y[j], z[j]),
+                    );
+                    let actual_force = body_force_density_circular_filament_cartesian_scalar(
+                        filament,
+                        radii[i],
+                        (x[j], y[j], z[j]),
+                        (jx[j], jy[j], jz[j]),
+                    );
+                    for (k, (ab, af)) in [actual_b.0, actual_b.1, actual_b.2]
+                        .into_iter()
+                        .zip([actual_force.0, actual_force.1, actual_force.2])
+                        .enumerate()
+                    {
+                        assert!(approx(ab, b[k], 1e-11, 1e-16));
+                        assert!(approx(af, force[k], 1e-11, 1e-16));
+                        sum_b[k] += b[k];
+                    }
+                }
+                expected_b.push(sum_b);
+                expected_force.push(cross3([jx[j], jy[j], jz[j]], sum_b));
+            }
+            for calc in [
+                flux_density_circular_filament_cartesian,
+                flux_density_circular_filament_cartesian_par,
+            ] {
+                let (mut bx, mut by, mut bz) =
+                    (vec![99.0; nobs], vec![99.0; nobs], vec![99.0; nobs]);
+                calc(source, &radii, obs, (&mut bx, &mut by, &mut bz)).unwrap();
+                for j in 0..nobs {
+                    for k in 0..3 {
+                        assert!(approx(
+                            [bx[j], by[j], bz[j]][k],
+                            expected_b[j][k],
+                            1e-11,
+                            1e-16
+                        ));
+                    }
+                }
+            }
+            for calc in [
+                body_force_density_circular_filament_cartesian,
+                body_force_density_circular_filament_cartesian_par,
+            ] {
+                let (mut fx, mut fy, mut fz) =
+                    (vec![99.0; nobs], vec![99.0; nobs], vec![99.0; nobs]);
+                calc(source, &radii, obs, jobs, (&mut fx, &mut fy, &mut fz)).unwrap();
+                for j in 0..nobs {
+                    for k in 0..3 {
+                        assert!(approx(
+                            [fx[j], fy[j], fz[j]][k],
+                            expected_force[j][k],
+                            1e-11,
+                            1e-16
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_cartesian_radius_and_shape_validation() {
+        let source = (&[1.0, 1.0][..], &[0.0, 0.0][..], &[1.0, 2.0][..]);
+        for nobs in [0, 2] {
+            let a = vec![1.0; nobs];
+            let obs = (&a[..], &a[..], &a[..]);
+            for radii in [&[][..], &[0.01][..], &[0.01, 0.02, 0.03][..]] {
+                for calc in [
+                    flux_density_circular_filament_cartesian,
+                    flux_density_circular_filament_cartesian_par,
+                ] {
+                    let (mut x, mut y, mut z) =
+                        (vec![99.0; nobs], vec![99.0; nobs], vec![99.0; nobs]);
+                    assert!(calc(source, radii, obs, (&mut x, &mut y, &mut z)).is_err());
+                    assert!(x.iter().chain(&y).chain(&z).all(|v| *v == 99.0));
+                }
+                for calc in [
+                    body_force_density_circular_filament_cartesian,
+                    body_force_density_circular_filament_cartesian_par,
+                ] {
+                    let (mut x, mut y, mut z) =
+                        (vec![99.0; nobs], vec![99.0; nobs], vec![99.0; nobs]);
+                    assert!(calc(source, radii, obs, obs, (&mut x, &mut y, &mut z)).is_err());
+                    assert!(x.iter().chain(&y).chain(&z).all(|v| *v == 99.0));
+                }
+            }
+        }
+        // Bad source, observation, current-density, and output shapes must fail
+        // before a parallel zip can silently truncate any slice.
+        let good = (&[1.0][..], &[1.0][..], &[1.0][..]);
+        let bad = (&[1.0][..], &[][..], &[1.0][..]);
+        for calc in [
+            flux_density_circular_filament_cartesian,
+            flux_density_circular_filament_cartesian_par,
+        ] {
+            for (source, obs, ny) in [(bad, good, 1), (good, bad, 1), (good, good, 0)] {
+                let (mut x, mut y, mut z) = ([99.0], vec![99.0; ny], [99.0]);
+                assert!(calc(source, &[0.01], obs, (&mut x, &mut y, &mut z)).is_err());
+                assert_eq!((x, y, z), ([99.0], vec![99.0; ny], [99.0]));
+            }
+        }
+        for calc in [
+            body_force_density_circular_filament_cartesian,
+            body_force_density_circular_filament_cartesian_par,
+        ] {
+            for (source, obs, jobs, ny) in [
+                (bad, good, good, 1),
+                (good, bad, good, 1),
+                (good, good, bad, 1),
+                (good, good, good, 0),
+            ] {
+                let (mut x, mut y, mut z) = ([99.0], vec![99.0; ny], [99.0]);
+                assert!(calc(source, &[0.01], obs, jobs, (&mut x, &mut y, &mut z)).is_err());
+                assert_eq!((x, y, z), ([99.0], vec![99.0; ny], [99.0]));
+            }
+        }
+    }
 
     #[test]
     fn test_potential_and_flux_zero_radius_against_preserved_kernels() {
@@ -1917,6 +2114,7 @@ mod test {
                         );
                         let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(
                             (radius, zfil, current),
+                            0.0,
                             (robs, robs, zobs),
                         );
                         assert_eq!(bx, 0.0);
@@ -1941,6 +2139,7 @@ mod test {
                     assert_eq!(field, on_axis);
                     let field_xyz = flux_density_circular_filament_cartesian_scalar(
                         filament,
+                        0.0,
                         (robs, 0.0, zobs),
                     );
                     assert_eq!(field_xyz, (0.0, 0.0, on_axis.1));
@@ -2041,8 +2240,14 @@ mod test {
             &mut x.clone()[..n - 1],
             &mut x.clone()[..n - 1],
         );
-        body_force_density_circular_filament_cartesian(rzifil, xyzobs, j_vec, (outx, outy, outz))
-            .unwrap();
+        body_force_density_circular_filament_cartesian(
+            rzifil,
+            &vec![0.0; rzifil.2.len()],
+            xyzobs,
+            j_vec,
+            (outx, outy, outz),
+        )
+        .unwrap();
         let out_sum: (f64, f64, f64) = (outx.iter().sum(), outy.iter().sum(), outz.iter().sum());
 
         // Calculate force from helix to circular filaments
@@ -2116,10 +2321,22 @@ mod test {
 
         // Do calcs
         let (bx0, by0, bz0) = (&mut x.clone()[..], &mut x.clone()[..], &mut x.clone()[..]);
-        flux_density_circular_filament_cartesian(rzifil, xyzobs, (bx0, by0, bz0)).unwrap();
+        flux_density_circular_filament_cartesian(
+            rzifil,
+            &vec![0.0; rzifil.2.len()],
+            xyzobs,
+            (bx0, by0, bz0),
+        )
+        .unwrap();
 
         let (bx1, by1, bz1) = (&mut x.clone()[..], &mut x.clone()[..], &mut x.clone()[..]);
-        flux_density_circular_filament_cartesian_par(rzifil, xyzobs, (bx1, by1, bz1)).unwrap();
+        flux_density_circular_filament_cartesian_par(
+            rzifil,
+            &vec![0.0; rzifil.2.len()],
+            xyzobs,
+            (bx1, by1, bz1),
+        )
+        .unwrap();
 
         let (bx2, by2, bz2) = (&mut x.clone()[..], &mut x.clone()[..], &mut x.clone()[..]);
         bx2.fill(0.0);

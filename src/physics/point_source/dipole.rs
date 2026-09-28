@@ -375,6 +375,7 @@ mod test {
         let outz_circ = &mut vec![0.0; nobs][..];
         crate::physics::circular_filament::flux_density_circular_filament_cartesian_par(
             (&[rfil], &[zfil], &[ifil]),
+            &[0.0],
             (&xmesh[..], &ymesh[..], &zmesh[..]),
             (outx_circ, outy_circ, outz_circ),
         )

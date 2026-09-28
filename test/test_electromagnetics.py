@@ -562,6 +562,88 @@ def test_circular_potential_and_flux_wire_radius_length_error(name, par, nobs, r
 
 
 @mark.parametrize("par", [True, False])
+@mark.parametrize("force", [False, True])
+def test_circular_cartesian_optional_wire_radius(par, force):
+    import cfsem.cfsem as raw
+
+    name = (
+        "body_force_density_circular_filament_cartesian"
+        if force
+        else "flux_density_circular_filament_cartesian"
+    )
+    current, rfil, zfil = np.array([2.0, -3.0]), np.array([0.5, 1.0]), np.array([0.0, 0.3])
+    obs = (np.array([0.0, 0.3, -0.4]), np.array([0.0, -0.4, 0.3]), np.array([0.2, 0.4, 0.5]))
+    j = (np.array([1.0, -2.0, 3.0]), np.array([0.5, 1.0, -0.3]), np.array([-2.0, 0.0, 0.7]))
+    args = (current, rfil, zfil, obs, j) if force else (current, rfil, zfil, obs)
+    calc, raw_calc = getattr(cfsem, name), getattr(raw, name)
+    legacy = calc(*args, par)
+    br, bz = cfsem.flux_density_circular_filament(current, rfil, zfil, np.hypot(*obs[:2]), obs[2], par)
+    phi = np.arctan2(obs[1], obs[0])
+    expected = np.array([br * np.cos(phi), br * np.sin(phi), bz])
+    if force:
+        expected = np.cross(np.array(j).T, expected.T).T
+    np.testing.assert_allclose(legacy, expected, rtol=1e-12, atol=1e-16)
+    for radii in [None, np.zeros(2), [0.0, 0.0]]:
+        np.testing.assert_array_equal(calc(*args, par, wire_radius=radii), legacy)
+    np.testing.assert_array_equal(raw_calc(*args, par), legacy)
+    np.testing.assert_array_equal(raw_calc(*args, par, wire_radius=None), legacy)
+    np.testing.assert_array_equal(raw_calc(*args, par, wire_radius=np.zeros(2)), legacy)
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("nobs", [0, 1, 4])
+def test_circular_cartesian_per_source_wire_radius(par, nobs):
+    import cfsem.cfsem as raw
+
+    current, rfil, zfil = np.array([1.0, -2.0, 0.5]), np.array([1.0, 1.0, 0.4]), np.array([0.0, 0.0, -0.3])
+    radii = np.array([0.01, 99.0, 0.02, 99.0, 0.0, 99.0])[::2]
+    r = np.array([1.0, 1.003, 1.015, 0.997])[:nobs]
+    phi = np.array([0.0, 0.7, 2.3, -0.7])[:nobs]
+    z = np.array([0.0, 0.004, 0.02, -0.004])[:nobs]
+    obs = (r * np.cos(phi), r * np.sin(phi), z)
+    j = tuple(
+        a[:nobs] for a in (np.array([1.0, -2.0, 3.0, 0.0]), np.array([0.0, 2.0, 1.0, -0.5]), np.ones(4))
+    )
+    args = (current, rfil, zfil, obs)
+    br, bz = cfsem.flux_density_circular_filament(current, rfil, zfil, r, z, par, wire_radius=radii)
+    expected_b = np.array([br * np.cos(phi), br * np.sin(phi), bz])
+    actual_b = cfsem.flux_density_circular_filament_cartesian(*args, par, wire_radius=radii)
+    actual_force = cfsem.body_force_density_circular_filament_cartesian(*args, j, par, wire_radius=radii)
+    assert np.all(np.isfinite(actual_b))
+    assert np.all(np.isfinite(actual_force))
+    np.testing.assert_allclose(actual_b, expected_b, rtol=1e-11, atol=1e-16)
+    np.testing.assert_allclose(actual_force, np.cross(np.array(j).T, expected_b.T).T, rtol=1e-11, atol=1e-16)
+    np.testing.assert_array_equal(
+        raw.flux_density_circular_filament_cartesian(*args, par, np.ascontiguousarray(radii)), actual_b
+    )
+    np.testing.assert_array_equal(
+        raw.body_force_density_circular_filament_cartesian(*args, j, par, np.ascontiguousarray(radii)),
+        actual_force,
+    )
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("force", [False, True])
+@mark.parametrize("nobs", [0, 2])
+@mark.parametrize("radii", [[], [0.01], [0.01, 0.02, 0.03]])
+def test_circular_cartesian_wire_radius_length_error(par, force, nobs, radii):
+    import cfsem.cfsem as raw
+
+    name = (
+        "body_force_density_circular_filament_cartesian"
+        if force
+        else "flux_density_circular_filament_cartesian"
+    )
+    obs = (np.ones(nobs), np.zeros(nobs), np.zeros(nobs))
+    args = (np.ones(2), np.ones(2), np.zeros(2), obs)
+    if force:
+        args += (obs,)
+    for calc in [getattr(cfsem, name), getattr(raw, name)]:
+        with raises(ValueError, match="Length mismatch"):
+            calc(*args, par, wire_radius=np.asarray(radii))
+
+
+@mark.parametrize("par", [True, False])
 def test_flux_density_circular_filament_optional_wire_radius(par):
     from cfsem.cfsem import flux_density_circular_filament as raw_field
 

@@ -3558,7 +3558,7 @@ fn hyp2f1(
 }
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, xyzobs, par, wire_radius=None))]
 fn flux_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -3569,12 +3569,21 @@ fn flux_density_circular_filament_cartesian(
         PyReadonlyArray1<f64>,
     ), // [m] Observation point coords
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
     let rzifil = (rfil, zfil, current);
     _3tup_slice_ro!(rzifil);
     let (rfil, zfil, current) = rzifil;
+    let default_wire_radius;
+    let wire_radius = match wire_radius.as_ref() {
+        Some(radius) => radius.as_slice()?,
+        None => {
+            default_wire_radius = vec![0.0; current.len()];
+            &default_wire_radius
+        }
+    };
     _3tup_slice_ro!(xyzobs);
 
     // Initialize output
@@ -3590,6 +3599,7 @@ fn flux_density_circular_filament_cartesian(
     // Do calculations
     match func(
         (&rfil, &zfil, &current),
+        wire_radius,
         xyzobs,
         (&mut bx, &mut by, &mut bz),
     ) {
@@ -3751,7 +3761,7 @@ fn vector_potential_dipole(
 }
 
 /// Python bindings for cfsemrs::physics::body_force_density_circular_filament_cartesian
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, obs, j, par, wire_radius=None))]
 fn body_force_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -3767,12 +3777,21 @@ fn body_force_density_circular_filament_cartesian(
         PyReadonlyArray1<f64>,
     ), // [A/m^2] current density at observation points
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
     let rzifil = (rfil, zfil, current);
     _3tup_slice_ro!(rzifil);
     let (rfil, zfil, current) = rzifil;
+    let default_wire_radius;
+    let wire_radius = match wire_radius.as_ref() {
+        Some(radius) => radius.as_slice()?,
+        None => {
+            default_wire_radius = vec![0.0; current.len()];
+            &default_wire_radius
+        }
+    };
     _3tup_slice_ro!(obs);
     _3tup_slice_ro!(j);
 
@@ -3787,7 +3806,7 @@ fn body_force_density_circular_filament_cartesian(
     let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     let out = (&mut outx[..], &mut outy[..], &mut outz[..]);
 
-    match func((&rfil, &zfil, &current), obs, j, out) {
+    match func((&rfil, &zfil, &current), wire_radius, obs, j, out) {
         Ok(_) => (),
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();

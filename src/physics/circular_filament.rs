@@ -8,7 +8,7 @@ use rayon::{
 use crate::{
     chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{cross3, dot3, ellipe, ellipk, norm3},
+    math::{cross3, dot3, ellipe, ellipe_complement, ellipk, ellipk_complement, norm3},
 };
 
 use crate::{MU_0, MU0_OVER_4PI};
@@ -361,6 +361,97 @@ pub fn flux_density_circular_filament_scalar(
         return flux_density_circular_filament_on_axis(rzifil, zprime);
     }
     flux_density_circular_filament_off_axis(rzifil, rzobs)
+}
+
+/// Br,Bz inside and near a circular loop with a finite circular conductor section.
+///
+/// Implements the thin-conductor model of Hurwitz et al. \[1\], equations 16–19,
+/// for uniform azimuthal current density `I / (pi * wire_radius^2)` in vacuum.
+/// Requires `0 < wire_radius < rfil`; accuracy requires `wire_radius / rfil << 1`
+/// and distance from the conductor centerline comparable to the wire radius.
+/// This is a local approximation, including the just-outside field, not a
+/// far-field calculation or an exact solution for a thick torus.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) loop major radius, z-coord, and total current
+/// * `wire_radius`: (m) radius of the circular conductor cross-section
+/// * `rzobs`: (m, m) cylindrical observation coordinates
+///
+/// # Returns
+///
+/// * `(br, bz)`: (T, T) radial and axial magnetic flux density
+///
+/// # Formula
+///
+/// The field is the sum of a regularized centerline field, the local straight
+/// cylinder field, and a curvature correction (equations 17, 18, and 19).
+/// With major radius $a$, wire radius $b$, and $Q = 4a^2 + b^2/\sqrt{e}$,
+/// the centerline integral in equation 17 reduces to
+///
+/// $$B_{\mathrm{reg},Z} = \frac{\mu_0 I}{2\pi\sqrt{Q}}[K(m)-E(m)],
+/// \qquad m = \frac{4a^2}{Q}.$$
+///
+/// The complementary parameter $1-m = b^2/(\sqrt{e}Q)$ is computed directly
+/// to avoid rounding $m$ to one for very thin conductors. The elliptic integrals
+/// use the same approximations as [ellipk] and [ellipe].
+///
+/// In the local frame of the paper, $\mathbf{e}_2=-\mathbf{e}_R$,
+/// $\mathbf{e}_3=\mathbf{e}_Z$, and curvature is $1/a$. Writing
+/// $u=(R-a)/b$ and $v=(Z-Z_\mathrm{fil})/b$, the interior correction is
+///
+/// $$\mathbf{B}^{<} = \frac{\mu_0 I}{8\pi a}
+/// \left[-uv\,\mathbf{e}_R + \left(\frac32-\frac{u^2+3v^2}{2}\right)
+/// \mathbf{e}_Z\right].$$
+///
+/// The interior branch includes the surface; equation 19b supplies the
+/// continuous near-exterior correction. At the conductor centerline, the
+/// radial field vanishes and the axial field is finite:
+/// $B_Z=B_{\mathrm{reg},Z}+3\mu_0 I/(16\pi a)$, approaching
+/// $\mu_0 I\ln(8a/b)/(4\pi a)$ for $b/a\to0$.
+///
+/// # References
+///
+/// \[1\] S. Hurwitz, M. Landreman, and T. M. Antonsen Jr.,
+/// “Efficient calculation of the self magnetic field, self-force, and
+/// self-inductance for electromagnetic coils,” 2023, equations 16–19.
+/// Available: <https://arxiv.org/abs/2310.09313>.
+#[inline]
+pub fn flux_density_circular_filament_finite_radius_scalar(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> (f64, f64) {
+    let (rfil, zfil, ifil) = rzifil;
+    let u = (rzobs.0 - rfil) / wire_radius; // [nondim], outward from centerline
+    let v = (rzobs.1 - zfil) / wire_radius; // [nondim], axial offset
+    let s2 = u.mul_add(u, v * v); // [nondim], squared distance / wire_radius^2
+
+    let aspect = wire_radius / rfil; // [nondim]
+    let core2 = aspect * aspect / core::f64::consts::E.sqrt(); // [nondim]
+    let q = 4.0 + core2; // [nondim], Q / rfil^2
+    let complement = core2 / q; // [nondim], 1 - m without cancellation
+    let loop_scale = MU0_OVER_4PI * ifil / rfil; // [T]
+    let bz_reg = 2.0 * loop_scale / q.sqrt()
+        * (ellipk_complement(complement) - ellipe_complement(complement)); // [T]
+    let cylinder_scale = 2.0 * MU0_OVER_4PI * ifil / wire_radius; // [T]
+    let curvature_scale = 0.5 * loop_scale; // [T]
+
+    if s2 <= 1.0 {
+        // Equations 18 and 19a, with no divisions by distance at the centerline.
+        let br = cylinder_scale * v - curvature_scale * u * v;
+        let bz =
+            bz_reg - cylinder_scale * u + curvature_scale * (1.5 - 0.5 * u.mul_add(u, 3.0 * v * v));
+        (br, bz)
+    } else {
+        // Equations 18 and 19b; cos(2 theta) = (u^2 - v^2) / s2.
+        let inv_s2 = s2.recip();
+        let cos_2theta = (u * u - v * v) * inv_s2;
+        let br = cylinder_scale * v * inv_s2 + curvature_scale * u * v * inv_s2 * (inv_s2 - 2.0);
+        let bz = bz_reg - cylinder_scale * u * inv_s2
+            + curvature_scale * (0.5 - s2.ln() + cos_2theta * (1.0 - 0.5 * inv_s2));
+        (br, bz)
+    }
 }
 
 /// Br,Bz components on the symmetry axis of a circular current filament in vacuum.
@@ -1017,6 +1108,170 @@ mod test {
 
     use super::*;
     use crate::{physics::linear_filament::body_force_density_linear_filament, testing::*};
+
+    #[test]
+    fn test_finite_radius_against_hurwitz_equations() {
+        let (a, zfil, current) = (2.0, -0.4, 3.0);
+        for aspect in [0.02, 0.1] {
+            let b = aspect * a;
+            // Direct periodic quadrature of equation 17, independent of the
+            // closed elliptic-integral reduction used by the scalar kernel.
+            let n = 65536;
+            let dphi = 2.0 * PI / n as f64;
+            let bz_reg = MU0_OVER_4PI
+                * current
+                * dphi
+                * (0..n)
+                    .map(|i| {
+                        let phi = (i as f64 + 0.5) * dphi;
+                        let numerator = a * a * (1.0 - phi.cos());
+                        numerator
+                            / (2.0 * numerator + b * b / core::f64::consts::E.sqrt()).powf(1.5)
+                    })
+                    .sum::<f64>();
+            for distance in [0.0, 0.3, 0.999, 1.0, 1.2, 2.0] {
+                let s = distance * b;
+                for theta in [0.0_f64, 0.7, 2.3, PI, 4.5] {
+                    // Paper's normal points inward: e2 = -eR, e3 = eZ.
+                    let obs = (a - s * theta.cos(), zfil + s * theta.sin());
+                    let cylinder =
+                        2.0 * MU0_OVER_4PI * current * if s <= b { s / (b * b) } else { 1.0 / s };
+                    let curvature = MU0_OVER_4PI * current / (2.0 * a);
+                    let (b2, b3) = if s <= b {
+                        (
+                            -s * s * (2.0 * theta).sin() / (2.0 * b * b),
+                            1.5 + s * s / (b * b) * ((2.0 * theta).cos() / 2.0 - 1.0),
+                        )
+                    } else {
+                        (
+                            (b * b / (2.0 * s * s) - 1.0) * (2.0 * theta).sin(),
+                            0.5 - 2.0 * (s / b).ln()
+                                + (1.0 - b * b / (2.0 * s * s)) * (2.0 * theta).cos(),
+                        )
+                    };
+                    let expected = (
+                        cylinder * theta.sin() - curvature * b2,
+                        bz_reg + cylinder * theta.cos() + curvature * b3,
+                    );
+                    let actual = flux_density_circular_filament_finite_radius_scalar(
+                        (a, zfil, current),
+                        b,
+                        obs,
+                    );
+                    // Absolute tolerance accounts for the elliptic-integral fits.
+                    let tol = 8e-8 * MU0_OVER_4PI * current / a;
+                    assert!((actual.0 - expected.0).abs() < tol);
+                    assert!((actual.1 - expected.1).abs() < tol);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_against_cross_section_integral() {
+        // Independent uniform-J disk integration of unit-current circular loops
+        // (a = I = 1), normalized by mu0*I/(4*pi*a). Observation-centered polar
+        // coordinates remove the 1/distance singularity via the area Jacobian.
+        // Reference: SciPy ellipkm1(d2/q), ellipe(1-d2/q), 256-point Gauss–Legendre
+        // radial quadrature and 1024 midpoint angles. Doubling both orders from
+        // 128/512 changed these vectors by less than 4e-10 relatively.
+        let cases = [
+            (0.01, 0.0, 0.0, 0.0, 6.68459083826242),
+            (0.01, 0.5, 0.0, 0.0, -93.3998252276275),
+            (0.01, 0.0, 0.5, 99.9780058466979, 6.49706713001394),
+            (0.01, 0.5, 0.5, 99.853938832051, -93.586570635344),
+            (0.01, -0.5, 0.5, 100.103633652062, 106.455855446888),
+            (0.1, 0.0, 0.0, 0.0, 4.38065660604968),
+            (0.1, 0.5, 0.0, 0.0, -5.81090160130197),
+            (0.1, 0.0, 0.5, 9.86653941687754, 4.19186834520168),
+            (0.1, 0.5, 0.5, 9.7576610149033, -5.99207737754346),
+            (0.1, -0.5, 0.5, 9.99007518217192, 14.2593819318384),
+        ];
+        for (b, u, v, br, bz) in cases {
+            let actual = flux_density_circular_filament_finite_radius_scalar(
+                (1.0, 0.0, 1.0),
+                b,
+                (1.0 + b * u, b * v),
+            );
+            let error = (actual.0 / MU0_OVER_4PI - br).hypot(actual.1 / MU0_OVER_4PI - bz);
+            // Model truncation, rather than quadrature or floating-point error,
+            // sets these tolerances: 0.03% at b/a=.01 and 3% at b/a=.1.
+            let rtol = if b == 0.01 { 3e-4 } else { 0.03 };
+            assert!(error < rtol * br.hypot(bz), "b={b}, u={u}, v={v}");
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_surface_continuity() {
+        let b = 0.01;
+        for i in 0..16 {
+            let theta = 2.0 * PI * i as f64 / 16.0;
+            let field = |s: f64| {
+                flux_density_circular_filament_finite_radius_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0 + s * theta.cos(), s * theta.sin()),
+                )
+            };
+            let surface = field(b);
+            for s in [b * (1.0 - 1e-8), b * (1.0 + 1e-8)] {
+                let nearby = field(s);
+                assert!(
+                    (nearby.0 - surface.0).hypot(nearby.1 - surface.1)
+                        < 1e-7 * surface.0.hypot(surface.1)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_centerline_and_straight_wire_limit() {
+        // These aspect ratios round m to 1 if the complement is not retained.
+        for b in [1e-8, 1e-12] {
+            for current in [-3.0, 0.0, 2.0] {
+                let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+                    (1.0, 0.7, current),
+                    b,
+                    (1.0, 0.7),
+                );
+                let expected = MU0_OVER_4PI * current * (8.0 / b).ln();
+                assert_eq!(br, 0.0);
+                assert!((bz - expected).abs() <= 1e-12 * expected.abs());
+            }
+        }
+        let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+            (1e10, 0.0, 1.0),
+            0.1,
+            (1e10, 0.03),
+        );
+        let cylinder = 2.0 * MU0_OVER_4PI * 0.03 / 0.1_f64.powi(2);
+        assert!((br - cylinder).abs() < 1e-14 * cylinder);
+        assert!(bz.abs() < 1e-9 * cylinder);
+    }
+
+    #[test]
+    fn test_finite_radius_symmetry_and_scaling() {
+        for (u, v) in [(0.3, 0.4), (-0.8, 0.9)] {
+            let base = flux_density_circular_filament_finite_radius_scalar(
+                (1.0, 0.0, 1.0),
+                0.01,
+                (1.0 + 0.01 * u, 0.01 * v),
+            );
+            for scale in [1e-6, 1.0, 1e6] {
+                for current in [-3.0, 0.0, 2.0] {
+                    // Include a z-translation and reflection about the loop plane.
+                    let actual = flux_density_circular_filament_finite_radius_scalar(
+                        (scale, 0.7 * scale, current),
+                        0.01 * scale,
+                        ((1.0 + 0.01 * u) * scale, (0.7 - 0.01 * v) * scale),
+                    );
+                    let expected = (-base.0 * current / scale, base.1 * current / scale);
+                    let tol = 1e-12 * expected.0.hypot(expected.1);
+                    assert!((actual.0 - expected.0).hypot(actual.1 - expected.1) <= tol);
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_flux_density_on_axis() {

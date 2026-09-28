@@ -3,6 +3,7 @@
 ##  2026-09-28
 
 * Rust
+    * Add `flux_density_circular_filament_finite_radius_scalar` for the Hurwitz circular-section interior and near-exterior field approximation
     * Resolve on-axis singularity for circular filament B-field
         * Minimal effect on performance; vectorizes over contiguous chunks
         * Use the on-axis approximation for R/a <= 1e-4

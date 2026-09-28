@@ -117,8 +117,13 @@ const ELLIPE_B: [f64; 5] = [
 ///    \[1\] M. Abramowitz and I. A. Stegun, *Handbook of mathematical functions: with formulas, graphs, and mathematical tables*. 1970.
 #[inline]
 pub fn ellipk(m: f64) -> f64 {
+    ellipk_complement(1.0 - m)
+}
+
+/// Evaluate [ellipk] from `c = 1 - m`, preserving small complementary parameters.
+#[inline]
+pub(crate) fn ellipk_complement(c: f64) -> f64 {
     let mut ellip: f64 = 0.0;
-    let c: f64 = 1.0 - m;
     let logterm = c.powi(-1).ln();
 
     // NOTE: This loop is unrolled at compile-time automatically,
@@ -144,8 +149,13 @@ pub fn ellipk(m: f64) -> f64 {
 ///   \[1\] M. Abramowitz and I. A. Stegun, *Handbook of mathematical functions: with formulas, graphs, and mathematical tables*. 1970.
 #[inline]
 pub fn ellipe(m: f64) -> f64 {
+    ellipe_complement(1.0 - m)
+}
+
+/// Evaluate [ellipe] from `c = 1 - m`, preserving small complementary parameters.
+#[inline]
+pub(crate) fn ellipe_complement(c: f64) -> f64 {
     let mut ellip: f64 = 0.0;
-    let c: f64 = 1.0 - m;
     let logterm = c.powi(-1).ln();
 
     // NOTE: This loop is unrolled at compile-time automatically,

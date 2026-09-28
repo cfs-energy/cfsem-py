@@ -480,6 +480,72 @@ def test_flux_density_circular_filament_against_ideal_loop(r, par):
     assert np.allclose(np.array([b_ideal]), bz_origin, rtol=1e-6)
 
 
+@mark.parametrize("par", [True, False])
+def test_flux_density_circular_filament_on_axis(par):
+    # Superpose translated loops with both current signs. Include signed zero,
+    # loop centers, and distant axial points where elliptic terms can cancel.
+    rfil = np.array([0.3, 1.7, 2.1])
+    zfil = np.array([-0.5, 0.0, 1.25])
+    ifil = np.array([2.0, -3.0, 0.75])
+    zobs = np.array([-1e4, -2.0, -0.5, 0.0, 1.25, 3.0, 1e4])
+    robs = np.zeros_like(zobs)
+    robs[::2] = -0.0
+    expected_bz = np.sum(
+        cfsem.MU_0 * ifil * rfil**2 / (2.0 * (rfil**2 + (zobs[:, None] - zfil) ** 2) ** 1.5),
+        axis=1,
+    )
+    # Python and Rust currently use permeability constants differing by 6.8e-10.
+    # The Rust scalar test checks accuracy near machine precision.
+    rtol = 1e-9
+
+    br, bz = cfsem.flux_density_circular_filament(ifil, rfil, zfil, robs, zobs, par)
+    np.testing.assert_array_equal(br, 0.0)
+    np.testing.assert_allclose(bz, expected_bz, rtol=rtol, atol=0.0)
+
+    bx, by, bz = cfsem.flux_density_circular_filament_cartesian(ifil, rfil, zfil, (robs, robs, zobs), par)
+    np.testing.assert_array_equal(bx, 0.0)
+    np.testing.assert_array_equal(by, 0.0)
+    np.testing.assert_allclose(bz, expected_bz, rtol=rtol, atol=0.0)
+
+    # Mixed batches must preserve both results, including runs at either end.
+    off_axis_r = np.full_like(robs, 0.2)
+    off_br, off_bz = cfsem.flux_density_circular_filament(ifil, rfil, zfil, off_axis_r, zobs, par)
+    for axis_first in [True, False]:
+        mixed_r = np.column_stack((robs, off_axis_r) if axis_first else (off_axis_r, robs)).ravel()
+        mixed_br, mixed_bz = cfsem.flux_density_circular_filament(
+            ifil, rfil, zfil, mixed_r, np.repeat(zobs, 2), par
+        )
+        axis_index = 0 if axis_first else 1
+        np.testing.assert_array_equal(mixed_br[axis_index::2], 0.0)
+        np.testing.assert_allclose(mixed_bz[axis_index::2], expected_bz, rtol=rtol, atol=0.0)
+        np.testing.assert_array_equal(mixed_br[1 - axis_index :: 2], off_br)
+        np.testing.assert_array_equal(mixed_bz[1 - axis_index :: 2], off_bz)
+
+
+@mark.parametrize("par", [True, False])
+@mark.parametrize("radius", [1e-6, 0.3, 2.0, 1e6])
+def test_flux_density_circular_filament_axis_cutoff(radius, par):
+    cutoff = 1e-4 * radius
+    robs = np.array(
+        [0.0, 100 * np.finfo(float).eps * radius, 0.5 * cutoff, cutoff, np.nextafter(cutoff, np.inf)]
+    )
+    zobs = np.full_like(robs, radius)
+    # At dz=a, Bz on the axis is mu_0 I / (2 sqrt(8) a).
+    expected_bz = cfsem.MU_0 * -3.0 / (2.0 * np.sqrt(8.0) * radius)
+    br, bz = cfsem.flux_density_circular_filament([-3.0], [radius], [0.0], robs, zobs, par)
+    np.testing.assert_array_equal(br[:-1], 0.0)
+    # Account for the existing Python/Rust permeability-constant difference.
+    np.testing.assert_allclose(bz[:-1], expected_bz, rtol=1e-9, atol=0.0)
+    assert br[-1] != 0.0
+
+    bx, by, bz_xyz = cfsem.flux_density_circular_filament_cartesian(
+        [-3.0], [radius], [0.0], (robs, np.zeros_like(robs), zobs), par
+    )
+    np.testing.assert_array_equal(bx, br)
+    np.testing.assert_array_equal(by, 0.0)
+    np.testing.assert_array_equal(bz_xyz, bz)
+
+
 @mark.parametrize("a", [0.775, np.pi])
 @mark.parametrize("z", [0.0, np.e / 2, -np.e / 2])
 @mark.parametrize("par", [True, False])

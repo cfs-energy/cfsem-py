@@ -13,6 +13,9 @@ use crate::{
 
 use crate::{MU_0, MU0_OVER_4PI};
 
+/// Observation-radius / filament-radius cutoff for the on-axis approximation.
+const ON_AXIS_RADIUS_RATIO: f64 = 1e-4;
+
 /// Flux contributions from some circular filaments to some observation points, which happens to be
 /// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.
 /// This variant of the function is parallelized over chunks of observation points.
@@ -177,7 +180,7 @@ pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64))
     MU_0 * ifil * (rrprime / k2).sqrt() * ((2.0 - k2) * ellipk(k2) - 2.0 * ellipe(k2))
 }
 
-/// Off-axis Br,Bz components for a circular current filament in vacuum.
+/// Br,Bz components for a circular current filament in vacuum, including on the axis.
 /// This variant of the function is parallelized over chunks of observation points.
 ///
 /// # Arguments
@@ -186,31 +189,9 @@ pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64))
 /// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
 /// * `out`:     (T, T), r- and z-components of magnetic flux density at observation location, length `n`
 ///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// See eqns. 12,13 pg. 34 in \[1\], eqn 9.8.7 in \[2\], and all of \[3\].
-///
-/// Note the formula for Br as given by \[1\] is incorrect and does not satisfy the
-/// constraints of the calculation without correcting by a factor of (z / r).
-///
-/// # References
-///
-///   \[1\] D. B. Montgomery and J. Terrell,
-///         “Some Useful Information For The Design Of Aircore Solenoids,
-///         Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
-///         And Current Density. Part II. Homogeneous Magnetic Fields,”
-///         Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
-///         Nov. 1961. Accessed: May 18, 2021. \[Online\].
-///         Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
-///
-///   \[2\] 8.02 Course Notes. Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
-///
-///   \[3\] Eric Dennyson, "Magnet Formulas". Available: <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// For field formulas, numerical treatment, and references, see
+/// [flux_density_circular_filament_scalar]. For Cartesian components, see
+/// [flux_density_circular_filament_cartesian_scalar].
 pub fn flux_density_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
@@ -239,7 +220,7 @@ pub fn flux_density_circular_filament_par(
     Ok(())
 }
 
-/// Off-axis Br,Bz components for a circular current filament in vacuum.
+/// Br,Bz components for a circular current filament in vacuum, including on the axis.
 ///
 /// # Arguments
 ///
@@ -247,85 +228,103 @@ pub fn flux_density_circular_filament_par(
 /// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
 /// * `out`:     (T, T), r- and z-components of magnetic flux density at observation location, length `n`
 ///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// See eqns. 12,13 pg. 34 in \[1\], eqn 9.8.7 in \[2\], and all of \[3\].
-///
-/// Note the formula for Br as given by \[1\] is incorrect and does not satisfy the
-/// constraints of the calculation without correcting by a factor of (z / r).
-///
-/// # References
-///
-///   \[1\] D. B. Montgomery and J. Terrell,
-///         “Some Useful Information For The Design Of Aircore Solenoids,
-///         Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
-///         And Current Density. Part II. Homogeneous Magnetic Fields,”
-///         Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
-///         Nov. 1961. Accessed: May 18, 2021. \[Online\].
-///         Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
-///
-///   \[2\] 8.02 Course Notes. Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
-///
-///   \[3\] Eric Dennyson, "Magnet Formulas". Available: <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// For field formulas, numerical treatment, and references, see
+/// [flux_density_circular_filament_scalar]. For Cartesian components, see
+/// [flux_density_circular_filament_cartesian_scalar].
 pub fn flux_density_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
     out: (&mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    // Unpack
     let (rfil, zfil, ifil) = rzifil;
     let (rprime, zprime) = rzobs;
     let (out_r, out_z) = out;
 
-    // Check lengths
     let n = ifil.len();
     let m = rprime.len();
     check_length_3tup!(n, &rzifil);
     check_length!(m, &out_r, &out_z);
 
-    // Zero output
     out_r.fill(0.0);
     out_z.fill(0.0);
 
-    // There aren't necessarily more observation points or filaments, depending on the use case.
-    // The more common extreme is to see a very large number of filaments evaluated at a smaller
-    // number of observation points. However, this particular calc suffers badly when iterating
-    // over observation points first, so to capture a 50% speedup for cases with >=10 observation
-    // points at the expense of a 30% slowdown for evaluating single observation points, we
-    // iterate over filaments first here.
-    for i in 0..n {
-        for j in 0..m {
-            // The inner function is inlined, so values that are reused between iterations
-            // can be pulled to the outer scope by the compiler and do not affect performance
+    // With one observation point there is no observation loop to vectorize.
+    // Sum scalar contributions directly to avoid per-filament run dispatch.
+    if m == 1 {
+        for i in 0..n {
             let (br, bz) = flux_density_circular_filament_scalar(
                 (rfil[i], zfil[i], ifil[i]),
-                (rprime[j], zprime[j]),
+                (rprime[0], zprime[0]),
             );
-            out_r[j] += br;
-            out_z[j] += bz;
+            out_r[0] += br;
+            out_z[0] += bz;
         }
+        return Ok(());
+    }
+
+    // Outside the largest filament's cutoff, every contribution is off-axis.
+    // Group observation points once to preserve the branch-free off-axis loop.
+    let max_filament_radius = rfil.iter().map(|r| r.abs()).fold(0.0, f64::max);
+    let max_cutoff = ON_AXIS_RADIUS_RATIO * max_filament_radius;
+    let mut start = 0;
+    for radii in rprime.chunk_by(|a, b| (a.abs() <= max_cutoff) == (b.abs() <= max_cutoff)) {
+        let end = start + radii.len();
+        let obs = (radii, &zprime[start..end]);
+        let out = (&mut out_r[start..end], &mut out_z[start..end]);
+        if radii[0].abs() <= max_cutoff {
+            // The scalar kernel checks each filament's own cutoff.
+            accumulate_flux_density(rzifil, obs, out, flux_density_circular_filament_scalar);
+        } else {
+            accumulate_flux_density(rzifil, obs, out, flux_density_circular_filament_off_axis);
+        }
+        start = end;
     }
 
     Ok(())
 }
 
-/// Off-axis Br,Bz components for a circular current filament in vacuum.
+#[inline]
+fn accumulate_flux_density(
+    rzifil: (&[f64], &[f64], &[f64]),
+    rzobs: (&[f64], &[f64]),
+    out: (&mut [f64], &mut [f64]),
+    field: impl Fn((f64, f64, f64), (f64, f64)) -> (f64, f64),
+) {
+    let (rfil, zfil, ifil) = rzifil;
+    let (rprime, zprime) = rzobs;
+    let (out_r, out_z) = out;
+    for i in 0..ifil.len() {
+        for j in 0..rprime.len() {
+            let (br, bz) = field((rfil[i], zfil[i], ifil[i]), (rprime[j], zprime[j]));
+            out_r[j] += br;
+            out_z[j] += bz;
+        }
+    }
+}
+
+/// Br,Bz components for a circular current filament in vacuum, including on the axis.
+///
+/// The ideal filament remains singular at the source location.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation point, length `n`
+/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of filament
+/// * `rzobs`:   (m, m) r-coord and z-coord of observation point
 ///
 /// # Returns
 ///
 /// * `(br, bz)`:   (T, T), r- and z-component of magnetic flux density at observation location
 ///
-/// # Commentary
+/// # On-axis field
+///
+/// For `R/a <= 1e-4`, where `a` is the filament radius, uses
+/// [flux_density_circular_filament_on_axis] at the same axial position.
+/// This clips the small radial field to zero and approximates the axial field
+/// to avoid cancellation in the elliptic-integral expression near the axis.
+/// The cutoff is relative to each filament's radius and includes its boundary.
+/// Outside the cutoff, the off-axis expression is used without modification.
+///
+/// # Off-axis field
 ///
 /// Near-exact formula (except numerically-evaluated elliptic integrals).
 /// See eqns. 12,13 pg. 34 in \[1\], eqn 9.8.7 in \[2\], and all of \[3\].
@@ -343,7 +342,9 @@ pub fn flux_density_circular_filament(
 ///         Nov. 1961. Accessed: May 18, 2021. \[Online\].
 ///         Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
 ///
-///   \[2\] 8.02 Course Notes. Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
+///   \[2\] MIT, *8.02 Course Notes*, Chapter 9, “Sources of Magnetic Fields,”
+///         Example 9.2, eqs. 9.1.13–9.1.15 (on-axis), and Appendix 1, eq. 9.8.7 (off-axis).
+///         Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
 ///
 ///   \[3\] Eric Dennyson, "Magnet Formulas". Available: <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
 ///
@@ -355,13 +356,67 @@ pub fn flux_density_circular_filament_scalar(
     rzifil: (f64, f64, f64),
     rzobs: (f64, f64),
 ) -> (f64, f64) {
-    // Unpack
+    let (rprime, zprime) = rzobs;
+    if rprime.abs() <= ON_AXIS_RADIUS_RATIO * rzifil.0.abs() {
+        return flux_density_circular_filament_on_axis(rzifil, zprime);
+    }
+    flux_density_circular_filament_off_axis(rzifil, rzobs)
+}
+
+/// Br,Bz components on the symmetry axis of a circular current filament in vacuum.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) positive radius, z-coord, and current of the filament
+/// * `zobs`: (m) z-coord of the observation point on the axis
+///
+/// # Returns
+///
+/// * `(br, bz)`: (T, T) magnetic flux density, with `br = 0`
+///
+/// # Formula
+///
+/// For a loop of radius $a = r_\mathrm{fil} > 0$, current $I = i_\mathrm{fil}$,
+/// and axial separation $\Delta z = z_\mathrm{obs} - z_\mathrm{fil}$, symmetry gives
+/// $B_R = 0$ on the axis. Integrating the Biot-Savart law gives
+///
+/// $$B_Z = \frac{\mu_0 I a^2}{2(a^2 + \Delta z^2)^{3/2}}.$$
+///
+/// See \[1\], Example 9.2, eqs. 9.1.13–9.1.15. At the loop center this reduces
+/// to $B_Z = \mu_0 I/(2a)$; the sign follows the current's right-hand rule.
+///
+/// This analytic expression avoids the removable division by `R` in the
+/// off-axis radial field and cancellation
+/// in the axial field far from the loop. It requires no elliptic integrals.
+/// With $d^2 = a^2 + \Delta z^2$, the calculation uses
+/// $(\mu_0 I/2)(a^2/d^2)/\sqrt{d^2}$ to avoid forming a cubed distance.
+///
+/// # References
+///
+/// \[1\] MIT, *8.02 Course Notes*, Chapter 9, “Sources of Magnetic Fields,”
+/// Example 9.2, eqs. 9.1.13–9.1.15.
+/// Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
+#[inline]
+pub fn flux_density_circular_filament_on_axis(rzifil: (f64, f64, f64), zobs: f64) -> (f64, f64) {
+    let (rfil, zfil, ifil) = rzifil;
+    let z = zobs - zfil; // [m]
+    let d2 = rfil.mul_add(rfil, z * z); // [m^2]
+    let bz = 0.5 * MU_0 * ifil * (rfil * rfil / d2) / d2.sqrt(); // [T]
+    (0.0, bz)
+}
+
+/// Off-axis Br,Bz components for one circular current filament at one observation point.
+///
+/// Requires nonzero observation radius. See [flux_density_circular_filament_scalar]
+/// for the elliptic-integral formula references, axis limit, and singularity behavior.
+#[inline]
+fn flux_density_circular_filament_off_axis(
+    rzifil: (f64, f64, f64),
+    rzobs: (f64, f64),
+) -> (f64, f64) {
     let (rfil, zfil, ifil) = rzifil;
     let (rprime, zprime) = rzobs;
-
-    // Evaluate
     let z = zprime - zfil; // [m]
-
     let z2 = z * z; // [m^2]
     let r2 = rprime * rprime; // [m^2]
 
@@ -393,7 +448,20 @@ pub fn flux_density_circular_filament_scalar(
 /// Flux density of a circular filament in cartesian form
 /// at a location given in cartesian coordinates.
 ///
-/// For additional documentation and commentary, see [flux_density_circular_filament_scalar].
+/// Evaluates [flux_density_circular_filament_scalar] at
+/// $R = \sqrt{x^2 + y^2}$ and rotates the radial component into
+/// $B_x = B_R \cos\phi$, $B_y = B_R \sin\phi$, with $\phi = \operatorname{atan2}(y, x)$.
+/// On the axis, $B_x = B_y = 0$ and $B_z$ is the analytic axial field.
+/// See [flux_density_circular_filament_scalar] for field formulas and references.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) radius, z-coord, and current of the filament
+/// * `xyzobs`: (m, m, m) Cartesian coordinates of the observation point
+///
+/// # Returns
+///
+/// * `(bx, by, bz)`: (T, T, T) Cartesian components of magnetic flux density
 #[inline]
 pub fn flux_density_circular_filament_cartesian_scalar(
     rzifil: (f64, f64, f64),
@@ -413,7 +481,8 @@ pub fn flux_density_circular_filament_cartesian_scalar(
 /// Flux density of a circular filament in cartesian form
 /// at a set of locations given in cartesian coordinates.
 ///
-/// For additional documentation and commentary, see [flux_density_circular_filament_scalar].
+/// See [flux_density_circular_filament_cartesian_scalar] for coordinate conversion
+/// and [flux_density_circular_filament_scalar] for field formulas and references.
 pub fn flux_density_circular_filament_cartesian(
     rzifil: (&[f64], &[f64], &[f64]),
     xyzobs: (&[f64], &[f64], &[f64]),
@@ -463,7 +532,8 @@ pub fn flux_density_circular_filament_cartesian(
 /// at a set of locations given in cartesian coordinates.
 /// Parallelized over chunks of observation points.
 ///
-/// For additional documentation and commentary, see [flux_density_circular_filament_scalar].
+/// See [flux_density_circular_filament_cartesian_scalar] for coordinate conversion
+/// and [flux_density_circular_filament_scalar] for field formulas and references.
 pub fn flux_density_circular_filament_cartesian_par(
     rzifil: (&[f64], &[f64], &[f64]),
     xyzobs: (&[f64], &[f64], &[f64]),
@@ -947,6 +1017,106 @@ mod test {
 
     use super::*;
     use crate::{physics::linear_filament::body_force_density_linear_filament, testing::*};
+
+    #[test]
+    fn test_flux_density_on_axis() {
+        for radius in [1e-6, 0.3, 2.0, 1e6] {
+            let zfil = 0.7 * radius;
+            for current in [-3.0, 0.0, 2.0] {
+                for offset in [-1e4, -2.0, 0.0, 2.0, 1e4] {
+                    let zobs = zfil + offset * radius;
+                    let dz = zobs - zfil;
+                    let expected = MU_0 * current * radius * radius
+                        / (2.0 * (radius * radius + dz * dz).powf(1.5));
+                    let on_axis =
+                        flux_density_circular_filament_on_axis((radius, zfil, current), zobs);
+                    for robs in [0.0, -0.0] {
+                        let (br, bz) = flux_density_circular_filament_scalar(
+                            (radius, zfil, current),
+                            (robs, zobs),
+                        );
+                        assert_eq!((br, bz), on_axis);
+                        assert_eq!(br, 0.0);
+                        assert!(
+                            (bz - expected).abs() <= 2e-15 * expected.abs(),
+                            "{bz} != {expected}"
+                        );
+                        let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(
+                            (radius, zfil, current),
+                            (robs, robs, zobs),
+                        );
+                        assert_eq!(bx, 0.0);
+                        assert_eq!(by, 0.0);
+                        assert!((bz - expected).abs() <= 2e-15 * expected.abs());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_flux_density_axis_cutoff() {
+        for radius in [1e-6, 0.3, 2.0, 1e6] {
+            let cutoff = 1e-4 * radius;
+            let filament = (radius, 0.7 * radius, -3.0);
+            for dz in [-radius, 0.0, radius] {
+                let zobs = filament.1 + dz;
+                let on_axis = flux_density_circular_filament_on_axis(filament, zobs);
+                for robs in [0.0, 100.0 * f64::EPSILON * radius, 0.5 * cutoff, cutoff] {
+                    let field = flux_density_circular_filament_scalar(filament, (robs, zobs));
+                    assert_eq!(field, on_axis);
+                    let field_xyz = flux_density_circular_filament_cartesian_scalar(
+                        filament,
+                        (robs, 0.0, zobs),
+                    );
+                    assert_eq!(field_xyz, (0.0, 0.0, on_axis.1));
+                }
+                let robs = cutoff.next_up();
+                let field = flux_density_circular_filament_scalar(filament, (robs, zobs));
+                assert_eq!(
+                    field,
+                    flux_density_circular_filament_off_axis(filament, (robs, zobs))
+                );
+                if dz != 0.0 {
+                    assert_ne!(field.0, 0.0);
+                }
+            }
+
+            // A relative cutoff must not regularize the source, even for tiny loops.
+            let field = flux_density_circular_filament_scalar(filament, (radius, filament.1));
+            assert!(!field.0.is_finite() || !field.1.is_finite());
+        }
+    }
+
+    #[test]
+    fn test_flux_density_mixed_axis_cutoffs() {
+        let rfil = [0.25, 2.0];
+        let zfil = [-0.5, 0.75];
+        let ifil = [2.0, -3.0];
+        let robs = [0.0, 1e-6, 2.5e-5, 1e-4, 2e-4, 1e-3, 0.1, 1e-5];
+        let zobs = [1.0; 8];
+        let mut br = [1.0; 8];
+        let mut bz = [1.0; 8];
+        let mut br_par = [2.0; 8];
+        let mut bz_par = [2.0; 8];
+        let sources = (&rfil[..], &zfil[..], &ifil[..]);
+        flux_density_circular_filament(sources, (&robs, &zobs), (&mut br, &mut bz)).unwrap();
+        flux_density_circular_filament_par(sources, (&robs, &zobs), (&mut br_par, &mut bz_par))
+            .unwrap();
+        for j in 0..robs.len() {
+            let mut expected = (0.0, 0.0);
+            for i in 0..rfil.len() {
+                let field = flux_density_circular_filament_scalar(
+                    (rfil[i], zfil[i], ifil[i]),
+                    (robs[j], zobs[j]),
+                );
+                expected.0 += field.0;
+                expected.1 += field.1;
+            }
+            assert_eq!((br[j], bz[j]), expected);
+            assert_eq!((br_par[j], bz_par[j]), expected);
+        }
+    }
 
     /// Make sure that force between a circular filament and a piecewise linear filament
     /// is equal and opposite

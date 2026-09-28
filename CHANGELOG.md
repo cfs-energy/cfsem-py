@@ -1,5 +1,14 @@
 # Changelog
 
+##  2026-09-28
+
+* Rust
+    * Resolve on-axis singularity for circular filament B-field
+        * Minimal effect on performance; vectorizes over contiguous chunks
+        * Use the on-axis approximation for R/a <= 1e-4
+        * Expose the scalar `flux_density_circular_filament_on_axis` calculation
+
+
 ## 13.1.0 2026-08-27
 
 * Python

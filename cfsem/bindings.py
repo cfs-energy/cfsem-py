@@ -242,28 +242,18 @@ def flux_density_circular_filament(
     par: bool = True,
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """
-    Off-axis Br,Bz components for a circular current filament in vacuum.
+    Br,Bz components for a circular current filament in vacuum, including on the axis.
 
-    Near-exact formula (except numerically-evaluated elliptic integrals)
-    See eqns. 12, 13 pg. 34 in [1], eqn 9.8.7 in [2], and all of [3].
+    For R/a <= 1e-4, where a is each filament's radius, returns Br=0 and the
+    analytic on-axis Bz at the same Z to avoid near-axis cancellation. The ideal
+    filament remains singular at the source location.
 
-    Note the formula for Br as given by [1] is incorrect and does not satisfy the
-    constraints of the calculation without correcting by a factor of ($z / r$).
+    For field formulas, numerical treatment, and references, see the Rust
+    [cylindrical scalar implementation][cylindrical_scalar]. For Cartesian components,
+    see the [Cartesian scalar implementation][cartesian_scalar].
 
-    References:
-        [1] D. B. Montgomery and J. Terrell,
-            “Some Useful Information For The Design Of Aircore Solenoids,
-            Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
-            And Current Density. Part II. Homogeneous Magnetic Fields,”
-            Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
-            Nov. 1961. Accessed: May 18, 2021. [Online].
-            Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
-
-        [2] 8.02 Course Notes. Available:
-        <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
-
-        [3] Eric Dennyson, "Magnet Formulas". Available:
-        <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
+    [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_scalar.html
+    [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_cartesian_scalar.html
 
     Args:
         ifil: [A] filament current
@@ -1301,6 +1291,13 @@ def flux_density_circular_filament_cartesian(
     """
     Flux density of a circular filament in cartesian form
     at a set of locations given in cartesian coordinates.
+
+    See the Rust [Cartesian scalar implementation][cartesian_scalar] for coordinate
+    conversion and the [cylindrical scalar implementation][cylindrical_scalar] for
+    field formulas and references.
+
+    [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_cartesian_scalar.html
+    [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_scalar.html
 
     Args:
         ifil: [A] filament current

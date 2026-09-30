@@ -164,6 +164,7 @@ def flux_circular_filament(
 ) -> NDArray[float64]:
     """
     Poloidal flux from circular conductors, calculated as 2*pi*rprime*A_phi.
+    Source radii use their magnitudes; flux is even in signed observation radius.
 
     For zero wire radii, this is the ideal-filament Green's function for the
     Grad-Shafranov solve, and unit-current values give the mutual inductance
@@ -207,6 +208,8 @@ def vector_potential_circular_filament(
 ) -> NDArray[float64]:
     """
     Azimuthal vector potential from circular conductors in vacuum.
+    Source radii use their magnitudes; current determines orientation. In a fixed
+    meridional plane, A_phi is odd in signed observation radius.
 
     Omitted or zero wire radii use the ideal-filament formula. Positive radii
     use the Hurwitz uniform-current, circular-section approximation, valid inside
@@ -256,9 +259,11 @@ def flux_density_circular_filament(
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """
     Br,Bz components from circular conductors in vacuum.
+    Source radii use their magnitudes; current determines orientation. In a fixed
+    meridional plane, Br is odd and Bz is even in signed observation radius.
 
     With omitted or zero wire radii, uses ideal filaments, including the on-axis
-    approximation for R/a <= 1e-4. Ideal filaments remain singular at their source.
+    approximation for |R|/|a| <= 1e-4. Ideal filaments remain singular at their source.
     Positive wire radii use the Hurwitz uniform-current, circular-section model
     near the conductor, smoothly blending to the ideal-filament field between
     1.5 and 3 wire radii from its centerline. Requires wire radius small relative
@@ -281,7 +286,7 @@ def flux_density_circular_filament(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular conductor-section radius per source, same length
             as ifil. None allocates zero radii, preserving ideal-filament behavior.
-            Negative radii produce NaNs.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [T] (Br, Bz) flux density components
@@ -1344,7 +1349,7 @@ def flux_density_circular_filament_cartesian(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular cross-section radius per source, same length as
             ifil. None allocates zero radii, preserving ideal-filament behavior.
-            Negative radii produce NaNs.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [T] flux density
@@ -1493,7 +1498,7 @@ def body_force_density_circular_filament_cartesian(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular cross-section radius per source, same length as
             ifil. None allocates zero radii, preserving ideal-filament behavior.
-            Negative radii produce NaNs.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [N/m^3] body force density

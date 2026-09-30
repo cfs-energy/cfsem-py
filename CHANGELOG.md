@@ -19,6 +19,8 @@ adds arbitrary location and orientation for circular filament cartesian-frame ca
         * Minimal effect on performance; vectorizes over contiguous chunks
         * Use the on-axis approximation for R/a <= 1e-4
         * Expose the scalar `flux_density_circular_filament_on_axis` calculation
+    * Support negative filament radius and negative observation point radius for circular filaments
+        * Combined with the elimination of singularities, this expands the circular filament methods to an unbounded and singularity-free domain when wire radius is nonzero.
 * Python
     * !Replace `zfil` with required `loc` and `normal` component arrays in Cartesian circular-filament B-field and body-force functions
         * Normals are normalized internally; positive current follows the right-hand rule

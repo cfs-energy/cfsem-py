@@ -123,15 +123,12 @@ pub fn ellipk(m: f64) -> f64 {
 /// Evaluate [ellipk] from `c = 1 - m`, preserving small complementary parameters.
 #[inline]
 pub(crate) fn ellipk_complement(c: f64) -> f64 {
-    let mut ellip: f64 = 0.0;
-    let logterm = c.powi(-1).ln();
-
-    // NOTE: This loop is unrolled at compile-time automatically,
-    // and the repeated calls to `powi` are de-duplicated by the compiler.
-    for i in 0..5 {
-        ellip = logterm
-            .mul_add(ELLIPK_B[i], ELLIPK_A[i])
-            .mul_add(c.powi(i as i32), ellip);
+    // Avoid a reciprocal, which can overflow for subnormal complements.
+    let logterm = -c.ln();
+    let mut ellip = logterm.mul_add(ELLIPK_B[4], ELLIPK_A[4]);
+    // Horner's rule avoids explicit powers of the complementary parameter.
+    for i in (0..4).rev() {
+        ellip = ellip.mul_add(c, logterm.mul_add(ELLIPK_B[i], ELLIPK_A[i]));
     }
 
     ellip
@@ -155,15 +152,12 @@ pub fn ellipe(m: f64) -> f64 {
 /// Evaluate [ellipe] from `c = 1 - m`, preserving small complementary parameters.
 #[inline]
 pub(crate) fn ellipe_complement(c: f64) -> f64 {
-    let mut ellip: f64 = 0.0;
-    let logterm = c.powi(-1).ln();
-
-    // NOTE: This loop is unrolled at compile-time automatically,
-    // and the repeated calls to `powi` are de-duplicated by the compiler.
-    for i in 0..5 {
-        ellip = logterm
-            .mul_add(ELLIPE_B[i], ELLIPE_A[i])
-            .mul_add(c.powi(i as i32), ellip);
+    // Avoid a reciprocal, which can overflow for subnormal complements.
+    let logterm = -c.ln();
+    let mut ellip = logterm.mul_add(ELLIPE_B[4], ELLIPE_A[4]);
+    // Horner's rule avoids explicit powers of the complementary parameter.
+    for i in (0..4).rev() {
+        ellip = ellip.mul_add(c, logterm.mul_add(ELLIPE_B[i], ELLIPE_A[i]));
     }
 
     ellip
@@ -416,4 +410,20 @@ pub fn switch_float(left: f64, right: f64, cond: bool) -> f64 {
     let right_part = right * right_factor;
 
     clip_nan(left_part, 0.0) + clip_nan(right_part, 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ellipe_complement, ellipk_complement};
+
+    #[test]
+    fn elliptic_integrals_tiny_complement() {
+        for c in [1e-20, 1e-100, 1e-310, f64::from_bits(1)] {
+            // At these complements, the leading asymptotic limits are accurate
+            // well beyond the polynomial fits' 2e-8 absolute error bound.
+            let k = 4.0_f64.ln() - 0.5 * c.ln();
+            assert!((ellipk_complement(c) - k).abs() < 2e-8);
+            assert!((ellipe_complement(c) - 1.0).abs() < 2e-8);
+        }
+    }
 }

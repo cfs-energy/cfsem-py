@@ -795,6 +795,12 @@ pub fn flux_density_circular_filament_cartesian_scalar(
     wire_radius: f64,
     xyzobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
+    let local_to_world = circular_filament_pose(loc, normal);
+    flux_density_circular_filament_cartesian_kernel(rifil, &local_to_world, wire_radius, xyzobs)
+}
+
+#[inline]
+fn circular_filament_pose(loc: (f64, f64, f64), normal: (f64, f64, f64)) -> Isometry3<f64> {
     let center = Vector3::new(loc.0, loc.1, loc.2);
     let normal = Vector3::new(normal.0, normal.1, normal.2);
     // Scale before normalizing to avoid overflow/underflow for non-unit inputs.
@@ -806,7 +812,16 @@ pub fn flux_density_circular_filament_cartesian_scalar(
         Vector3::x()
     };
     let rotation = UnitQuaternion::face_towards(&normal, &up);
-    let local_to_world = Isometry3::from_parts(Translation3::from(center), rotation);
+    Isometry3::from_parts(Translation3::from(center), rotation)
+}
+
+#[inline]
+fn flux_density_circular_filament_cartesian_kernel(
+    rifil: (f64, f64),
+    local_to_world: &Isometry3<f64>,
+    wire_radius: f64,
+    xyzobs: (f64, f64, f64),
+) -> (f64, f64, f64) {
     let local = local_to_world.inverse_transform_point(&Point3::new(xyzobs.0, xyzobs.1, xyzobs.2));
     let radial = Vector3::new(local.x, local.y, 0.0);
     let r = radial.norm();
@@ -830,6 +845,7 @@ pub fn flux_density_circular_filament_cartesian_scalar(
 /// slices, including `wire_radius`, have the same length. `xyzobs` and
 /// `bxyz_out` have one entry per observation, in world coordinates (m and T).
 /// Uses stack temporaries and caller-provided output buffers; no heap allocation.
+/// Each source pose is constructed once outside the observation loop.
 /// See [flux_density_circular_filament_cartesian_scalar] for conventions,
 /// field formulas, validity limits, and NaN propagation for invalid geometry.
 pub fn flux_density_circular_filament_cartesian(
@@ -850,11 +866,17 @@ pub fn flux_density_circular_filament_cartesian(
     bxyz_out.1.fill(0.0);
     bxyz_out.2.fill(0.0);
     for i in 0..n {
+        // FUTURE: The compiler should hoist this pose construction automatically,
+        // but currently does not. Investigate the missed optimization in rustc/LLVM
+        // and upstream a fix.
+        let local_to_world = circular_filament_pose(
+            (loc.0[i], loc.1[i], loc.2[i]),
+            (normal.0[i], normal.1[i], normal.2[i]),
+        );
         for j in 0..xyzobs.0.len() {
-            let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(
+            let (bx, by, bz) = flux_density_circular_filament_cartesian_kernel(
                 (rifil.0[i], rifil.1[i]),
-                (loc.0[i], loc.1[i], loc.2[i]),
-                (normal.0[i], normal.1[i], normal.2[i]),
+                &local_to_world,
                 wire_radius[i],
                 (xyzobs.0[j], xyzobs.1[j], xyzobs.2[j]),
             );

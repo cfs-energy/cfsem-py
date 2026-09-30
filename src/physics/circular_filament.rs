@@ -559,13 +559,12 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
     // Calculate far-field kernel
     let far = flux_density_circular_filament_scalar(rzifil, rzobs);
 
-    // F
+    // Far-field branch
     if s2 >= FAR_FIELD_LIMIT_SQUARED {
         return far;
     }
 
     // Blending branch
-
     // Calculate near-field approximation
     let near = flux_density_circular_filament_finite_radius_scalar_near(rzifil, wire_radius, rzobs);
     // Calculate blending parameter and weights for near and far-field for blending

@@ -766,6 +766,7 @@ fn flux_density_circular_filament_off_axis_kernel<const DIRECT_COMPLEMENT: bool>
 /// for the ideal-filament formula and on-axis treatment.
 ///
 /// Invalid geometry propagates through floating-point arithmetic as NaNs.
+#[inline]
 pub fn flux_density_circular_filament_cartesian_scalar(
     rifil: (f64, f64),
     loc: (f64, f64, f64),
@@ -773,8 +774,31 @@ pub fn flux_density_circular_filament_cartesian_scalar(
     wire_radius: f64,
     xyzobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
-    let source = CartesianCircularFilament::new(rifil, loc, normal, wire_radius);
-    let b = source.field(Point3::new(xyzobs.0, xyzobs.1, xyzobs.2));
+    let center = Vector3::new(loc.0, loc.1, loc.2);
+    let normal = Vector3::new(normal.0, normal.1, normal.2);
+    // Scale before normalizing to avoid overflow/underflow for non-unit inputs.
+    let normal = (normal / normal.amax()).normalize();
+    // Roll about the normal is immaterial. Choose a nonparallel up vector.
+    let up = if normal.y.abs() < 0.9 {
+        Vector3::y()
+    } else {
+        Vector3::x()
+    };
+    let rotation = UnitQuaternion::face_towards(&normal, &up);
+    let local_to_world = Isometry3::from_parts(Translation3::from(center), rotation);
+    let local = local_to_world.inverse_transform_point(&Point3::new(xyzobs.0, xyzobs.1, xyzobs.2));
+    let radial = Vector3::new(local.x, local.y, 0.0);
+    let r = radial.norm();
+    let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+        (rifil.0, 0.0, rifil.1),
+        wire_radius,
+        (r, local.z),
+    );
+    let mut b = Vector3::new(0.0, 0.0, bz);
+    if r != 0.0 {
+        b += (radial / r) * br;
+    }
+    let b = local_to_world.transform_vector(&b);
     (b.x, b.y, b.z)
 }
 
@@ -784,6 +808,7 @@ pub fn flux_density_circular_filament_cartesian_scalar(
 /// `normal` contains loop normals as (x, y, z) component slices. All source
 /// slices, including `wire_radius`, have the same length. `xyzobs` and
 /// `bxyz_out` have one entry per observation, in world coordinates (m and T).
+/// Uses stack temporaries and caller-provided output buffers; no heap allocation.
 /// See [flux_density_circular_filament_cartesian_scalar] for conventions,
 /// field formulas, validity limits, and NaN propagation for invalid geometry.
 pub fn flux_density_circular_filament_cartesian(
@@ -796,13 +821,33 @@ pub fn flux_density_circular_filament_cartesian(
 ) -> Result<(), &'static str> {
     check_length_3tup!(xyzobs.0.len(), &xyzobs);
     check_length_3tup!(xyzobs.0.len(), &bxyz_out);
-    let sources = cartesian_circular_sources(rifil, loc, normal, wire_radius)?;
-    cartesian_circular_field(&sources, xyzobs, bxyz_out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+    bxyz_out.0.fill(0.0);
+    bxyz_out.1.fill(0.0);
+    bxyz_out.2.fill(0.0);
+    for i in 0..n {
+        for j in 0..xyzobs.0.len() {
+            let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(
+                (rifil.0[i], rifil.1[i]),
+                (loc.0[i], loc.1[i], loc.2[i]),
+                (normal.0[i], normal.1[i], normal.2[i]),
+                wire_radius[i],
+                (xyzobs.0[j], xyzobs.1[j], xyzobs.2[j]),
+            );
+            bxyz_out.0[j] += bx;
+            bxyz_out.1[j] += by;
+            bxyz_out.2[j] += bz;
+        }
+    }
     Ok(())
 }
 
 /// Parallel version of [flux_density_circular_filament_cartesian].
 /// Uses the same per-source centers, normals, radii, and world-coordinate outputs.
+/// The kernel allocates no buffers; Rayon may allocate when scheduling work.
 pub fn flux_density_circular_filament_cartesian_par(
     rifil: (&[f64], &[f64]),
     loc: (&[f64], &[f64], &[f64]),
@@ -813,110 +858,26 @@ pub fn flux_density_circular_filament_cartesian_par(
 ) -> Result<(), &'static str> {
     check_length_3tup!(xyzobs.0.len(), &xyzobs);
     check_length_3tup!(xyzobs.0.len(), &bxyz_out);
-    // Build each transform once, then share it across chunks.
-    let sources = cartesian_circular_sources(rifil, loc, normal, wire_radius)?;
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
     let n = chunksize(xyzobs.0.len());
     let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
     let (bx, by, bz) = mut_par_chunks_3tup!(bxyz_out, n);
     (xc, yc, zc, bx, by, bz)
         .into_par_iter()
-        .for_each(|(x, y, z, bx, by, bz)| {
-            cartesian_circular_field(&sources, (x, y, z), (bx, by, bz));
-        });
-    Ok(())
-}
-
-// A loop's fixed geometry is constructed once per source, not per observation.
-struct CartesianCircularFilament {
-    local_to_world: Isometry3<f64>,
-    radius: f64,
-    current: f64,
-    wire_radius: f64,
-}
-
-impl CartesianCircularFilament {
-    fn new(
-        rifil: (f64, f64),
-        center: (f64, f64, f64),
-        normal: (f64, f64, f64),
-        wire_radius: f64,
-    ) -> Self {
-        let center = Vector3::new(center.0, center.1, center.2);
-        let normal = Vector3::new(normal.0, normal.1, normal.2);
-        // Scale before normalizing to avoid overflow/underflow for non-unit inputs.
-        let normal = (normal / normal.amax()).normalize();
-        // Roll about the normal is immaterial. Choose a nonparallel up vector
-        // so the frame remains well conditioned, including nearly reversed axes.
-        let up = if normal.y.abs() < 0.9 {
-            Vector3::y()
-        } else {
-            Vector3::x()
-        };
-        let rotation = UnitQuaternion::face_towards(&normal, &up);
-        Self {
-            local_to_world: Isometry3::from_parts(Translation3::from(center), rotation),
-            radius: rifil.0,
-            current: rifil.1,
-            wire_radius,
-        }
-    }
-
-    #[inline]
-    fn field(&self, observation: Point3<f64>) -> Vector3<f64> {
-        let local = self.local_to_world.inverse_transform_point(&observation);
-        let radial = Vector3::new(local.x, local.y, 0.0);
-        let r = radial.norm();
-        let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
-            (self.radius, 0.0, self.current),
-            self.wire_radius,
-            (r, local.z),
-        );
-        let mut b = Vector3::new(0.0, 0.0, bz);
-        if r != 0.0 {
-            b += (radial / r) * br;
-        }
-        self.local_to_world.transform_vector(&b)
-    }
-}
-
-fn cartesian_circular_sources(
-    rifil: (&[f64], &[f64]),
-    loc: (&[f64], &[f64], &[f64]),
-    normal: (&[f64], &[f64], &[f64]),
-    wire_radius: &[f64],
-) -> Result<Vec<CartesianCircularFilament>, &'static str> {
-    let n = rifil.0.len();
-    check_length!(n, rifil.1, wire_radius);
-    check_length_3tup!(n, &loc);
-    check_length_3tup!(n, &normal);
-    Ok((0..n)
-        .map(|i| {
-            CartesianCircularFilament::new(
-                (rifil.0[i], rifil.1[i]),
-                (loc.0[i], loc.1[i], loc.2[i]),
-                (normal.0[i], normal.1[i], normal.2[i]),
-                wire_radius[i],
+        .try_for_each(|(x, y, z, bx, by, bz)| {
+            flux_density_circular_filament_cartesian(
+                rifil,
+                loc,
+                normal,
+                wire_radius,
+                (x, y, z),
+                (bx, by, bz),
             )
-        })
-        .collect())
-}
-
-fn cartesian_circular_field(
-    sources: &[CartesianCircularFilament],
-    xyzobs: (&[f64], &[f64], &[f64]),
-    out: (&mut [f64], &mut [f64], &mut [f64]),
-) {
-    out.0.fill(0.0);
-    out.1.fill(0.0);
-    out.2.fill(0.0);
-    for source in sources {
-        for j in 0..xyzobs.0.len() {
-            let b = source.field(Point3::new(xyzobs.0[j], xyzobs.1[j], xyzobs.2[j]));
-            out.0[j] += b.x;
-            out.1[j] += b.y;
-            out.2[j] += b.z;
-        }
-    }
+        })?;
+    Ok(())
 }
 
 /// A_phi from circular conductors with per-source circular cross-section radii.
@@ -1128,12 +1089,13 @@ pub fn vector_potential_circular_filament_finite_thickness_scalar(
     wire_radius: f64,
     rzobs: (f64, f64),
 ) -> f64 {
+    // Thin-filament shortcut
     if wire_radius == 0.0 {
         return vector_potential_circular_filament_scalar(rzifil, rzobs);
     }
-    if wire_radius < 0.0 {
-        return f64::NAN;
-    }
+
+    let wire_radius = wire_radius.abs();
+
     let u = (rzobs.0.abs() - rzifil.0.abs()) / wire_radius;
     let v = (rzobs.1 - rzifil.1) / wire_radius;
     let s2 = u.mul_add(u, v * v);

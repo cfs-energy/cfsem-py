@@ -10,10 +10,13 @@ use rayon::{
 use crate::{
     chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{dot3, ellipe, ellipe_complement, ellipk, ellipk_complement, norm3},
+    math::{dot3, ellipe_complement, ellipk_complement, norm3},
 };
 
 use crate::{MU_0, MU0_OVER_4PI};
+
+#[cfg(test)]
+use crate::math::{ellipe, ellipk};
 
 /// Observation-radius / filament-radius cutoff for the on-axis approximation.
 const ON_AXIS_RADIUS_RATIO: f64 = 1e-4;
@@ -972,7 +975,7 @@ fn vector_potential_circular_filament_thin(
     Ok(())
 }
 
-/// Off-axis A_phi component for a circular current filament in vacuum.
+/// A_phi component for a circular current filament in vacuum, including on the axis.
 /// Source radius is interpreted by magnitude; current determines orientation.
 /// A_phi is odd in signed observation radius in a fixed meridional plane,
 /// so the linked flux `2*pi*R*A_phi` is even.
@@ -989,7 +992,10 @@ fn vector_potential_circular_filament_thin(
 ///
 /// Near-exact formula (except numerically-evaluated elliptic integrals).
 /// The vector potential of a loop has zero r- and z- components due to symmetry,
-/// and does not vary in the phi-direction.
+/// and does not vary in the phi-direction. On the symmetry axis A_phi is zero.
+/// The elliptic complement is computed directly as `((a-R)^2 + z^2) / Q`,
+/// where `Q = (a+R)^2 + z^2`, to avoid rounding the elliptic parameter to one
+/// near the filament. The ideal filament remains singular at the source.
 ///
 /// # References
 ///
@@ -1001,14 +1007,20 @@ pub fn vector_potential_circular_filament_scalar(
     rzifil: (f64, f64, f64),
     rzobs: (f64, f64),
 ) -> f64 {
-    rzobs.0.signum()
-        * vector_potential_circular_filament_thin_scalar(
-            (rzifil.0.abs(), rzifil.1, rzifil.2),
-            (rzobs.0.abs(), rzobs.1),
-        )
+    let (a, r, z) = (rzifil.0.abs(), rzobs.0.abs(), rzobs.1 - rzifil.1);
+    let q = (a + r).mul_add(a + r, z * z);
+    let complement = (a - r).mul_add(a - r, z * z) / q;
+    let m = 4.0 * a * r / q;
+    let c0 = if r == 0.0 {
+        0.0
+    } else {
+        ((2.0 - m) * ellipk_complement(complement) - 2.0 * ellipe_complement(complement)) / m
+    };
+    rzobs.0.signum() * (c0 * (MU0_OVER_4PI * rzifil.2 * 4.0 * a / q.sqrt()))
 }
 
-// Original ideal-filament formula, also used by the private vector test reference.
+// Original ideal-filament formula retained independently for regression tests.
+#[cfg(test)]
 #[inline]
 fn vector_potential_circular_filament_thin_scalar(
     rzifil: (f64, f64, f64),
@@ -1046,7 +1058,7 @@ fn vector_potential_circular_filament_thin_scalar(
 /// Arguments are `(major radius a, z, current)` in (m, m, A-turns), conductor
 /// cross-section radius `b = wire_radius` in m, and observation `(R, Z)` in m.
 /// Requires `b/|a| << 1`. Returns A_phi in V-s/m. Wire radius is taken by magnitude;
-/// zero wire radius preserves [vector_potential_circular_filament_scalar].
+/// zero wire radius uses [vector_potential_circular_filament_scalar].
 /// Signed radii follow that function's convention.
 ///
 /// At centerline distance `s <= 1.5b`, use
@@ -1083,7 +1095,7 @@ pub fn vector_potential_circular_filament_finite_thickness_scalar(
             rzobs,
         );
     }
-    let far = vector_potential_circular_filament_far(rzifil, rzobs);
+    let far = vector_potential_circular_filament_scalar(rzifil, rzobs);
     if s2 >= FAR_FIELD_LIMIT_SQUARED {
         return far;
     }
@@ -1094,22 +1106,6 @@ pub fn vector_potential_circular_filament_finite_thickness_scalar(
     w.mul_add(far - near, near)
 }
 
-// Same ideal-loop formula, evaluated from the elliptic complement so very thin
-// wires do not round m to 1 in the blend. Keep zero-wire-radius arithmetic intact.
-#[inline]
-fn vector_potential_circular_filament_far(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
-    let (a, r, z) = (rzifil.0.abs(), rzobs.0.abs(), rzobs.1 - rzifil.1);
-    let q = (a + r).mul_add(a + r, z * z);
-    let complement = (a - r).mul_add(a - r, z * z) / q;
-    let m = 4.0 * a * r / q;
-    let c0 = if r == 0.0 {
-        0.0
-    } else {
-        ((2.0 - m) * ellipk_complement(complement) - 2.0 * ellipe_complement(complement)) / m
-    };
-    rzobs.0.signum() * (c0 * (MU0_OVER_4PI * rzifil.2 * 4.0 * a / q.sqrt()))
-}
-
 /// A_phi inside and near a circular loop with a finite circular conductor section.
 /// Signed radii follow [vector_potential_circular_filament_scalar]; formulas below
 /// use the magnitudes of the major and observation radii.
@@ -1118,7 +1114,7 @@ fn vector_potential_circular_filament_far(rzifil: (f64, f64, f64), rzobs: (f64, 
 /// `wire_radius / |rfil| << 1`, and observation distance comparable to the wire radius.
 /// Positive radii use the Hurwitz near-conductor approximation throughout; this
 /// is not a global thick-torus solution. Zero radius delegates to
-/// [vector_potential_circular_filament_scalar], preserving its singularities.
+/// [vector_potential_circular_filament_scalar], including its ideal source singularity.
 ///
 /// # Arguments
 ///
@@ -1789,19 +1785,17 @@ mod test {
                             let mut actual = vec![99.0; nobs];
                             calc(source, &radii, obs, &mut actual).unwrap();
                             for ((a, old), r) in actual.iter().zip(&old_a).zip(&robs) {
-                                assert!((a.is_nan() && old.is_nan()) || *a == *old * r.signum());
+                                let expected = if *r == 0.0 { 0.0 } else { *old * r.signum() };
+                                assert!(approx(expected, *a, 5e-12, 1e-18));
                             }
                         }
                         for calc in [flux_circular_filament, flux_circular_filament_par] {
                             let mut actual = vec![99.0; nobs];
                             calc(source, &radii, obs, &mut actual).unwrap();
-                            for (flux, old) in actual.iter().zip(&old_flux) {
-                                // Scaling after summation changes rounding; preserve
-                                // the old formula's accuracy and axis singularity.
-                                assert!(
-                                    (flux.is_nan() && old.is_nan())
-                                        || approx(*flux, *old, 5e-12, 1e-18 * scale)
-                                );
+                            for ((flux, old), r) in actual.iter().zip(&old_flux).zip(&robs) {
+                                // Equivalent algebra changes roundoff; the axis now uses its limit.
+                                let expected = if *r == 0.0 { 0.0 } else { *old };
+                                assert!(approx(expected, *flux, 5e-12, 1e-18 * scale));
                             }
                         }
                     }
@@ -1929,9 +1923,11 @@ mod test {
                         let actual = vector_potential_circular_filament_finite_thickness_scalar(
                             filament, radius, obs,
                         );
-                        // Preserve all existing behavior, including NaN on the
-                        // symmetry axis and the ideal source singularity.
+                        // Zero radius delegates to the ideal kernel, including its source singularity.
                         assert_eq!(actual.to_bits(), expected.to_bits());
+                        if r == 0.0 {
+                            assert_eq!(actual, 0.0);
+                        }
                     }
                 }
             }
@@ -2001,11 +1997,11 @@ mod test {
             );
         }
         // Direct complement remains finite even when the usual m rounds to one.
-        for b in [1e-8, 1e-12] {
+        for (b, finite) in itertools::iproduct!([1e-8, 1e-12], [false, true]) {
             for s in [2.0, 4.0] {
                 let a = vector_potential_circular_filament_finite_thickness_scalar(
                     (1.0, 0.0, 1.0),
-                    b,
+                    if finite { b } else { 0.0 },
                     (1.0, s * b),
                 );
                 let leading = MU0_OVER_4PI * (2.0 * (8.0 / (s * b)).ln() - 4.0);

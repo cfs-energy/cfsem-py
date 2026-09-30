@@ -985,6 +985,10 @@ def test_flux_density_circular_filament_on_axis(par):
     np.testing.assert_array_equal(br, 0.0)
     np.testing.assert_allclose(bz, expected_bz, rtol=rtol, atol=0.0)
 
+    for calc in (cfsem.vector_potential_circular_filament, cfsem.flux_circular_filament):
+        for wire in (None, np.zeros_like(ifil), np.full_like(ifil, 0.001)):
+            np.testing.assert_array_equal(calc(ifil, rfil, zfil, robs, zobs, par, wire), 0.0)
+
     bx, by, bz = cfsem.flux_density_circular_filament_cartesian(
         ifil,
         rfil,

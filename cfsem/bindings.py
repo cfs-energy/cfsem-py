@@ -215,7 +215,7 @@ def vector_potential_circular_filament(
     use the Hurwitz uniform-current, circular-section approximation near conductors,
     blending to the ideal-filament potential between 1.5 and 3 wire radii from the
     centerline. Requires wire radius small relative to loop radius. Finite-section
-    corrections are neglected in the far field; positive-radius A_phi is zero on axis.
+    corrections are neglected in the far field. A_phi is zero on the symmetry axis.
 
     Only A_phi is nonzero. Its curl includes a derivative of the blending weight,
     so it differs from the separately blended B-field kernel.

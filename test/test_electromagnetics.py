@@ -888,6 +888,57 @@ def test_circular_negative_wire_radius_nan(par, nobs, radius):
 
 
 @mark.parametrize("par", [True, False])
+def test_circular_finite_radius_blend_and_far_field(par):
+    # Unit loop, b/a=.01: independent uniform-J cross-section quadrature.
+    # Gauss-Legendre radial / midpoint angular orders 64/256 and 96/384 agree to 1e-9.
+    r = np.array([1.0, 0.988, 1.02, 1.0, 0.982, 1.04, 1.0, 0.0])
+    z = np.array([0.015, 0.016, 0.0, 0.025, 0.024, 0.0, 10.0, 10.0])
+    expected = (
+        cfsem.MU_0
+        / (4 * np.pi)
+        * np.array(
+            [
+                [133.272965286997, 80.3615478215542, 0.0, 79.9079909884819, 53.7056093252171, 0.0],
+                [
+                    5.39003743720978,
+                    65.4098491497257,
+                    -94.1467219114031,
+                    4.80779121261902,
+                    45.0095655376613,
+                    -44.847395671673,
+                ],
+            ]
+        )
+    )
+    actual = np.asarray(
+        cfsem.flux_density_circular_filament([1.0], [1.0], [0.0], r, z, par, wire_radius=[0.01])
+    )
+    error = np.linalg.norm(actual[:, :6] - expected, axis=0) / np.linalg.norm(expected, axis=0)
+    assert np.all(error < 1e-3)
+    thin = cfsem.flux_density_circular_filament([1.0], [1.0], [0.0], r[-2:], z[-2:], par)
+    np.testing.assert_allclose(actual[:, -2:], thin, rtol=1e-9, atol=1e-20)
+    assert actual[0, -1] == 0.0
+
+    phi = np.arange(len(r)) * 0.7
+    obs = (r * np.cos(phi), r * np.sin(phi), z)
+    loc = ([0.0], [0.0], [0.0])
+    normal = ([0.0], [0.0], [1.0])
+    bxyz = np.asarray(
+        cfsem.flux_density_circular_filament_cartesian(
+            [1.0], [1.0], loc, normal, obs, par, wire_radius=[0.01]
+        )
+    )
+    np.testing.assert_allclose(
+        bxyz, [actual[0] * np.cos(phi), actual[0] * np.sin(phi), actual[1]], rtol=1e-10, atol=1e-18
+    )
+    jobs = (np.ones(len(r)), np.full(len(r), 2.0), np.full(len(r), -3.0))
+    force = cfsem.body_force_density_circular_filament_cartesian(
+        [1.0], [1.0], loc, normal, obs, jobs, par, wire_radius=[0.01]
+    )
+    np.testing.assert_allclose(force, np.cross(np.asarray(jobs).T, bxyz.T).T, rtol=1e-12, atol=1e-18)
+
+
+@mark.parametrize("par", [True, False])
 def test_flux_density_circular_filament_on_axis(par):
     # Superpose translated loops with both current signs. Include signed zero,
     # loop centers, and distant axial points where elliptic terms can cancel.

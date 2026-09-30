@@ -213,8 +213,9 @@ def vector_potential_circular_filament(
     and near conductors whose wire radius is small relative to their loop radius.
     This positive-radius model is not a global thick-torus solution.
 
-    Only A_phi is nonzero. Recover B using the cylindrical curl; the finite-radius
-    A and B models agree to their retained asymptotic order.
+    Only A_phi is nonzero. Its cylindrical curl agrees with the local finite-radius
+    B model to retained asymptotic order. The B API additionally blends to a far-field
+    kernel; this potential does not include that transition.
 
     For formulas and references, see the Rust [finite-thickness scalar][finite_scalar]
     and [ideal-filament scalar][thin_scalar] implementations.
@@ -258,9 +259,11 @@ def flux_density_circular_filament(
 
     With omitted or zero wire radii, uses ideal filaments, including the on-axis
     approximation for R/a <= 1e-4. Ideal filaments remain singular at their source.
-    Positive wire radii use the Hurwitz uniform-current, circular-section model,
-    valid inside and near conductors whose wire radius is small relative to their
-    loop radius. This positive-radius model is not a far-field approximation.
+    Positive wire radii use the Hurwitz uniform-current, circular-section model
+    near the conductor, smoothly blending to the ideal-filament field between
+    1.5 and 3 wire radii from its centerline. Requires wire radius small relative
+    to loop radius. This direct B blend need not be divergence-free in the band;
+    the finite-radius vector potential and flux remain local approximations.
 
     For field formulas, numerical treatment, and references, see the Rust
     [finite-radius scalar implementation][finite_radius_scalar] and the
@@ -1323,8 +1326,9 @@ def flux_density_circular_filament_cartesian(
     Observation coordinates and returned vectors use the world Cartesian frame.
     Each loop has its own center and normal.
 
-    Positive wire radii use the uniform-current circular-section approximation,
-    valid inside and near conductors with wire radius small relative to loop radius.
+    Positive wire radii use the uniform-current circular-section approximation
+    near the conductor and blend to the ideal-filament field between 1.5 and 3
+    wire radii from its centerline. Requires wire radius small relative to loop radius.
     Zero radii use the ideal-filament field, including its on-axis treatment.
 
     Invalid geometry propagates as NaNs; inconsistent array lengths raise an error.
@@ -1470,8 +1474,9 @@ def body_force_density_circular_filament_cartesian(
     Observation coordinates, current densities (when supplied), and returned
     vectors use the world Cartesian frame. Each loop has its own center and normal.
 
-    Positive wire radii use the uniform-current circular-section approximation,
-    valid inside and near conductors with wire radius small relative to loop radius.
+    Positive wire radii use the uniform-current circular-section approximation
+    near the conductor and blend to the ideal-filament field between 1.5 and 3
+    wire radii from its centerline. Requires wire radius small relative to loop radius.
     Zero radii use the ideal-filament field, including its on-axis treatment.
 
     Invalid geometry propagates as NaNs; inconsistent array lengths raise an error.

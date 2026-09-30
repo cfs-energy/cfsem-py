@@ -3,6 +3,7 @@
 use cfsem::physics::{
     circular_filament::{
         flux_circular_filament_par, flux_density_circular_filament_finite_radius_scalar,
+        flux_density_circular_filament_finite_radius_scalar_near,
         flux_density_circular_filament_par, flux_density_circular_filament_scalar,
         vector_potential_circular_filament, vector_potential_circular_filament_par,
     },
@@ -255,7 +256,7 @@ fn bench_vector_potential_near_conductor(c: &mut Criterion) {
     // Nonsingular points in the finite-thickness model's domain of validity.
     // Compare zero and positive per-source radii with identical geometry.
     let wire_radius = 0.01;
-    for (region, u, v) in [("interior", 0.3, 0.4), ("near exterior", 0.9, 1.2)] {
+    for (region, u, v) in [("interior", 0.3, 0.4), ("near exterior", 0.6, 1.0)] {
         for nobs in [1000, 100, 10, 1] {
             let nfils = 10_000 / nobs;
             let rfil = vec![1.0; nfils];
@@ -296,7 +297,13 @@ fn bench_flux_density_finite_radius_scalar(c: &mut Criterion) {
     // physically from the uniform-current finite-radius field inside the wire.
     let filament = (1.0, 0.25, 3.0);
     let wire_radius = 0.01;
-    for (name, u, v) in [("interior", 0.3, 0.4), ("near exterior", 0.9, 1.2)] {
+    for (name, u, v) in [
+        ("interior", 0.3, 0.4),
+        ("near exterior", 0.6, 1.0),
+        ("blend", 1.2, 1.6),
+        ("far", 0.0, 1000.0),
+        ("axis", -100.0, 1000.0),
+    ] {
         let obs = (filament.0 + u * wire_radius, filament.1 + v * wire_radius);
         let input = (filament, wire_radius, obs);
         group.bench_with_input(BenchmarkId::new(name, "thin"), &input, |b, &input| {
@@ -305,6 +312,16 @@ fn bench_flux_density_finite_radius_scalar(c: &mut Criterion) {
                 black_box(flux_density_circular_filament_scalar(filament, obs))
             });
         });
+        if name == "interior" || name == "near exterior" || name == "blend" {
+            group.bench_with_input(BenchmarkId::new(name, "near only"), &input, |b, &input| {
+                b.iter(|| {
+                    let (filament, radius, obs) = black_box(input);
+                    black_box(flux_density_circular_filament_finite_radius_scalar_near(
+                        filament, radius, obs,
+                    ))
+                });
+            });
+        }
         group.bench_with_input(
             BenchmarkId::new(name, "finite radius"),
             &input,

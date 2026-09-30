@@ -486,15 +486,20 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
     wire_radius: f64,
     rzobs: (f64, f64),
 ) -> (f64, f64) {
+    // Handle erroneous inputs in a sensible way
+    let wire_radius = wire_radius.abs();
+
+    // Zero-radius shortcut to fast far-field kernel
     if wire_radius == 0.0 {
         return flux_density_circular_filament_scalar(rzifil, rzobs);
     }
-    if wire_radius < 0.0 {
-        return (f64::NAN, f64::NAN);
-    }
+
+    // Check whether we are in the near-field
     let u = (rzobs.0 - rzifil.0) / wire_radius;
     let v = (rzobs.1 - rzifil.1) / wire_radius;
     let s2 = u.mul_add(u, v * v);
+
+    // Calculate near-field kernel if we are concretely near-field
     if s2 <= NEAR_FIELD_LIMIT_SQUARED {
         return flux_density_circular_filament_finite_radius_scalar_near(
             rzifil,
@@ -502,6 +507,8 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
             rzobs,
         );
     }
+
+    // Calculate far-field kernel
     let far = if rzobs.0.abs() <= ON_AXIS_RADIUS_RATIO * rzifil.0.abs() {
         flux_density_circular_filament_on_axis(rzifil, rzobs.1)
     } else {
@@ -509,12 +516,20 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
         // round to zero. Evaluate the same thin formula from its complement.
         flux_density_circular_filament_off_axis_kernel::<true>(rzifil, rzobs)
     };
+
+    // F
     if s2 >= FAR_FIELD_LIMIT_SQUARED {
         return far;
     }
+    
+    // Blending branch
+
+    // Calculate near-field approximation
     let near = flux_density_circular_filament_finite_radius_scalar_near(rzifil, wire_radius, rzobs);
+    // Calculate blending parameter and weights for near and far-field for blending
     let t = (s2 - NEAR_FIELD_LIMIT_SQUARED) / (FAR_FIELD_LIMIT_SQUARED - NEAR_FIELD_LIMIT_SQUARED);
     let w = t * t * t * (10.0 + t * (-15.0 + 6.0 * t));
+    // Blend the near-field and far-field solutions
     (
         w.mul_add(far.0 - near.0, near.0),
         w.mul_add(far.1 - near.1, near.1),

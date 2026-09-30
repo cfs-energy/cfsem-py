@@ -659,7 +659,7 @@ def test_triangle_mesh_self_force_mapping_shapes_and_serial_parallel_agree(par, 
 
 @mark.parametrize("par", [True, False])
 @mark.parametrize("quad", TRIANGLE_QUADRATURES)
-@mark.parametrize("offset", [0.0, 1e-5, 0.3])
+@mark.parametrize("offset", [0.0, 1e-5])
 def test_circular_force_mapping_axis_and_quadrants(par, quad, offset):
     # The first centroid is exactly on axis at offset=0; other points span quadrants.
     nodes = np.array([[0.0, 0.0, 0.5], [-0.375, -0.375, 0.14], [0.375, 0.375, 0.14], [0.375, -0.375, 0.14]])

@@ -33,8 +33,7 @@ use super::{
 use crate::math::{cartesian_to_cylindrical, cross3, dot3};
 use crate::mesh::TriangleMeshView;
 use crate::physics::circular_filament::{
-    flux_circular_filament_scalar, flux_density_circular_filament_cartesian_scalar,
-    vector_potential_circular_filament_scalar,
+    flux_density_circular_filament_cartesian_scalar, vector_potential_circular_filament_scalar,
 };
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::current_element::{
@@ -1773,7 +1772,10 @@ fn test_triangle_strip_mutual_inductance_against_circular_filament() {
 
     let m_strip = strip_mutual_inductance(&strip_src, &strip_tgt);
     let m_strip_reverse = strip_mutual_inductance(&strip_tgt, &strip_src);
-    let m_loop = flux_circular_filament_scalar((radius, z_src, 1.0), 0.0, (radius, z_tgt));
+    let m_loop = 2.0
+        * PI
+        * radius
+        * vector_potential_circular_filament_scalar((radius, z_src, 1.0), (radius, z_tgt));
 
     assert!(
         approx(m_loop, m_strip, 1e-3, 1e-12),

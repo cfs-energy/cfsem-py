@@ -10,7 +10,7 @@ use super::{
 };
 use crate::math::cross3;
 use crate::mesh::TriangleMeshView;
-use crate::physics::circular_filament::flux_density_circular_filament_cartesian_scalar;
+use crate::physics::circular_filament::flux_density_circular_filament_scalar;
 use crate::physics::linear_filament::flux_density_linear_filament_scalar;
 use crate::physics::point_source::dipole::flux_density_dipole_scalar;
 
@@ -530,6 +530,19 @@ pub fn triangle_mesh_force_mapping_from_linear_filaments_par(
     Ok(())
 }
 
+// These sources are centered on the z-axis, so no arbitrary-pose transform is needed.
+#[inline]
+fn axisymmetric_circular_field(rzifil: (f64, f64, f64), obs: (f64, f64, f64)) -> (f64, f64, f64) {
+    let (x, y, z) = obs;
+    let r = (x * x + y * y).sqrt();
+    let (br, bz) = flux_density_circular_filament_scalar(rzifil, (r, z));
+    if r == 0.0 {
+        (0.0, 0.0, bz)
+    } else {
+        (br * (x / r), br * (y / r), bz)
+    }
+}
+
 /// Assemble the frozen-target source-current to target-triangle force mapping for circular
 /// filament sources.
 #[inline]
@@ -567,11 +580,8 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments(
                 quad_kind,
                 |_, obs, bout| {
                     for i in 0..obs.0.len() {
-                        let b = flux_density_circular_filament_cartesian_scalar(
-                            (rfil[ifil], 1.0),
-                            (0.0, 0.0, zfil[ifil]),
-                            (0.0, 0.0, 1.0),
-                            0.0,
+                        let b = axisymmetric_circular_field(
+                            (rfil[ifil], zfil[ifil], 1.0),
                             (obs.0[i], obs.1[i], obs.2[i]),
                         );
                         bout.0[i] = b.0; // [T/A]
@@ -628,11 +638,8 @@ pub fn triangle_mesh_force_mapping_from_circular_filaments_par(
                     quad_kind,
                     |_, obs, bout| {
                         for i in 0..obs.0.len() {
-                            let b = flux_density_circular_filament_cartesian_scalar(
-                                (rfil[ifil], 1.0),
-                                (0.0, 0.0, zfil[ifil]),
-                                (0.0, 0.0, 1.0),
-                                0.0,
+                            let b = axisymmetric_circular_field(
+                                (rfil[ifil], zfil[ifil], 1.0),
                                 (obs.0[i], obs.1[i], obs.2[i]),
                             );
                             bout.0[i] = b.0;

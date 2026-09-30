@@ -183,15 +183,15 @@ def flux_circular_filament(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular conductor-section radius per source, same length
             as ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Negative radii produce NaNs.
 
     Returns:
         [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    wire_radius = (
-        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
-    )
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
     psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return psi  # [Wb] or [T-m^2] or [V-s]
 
@@ -231,15 +231,15 @@ def vector_potential_circular_filament(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular conductor-section radius per source, same length
             as ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Negative radii produce NaNs.
 
     Returns:
         [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    wire_radius = (
-        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
-    )
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
     a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return a_phi  # [Wb/m] or [V-s/m]
 
@@ -278,15 +278,15 @@ def flux_density_circular_filament(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular conductor-section radius per source, same length
             as ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Negative radii produce NaNs.
 
     Returns:
         [T] (Br, Bz) flux density components
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    wire_radius = (
-        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
-    )
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
     br, bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return br, bz  # [T]
 
@@ -1320,8 +1320,8 @@ def flux_density_circular_filament_cartesian(
     [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_cartesian_scalar.html
     [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_finite_radius_scalar.html
 
-    Observation coordinates, current densities (when supplied), and returned
-    vectors use the world Cartesian frame. Each loop has its own center and normal.
+    Observation coordinates and returned vectors use the world Cartesian frame.
+    Each loop has its own center and normal.
 
     Positive wire radii use the uniform-current circular-section approximation,
     valid inside and near conductors with wire radius small relative to loop radius.
@@ -1340,6 +1340,7 @@ def flux_density_circular_filament_cartesian(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular cross-section radius per source, same length as
             ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Negative radii produce NaNs.
 
     Returns:
         [T] flux density
@@ -1347,9 +1348,8 @@ def flux_density_circular_filament_cartesian(
     ifil, rfil = _2tup_contig((ifil, rfil))
     loc = _3tup_contig(loc)
     normal = _3tup_contig(normal)
-    wire_radius = (
-        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
-    )
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
     xyzp = _3tup_contig(xyzp)
     bx, by, bz = em_flux_density_circular_filament_cartesian(
         ifil, rfil, loc, normal, xyzp, par, wire_radius
@@ -1488,6 +1488,7 @@ def body_force_density_circular_filament_cartesian(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular cross-section radius per source, same length as
             ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Negative radii produce NaNs.
 
     Returns:
         [N/m^3] body force density
@@ -1495,9 +1496,8 @@ def body_force_density_circular_filament_cartesian(
     ifil, rfil = _2tup_contig((ifil, rfil))
     loc = _3tup_contig(loc)
     normal = _3tup_contig(normal)
-    wire_radius = (
-        zeros_like(ifil) if wire_radius is None else ascontiguousarray(wire_radius, dtype=float64).ravel()
-    )
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(

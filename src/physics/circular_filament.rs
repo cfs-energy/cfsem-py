@@ -302,85 +302,49 @@ fn accumulate_flux_density(
     }
 }
 
-// Preserved thin-filament vector kernel for independent zero-radius regression tests.
+// Original off-axis kernels from 4639769, independent of production dispatch and helpers.
+// The intentional on-axis change is covered separately by analytic-axis tests.
 #[cfg(test)]
 fn flux_density_circular_filament_thin(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
     out: (&mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
+    // Unpack
     let (rfil, zfil, ifil) = rzifil;
     let (rprime, zprime) = rzobs;
     let (out_r, out_z) = out;
 
+    // Check lengths
     let n = ifil.len();
     let m = rprime.len();
     check_length_3tup!(n, &rzifil);
     check_length!(m, &out_r, &out_z);
 
+    // Zero output
     out_r.fill(0.0);
     out_z.fill(0.0);
 
-    // With one observation point there is no observation loop to vectorize.
-    // Sum scalar contributions directly to avoid per-filament run dispatch.
-    if m == 1 {
-        for i in 0..n {
+    // There aren't necessarily more observation points or filaments, depending on the use case.
+    // The more common extreme is to see a very large number of filaments evaluated at a smaller
+    // number of observation points. However, this particular calc suffers badly when iterating
+    // over observation points first, so to capture a 50% speedup for cases with >=10 observation
+    // points at the expense of a 30% slowdown for evaluating single observation points, we
+    // iterate over filaments first here.
+    for i in 0..n {
+        for j in 0..m {
+            // The inner function is inlined, so values that are reused between iterations
+            // can be pulled to the outer scope by the compiler and do not affect performance
             let (br, bz) = flux_density_circular_filament_thin_scalar(
                 (rfil[i], zfil[i], ifil[i]),
-                (rprime[0], zprime[0]),
+                (rprime[j], zprime[j]),
             );
-            out_r[0] += br;
-            out_z[0] += bz;
-        }
-        return Ok(());
-    }
-
-    // Outside the largest filament's cutoff, every contribution is off-axis.
-    // Group observation points once to preserve the branch-free off-axis loop.
-    let max_filament_radius = rfil.iter().map(|r| r.abs()).fold(0.0, f64::max);
-    let max_cutoff = ON_AXIS_RADIUS_RATIO * max_filament_radius;
-    let mut start = 0;
-    for radii in rprime.chunk_by(|a, b| (a.abs() <= max_cutoff) == (b.abs() <= max_cutoff)) {
-        let end = start + radii.len();
-        let obs = (radii, &zprime[start..end]);
-        let out = (&mut out_r[start..end], &mut out_z[start..end]);
-        if radii[0].abs() <= max_cutoff {
-            // The scalar kernel checks each filament's own cutoff.
-            accumulate_flux_density_thin(
-                rzifil,
-                obs,
-                out,
-                flux_density_circular_filament_thin_scalar,
-            );
-        } else {
-            accumulate_flux_density_thin(rzifil, obs, out, |filament, observation| {
-                flux_density_circular_filament_off_axis(filament, observation)
-            });
-        }
-        start = end;
-    }
-
-    Ok(())
-}
-
-#[cfg(test)]
-#[inline]
-fn accumulate_flux_density_thin(
-    rzifil: (&[f64], &[f64], &[f64]),
-    rzobs: (&[f64], &[f64]),
-    out: (&mut [f64], &mut [f64]),
-    field: impl Fn((f64, f64, f64), (f64, f64)) -> (f64, f64),
-) {
-    let (rfil, zfil, ifil) = rzifil;
-    let (rprime, zprime) = rzobs;
-    let (out_r, out_z) = out;
-    for i in 0..ifil.len() {
-        for j in 0..rprime.len() {
-            let (br, bz) = field((rfil[i], zfil[i], ifil[i]), (rprime[j], zprime[j]));
             out_r[j] += br;
             out_z[j] += bz;
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -388,10 +352,39 @@ fn flux_density_circular_filament_thin_scalar(
     rzifil: (f64, f64, f64),
     rzobs: (f64, f64),
 ) -> (f64, f64) {
-    if rzobs.0.abs() <= ON_AXIS_RADIUS_RATIO * rzifil.0.abs() {
-        return flux_density_circular_filament_on_axis(rzifil, rzobs.1);
-    }
-    flux_density_circular_filament_off_axis(rzifil, rzobs)
+    // Unpack
+    let (rfil, zfil, ifil) = rzifil;
+    let (rprime, zprime) = rzobs;
+
+    // Evaluate
+    let z = zprime - zfil; // [m]
+
+    let z2 = z * z; // [m^2]
+    let r2 = rprime * rprime; // [m^2]
+
+    let rpr = rfil + rprime; // [m]
+
+    let q = rpr.mul_add(rpr, z2); // [m^2]
+    let k2 = 4.0 * rfil * rprime / q; // [nondim]
+
+    let a0 = 2.0 * ifil / q.sqrt(); // [A/m]
+
+    let f = ellipk(k2); // [nondim]
+    let s = ellipe(k2) / (1.0 - k2); // [nondim]
+
+    // Bake some reusable values
+    let s_over_q = s / q; // [m^-2]
+    let rfil2 = rfil * rfil; // [m^2]
+
+    // Magnetic field intensity, less the factor of 4pi that we have adjusted out of mu_0
+    let hr = (z / rprime) * a0 * s_over_q.mul_add(rfil2 + r2 + z2, -f);
+    let hz = a0 * s_over_q.mul_add(rfil2 - r2 - z2, f);
+
+    // Magnetic flux density assuming vacuum permeability
+    let br = MU0_OVER_4PI * hr;
+    let bz = MU0_OVER_4PI * hz;
+
+    (br, bz)
 }
 
 /// Br,Bz components for a circular current filament in vacuum, including on the axis.
@@ -502,6 +495,8 @@ pub fn flux_density_circular_filament_scalar(
 /// $B_Z=B_{\mathrm{reg},Z}+3\mu_0 I/(16\pi a)$, approaching
 /// $\mu_0 I\ln(8a/b)/(4\pi a)$ for $b/a\to0$.
 ///
+/// Negative wire radii return NaNs.
+///
 /// # References
 ///
 /// \[1\] S. Hurwitz, M. Landreman, and T. M. Antonsen Jr.,
@@ -530,6 +525,9 @@ fn flux_density_circular_filament_finite_radius_off_axis(
 ) -> (f64, f64) {
     if wire_radius == 0.0 {
         return flux_density_circular_filament_off_axis(rzifil, rzobs);
+    }
+    if wire_radius < 0.0 {
+        return (f64::NAN, f64::NAN);
     }
 
     let (rfil, zfil, ifil) = rzifil;
@@ -1025,6 +1023,8 @@ fn vector_potential_circular_filament_thin_scalar(
 /// Both branches and their first derivatives agree at the surface. At the
 /// centerline, $A_\phi=\mu_0 I[2\ln(8a/b)-3]/(4\pi)$ is finite.
 ///
+/// Negative wire radii return NaNs.
+///
 /// # References
 ///
 /// \[1\] S. Hurwitz, M. Landreman, and T. M. Antonsen Jr.,
@@ -1039,6 +1039,9 @@ pub fn vector_potential_circular_filament_finite_thickness_scalar(
 ) -> f64 {
     if wire_radius == 0.0 {
         return vector_potential_circular_filament_scalar(rzifil, rzobs);
+    }
+    if wire_radius < 0.0 {
+        return f64::NAN;
     }
 
     let (rfil, zfil, ifil) = rzifil;
@@ -1919,13 +1922,14 @@ mod test {
     }
 
     #[test]
-    fn test_zero_radius_vectors_against_preserved_thin_kernel() {
+    fn test_zero_radius_off_axis_vectors_against_preserved_thin_kernel() {
         for scale in [1e-6, 1.0, 1e6] {
             let rfil = [0.5 * scale, scale, 2.0 * scale];
             let zfil = [0.0, scale, -0.5 * scale];
             let current = [2.0, -3.0, 0.7];
             let radii = [0.0; 3];
-            let robs = [0.0, 1e-6, 0.1, 1e-4, 2e-4, 1.0, 0.0].map(|r| r * scale);
+            // Stay outside every source's axis cutoff; the original kernel was singular on axis.
+            let robs = [3e-4, 0.01, 0.1, 0.3, 0.6, 1.0, 2.5].map(|r| r * scale);
             let zobs = [0.25 * scale; 7];
             for nsrc in [0, 1, 3] {
                 for nobs in [0, 1, 7] {
@@ -2015,6 +2019,40 @@ mod test {
             assert_eq!(bz, [4.0; 2]);
             // Empty observation arrays must not bypass source/radius validation.
             assert!(calc(source, &[], (&[], &[]), (&mut [], &mut [])).is_err());
+        }
+    }
+
+    #[test]
+    fn test_negative_wire_radius_scalar_nan() {
+        let source = (1.0, 0.0, 1.0);
+        for radius in [-0.01, -1e-300, f64::NEG_INFINITY, f64::NAN] {
+            for obs in [(0.0, 1.0), (1.0, 0.0), (1.003, 0.004), (1.02, 0.01)] {
+                let b = flux_density_circular_filament_finite_radius_scalar(source, radius, obs);
+                assert!(b.0.is_nan() && b.1.is_nan());
+                assert!(vector_potential_circular_filament_finite_thickness_scalar(
+                    source, radius, obs,
+                ).is_nan());
+                assert!(flux_circular_filament_scalar(source, radius, obs).is_nan());
+                let xyz = (obs.0, 0.0, obs.1);
+                let loc = (0.0, 0.0, 0.0);
+                let normal = (0.0, 0.0, 1.0);
+                let b = flux_density_circular_filament_cartesian_scalar(
+                    (1.0, 1.0),
+                    loc,
+                    normal,
+                    radius,
+                    xyz,
+                );
+                let f = body_force_density_circular_filament_cartesian_scalar(
+                    (1.0, 1.0),
+                    loc,
+                    normal,
+                    radius,
+                    xyz,
+                    (1.0, 2.0, 3.0),
+                );
+                assert!([b.0, b.1, b.2, f.0, f.1, f.2].iter().all(|v| v.is_nan()));
+            }
         }
     }
 

@@ -855,6 +855,39 @@ def test_flux_density_circular_filament_wire_radius_length_error(par, nobs, radi
 
 
 @mark.parametrize("par", [True, False])
+@mark.parametrize("nobs", [0, 1, 4])
+@mark.parametrize("radius", [-0.01, np.nan])
+def test_circular_negative_wire_radius_nan(par, nobs, radius):
+    import cfsem.cfsem as raw
+
+    # A bad source must contaminate the sum even when surrounded by valid sources.
+    current = np.ones(3)
+    rfil = np.ones(3)
+    zfil = np.zeros(3)
+    wire_radius = np.array([0.0, radius, 0.01])
+    robs = np.array([1.003, 0.0, 1.0, 1.02])[:nobs]
+    zobs = np.array([0.004, 1.0, 0.0, 0.01])[:nobs]
+    loc = (zfil, zfil, zfil)
+    normal = (zfil, zfil, current)
+    obs = (robs, np.zeros(nobs), zobs)
+    jobs = (np.ones(nobs), np.ones(nobs), np.ones(nobs))
+    for api in (cfsem, raw):
+        for name in (
+            "flux_circular_filament",
+            "vector_potential_circular_filament",
+            "flux_density_circular_filament",
+        ):
+            result = getattr(api, name)(current, rfil, zfil, robs, zobs, par, wire_radius)
+            assert np.all(np.isnan(result))
+        b = api.flux_density_circular_filament_cartesian(current, rfil, loc, normal, obs, par, wire_radius)
+        force = api.body_force_density_circular_filament_cartesian(
+            current, rfil, loc, normal, obs, jobs, par, wire_radius
+        )
+        assert np.all(np.isnan(b))
+        assert np.all(np.isnan(force))
+
+
+@mark.parametrize("par", [True, False])
 def test_flux_density_circular_filament_on_axis(par):
     # Superpose translated loops with both current signs. Include signed zero,
     # loop centers, and distant axial points where elliptic terms can cancel.

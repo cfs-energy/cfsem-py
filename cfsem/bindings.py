@@ -86,6 +86,9 @@ from .cfsem import (
     vector_potential_circular_filament as em_vector_potential_circular_filament,
 )
 from .cfsem import (
+    vector_potential_circular_filament_cartesian as em_vector_potential_circular_filament_cartesian,
+)
+from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
 from .cfsem import vector_potential_linear_filament_hierarchical
@@ -1365,6 +1368,49 @@ def flux_density_circular_filament_cartesian(
     )  # [T]
 
     return bx, by, bz
+
+
+def vector_potential_circular_filament_cartesian(
+    ifil: NDArray[float64],
+    rfil: NDArray[float64],
+    loc: Array3xN,
+    normal: Array3xN,
+    xyzp: Array3xN,
+    par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
+) -> Array3xN:
+    """Vector potential from independently located and oriented circular conductors.
+
+    Observation coordinates and returned vectors use the world Cartesian frame.
+    See [vector_potential_circular_filament][cfsem.vector_potential_circular_filament]
+    for the near/far blend, validity limits, and references, and the Rust
+    [Cartesian scalar implementation][cartesian_scalar] for coordinate conversion.
+    The potential is zero on the loop axis. Invalid geometry propagates as NaNs;
+    inconsistent array lengths raise an error.
+
+    [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.vector_potential_circular_filament_cartesian_scalar.html
+
+    Args:
+        ifil: [A] current per source
+        rfil: [m] loop major radius per source, interpreted by magnitude
+        loc: [m] loop centers as (x, y, z) arrays, one entry per source
+        normal: Finite nonzero loop normals as (nx, ny, nz) arrays, normalized
+            internally. Positive current follows the right-hand rule.
+        xyzp: [m] observation coordinates as (x, y, z) arrays
+        par: Whether to use CPU parallelism
+        wire_radius: [m] circular cross-section radius per source, interpreted by
+            magnitude. None defaults to zero radii for ideal filaments.
+
+    Returns:
+        (Ax, Ay, Az) arrays in [Wb/m] or [V-s/m].
+    """
+    ifil, rfil = _2tup_contig((ifil, rfil))
+    loc = _3tup_contig(loc)
+    normal = _3tup_contig(normal)
+    xyzp = _3tup_contig(xyzp)
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
+    return em_vector_potential_circular_filament_cartesian(ifil, rfil, loc, normal, xyzp, par, wire_radius)
 
 
 def mutual_inductance_circular_to_linear(

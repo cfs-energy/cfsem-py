@@ -8,6 +8,7 @@ supports arbitrary location and orientation for circular filament cartesian-fram
 and expands domain of circular filament functions to include the left half plane.
 
 * Rust
+    * Add scalar, vector, and parallel Cartesian circular-filament vector potential with per-source centers, normals, and wire radii
     * !Cartesian circular-filament B-field and body-force calculations now take per-source Cartesian centers and normals
     * !Require per-source `wire_radius` in circular-filament calcs
         * Both polar and cartesian variants; flux, vector potential, flux density, body force density
@@ -20,6 +21,7 @@ and expands domain of circular filament functions to include the left half plane
     * Support negative filament radius and negative observation point radius for circular filaments
         * Combined with the elimination of singularities, this expands the circular filament methods to an unbounded and singularity-free domain when wire radius is nonzero.
 * Python
+    * Add `vector_potential_circular_filament_cartesian` with the same pose inputs and optional wire radius as the Cartesian B-field API
     * !Replace `zfil` with required `loc` and `normal` component arrays in Cartesian circular-filament B-field and body-force functions
         * Normals are normalized internally; positive current follows the right-hand rule
     * Add optional per-source `wire_radius` to circular filament calcs; `None` defaults to zero radius

@@ -3625,6 +3625,74 @@ fn flux_density_circular_filament_cartesian(
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
 }
 
+/// Python bindings for cfsemrs::physics::vector_potential_circular_filament_cartesian
+#[pyfunction(signature = (current, rfil, loc, normal, xyzobs, par, wire_radius=None))]
+fn vector_potential_circular_filament_cartesian(
+    current: PyReadonlyArray1<f64>,
+    rfil: PyReadonlyArray1<f64>,
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    normal: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    xyzobs: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Observation point coords
+    par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    let rfil = rfil.as_slice()?;
+    let current = current.as_slice()?;
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(normal);
+    let default_wire_radius;
+    let wire_radius = match wire_radius.as_ref() {
+        Some(radius) => radius.as_slice()?,
+        None => {
+            default_wire_radius = vec![0.0; current.len()];
+            &default_wire_radius
+        }
+    };
+    _3tup_slice_ro!(xyzobs);
+
+    // Initialize output
+    let n = xyzobs.0.len();
+    let (mut ax, mut ay, mut az) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+
+    // Select variant
+    let func = match par {
+        true => physics::circular_filament::vector_potential_circular_filament_cartesian_par,
+        false => physics::circular_filament::vector_potential_circular_filament_cartesian,
+    };
+
+    // Do calculations
+    match func(
+        (rfil, current),
+        loc,
+        normal,
+        wire_radius,
+        xyzobs,
+        (&mut ax, &mut ay, &mut az),
+    ) {
+        Ok(_) => {}
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
+}
+
 /// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
 #[pyfunction]
 fn mutual_inductance_circular_to_linear(
@@ -4607,6 +4675,10 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_circular_filament,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_circular_filament_cartesian,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

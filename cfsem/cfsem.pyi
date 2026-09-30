@@ -270,6 +270,15 @@ def flux_density_circular_filament_cartesian(
     par: bool,
     wire_radius: FloatArray | None = None,
 ) -> ArrayTriple: ...
+def vector_potential_circular_filament_cartesian(
+    current: FloatArray,
+    rfil: FloatArray,
+    loc: ArrayTriple,
+    normal: ArrayTriple,
+    xyzobs: ArrayTriple,
+    par: bool,
+    wire_radius: FloatArray | None = None,
+) -> ArrayTriple: ...
 def mutual_inductance_circular_to_linear(
     rfil: FloatArray,
     zfil: FloatArray,

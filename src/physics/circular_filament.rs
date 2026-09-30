@@ -923,6 +923,135 @@ pub fn flux_density_circular_filament_cartesian_par(
     Ok(())
 }
 
+/// Cartesian vector potential of one translated and oriented circular conductor.
+///
+/// Source location, normal, current orientation, and NaN propagation follow
+/// [flux_density_circular_filament_cartesian_scalar]. The returned `(Ax, Ay, Az)`
+/// is in Wb/m in the world frame. In the local frame, `A = A_phi * e_phi`, with
+/// `e_phi = (-y/R, x/R, 0)` away from the axis and A = 0 on the axis.
+///
+/// See [vector_potential_circular_filament_finite_thickness_scalar] and
+/// [vector_potential_circular_filament_scalar] for the finite-radius blend,
+/// ideal-filament formula, validity limits, and references. The curl of the
+/// blended potential differs from the separately blended B field in the band.
+#[inline]
+pub fn vector_potential_circular_filament_cartesian_scalar(
+    rifil: (f64, f64),
+    loc: (f64, f64, f64),
+    normal: (f64, f64, f64),
+    wire_radius: f64,
+    xyzobs: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let local_to_world = circular_filament_pose(loc, normal);
+    vector_potential_circular_filament_cartesian_kernel(rifil, &local_to_world, wire_radius, xyzobs)
+}
+
+#[inline]
+fn vector_potential_circular_filament_cartesian_kernel(
+    rifil: (f64, f64),
+    local_to_world: &Isometry3<f64>,
+    wire_radius: f64,
+    xyzobs: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let local = local_to_world.inverse_transform_point(&Point3::new(xyzobs.0, xyzobs.1, xyzobs.2));
+    let azimuthal = Vector3::new(-local.y, local.x, 0.0);
+    let r = azimuthal.norm();
+    let a_phi = vector_potential_circular_filament_finite_thickness_scalar(
+        (rifil.0, 0.0, rifil.1),
+        wire_radius,
+        (r, local.z),
+    );
+    let direction = if r == 0.0 {
+        Vector3::zeros()
+    } else {
+        azimuthal / r
+    };
+    // Multiplying by A_phi also preserves NaNs from invalid inputs on the axis.
+    let a = local_to_world.transform_vector(&(direction * a_phi));
+    (a.x, a.y, a.z)
+}
+
+/// Cartesian vector potentials from independently located and oriented circular conductors.
+///
+/// Arguments follow [flux_density_circular_filament_cartesian]; `axyz_out` holds
+/// world-frame `(Ax, Ay, Az)` components in Wb/m, one entry per observation.
+/// Each source pose is constructed once outside the observation loop using
+/// stack storage and caller-provided output buffers; no heap allocation.
+/// See [vector_potential_circular_filament_cartesian_scalar] for field details.
+pub fn vector_potential_circular_filament_cartesian(
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    xyzobs: (&[f64], &[f64], &[f64]),
+    axyz_out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &axyz_out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+    axyz_out.0.fill(0.0);
+    axyz_out.1.fill(0.0);
+    axyz_out.2.fill(0.0);
+    for i in 0..n {
+        // FUTURE: The compiler should hoist this pose construction automatically,
+        // but currently does not. Investigate the missed optimization in rustc/LLVM
+        // and upstream a fix.
+        let local_to_world = circular_filament_pose(
+            (loc.0[i], loc.1[i], loc.2[i]),
+            (normal.0[i], normal.1[i], normal.2[i]),
+        );
+        for j in 0..xyzobs.0.len() {
+            let (ax, ay, az) = vector_potential_circular_filament_cartesian_kernel(
+                (rifil.0[i], rifil.1[i]),
+                &local_to_world,
+                wire_radius[i],
+                (xyzobs.0[j], xyzobs.1[j], xyzobs.2[j]),
+            );
+            axyz_out.0[j] += ax;
+            axyz_out.1[j] += ay;
+            axyz_out.2[j] += az;
+        }
+    }
+    Ok(())
+}
+
+/// Parallel version of [vector_potential_circular_filament_cartesian].
+/// The kernel allocates no buffers; Rayon may allocate when scheduling work.
+pub fn vector_potential_circular_filament_cartesian_par(
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    xyzobs: (&[f64], &[f64], &[f64]),
+    axyz_out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &axyz_out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+    let n = chunksize(xyzobs.0.len());
+    let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
+    let (ax, ay, az) = mut_par_chunks_3tup!(axyz_out, n);
+    (xc, yc, zc, ax, ay, az)
+        .into_par_iter()
+        .try_for_each(|(x, y, z, ax, ay, az)| {
+            vector_potential_circular_filament_cartesian(
+                rifil,
+                loc,
+                normal,
+                wire_radius,
+                (x, y, z),
+                (ax, ay, az),
+            )
+        })?;
+    Ok(())
+}
+
 /// A_phi from circular conductors with per-source circular cross-section radii.
 /// Parallelized over chunks of observation points.
 ///
@@ -1562,6 +1691,24 @@ mod test {
                         (r, local.z),
                     );
                     let local_b = Vector3::new(br * local.x / r, br * local.y / r, bz);
+                    let a_phi = vector_potential_circular_filament_finite_thickness_scalar(
+                        (1.0, 0.0, 2.0),
+                        wire_radius,
+                        (r, local.z),
+                    );
+                    let expected_a =
+                        rotation * Vector3::new(-a_phi * local.y / r, a_phi * local.x / r, 0.0);
+                    let actual_a = vector_potential_circular_filament_cartesian_scalar(
+                        (1.0, 2.0),
+                        (center.x, center.y, center.z),
+                        (normal.x, normal.y, normal.z),
+                        wire_radius,
+                        (world.x, world.y, world.z),
+                    );
+                    assert!(
+                        (vector_from_tuple(actual_a) - expected_a).norm()
+                            < 2e-10 * expected_a.norm()
+                    );
                     let expected = rotation * local_b;
                     let local_j = Vector3::new(1.0, -2.0, 0.3);
                     let world_j = rotation * local_j;
@@ -1601,6 +1748,16 @@ mod test {
                     (center.x, center.y, center.z),
                 );
                 assert!((vector_from_tuple(actual) - MU_0 * normal).norm() < 1e-14 * MU_0);
+                for wire_radius in [0.0, 0.01] {
+                    let a = vector_potential_circular_filament_cartesian_scalar(
+                        (1.0, 2.0),
+                        (center.x, center.y, center.z),
+                        (n.x, n.y, n.z),
+                        wire_radius,
+                        (center.x, center.y, center.z),
+                    );
+                    assert_eq!(a, (0.0, 0.0, 0.0));
+                }
             }
             let world = center + rotation * Vector3::new(1.0, 0.0, 0.0);
             let b = flux_density_circular_filament_cartesian_scalar(
@@ -1628,6 +1785,8 @@ mod test {
                 for calc in [
                     flux_density_circular_filament_cartesian,
                     flux_density_circular_filament_cartesian_par,
+                    vector_potential_circular_filament_cartesian,
+                    vector_potential_circular_filament_cartesian_par,
                 ] {
                     let (mut x, mut y, mut z) = (vec![99.0; n], vec![99.0; n], vec![99.0; n]);
                     assert!(

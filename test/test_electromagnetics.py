@@ -572,15 +572,18 @@ def test_circular_wire_radius_length_error(name, par, nobs, radii):
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("force", [False, True])
-def test_circular_cartesian_optional_wire_radius(par, force):
+@mark.parametrize(
+    "name",
+    [
+        "flux_density_circular_filament_cartesian",
+        "vector_potential_circular_filament_cartesian",
+        "body_force_density_circular_filament_cartesian",
+    ],
+)
+def test_circular_cartesian_optional_wire_radius(par, name):
     import cfsem.cfsem as raw
 
-    name = (
-        "body_force_density_circular_filament_cartesian"
-        if force
-        else "flux_density_circular_filament_cartesian"
-    )
+    force = name.startswith("body_force")
     current, rfil, zfil = np.array([2.0, -3.0]), np.array([0.5, 1.0]), np.array([0.0, 0.3])
     obs = (np.array([0.0, 0.3, -0.4]), np.array([0.0, -0.4, 0.3]), np.array([0.2, 0.4, 0.5]))
     j = (np.array([1.0, -2.0, 3.0]), np.array([0.5, 1.0, -0.3]), np.array([-2.0, 0.0, 0.7]))
@@ -601,17 +604,20 @@ def test_circular_cartesian_optional_wire_radius(par, force):
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("force", [False, True])
+@mark.parametrize(
+    "name",
+    [
+        "flux_density_circular_filament_cartesian",
+        "vector_potential_circular_filament_cartesian",
+        "body_force_density_circular_filament_cartesian",
+    ],
+)
 @mark.parametrize("nobs", [0, 2])
 @mark.parametrize("radii", [[], [0.01], [0.01, 0.02, 0.03]])
-def test_circular_cartesian_wire_radius_length_error(par, force, nobs, radii):
+def test_circular_cartesian_wire_radius_length_error(par, name, nobs, radii):
     import cfsem.cfsem as raw
 
-    name = (
-        "body_force_density_circular_filament_cartesian"
-        if force
-        else "flux_density_circular_filament_cartesian"
-    )
+    force = name.startswith("body_force")
     obs = (np.ones(nobs), np.zeros(nobs), np.zeros(nobs))
     args = (
         np.ones(2),
@@ -645,6 +651,7 @@ def test_circular_cartesian_independent_source_poses(par):
     obs = target + np.array([[0, 0, 0], [0.003, 0.002, 0.004], [-0.002, -0.003, -0.002]])
     jobs = np.array([[1.0, -2.0, 0.3], [0.7, 0.0, -0.4], [-0.3, 0.5, 0.0]])
     expected = np.zeros_like(obs)
+    expected_a = np.zeros_like(obs)
     for i in range(3):
         local = (obs - centers[i]) @ rotations[i]
         r = np.hypot(local[:, 0], local[:, 1])
@@ -659,40 +666,60 @@ def test_circular_cartesian_independent_source_poses(par):
         )
         local_b = np.column_stack((br * local[:, 0] / r, br * local[:, 1] / r, bz))
         expected += local_b @ rotations[i].T
+        a_phi = cfsem.vector_potential_circular_filament(
+            current[i : i + 1],
+            rfil[i : i + 1],
+            [0.0],
+            r,
+            local[:, 2],
+            par,
+            wire_radius=radii[i : i + 1],
+        )
+        local_a = np.column_stack((-a_phi * local[:, 1] / r, a_phi * local[:, 0] / r, np.zeros_like(r)))
+        expected_a += local_a @ rotations[i].T
     # Component arrays are deliberately strided views. Normals differ per source.
     args = (current, rfil, tuple(centers.T), tuple(normals.T), tuple(obs.T))
     actual = cfsem.flux_density_circular_filament_cartesian(*args, par, wire_radius=radii)
     force = cfsem.body_force_density_circular_filament_cartesian(*args, tuple(jobs.T), par, wire_radius=radii)
     np.testing.assert_allclose(np.array(actual).T, expected, rtol=2e-10, atol=1e-16)
+    actual_a = cfsem.vector_potential_circular_filament_cartesian(*args, par, wire_radius=radii)
+    np.testing.assert_allclose(np.array(actual_a).T, expected_a, rtol=2e-10, atol=1e-16)
     np.testing.assert_allclose(np.array(force).T, np.cross(jobs, expected), rtol=2e-10, atol=1e-16)
     # A common translation changes points and centers, never field/current vectors.
     shift = np.array([0.7, -0.4, 1.3])
-    shifted = cfsem.flux_density_circular_filament_cartesian(
-        current,
-        rfil,
-        tuple((centers + shift).T),
-        tuple(normals.T),
-        tuple((obs + shift).T),
-        par,
-        wire_radius=radii,
-    )
-    np.testing.assert_allclose(shifted, actual, rtol=2e-10, atol=1e-16)
+    for calc, unshifted in [
+        (cfsem.flux_density_circular_filament_cartesian, actual),
+        (cfsem.vector_potential_circular_filament_cartesian, actual_a),
+    ]:
+        shifted = calc(
+            current,
+            rfil,
+            tuple((centers + shift).T),
+            tuple(normals.T),
+            tuple((obs + shift).T),
+            par,
+            wire_radius=radii,
+        )
+        np.testing.assert_allclose(shifted, unshifted, rtol=2e-10, atol=1e-16)
 
 
 @mark.parametrize("par", [True, False])
-@mark.parametrize("force", [False, True])
+@mark.parametrize(
+    "name",
+    [
+        "flux_density_circular_filament_cartesian",
+        "vector_potential_circular_filament_cartesian",
+        "body_force_density_circular_filament_cartesian",
+    ],
+)
 @mark.parametrize("wire_radius", [0.0, 0.01])
 @mark.parametrize(
     "bad, value",
     [("normal", 0.0)] + [(bad, value) for bad in ["loc", "normal", "obs"] for value in [np.nan, np.inf]],
 )
-def test_circular_cartesian_invalid_geometry(par, force, wire_radius, bad, value):
+def test_circular_cartesian_invalid_geometry(par, name, wire_radius, bad, value):
     nobs = 2
-    name = (
-        "body_force_density_circular_filament_cartesian"
-        if force
-        else "flux_density_circular_filament_cartesian"
-    )
+    force = name.startswith("body_force")
     loc = ([0.0], [0.0], [0.0])
     normal = ([0.0], [0.0], [1.0])
     obs = (np.zeros(nobs), np.zeros(nobs), np.ones(nobs))
@@ -712,20 +739,20 @@ def test_circular_cartesian_invalid_geometry(par, force, wire_radius, bad, value
 
 @mark.parametrize("par", [True, False])
 @mark.parametrize(
-    "force,bad",
+    "name,bad",
     [
-        (force, bad)
-        for force in [False, True]
+        (name, bad)
+        for name in [
+            "flux_density_circular_filament_cartesian",
+            "vector_potential_circular_filament_cartesian",
+            "body_force_density_circular_filament_cartesian",
+        ]
         for bad in ["radius", "center", "normal", "observation", "jobs"]
-        if force or bad != "jobs"
+        if name.startswith("body_force") or bad != "jobs"
     ],
 )
-def test_circular_cartesian_pose_shapes(par, force, bad):
-    name = (
-        "body_force_density_circular_filament_cartesian"
-        if force
-        else "flux_density_circular_filament_cartesian"
-    )
+def test_circular_cartesian_pose_shapes(par, name, bad):
+    force = name.startswith("body_force")
     rfil = [] if bad == "radius" else [1.0]
     center = ([], [0.0], [0.0]) if bad == "center" else ([0.0], [0.0], [0.0])
     normal = ([0.0], [], [1.0]) if bad == "normal" else ([0.0], [0.0], [1.0])
@@ -787,6 +814,7 @@ def test_circular_negative_wire_radius(par, nobs, radius):
         (cfsem.flux_circular_filament, (current, rfil, zfil, robs, zobs)),
         (cfsem.flux_density_circular_filament, (current, rfil, zfil, robs, zobs)),
         (cfsem.flux_density_circular_filament_cartesian, (current, rfil, loc, normal, obs)),
+        (cfsem.vector_potential_circular_filament_cartesian, (current, rfil, loc, normal, obs)),
         (cfsem.body_force_density_circular_filament_cartesian, (current, rfil, loc, normal, obs, jobs)),
     ):
         np.testing.assert_array_equal(calc(*args, par, wire_radius), calc(*args, par, np.abs(wire_radius)))
@@ -879,7 +907,7 @@ def test_flux_density_circular_filament_on_axis(par):
         for wire in (None, np.zeros_like(ifil), np.full_like(ifil, 0.001)):
             np.testing.assert_array_equal(calc(ifil, rfil, zfil, robs, zobs, par, wire), 0.0)
 
-    bx, by, bz = cfsem.flux_density_circular_filament_cartesian(
+    cartesian_args = (
         ifil,
         rfil,
         (np.zeros_like(zfil), np.zeros_like(zfil), zfil),
@@ -887,6 +915,11 @@ def test_flux_density_circular_filament_on_axis(par):
         (robs, robs, zobs),
         par,
     )
+    bx, by, bz = cfsem.flux_density_circular_filament_cartesian(*cartesian_args)
+    for wire in (None, np.zeros_like(ifil), np.full_like(ifil, 0.001)):
+        np.testing.assert_array_equal(
+            cfsem.vector_potential_circular_filament_cartesian(*cartesian_args, wire_radius=wire), 0.0
+        )
     np.testing.assert_array_equal(bx, 0.0)
     np.testing.assert_array_equal(by, 0.0)
     np.testing.assert_allclose(bz, expected_bz, rtol=rtol, atol=0.0)
@@ -1234,6 +1267,14 @@ def test_vector_potential_linear_against_circular_filament(r, z, n_filaments, pa
     ax, ay, az = cfsem.vector_potential_linear_filament(
         xyzp, xyzfil, dlxyzfil, ifil, wire_radius, par
     )  # [V-s/m]
+
+    a_cartesian = cfsem.vector_potential_circular_filament_cartesian(
+        np.ones(1), np.array([r]), ([0.0], [0.0], [z]), ([0.0], [0.0], [1.0]), xyzp, par
+    )
+    np.testing.assert_allclose(a_cartesian[1], ay, rtol=1e-12, atol=1e-12)
+    # The analytic loop has exact transverse zeros; the linear discretization
+    # is checked against its existing 1e-9 tolerance below.
+    np.testing.assert_array_equal((a_cartesian[0], a_cartesian[2]), 0.0)
 
     assert np.allclose(a_phi, ay, rtol=1e-12, atol=1e-12)  # Should match circular calc
     assert np.allclose(az, np.zeros_like(az), atol=1e-9)  # Should sum to zero everywhere

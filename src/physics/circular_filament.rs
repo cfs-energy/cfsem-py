@@ -467,6 +467,13 @@ pub fn flux_density_circular_filament_scalar(
 /// w = t^3(10-15t+6t^2),\qquad
 /// \mathbf B = (1-w)\mathbf B_{near} + w\mathbf B_{thin}.$$
 ///
+/// The 1.5b–3b band was chosen to keep relative vector-field error below 0.1%
+/// at `b/a = 0.01`, measured as `||B - B_ref|| / ||B_ref||` against numerical
+/// integration over a circular cross-section with uniform current density.
+/// A sweep of 33 distances and 32 cross-section angles within the band found a
+/// maximum error of approximately 0.086%; this is sampled validation, not a
+/// rigorous bound or a guarantee for other aspect ratios.
+///
 /// The weight has zero first and second derivatives at either end, so the blend
 /// matches the adjoining kernels through second derivatives. This adds no new
 /// transition at the conductor surface; the ideal kernel's axis cutoff is unchanged.

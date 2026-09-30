@@ -171,9 +171,9 @@ def flux_circular_filament(
     between source and observation loops.
 
     Positive wire radii use the same uniform-current, thin-conductor approximation
-    as vector_potential_circular_filament, valid inside and near each conductor.
-    They do not provide a global thick-torus solution or the mutual inductance
-    between two finite-section conductors without averaging over the receiver.
+    as vector_potential_circular_filament near each conductor, blending to the
+    ideal-filament potential between 1.5 and 3 wire radii from the centerline.
+    Finite-section mutual inductance still requires averaging over the receiver.
 
     Args:
         ifil: [A] filament current
@@ -212,13 +212,13 @@ def vector_potential_circular_filament(
     meridional plane, A_phi is odd in signed observation radius.
 
     Omitted or zero wire radii use the ideal-filament formula. Positive radii
-    use the Hurwitz uniform-current, circular-section approximation, valid inside
-    and near conductors whose wire radius is small relative to their loop radius.
-    This positive-radius model is not a global thick-torus solution.
+    use the Hurwitz uniform-current, circular-section approximation near conductors,
+    blending to the ideal-filament potential between 1.5 and 3 wire radii from the
+    centerline. Requires wire radius small relative to loop radius. Finite-section
+    corrections are neglected in the far field; positive-radius A_phi is zero on axis.
 
-    Only A_phi is nonzero. Its cylindrical curl agrees with the local finite-radius
-    B model to retained asymptotic order. The B API additionally blends to a far-field
-    kernel; this potential does not include that transition.
+    Only A_phi is nonzero. Its curl includes a derivative of the blending weight,
+    so it differs from the separately blended B-field kernel.
 
     For formulas and references, see the Rust [finite-thickness scalar][finite_scalar]
     and [ideal-filament scalar][thin_scalar] implementations.
@@ -268,7 +268,7 @@ def flux_density_circular_filament(
     near the conductor, smoothly blending to the ideal-filament field between
     1.5 and 3 wire radii from its centerline. Requires wire radius small relative
     to loop radius. This direct B blend need not be divergence-free in the band;
-    the finite-radius vector potential and flux remain local approximations.
+    it is not the curl of the separately blended vector potential.
 
     For field formulas, numerical treatment, and references, see the Rust
     [finite-radius scalar implementation][finite_radius_scalar] and the

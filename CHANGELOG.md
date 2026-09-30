@@ -3,18 +3,16 @@
 ## 14.0.0 2026-09-28
 
 Upgrade circular filament calcs to be faster, more robust, and increase functionality.
-Adds finite-wire-radius circular filament calcs, resolve on-axis singularity, and
-adds arbitrary location and orientation for circular filament cartesian-frame calcs.
+Adds finite-wire-radius circular filament calcs, resolves on-axis singularity,
+supports arbitrary location and orientation for circular filament cartesian-frame calcs,
+and expands domain of circular filament functions to include the left half plane.
 
 * Rust
     * !Cartesian circular-filament B-field and body-force calculations now take per-source Cartesian centers and normals
     * !Require per-source `wire_radius` in circular-filament calcs
         * Both polar and cartesian variants; flux, vector potential, flux density, body force density
-    * Add _finite_radius circular filament calc variants using Hurwitz formula
-        * These are now used in vector and parallel circular filament calcs
-        * ~50% speedup for large numbers of observation points
-    * Blend circular B-fields to the ideal-loop field between 1.5 and 3 wire radii from the centerline
-        * Expose the local approximation as `flux_density_circular_filament_finite_radius_scalar_near`
+    * Add _finite_radius near-field circular filament calc variants using Hurwitz formula
+    * Blend circular fields to the ideal-loop field between 1.5 and 3 wire radii from the centerline
     * Resolve on-axis singularity for circular filament B-field
         * Minimal effect on performance; vectorizes over contiguous chunks
         * Use the on-axis approximation for R/a <= 1e-4

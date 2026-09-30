@@ -18,7 +18,7 @@ use crate::{MU_0, MU0_OVER_4PI};
 /// Observation-radius / filament-radius cutoff for the on-axis approximation.
 const ON_AXIS_RADIUS_RATIO: f64 = 1e-4;
 
-/// Squared centerline-distance / wire-radius limits for the exterior B-field blend.
+/// Squared centerline-distance / wire-radius limits for the exterior B and A blends.
 const NEAR_FIELD_LIMIT_SQUARED: f64 = 1.5 * 1.5;
 const FAR_FIELD_LIMIT_SQUARED: f64 = 3.0 * 3.0;
 
@@ -33,7 +33,7 @@ const FAR_FIELD_LIMIT_SQUARED: f64 = 3.0 * 3.0;
 /// * `out`: (Wb) poloidal flux at each observation, length `n`
 ///
 /// See [vector_potential_circular_filament_finite_thickness_scalar] for the
-/// positive-radius interior and near-exterior approximation, and
+/// positive-radius blended near/far approximation, and
 /// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 /// Flux is $2\pi R_\mathrm{obs} A_\phi$.
 pub fn flux_circular_filament_par(
@@ -59,7 +59,7 @@ pub fn flux_circular_filament_par(
 /// * `out`: (Wb) poloidal flux at each observation, length `n`
 ///
 /// See [vector_potential_circular_filament_finite_thickness_scalar] for the
-/// positive-radius interior and near-exterior approximation, and
+/// positive-radius blended near/far approximation, and
 /// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 /// Flux is $2\pi R_\mathrm{obs} A_\phi$.
 pub fn flux_circular_filament(
@@ -483,7 +483,7 @@ pub fn flux_density_circular_filament_scalar(
 /// transition at the conductor surface; the ideal kernel's axis cutoff is unchanged.
 /// The far field neglects finite-section corrections. This direct B blend need
 /// not be divergence-free in the transition band and is not the curl of the
-/// separately implemented, local-only finite-thickness vector potential.
+/// separately blended finite-thickness vector potential.
 #[inline]
 pub fn flux_density_circular_filament_finite_radius_scalar(
     rzifil: (f64, f64, f64),
@@ -930,7 +930,7 @@ fn cartesian_circular_field(
 /// * `out`: (V-s/m) azimuthal vector potential at each observation, length `n`
 ///
 /// See [vector_potential_circular_filament_finite_thickness_scalar] for the
-/// positive-radius interior and near-exterior approximation, and
+/// positive-radius blended near/far approximation, and
 /// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 pub fn vector_potential_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
@@ -965,7 +965,7 @@ pub fn vector_potential_circular_filament_par(
 /// * `out`: (V-s/m) azimuthal vector potential at each observation, length `n`
 ///
 /// See [vector_potential_circular_filament_finite_thickness_scalar] for the
-/// positive-radius interior and near-exterior approximation, and
+/// positive-radius blended near/far approximation, and
 /// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 pub fn vector_potential_circular_filament(
     rzifil: (&[f64], &[f64], &[f64]),
@@ -1103,6 +1103,74 @@ fn vector_potential_circular_filament_thin_scalar(
     c0 * c1 // Other components are zero
 }
 
+/// A_phi from a finite circular conductor, blending local and far-field models.
+///
+/// Arguments are `(major radius a, z, current)` in (m, m, A-turns), conductor
+/// cross-section radius `b = wire_radius` in m, and observation `(R, Z)` in m.
+/// Requires `b/|a| << 1`. Returns A_phi in V-s/m. Negative wire radii return NaNs;
+/// zero wire radius preserves [vector_potential_circular_filament_scalar].
+/// Signed radii follow that function's convention.
+///
+/// At centerline distance `s <= 1.5b`, use
+/// [vector_potential_circular_filament_finite_thickness_scalar_near]. At `s >= 3b`,
+/// use the ideal-filament potential, with its analytic value zero on the axis.
+/// Only the intervening band evaluates both kernels, using the same quintic
+/// weight in squared distance as [flux_density_circular_filament_finite_radius_scalar].
+/// The blend matches values and first and second derivatives at both endpoints.
+/// The band's 0.1% validation applies to B at `b/|a| = 0.01`, not to A_phi.
+///
+/// The far field neglects finite-section corrections. The curl of this blended
+/// potential includes a derivative-of-weight term, so it is not the separately
+/// blended B-field kernel. Flux uses this potential through `2*pi*R*A_phi`.
+#[inline]
+pub fn vector_potential_circular_filament_finite_thickness_scalar(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> f64 {
+    if wire_radius == 0.0 {
+        return vector_potential_circular_filament_scalar(rzifil, rzobs);
+    }
+    if wire_radius < 0.0 {
+        return f64::NAN;
+    }
+    let u = (rzobs.0.abs() - rzifil.0.abs()) / wire_radius;
+    let v = (rzobs.1 - rzifil.1) / wire_radius;
+    let s2 = u.mul_add(u, v * v);
+    if s2 <= NEAR_FIELD_LIMIT_SQUARED {
+        return vector_potential_circular_filament_finite_thickness_scalar_near(
+            rzifil,
+            wire_radius,
+            rzobs,
+        );
+    }
+    let far = vector_potential_circular_filament_far(rzifil, rzobs);
+    if s2 >= FAR_FIELD_LIMIT_SQUARED {
+        return far;
+    }
+    let near =
+        vector_potential_circular_filament_finite_thickness_scalar_near(rzifil, wire_radius, rzobs);
+    let t = (s2 - NEAR_FIELD_LIMIT_SQUARED) / (FAR_FIELD_LIMIT_SQUARED - NEAR_FIELD_LIMIT_SQUARED);
+    let w = t * t * t * (10.0 + t * (-15.0 + 6.0 * t));
+    w.mul_add(far - near, near)
+}
+
+// Same ideal-loop formula, evaluated from the elliptic complement so very thin
+// wires do not round m to 1 in the blend. Keep zero-wire-radius arithmetic intact.
+#[inline]
+fn vector_potential_circular_filament_far(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
+    let (a, r, z) = (rzifil.0.abs(), rzobs.0.abs(), rzobs.1 - rzifil.1);
+    let q = (a + r).mul_add(a + r, z * z);
+    let complement = (a - r).mul_add(a - r, z * z) / q;
+    let m = 4.0 * a * r / q;
+    let c0 = if r == 0.0 {
+        0.0
+    } else {
+        ((2.0 - m) * ellipk_complement(complement) - 2.0 * ellipe_complement(complement)) / m
+    };
+    rzobs.0.signum() * (c0 * (MU0_OVER_4PI * rzifil.2 * 4.0 * a / q.sqrt()))
+}
+
 /// A_phi inside and near a circular loop with a finite circular conductor section.
 /// Signed radii follow [vector_potential_circular_filament_scalar]; formulas below
 /// use the magnitudes of the major and observation radii.
@@ -1148,7 +1216,7 @@ fn vector_potential_circular_filament_thin_scalar(
 /// self-inductance for electromagnetic coils,” 2023, Appendix A, equations 35 and 53.
 /// Available: <https://arxiv.org/abs/2310.09313>.
 #[inline]
-pub fn vector_potential_circular_filament_finite_thickness_scalar(
+pub fn vector_potential_circular_filament_finite_thickness_scalar_near(
     rzifil: (f64, f64, f64),
     wire_radius: f64,
     rzobs: (f64, f64),
@@ -1968,6 +2036,75 @@ mod test {
     }
 
     #[test]
+    fn test_finite_thickness_potential_blend() {
+        for (scale, sf, so) in itertools::iproduct!([1e-6, 1.0, 1e6], [-1.0, 1.0], [-1.0, 1.0]) {
+            let source = (sf * scale, 0.0, -2.0);
+            let b = 0.01 * scale;
+            for s in [0.0, 0.5, 1.5, ((2.25_f64 + 9.0) / 2.0).sqrt(), 3.0, 100.0] {
+                let obs = (so * scale, s * b);
+                let actual =
+                    vector_potential_circular_filament_finite_thickness_scalar(source, b, obs);
+                let near =
+                    vector_potential_circular_filament_finite_thickness_scalar_near(source, b, obs);
+                let far = vector_potential_circular_filament_scalar(source, obs);
+                let expected = if s <= 1.5 {
+                    near
+                } else if s >= 3.0 {
+                    far
+                } else {
+                    0.5 * (near + far)
+                };
+                assert!(approx(expected, actual, 1e-10, 1e-20));
+            }
+            assert_eq!(
+                vector_potential_circular_filament_finite_thickness_scalar(source, b, (0.0, scale)),
+                0.0
+            );
+        }
+        // Direct complement remains finite even when the usual m rounds to one.
+        for b in [1e-8, 1e-12] {
+            for s in [2.0, 4.0] {
+                let a = vector_potential_circular_filament_finite_thickness_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0, s * b),
+                );
+                let leading = MU0_OVER_4PI * (2.0 * (8.0 / (s * b)).ln() - 4.0);
+                assert!(approx(leading, a, 1e-9, 0.0));
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_blend_boundary_derivatives() {
+        let b = 0.01;
+        for theta in [0.0_f64, 0.7, 2.3, PI, 4.5] {
+            let potential = |s: f64| {
+                vector_potential_circular_filament_finite_thickness_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0 + s * theta.cos(), s * theta.sin()),
+                )
+            };
+            for boundary in [1.5 * b, 3.0 * b] {
+                let h = b * 1e-4;
+                let (fm, f0, fp) = (
+                    potential(boundary - h),
+                    potential(boundary),
+                    potential(boundary + h),
+                );
+                assert!((fp - fm).abs() < 1e-4 * f0.abs());
+                let left = (3.0 * f0 - 4.0 * fm + potential(boundary - 2.0 * h)) / (2.0 * h);
+                let right = (-3.0 * f0 + 4.0 * fp - potential(boundary + 2.0 * h)) / (2.0 * h);
+                assert!((left - right).abs() < 1e-7 * f0.abs() / b);
+                let left2 = (f0 - 2.0 * fm + potential(boundary - 2.0 * h)) / (h * h);
+                let right2 = (potential(boundary + 2.0 * h) - 2.0 * fp + f0) / (h * h);
+                assert!((left2 - right2).abs() < 5e-4 * f0.abs() / (b * b));
+            }
+        }
+    }
+
+    #[test]
     fn test_finite_thickness_potential_surface_continuity() {
         let b = 0.01;
         let h = b * 1e-5;
@@ -1996,7 +2133,7 @@ mod test {
             for (u, v) in [(0.0, 0.0), (0.3, 0.4), (-0.5, 0.5), (0.9, 1.2)] {
                 let (r, z) = (1.0 + b * u, b * v);
                 let potential = |r, z| {
-                    vector_potential_circular_filament_finite_thickness_scalar(
+                    vector_potential_circular_filament_finite_thickness_scalar_near(
                         (1.0, 0.0, 1.0),
                         b,
                         (r, z),

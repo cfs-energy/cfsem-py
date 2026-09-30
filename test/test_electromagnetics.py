@@ -925,6 +925,31 @@ def test_circular_finite_radius_blend_and_far_field(par, sf, so):
     np.testing.assert_allclose(actual[:, -2:], thin, rtol=1e-9, atol=1e-20)
     assert actual[0, -1] == 0.0
 
+    # Same disk quadrature for A_phi; both quadrature orders agree to 1e-14.
+    expected_a = (
+        so
+        * cfsem.MU_0
+        / (4 * np.pi)
+        * np.array(
+            [
+                8.558861359200655,
+                8.019288525062006,
+                7.926008834048046,
+                7.53797552697675,
+                7.220474354152276,
+                6.510475334691865,
+            ]
+        )
+    )
+    a = cfsem.vector_potential_circular_filament([1.0], [sf], [0.0], r, z, par, wire_radius=[0.01])
+    # Check the 0.1% target; finite-section/model truncation dominates fit error.
+    np.testing.assert_allclose(a[:6], expected_a, rtol=1e-3)
+    thin_a = cfsem.vector_potential_circular_filament([1.0], [sf], [0.0], r[-2:-1], z[-2:-1], par)
+    np.testing.assert_allclose(a[-2:-1], thin_a, rtol=1e-8)
+    assert a[-1] == 0.0
+    flux = cfsem.flux_circular_filament([1.0], [sf], [0.0], r, z, par, wire_radius=[0.01])
+    np.testing.assert_array_equal(flux, 2 * np.pi * r * a)
+
     phi = np.arange(len(r)) * 0.7
     obs = (r * np.cos(phi), r * np.sin(phi), z)
     loc = ([0.0], [0.0], [0.0])

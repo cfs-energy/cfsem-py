@@ -46,11 +46,19 @@ pub fn flux_circular_filament_par(
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
 ) -> Result<(), &'static str> {
-    vector_potential_circular_filament_par(rzifil, wire_radius, rzobs, out)?;
-    for (flux, r) in out.iter_mut().zip(rzobs.0) {
-        *flux *= 2.0 * core::f64::consts::PI * r;
-    }
-    Ok(())
+    let (rprime, zprime) = rzobs;
+    check_length_3tup!(rzifil.2.len(), &rzifil);
+    check_length!(rzifil.2.len(), wire_radius);
+    check_length!(rprime.len(), zprime, out);
+
+    let n = chunksize(rprime.len());
+    (
+        out.par_chunks_mut(n),
+        rprime.par_chunks(n),
+        zprime.par_chunks(n),
+    )
+        .into_par_iter()
+        .try_for_each(|(outc, rc, zc)| flux_circular_filament(rzifil, wire_radius, (rc, zc), outc))
 }
 
 /// Poloidal flux from circular conductors with per-source circular cross-section radii.
@@ -1638,16 +1646,30 @@ pub fn body_force_density_circular_filament_cartesian_par(
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     check_length_3tup!(xyzobs.0.len(), &jobs);
-    flux_density_circular_filament_cartesian_par(
-        rifil,
-        loc,
-        normal,
-        wire_radius,
-        xyzobs,
-        (&mut *out.0, &mut *out.1, &mut *out.2),
-    )?;
-    cartesian_lorentz_force(jobs, out);
-    Ok(())
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+
+    let n = chunksize(xyzobs.0.len());
+    let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
+    let (jx, jy, jz) = par_chunks_3tup!(jobs, n);
+    let (fx, fy, fz) = mut_par_chunks_3tup!(out, n);
+    (xc, yc, zc, jx, jy, jz, fx, fy, fz)
+        .into_par_iter()
+        .try_for_each(|(x, y, z, jx, jy, jz, fx, fy, fz)| {
+            body_force_density_circular_filament_cartesian(
+                rifil,
+                loc,
+                normal,
+                wire_radius,
+                (x, y, z),
+                (jx, jy, jz),
+                (fx, fy, fz),
+            )
+        })
 }
 
 fn cartesian_lorentz_force(

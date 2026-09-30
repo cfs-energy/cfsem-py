@@ -862,7 +862,7 @@ def test_flux_density_circular_filament_wire_radius_length_error(par, nobs, radi
 def test_circular_negative_wire_radius(par, nobs, radius):
     import cfsem.cfsem as raw
 
-    # B uses wire-radius magnitude; A and flux reject negative wire radii.
+    # All combined circular kernels use wire-radius magnitude.
     current = np.ones(3)
     rfil = np.ones(3)
     zfil = np.zeros(3)
@@ -874,13 +874,9 @@ def test_circular_negative_wire_radius(par, nobs, radius):
     obs = (robs, np.zeros(nobs), zobs)
     jobs = (np.ones(nobs), np.ones(nobs), np.ones(nobs))
     for api in (cfsem, raw):
-        for name in (
-            "flux_circular_filament",
-            "vector_potential_circular_filament",
-        ):
-            result = getattr(api, name)(current, rfil, zfil, robs, zobs, par, wire_radius)
-            assert np.all(np.isnan(result))
         for calc, args in (
+            (api.vector_potential_circular_filament, (current, rfil, zfil, robs, zobs)),
+            (api.flux_circular_filament, (current, rfil, zfil, robs, zobs)),
             (api.flux_density_circular_filament, (current, rfil, zfil, robs, zobs)),
             (api.flux_density_circular_filament_cartesian, (current, rfil, loc, normal, obs)),
             (api.body_force_density_circular_filament_cartesian, (current, rfil, loc, normal, obs, jobs)),

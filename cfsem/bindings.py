@@ -184,7 +184,7 @@ def flux_circular_filament(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular conductor-section radius per source, same length
             as ifil. None allocates zero radii, preserving ideal-filament behavior.
-            Negative radii produce NaNs.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
@@ -235,7 +235,7 @@ def vector_potential_circular_filament(
         par: Whether to use CPU parallelism
         wire_radius: [m] circular conductor-section radius per source, same length
             as ifil. None allocates zero radii, preserving ideal-filament behavior.
-            Negative radii produce NaNs.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction

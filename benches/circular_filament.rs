@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use std::hint::black_box;
 
+const WIRE_RADIUS: f64 = 1e-3; // [m] 1 mm conductor radius
+
 fn bench_flux_circular_filament(c: &mut Criterion) {
     let mut group = c.benchmark_group("Poloidal Flux of a Circular Filament");
     group.sample_size(10);
@@ -27,7 +29,7 @@ fn bench_flux_circular_filament(c: &mut Criterion) {
             let rfil = vec![1.0 / 7.0_f64; nfils];
             let zfil = vec![1.0 / 11.0_f64; nfils];
             let current = vec![0.5_f64; nfils];
-            let wire_radius = vec![0.0; nfils];
+            let wire_radius = vec![WIRE_RADIUS; nfils];
 
             // Observation points
             let nobs = 1000;
@@ -106,7 +108,7 @@ fn bench_vector_potential_circular_filament(c: &mut Criterion) {
             let rfil = vec![1.0 / 7.0_f64; nfils];
             let zfil = vec![1.0 / 11.0_f64; nfils];
             let current = vec![0.5_f64; nfils];
-            let wire_radius = vec![0.0; nfils];
+            let wire_radius = vec![WIRE_RADIUS; nfils];
 
             // Observation points
             let nobs = 1000;
@@ -185,7 +187,7 @@ fn bench_flux_density_circular_filament(c: &mut Criterion) {
             let rfil = vec![1.0 / 7.0_f64; nfils];
             let zfil = vec![1.0 / 11.0_f64; nfils];
             let current = vec![0.5_f64; nfils];
-            let wire_radius = vec![0.0; nfils];
+            let wire_radius = vec![WIRE_RADIUS; nfils];
 
             // Observation points
             let nobs = 1000;
@@ -255,7 +257,7 @@ fn bench_vector_potential_near_conductor(c: &mut Criterion) {
 
     // Nonsingular points in the finite-thickness model's domain of validity.
     // Compare zero and positive per-source radii with identical geometry.
-    let wire_radius = 0.01;
+    let wire_radius = WIRE_RADIUS;
     for (region, u, v) in [("interior", 0.3, 0.4), ("near exterior", 0.6, 1.0)] {
         for nobs in [1000, 100, 10, 1] {
             let nfils = 10_000 / nobs;
@@ -296,13 +298,13 @@ fn bench_flux_density_finite_radius_scalar(c: &mut Criterion) {
     // The thin-filament field remains nonsingular at these points, but differs
     // physically from the uniform-current finite-radius field inside the wire.
     let filament = (1.0, 0.25, 3.0);
-    let wire_radius = 0.01;
+    let wire_radius = WIRE_RADIUS;
     for (name, u, v) in [
         ("interior", 0.3, 0.4),
         ("near exterior", 0.6, 1.0),
         ("blend", 1.2, 1.6),
         ("far", 0.0, 1000.0),
-        ("axis", -100.0, 1000.0),
+        ("axis", -filament.0 / wire_radius, 1000.0),
     ] {
         let obs = (filament.0 + u * wire_radius, filament.1 + v * wire_radius);
         let input = (filament, wire_radius, obs);

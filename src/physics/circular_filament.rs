@@ -525,6 +525,8 @@ pub fn flux_density_circular_filament_scalar(
 /// The weight has zero first and second derivatives at either end, so the blend
 /// matches the adjoining kernels through second derivatives. This adds no new
 /// transition at the conductor surface; the ideal kernel's axis cutoff is unchanged.
+/// If a thick conductor brings the axis into the near/blend region, the near
+/// kernel's radial taper removes its axis jump; thick-loop accuracy is not implied.
 /// The far field neglects finite-section corrections. This direct B blend need
 /// not be divergence-free in the transition band and is not the curl of the
 /// separately blended finite-thickness vector potential.
@@ -592,6 +594,13 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
 /// the on-axis treatment documented in [flux_density_circular_filament_scalar].
 /// The zero-radius field is valid throughout space except at the filament itself.
 ///
+/// Outside this local model's observation regime, regularize the radial field
+/// near the axis by replacing its sign factor with `R / max(|R|, 1e-4 |a|)`.
+/// This leaves the local field unchanged and makes `Br` tend continuously to
+/// zero at the axis, including for thick loops whose blend band reaches it.
+/// This is numerical regularization, not an accurate thick-torus model; `Bz`
+/// is unchanged and the taper has a slope change at the cutoff.
+///
 /// # Arguments
 ///
 /// * `rzifil`: (m, m, A-turns) loop major radius, z-coord, and total current
@@ -653,6 +662,7 @@ pub fn flux_density_circular_filament_finite_radius_scalar_near(
 
     let (rfil, zfil, ifil) = rzifil;
     let rfil = rfil.abs();
+    let radial_sign = rzobs.0 / rzobs.0.abs().max(ON_AXIS_RADIUS_RATIO * rfil);
     let u = (rzobs.0.abs() - rfil) / wire_radius; // [nondim], outward from centerline
     let v = (rzobs.1 - zfil) / wire_radius; // [nondim], axial offset
     let s2 = u.mul_add(u, v * v); // [nondim], squared distance / wire_radius^2
@@ -672,7 +682,7 @@ pub fn flux_density_circular_filament_finite_radius_scalar_near(
         let br = cylinder_scale * v - curvature_scale * u * v;
         let bz =
             bz_reg - cylinder_scale * u + curvature_scale * (1.5 - 0.5 * u.mul_add(u, 3.0 * v * v));
-        (rzobs.0.signum() * br, bz)
+        (radial_sign * br, bz)
     } else {
         // Equations 18 and 19b; cos(2 theta) = (u^2 - v^2) / s2.
         let inv_s2 = s2.recip();
@@ -680,7 +690,7 @@ pub fn flux_density_circular_filament_finite_radius_scalar_near(
         let br = cylinder_scale * v * inv_s2 + curvature_scale * u * v * inv_s2 * (inv_s2 - 2.0);
         let bz = bz_reg - cylinder_scale * u * inv_s2
             + curvature_scale * (0.5 - s2.ln() + cos_2theta * (1.0 - 0.5 * inv_s2));
-        (rzobs.0.signum() * br, bz)
+        (radial_sign * br, bz)
     }
 }
 
@@ -2508,6 +2518,30 @@ mod test {
                         assert_eq!(bx, 0.0);
                         assert_eq!(by, 0.0);
                         assert!((bz - expected).abs() <= 2e-15 * expected.abs());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_radial_axis_limit() {
+        // Thick, non-overlapping loops can bring the axis into the blend band.
+        // Check regularity only: the local model is not accurate for thick loops.
+        for calc in [
+            flux_density_circular_filament_finite_radius_scalar_near,
+            flux_density_circular_filament_finite_radius_scalar,
+        ] {
+            for (a, b) in itertools::iproduct!([-1.0, 1.0], [0.01, 0.4, 0.8]) {
+                for r in [0.0, -0.0, 1e-12, -1e-12, 1e-8, -1e-8] {
+                    let (br, bz) = calc((a, 0.0, 1.0), b, (r, 0.1));
+                    assert!(br.is_finite() && bz.is_finite());
+                    assert_eq!(calc((a, 0.0, 1.0), b, (-r, 0.1)), (-br, bz));
+                    if r == 0.0 {
+                        assert_eq!(br, 0.0);
+                    } else {
+                        let half = calc((a, 0.0, 1.0), b, (0.5 * r, 0.1));
+                        assert!((2.0 * half.0 - br).abs() <= 1e-6 * br.abs());
                     }
                 }
             }

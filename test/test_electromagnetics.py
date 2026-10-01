@@ -896,7 +896,7 @@ def test_flux_density_circular_filament_on_axis(par):
         axis=1,
     )
     # Python and Rust currently use permeability constants differing by 6.8e-10.
-    # The Rust scalar test checks accuracy near machine precision.
+    # The general kernel also includes the elliptic fit's small endpoint error.
     rtol = 1e-9
 
     br, bz = cfsem.flux_density_circular_filament(ifil, rfil, zfil, robs, zobs, par)
@@ -923,6 +923,15 @@ def test_flux_density_circular_filament_on_axis(par):
     np.testing.assert_array_equal(bx, 0.0)
     np.testing.assert_array_equal(by, 0.0)
     np.testing.assert_allclose(bz, expected_bz, rtol=rtol, atol=0.0)
+
+    # Near-axis leading limits: Br is linear in R, not clipped to zero.
+    r = np.array([-1e-4, -1e-6, -1e-10, 1e-10, 1e-6, 1e-4])
+    z = np.full_like(r, 0.1)
+    br, bz = cfsem.flux_density_circular_filament([1.0], [1.0], [0.0], r, z, par)
+    expected_br = 3 * cfsem.MU_0 * r * z / (4 * (1 + z**2) ** 2.5)
+    expected_bz = cfsem.MU_0 / (2 * (1 + z**2) ** 1.5)
+    np.testing.assert_allclose(br, expected_br, rtol=5e-8, atol=0.0)
+    np.testing.assert_allclose(bz, expected_bz, rtol=5e-8, atol=0.0)
 
 
 @mark.parametrize("a", [0.775, np.pi])

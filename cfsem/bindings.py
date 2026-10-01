@@ -214,7 +214,7 @@ def vector_potential_circular_filament(
     Source radii use their magnitudes; current determines orientation. In a fixed
     meridional plane, A_phi is odd in signed observation radius.
 
-    Omitted or zero wire radii use the ideal-filament formula. Positive radii
+    Positive radii
     use the Hurwitz uniform-current, circular-section approximation near conductors,
     blending to the ideal-filament potential between 1.5 and 3 wire radii from the
     centerline. Requires wire radius small relative to loop radius. Finite-section
@@ -265,8 +265,6 @@ def flux_density_circular_filament(
     Source radii use their magnitudes; current determines orientation. In a fixed
     meridional plane, Br is odd and Bz is even in signed observation radius.
 
-    With omitted or zero wire radii, uses ideal filaments, including the on-axis
-    approximation for |R|/|a| <= 1e-4. Ideal filaments remain singular at their source.
     Positive wire radii use the Hurwitz uniform-current, circular-section model
     near the conductor, smoothly blending to the ideal-filament field between
     1.5 and 3 wire radii from its centerline. Requires wire radius small relative

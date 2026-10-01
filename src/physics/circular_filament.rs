@@ -10,7 +10,7 @@ use rayon::{
 use crate::{
     chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{dot3, ellipd_complement, ellipe_complement, ellipk_complement, norm3},
+    math::{dot3, ellipd_complement, ellipe_complement, norm3},
 };
 
 use crate::{MU_0, MU0_OVER_4PI};
@@ -18,8 +18,8 @@ use crate::{MU_0, MU0_OVER_4PI};
 #[cfg(test)]
 use crate::math::{ellipe, ellipk};
 
-/// Observation-radius / filament-radius cutoff for the on-axis approximation.
-const ON_AXIS_RADIUS_RATIO: f64 = 1e-4;
+/// Observation-radius / filament-radius taper for the local near-field model.
+const NEAR_FIELD_AXIS_TAPER_RATIO: f64 = 1e-4;
 
 /// Squared centerline-distance / wire-radius limits for the exterior B and A blends.
 const NEAR_FIELD_LIMIT_SQUARED: f64 = 1.5 * 1.5;
@@ -241,51 +241,49 @@ pub fn flux_density_circular_filament(
     rzobs: (&[f64], &[f64]),
     out: (&mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (rfil, _, ifil) = rzifil;
+    let (rfil, zfil, ifil) = rzifil;
     let (rprime, zprime) = rzobs;
     let (out_r, out_z) = out;
 
-    let n = ifil.len();
-    let m = rprime.len();
-    check_length_3tup!(n, &rzifil);
-    check_length!(n, wire_radius);
-    check_length!(m, zprime, &out_r, &out_z);
-
+    check_length_3tup!(ifil.len(), &rzifil);
+    check_length!(ifil.len(), wire_radius);
+    check_length!(rprime.len(), zprime, &out_r, &out_z);
     out_r.fill(0.0);
     out_z.fill(0.0);
 
-    // Outside the largest filament's cutoff, every contribution is off-axis.
-    // Group observation points once to avoid per-pair axis checks for thin sources.
-    let max_filament_radius = rfil.iter().map(|r| r.abs()).fold(0.0, f64::max);
-    let max_cutoff = ON_AXIS_RADIUS_RATIO * max_filament_radius;
-    let mut start = 0;
-    for radii in rprime.chunk_by(|a, b| (a.abs() <= max_cutoff) == (b.abs() <= max_cutoff)) {
-        let end = start + radii.len();
-        let obs = (radii, &zprime[start..end]);
-        let out = (&mut out_r[start..end], &mut out_z[start..end]);
-        if radii[0].abs() <= max_cutoff {
-            // The scalar kernel checks each filament's own cutoff.
-            accumulate_flux_density(
-                rzifil,
-                wire_radius,
-                obs,
-                out,
-                flux_density_circular_filament_scalar,
-                flux_density_circular_filament_finite_radius_scalar,
-            );
+    for i in 0..ifil.len() {
+        let source = (rfil[i], zfil[i], ifil[i]);
+        // Thin sources need no near/far classification.
+        if wire_radius[i] == 0.0 {
+            for j in 0..rprime.len() {
+                let (br, bz) =
+                    flux_density_circular_filament_scalar(source, (rprime[j], zprime[j]));
+                out_r[j] += br;
+                out_z[j] += bz;
+            }
         } else {
-            accumulate_flux_density(
-                rzifil,
-                wire_radius,
-                obs,
-                out,
-                flux_density_circular_filament_off_axis,
-                flux_density_circular_filament_finite_radius_scalar,
-            );
+            for (range, far) in circular_field_chunks(source, wire_radius[i], rzobs) {
+                if far {
+                    for j in range {
+                        let (br, bz) =
+                            flux_density_circular_filament_scalar(source, (rprime[j], zprime[j]));
+                        out_r[j] += br;
+                        out_z[j] += bz;
+                    }
+                } else {
+                    for j in range {
+                        let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+                            source,
+                            wire_radius[i],
+                            (rprime[j], zprime[j]),
+                        );
+                        out_r[j] += br;
+                        out_z[j] += bz;
+                    }
+                }
+            }
         }
-        start = end;
     }
-
     Ok(())
 }
 
@@ -317,47 +315,6 @@ fn circular_field_chunks<'a>(
         start = end;
         Some((range, far))
     })
-}
-
-#[inline]
-fn accumulate_flux_density(
-    rzifil: (&[f64], &[f64], &[f64]),
-    wire_radius: &[f64],
-    rzobs: (&[f64], &[f64]),
-    out: (&mut [f64], &mut [f64]),
-    thin_field: impl Fn((f64, f64, f64), (f64, f64)) -> (f64, f64),
-    field: impl Fn((f64, f64, f64), f64, (f64, f64)) -> (f64, f64),
-) {
-    let (rfil, zfil, ifil) = rzifil;
-    let (rprime, zprime) = rzobs;
-    let (out_r, out_z) = out;
-    for i in 0..ifil.len() {
-        let source = (rfil[i], zfil[i], ifil[i]);
-        // Thin sources need no near/far classification.
-        if wire_radius[i] == 0.0 {
-            for j in 0..rprime.len() {
-                let (br, bz) = thin_field(source, (rprime[j], zprime[j]));
-                out_r[j] += br;
-                out_z[j] += bz;
-            }
-        } else {
-            for (range, far) in circular_field_chunks(source, wire_radius[i], rzobs) {
-                if far {
-                    for j in range {
-                        let (br, bz) = thin_field(source, (rprime[j], zprime[j]));
-                        out_r[j] += br;
-                        out_z[j] += bz;
-                    }
-                } else {
-                    for j in range {
-                        let (br, bz) = field(source, wire_radius[i], (rprime[j], zprime[j]));
-                        out_r[j] += br;
-                        out_z[j] += bz;
-                    }
-                }
-            }
-        }
-    }
 }
 
 // Original off-axis kernels from 4639769, independent of production dispatch and helpers.
@@ -450,7 +407,7 @@ fn flux_density_circular_filament_thin_scalar(
 /// The ideal filament remains singular at the source location.
 /// Source radius is interpreted by magnitude; current determines orientation.
 /// Signed observation radii describe a fixed meridional plane: Br is odd in R
-/// and Bz is even. Geometry and the axis cutoff use absolute radii.
+/// and Bz is even. Geometry uses absolute radii.
 ///
 /// # Arguments
 ///
@@ -461,14 +418,36 @@ fn flux_density_circular_filament_thin_scalar(
 ///
 /// * `(br, bz)`:   (T, T), r- and z-component of magnetic flux density at observation location
 ///
-/// # On-axis field
+/// # Stable field calculation
 ///
-/// For `|R|/|a| <= 1e-4`, where `a` is the filament radius, uses
-/// [flux_density_circular_filament_on_axis] at the same axial position.
-/// This clips the small radial field to zero and approximates the axial field
-/// to avoid cancellation in the elliptic-integral expression near the axis.
-/// The cutoff is relative to each filament's radius and includes its boundary.
-/// Outside the cutoff, the off-axis expression is used without modification.
+/// The same expression covers the axis and off-axis observations, retaining
+/// the small radial field without clipping. On the axis it reduces to
+/// [flux_density_circular_filament_on_axis], up to the elliptic fit's error.
+///
+/// With $a=|R_\mathrm{fil}|$, $R=|R_\mathrm{obs}|$, and $z=Z_\mathrm{obs}-Z_\mathrm{fil}$,
+/// define $Q=(a+R)^2+z^2$, $\Delta=(a-R)^2+z^2$, $u=\sqrt Q$,
+/// $v=\sqrt\Delta$, and $h=1/(u+v)$. The descending Landen transformation
+/// has parameter $t=4aRh^2$ and complement $c_1=1-t^2=4(uh)(vh)$.
+/// With $E_1=E(t^2)$ and $D_1=D(t^2)$, define
+///
+/// $$N=(a-R)(a+R)+z^2,\qquad M=(R-a)(R+a)+z^2,$$
+/// $$H=2(Rh)^2c_1(uv+M),\qquad P=\frac{2\mu_0 I a^2h}{\pi\Delta}.$$
+///
+/// Eliminating the intermediate normalization and the reconstruction of E(m)
+/// gives the field directly in terms of the transformed elliptic integrals:
+///
+/// $$B_R=P\frac{2Rz}{Q}\left(E_1-\frac{c_1D_1}{2}\right),\qquad
+/// B_Z=P\frac{NE_1+HD_1}{Q}.$$
+///
+/// Apply the observation-radius sign to $B_R$. As $t\to0$, the radial
+/// elliptic factor tends to $3\pi/8$, avoiding cancellation near the axis
+/// and far from the loop. The factored N and M retain near-wire accuracy.
+/// Compute $c_1$ directly from the distances to preserve very small complements.
+/// E and D share the same argument and logarithm; the radial elliptic factor
+/// and axial sum use fused multiply-adds. The geometry uses three divisions
+/// and two independent square roots, with no axis branch.
+/// See [crate::math::ellipd] and NIST DLMF
+/// [19.8.11–12](https://dlmf.nist.gov/19.8.E11) for the transformation.
 ///
 /// # Off-axis field
 ///
@@ -502,11 +481,33 @@ pub fn flux_density_circular_filament_scalar(
     rzifil: (f64, f64, f64),
     rzobs: (f64, f64),
 ) -> (f64, f64) {
-    if rzobs.0.abs() <= ON_AXIS_RADIUS_RATIO * rzifil.0.abs() {
-        flux_density_circular_filament_on_axis(rzifil, rzobs.1)
-    } else {
-        flux_density_circular_filament_off_axis(rzifil, rzobs)
-    }
+    let (a, r, z) = (rzifil.0.abs(), rzobs.0.abs(), rzobs.1 - rzifil.1);
+    let z2 = z * z;
+    let sum = a + r;
+    let difference = a - r;
+    let q = sum.mul_add(sum, z2);
+    let distance_squared = difference.mul_add(difference, z2);
+    let u = q.sqrt();
+    let v = distance_squared.sqrt();
+    let h = (u + v).recip();
+    let inv_q = q.recip();
+
+    // Direct Landen complement; E and D share a logarithm after inlining.
+    let transformed_complement = 4.0 * (u * h) * (v * h);
+    let e = ellipe_complement(transformed_complement);
+    let d = ellipd_complement(transformed_complement);
+    let radial_factor = (-0.5 * transformed_complement).mul_add(d, e);
+
+    // Factored numerators retain the small axial terms near the conductor.
+    let n = difference.mul_add(sum, z2);
+    let m = (-difference).mul_add(sum, z2);
+    let axial_d = 2.0 * (r * h).powi(2) * transformed_complement * u.mul_add(v, m);
+    let scale = 8.0 * MU0_OVER_4PI * rzifil.2 * h * (a * a / distance_squared);
+    // Normalize before scaling to avoid large products of squared distances.
+    // Signed R makes Br odd and gives zero on the axis without a branch.
+    let br = scale * (2.0 * z * rzobs.0 * inv_q) * radial_factor;
+    let bz = scale * (n * inv_q).mul_add(e, axial_d * inv_q * d);
+    (br, bz)
 }
 
 /// Br,Bz from a finite circular conductor, blending local and far-field models.
@@ -535,7 +536,7 @@ pub fn flux_density_circular_filament_scalar(
 ///
 /// The weight has zero first and second derivatives at either end, so the blend
 /// matches the adjoining kernels through second derivatives. This adds no new
-/// transition at the conductor surface; the ideal kernel's axis cutoff is unchanged.
+/// transition at the conductor surface; the ideal kernel is regular on the axis.
 /// If a thick conductor brings the axis into the near/blend region, the near
 /// kernel's radial taper removes its axis jump; thick-loop accuracy is not implied.
 /// The far field neglects finite-section corrections. This direct B blend need
@@ -661,7 +662,7 @@ pub fn flux_density_circular_filament_finite_radius_scalar_near(
 
     let (rfil, zfil, ifil) = rzifil;
     let rfil = rfil.abs();
-    let radial_sign = rzobs.0 / rzobs.0.abs().max(ON_AXIS_RADIUS_RATIO * rfil);
+    let radial_sign = rzobs.0 / rzobs.0.abs().max(NEAR_FIELD_AXIS_TAPER_RATIO * rfil);
     let u = (rzobs.0.abs() - rfil) / wire_radius; // [nondim], outward from centerline
     let v = (rzobs.1 - zfil) / wire_radius; // [nondim], axial offset
     let s2 = u.mul_add(u, v * v); // [nondim], squared distance / wire_radius^2
@@ -732,51 +733,6 @@ pub fn flux_density_circular_filament_on_axis(rzifil: (f64, f64, f64), zobs: f64
     let d2 = rfil.mul_add(rfil, z * z); // [m^2]
     let bz = 0.5 * MU_0 * ifil * (rfil * rfil / d2) / d2.sqrt(); // [T]
     (0.0, bz)
-}
-
-/// Off-axis Br,Bz components for one circular current filament at one observation point.
-///
-/// Requires nonzero observation radius. See [flux_density_circular_filament_scalar]
-/// for the elliptic-integral formula references, axis limit, and singularity behavior.
-#[inline]
-fn flux_density_circular_filament_off_axis(
-    rzifil: (f64, f64, f64),
-    rzobs: (f64, f64),
-) -> (f64, f64) {
-    let (rfil, zfil, ifil) = rzifil;
-    let (rprime, zprime) = rzobs;
-    let (rfil, rprime) = (rfil.abs(), rprime.abs());
-    let z = zprime - zfil; // [m]
-    let z2 = z * z; // [m^2]
-    let r2 = rprime * rprime; // [m^2]
-
-    let rpr = rfil + rprime; // [m]
-
-    let q = rpr.mul_add(rpr, z2); // [m^2]
-    // Compute 1-m directly to avoid cancellation near the filament.
-    let dr = rprime - rfil;
-    let distance_squared = dr.mul_add(dr, z2); // [m^2]
-    let complement = distance_squared / q; // [nondim]
-
-    let a0 = 2.0 * ifil / q.sqrt(); // [A/m]
-
-    let f = ellipk_complement(complement); // [nondim]
-
-    // Since complement * q = distance_squared, avoid two successive divisions.
-    let s_over_q = ellipe_complement(complement) / distance_squared; // [m^-2]
-    let rfil2 = rfil * rfil; // [m^2]
-
-    // Magnetic field intensity, less the factor of 4pi that we have adjusted out of mu_0
-    // Retain signed R in this prefactor to make Br odd without another multiply.
-    let hr = (z / rzobs.0) * a0 * s_over_q.mul_add(rfil2 + r2 + z2, -f);
-    let axial_numerator = (rfil - rprime) * rpr - z2;
-    let hz = a0 * s_over_q.mul_add(axial_numerator, f);
-
-    // Magnetic flux density assuming vacuum permeability
-    let br = MU0_OVER_4PI * hr;
-    let bz = MU0_OVER_4PI * hz;
-
-    (br, bz)
 }
 
 /// Cartesian field of one translated and oriented circular conductor.
@@ -1832,7 +1788,8 @@ mod test {
                     0.0,
                     (center.x, center.y, center.z),
                 );
-                assert!((vector_from_tuple(actual) - MU_0 * normal).norm() < 1e-14 * MU_0);
+                // The general field kernel inherits E(0)'s small fit error.
+                assert!((vector_from_tuple(actual) - MU_0 * normal).norm() < 1e-11 * MU_0);
                 for wire_radius in [0.0, 0.01] {
                     let a = vector_potential_circular_filament_cartesian_scalar(
                         (1.0, 2.0),
@@ -2218,7 +2175,7 @@ mod test {
             let zfil = [0.0, scale, -0.5 * scale];
             let current = [2.0, -3.0, 0.7];
             let radii = [0.0; 3];
-            // Stay outside every source's axis cutoff; the original kernel was singular on axis.
+            // The preserved kernel is singular on axis and loses precision near it.
             let robs =
                 [-2.5, -1.0, -0.1, -3e-4, 3e-4, 0.01, 0.1, 0.3, 0.6, 1.0, 2.5].map(|r| r * scale);
             let zobs = [0.25 * scale; 11];
@@ -2242,10 +2199,15 @@ mod test {
                     ] {
                         let (mut br, mut bz) = (vec![3.0; nobs], vec![4.0; nobs]);
                         calc(source, &radii[..nsrc], obs, (&mut br, &mut bz)).unwrap();
-                        // Equivalent algebra changes roundoff, especially in small Br near the axis.
+                        // The old K/E fits have up to 1.2e-7 vector error in these cases;
+                        // the new formulation has separate high-precision coverage.
                         for j in 0..nobs {
                             let error = (br[j] - expected_r[j]).hypot(bz[j] - expected_z[j]);
-                            assert!(error <= 1e-11 * expected_r[j].hypot(expected_z[j]));
+                            assert!(
+                                error <= 2e-7 * expected_r[j].hypot(expected_z[j]),
+                                "r={}, error={error}",
+                                robs[j]
+                            );
                         }
                     }
                 }
@@ -2613,15 +2575,15 @@ mod test {
                         / (2.0 * (radius * radius + dz * dz).powf(1.5));
                     let on_axis =
                         flux_density_circular_filament_on_axis((radius, zfil, current), zobs);
+                    assert!((on_axis.1 - expected).abs() <= 2e-15 * expected.abs());
                     for robs in [0.0, -0.0] {
                         let (br, bz) = flux_density_circular_filament_scalar(
                             (radius, zfil, current),
                             (robs, zobs),
                         );
-                        assert_eq!((br, bz), on_axis);
                         assert_eq!(br, 0.0);
                         assert!(
-                            (bz - expected).abs() <= 2e-15 * expected.abs(),
+                            (bz - expected).abs() <= 1e-11 * expected.abs(),
                             "{bz} != {expected}"
                         );
                         let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(
@@ -2633,7 +2595,7 @@ mod test {
                         );
                         assert_eq!(bx, 0.0);
                         assert_eq!(by, 0.0);
-                        assert!((bz - expected).abs() <= 2e-15 * expected.abs());
+                        assert!((bz - expected).abs() <= 1e-11 * expected.abs());
                     }
                 }
             }
@@ -2665,86 +2627,34 @@ mod test {
     }
 
     #[test]
-    fn test_flux_density_axis_cutoff() {
-        for radius in [-1e6_f64, -2.0, -0.3, -1e-6, 1e-6, 0.3, 2.0, 1e6] {
-            let cutoff = 1e-4 * radius.abs();
-            let filament = (radius, 0.7 * radius, -3.0);
-            for dz in [-radius, 0.0, radius] {
-                let zobs = filament.1 + dz;
-                let on_axis = flux_density_circular_filament_on_axis(filament, zobs);
-                for robs in [
-                    -cutoff,
-                    -0.5 * cutoff,
-                    0.0,
-                    100.0 * f64::EPSILON * radius,
-                    0.5 * cutoff,
-                    cutoff,
-                ] {
-                    let field = flux_density_circular_filament_scalar(filament, (robs, zobs));
-                    assert_eq!(field, on_axis);
-                    let field_xyz = {
-                        let (r, z, current) = filament;
-                        flux_density_circular_filament_cartesian_scalar(
-                            (r, current),
-                            (0.0, 0.0, z),
-                            (0.0, 0.0, 1.0),
-                            0.0,
-                            (robs, 0.0, zobs),
-                        )
-                    };
-                    assert_eq!(field_xyz, (0.0, 0.0, on_axis.1));
-                }
-                let robs = cutoff.next_up();
-                let field = flux_density_circular_filament_scalar(filament, (robs, zobs));
-                assert_eq!(
-                    field,
-                    flux_density_circular_filament_off_axis(filament, (robs, zobs))
+    fn test_flux_density_landen_against_high_precision() {
+        // Original K/E expression evaluated by mpmath at 90 decimal digits,
+        // using the exact f64 coordinates, a=I=1, B normalized by mu0/(4*pi).
+        // Cover the removed axis cutoff, far-field decay, and near-wire behavior.
+        let cases = [
+            (0.0, 0.1, 0.0, 6.190102033291746),
+            (1e-10, 0.1, 9.193220841522396e-11, 6.190102033291746),
+            (1e-6, 0.1, 9.193220841539067e-7, 6.190102033296115),
+            (1e-4, 0.1, 9.193221008245843e-5, 6.190102076982301),
+            (0.5, 0.2, 1.343142703162336, 6.904221985351054),
+            (1.0, 1e-12, 2e12, 28.710462657608385),
+            (1.000000000001, 1e-12, 999911103368.8158, -999999996019.8307),
+            (1.0, 1e6, 9.424777960722256e-24, 6.283185307151312e-18),
+            (1e6, 1e6, 1.6660811018091271e-18, 5.553603672704726e-19),
+        ];
+        for ((r, z, br, bz), sf, so) in itertools::iproduct!(cases, [-1.0, 1.0], [-1.0, 1.0]) {
+            let actual = flux_density_circular_filament_scalar((sf, 0.0, 1.0), (so * r, z));
+            // Check each component, including very small radial fields.
+            for (value, expected) in [(actual.0, so * br), (actual.1, bz)] {
+                assert!(
+                    (value / MU0_OVER_4PI - expected).abs() <= 5e-8 * expected.abs(),
+                    "r={r}, z={z}, actual={}, expected={expected}",
+                    value / MU0_OVER_4PI
                 );
-                if dz != 0.0 {
-                    assert_ne!(field.0, 0.0);
-                }
             }
-
-            // A relative cutoff must not regularize the source, even for tiny loops.
-            let field = flux_density_circular_filament_scalar(filament, (radius, filament.1));
-            assert!(!field.0.is_finite() || !field.1.is_finite());
         }
-    }
-
-    #[test]
-    fn test_flux_density_mixed_axis_cutoffs() {
-        let rfil = [0.25, 2.0];
-        let zfil = [-0.5, 0.75];
-        let ifil = [2.0, -3.0];
-        let robs = [0.0, 1e-6, 2.5e-5, 1e-4, 2e-4, 1e-3, 0.1, 1e-5];
-        let zobs = [1.0; 8];
-        let mut br = [1.0; 8];
-        let mut bz = [1.0; 8];
-        let mut br_par = [2.0; 8];
-        let mut bz_par = [2.0; 8];
-        let sources = (&rfil[..], &zfil[..], &ifil[..]);
-        flux_density_circular_filament(sources, &[0.0; 2], (&robs, &zobs), (&mut br, &mut bz))
-            .unwrap();
-        flux_density_circular_filament_par(
-            sources,
-            &[0.0; 2],
-            (&robs, &zobs),
-            (&mut br_par, &mut bz_par),
-        )
-        .unwrap();
-        for j in 0..robs.len() {
-            let mut expected = (0.0, 0.0);
-            for i in 0..rfil.len() {
-                let field = flux_density_circular_filament_scalar(
-                    (rfil[i], zfil[i], ifil[i]),
-                    (robs[j], zobs[j]),
-                );
-                expected.0 += field.0;
-                expected.1 += field.1;
-            }
-            assert_eq!((br[j], bz[j]), expected);
-            assert_eq!((br_par[j], bz_par[j]), expected);
-        }
+        let source_field = flux_density_circular_filament_scalar((1.0, 0.0, 1.0), (1.0, 0.0));
+        assert!(!source_field.0.is_finite() || !source_field.1.is_finite());
     }
 
     /// Make sure that force between a circular filament and a piecewise linear filament

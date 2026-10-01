@@ -15,12 +15,11 @@ and expands domain of circular filament functions to include the left half plane
     * Add _finite_radius near-field circular filament calc variants using Hurwitz formula
     * Blend circular fields to the ideal-loop field between 1.5 and 3 wire radii from the centerline
     * Resolve on-axis singularity for circular filament B-field
-        * Minimal effect on performance; vectorizes over contiguous chunks
-        * Use the on-axis approximation for R/a <= 1e-4
+        * Use a Landen-transformed elliptic formula on and off the axis, retaining the small radial field without a cutoff
         * Expose the scalar `flux_density_circular_filament_on_axis` calculation
     * Support negative filament radius and negative observation point radius for circular filaments
         * Combined with the elimination of singularities, this expands the circular filament methods to an unbounded and singularity-free domain when wire radius is nonzero.
-    * Implement ellipd function for stable evaluation of `E-K` difference of elliptic integrals
+    * Implement ellipd function for stable evaluation of the normalized elliptic difference `(K-E)/m`
 * Python
     * Add `vector_potential_circular_filament_cartesian` with the same pose inputs and optional wire radius as the Cartesian B-field API
     * !Replace `zfil` with required `loc` and `normal` component arrays in Cartesian circular-filament B-field and body-force functions

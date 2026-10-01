@@ -241,7 +241,7 @@ pub fn flux_density_circular_filament(
     rzobs: (&[f64], &[f64]),
     out: (&mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    let (rfil, zfil, ifil) = rzifil;
+    let (rfil, _, ifil) = rzifil;
     let (rprime, zprime) = rzobs;
     let (out_r, out_z) = out;
 
@@ -253,23 +253,6 @@ pub fn flux_density_circular_filament(
 
     out_r.fill(0.0);
     out_z.fill(0.0);
-
-    // With one observation point there is no observation loop to vectorize.
-    // Sum scalar contributions directly to avoid per-filament run dispatch.
-    if m == 1 {
-        for i in 0..n {
-            let source = (rfil[i], zfil[i], ifil[i]);
-            let obs = (rprime[0], zprime[0]);
-            let (br, bz) = if wire_radius[i] == 0.0 {
-                flux_density_circular_filament_scalar(source, obs)
-            } else {
-                flux_density_circular_filament_finite_radius_scalar(source, wire_radius[i], obs)
-            };
-            out_r[0] += br;
-            out_z[0] += bz;
-        }
-        return Ok(());
-    }
 
     // Outside the largest filament's cutoff, every contribution is off-axis.
     // Group observation points once to avoid per-pair axis checks for thin sources.

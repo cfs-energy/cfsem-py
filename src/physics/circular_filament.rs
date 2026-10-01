@@ -10,7 +10,7 @@ use rayon::{
 use crate::{
     chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{dot3, ellipe_complement, ellipk_complement, norm3},
+    math::{dot3, ellipd_complement, ellipe_complement, ellipk_complement, norm3},
 };
 
 use crate::{MU_0, MU0_OVER_4PI};
@@ -1266,7 +1266,10 @@ fn vector_potential_circular_filament_thin(
 /// and does not vary in the phi-direction. On the symmetry axis A_phi is zero.
 /// The elliptic complement is computed directly as `((a-R)^2 + z^2) / Q`,
 /// where `Q = (a+R)^2 + z^2`, to avoid rounding the elliptic parameter to one
-/// near the filament. The ideal filament remains singular at the source.
+/// near the filament. The descending Landen transformation rewrites the
+/// subtractive elliptic factor as `t*(1+t)*D(t^2)`, avoiding cancellation near
+/// the axis and in the far field. See [crate::math::ellipd] for the derivation
+/// and NIST references. The ideal filament remains singular at the source.
 ///
 /// # References
 ///
@@ -1282,9 +1285,11 @@ pub fn vector_potential_circular_filament_scalar(
     let q = (a + r).mul_add(a + r, z * z);
     let complement = (a - r).mul_add(a - r, z * z) / q;
     let m = 4.0 * a * r / q;
-    let c0 = ((2.0 - m) * ellipk_complement(complement) - 2.0 * ellipe_complement(complement)) / m;
-    // Select the axis limit after evaluation to keep the off-axis arithmetic vectorizable.
-    let c0 = if r == 0.0 { 0.0 } else { c0 };
+    let root_complement = complement.sqrt();
+    let denominator = (1.0 + root_complement).powi(2);
+    let t = m / denominator;
+    let transformed_complement = 4.0 * root_complement / denominator;
+    let c0 = t * (1.0 + t) * ellipd_complement(transformed_complement);
     rzobs.0.signum() * (c0 * (MU0_OVER_4PI * rzifil.2 * 4.0 * a / q.sqrt()))
 }
 
@@ -1906,7 +1911,39 @@ mod test {
     }
 
     #[test]
+    fn test_potential_landen_against_high_precision() {
+        // Original K/E expression evaluated by mpmath at 80 decimal digits,
+        // with a=I=1 and A normalized by mu0/(4*pi).
+        let cases = [
+            (0.0, 0.1, 0.0),
+            (1e-10, 0.1, 3.095051016645873e-10),
+            (1e-6, 0.1, 3.095051016646965e-6),
+            (0.1, 0.1, 0.310603543909276),
+            (1.0, 0.1, 4.779226072276121),
+            (2.0, 0.1, 0.8681173469220067),
+            (100.0, 0.1, 0.00031417057574111584),
+            (1.0, 1e6, 3.1415926535803685e-18),
+        ];
+        for ((r, z, expected), sf, so) in itertools::iproduct!(cases, [-1.0, 1.0], [-1.0, 1.0]) {
+            for scale in [1e-6, 1.0, 1e6] {
+                let actual = vector_potential_circular_filament_scalar(
+                    (sf * scale, 0.0, 1.0),
+                    (so * r * scale, z * scale),
+                ) / MU0_OVER_4PI;
+                assert!(
+                    (actual - so * expected).abs() <= 4e-9 * expected,
+                    "r={r}, z={z}, actual={actual}, expected={expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_potential_and_flux_zero_radius_against_preserved_kernels() {
+        // The old independent K/E fits differ from high-precision references by
+        // up to 2.1e-6 relatively in these cases. The Landen accuracy is tested
+        // separately against high-precision values, including near the axis.
+        let rtol = 3e-6;
         for scale in [1e-6, 1.0, 1e6] {
             let rfil = [-0.5 * scale, scale, -2.0 * scale];
             let zfil = [-0.2 * scale, 0.3 * scale, 0.8 * scale];
@@ -1941,16 +1978,16 @@ mod test {
                             calc(source, &radii, obs, &mut actual).unwrap();
                             for ((a, old), r) in actual.iter().zip(&old_a).zip(&robs) {
                                 let expected = if *r == 0.0 { 0.0 } else { *old * r.signum() };
-                                assert!(approx(expected, *a, 5e-12, 1e-18));
+                                assert!(approx(expected, *a, rtol, 1e-18));
                             }
                         }
                         for calc in [flux_circular_filament, flux_circular_filament_par] {
                             let mut actual = vec![99.0; nobs];
                             calc(source, &radii, obs, &mut actual).unwrap();
                             for ((flux, old), r) in actual.iter().zip(&old_flux).zip(&robs) {
-                                // Equivalent algebra changes roundoff; the axis now uses its limit.
+                                // The preserved formula is singular on the axis.
                                 let expected = if *r == 0.0 { 0.0 } else { *old };
-                                assert!(approx(expected, *flux, 5e-12, 1e-18 * scale));
+                                assert!(approx(expected, *flux, rtol, 1e-18 * scale));
                             }
                         }
                     }

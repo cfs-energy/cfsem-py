@@ -121,7 +121,7 @@ The table summarizes sources cited in the implementation, tests, examples, and d
 | [29](#ref-29) | Gumerov et al. — Analytical Galerkin Boundary Integrals | Analytic double-integral formulation cited as an independent validation reference for triangle inductance. |
 | [30](#ref-30) | Abramowitz and Stegun — Handbook of Mathematical Functions | Polynomial approximations for complete elliptic integrals. |
 | [31](#ref-31) | Michel and Stoitsov — Gauss Hypergeometric Function | Stable complex hypergeometric-function evaluation and analytic continuation. |
-| [32](#ref-32) | NIST — Digital Library of Mathematical Functions | Hypergeometric definitions and branches; Gauss–Legendre quadrature and Legendre polynomials. |
+| [32](#ref-32) | NIST — Digital Library of Mathematical Functions | Hypergeometric definitions and branches; Gauss–Legendre quadrature and Legendre polynomials; elliptic D and the Landen transformation for cancellation-free circular-loop vector potential. |
 | [33](#ref-33) | JuliaMath — HypergeometricFunctions.jl | Adapted hypergeometric implementation; attribution is recorded in THIRD_PARTY_NOTICES.md. |
 | [34](#ref-34) | SciPy — hyp2f1 API Reference | Hypergeometric-function conventions and comparison implementation. |
 | [35](#ref-35) | NVIDIA — PhysicsNeMo | Software reference cited by the hierarchical field-evaluation module. |
@@ -204,7 +204,7 @@ The table summarizes sources cited in the implementation, tests, examples, and d
 
 31. <a id="ref-31"></a> N. Michel and M. V. Stoitsov, [“Fast computation of the Gauss hypergeometric function with all its parameters complex with application to the Pöschl–Teller–Ginocchio potential wave functions”](https://doi.org/10.1016/j.cpc.2007.11.007), *Computer Physics Communications*, vol. 178, no. 7, pp. 535–551, 2008.
 
-32. <a id="ref-32"></a> NIST, *Digital Library of Mathematical Functions*: [§15.2, “Definitions and Analytical Properties”](https://dlmf.nist.gov/15.2); [§3.5(v), “Gauss Quadrature”](https://dlmf.nist.gov/3.5#v), especially equations 3.5.18–3.5.21; and [§18.3, “Definitions”](https://dlmf.nist.gov/18.3), for Legendre polynomials.
+32. <a id="ref-32"></a> NIST, *Digital Library of Mathematical Functions*: [§15.2, “Definitions and Analytical Properties”](https://dlmf.nist.gov/15.2); [§3.5(v), “Gauss Quadrature”](https://dlmf.nist.gov/3.5#v), especially equations 3.5.18–3.5.21; and [§18.3, “Definitions”](https://dlmf.nist.gov/18.3), for Legendre polynomials; [19.25.1](https://dlmf.nist.gov/19.25.E1) for the normalized elliptic difference `D(m) = (K(m)-E(m))/m`; [19.5.3](https://dlmf.nist.gov/19.5.E3) and [19.12.1–2](https://dlmf.nist.gov/19.12) for its endpoint limits; and [19.8.11–12](https://dlmf.nist.gov/19.8.E11) for the descending Landen transformation used to eliminate cancellation in circular-loop vector potential. DLMF uses modulus `k`; this repository uses parameter `m = k^2`.
 
 33. <a id="ref-33"></a> JuliaMath contributors, [*HypergeometricFunctions.jl*](https://github.com/JuliaMath/HypergeometricFunctions.jl), version 0.3.30. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and license information.
 

@@ -26,6 +26,25 @@ const NEAR_FIELD_LIMIT_SQUARED: f64 = 1.5 * 1.5;
 const FAR_FIELD_LIMIT: f64 = 3.0;
 const FAR_FIELD_LIMIT_SQUARED: f64 = FAR_FIELD_LIMIT * FAR_FIELD_LIMIT;
 
+/// Squared centerline distance normalized by the nonzero wire-radius magnitude.
+#[inline]
+fn normalized_centerline_distance_squared(
+    source: (f64, f64, f64),
+    wire_radius: f64,
+    obs: (f64, f64),
+) -> f64 {
+    let u = (obs.0.abs() - source.0.abs()) / wire_radius;
+    let v = (obs.1 - source.1) / wire_radius;
+    u.mul_add(u, v * v)
+}
+
+/// Quintic far-field weight for a normalized squared distance inside the blend band.
+#[inline]
+fn far_field_blend_weight(s2: f64) -> f64 {
+    let t = (s2 - NEAR_FIELD_LIMIT_SQUARED) / (FAR_FIELD_LIMIT_SQUARED - NEAR_FIELD_LIMIT_SQUARED);
+    t * t * t * (10.0 + t * (-15.0 + 6.0 * t))
+}
+
 /// Poloidal flux from circular conductors with per-source circular cross-section radii.
 /// Parallelized over chunks of observation points.
 ///
@@ -299,9 +318,8 @@ fn circular_field_chunks<'a>(
 ) -> impl Iterator<Item = (std::ops::Range<usize>, bool)> + 'a {
     let wire_radius = wire_radius.abs();
     let is_far = move |i: usize| {
-        let u = (obs.0[i].abs() - source.0.abs()) / wire_radius;
-        let v = (obs.1[i] - source.1) / wire_radius;
-        u.mul_add(u, v * v) >= FAR_FIELD_LIMIT_SQUARED
+        normalized_centerline_distance_squared(source, wire_radius, (obs.0[i], obs.1[i]))
+            >= FAR_FIELD_LIMIT_SQUARED
     };
     let mut start = 0;
     std::iter::from_fn(move || {
@@ -550,9 +568,7 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
     let wire_radius = wire_radius.abs();
 
     // Check whether we are in the near-field
-    let u = (rzobs.0.abs() - rzifil.0.abs()) / wire_radius;
-    let v = (rzobs.1 - rzifil.1) / wire_radius;
-    let s2 = u.mul_add(u, v * v);
+    let s2 = normalized_centerline_distance_squared(rzifil, wire_radius, rzobs);
 
     // Calculate near-field kernel if we are concretely near-field
     if s2 <= NEAR_FIELD_LIMIT_SQUARED {
@@ -574,9 +590,7 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
     // Blending branch
     // Calculate near-field approximation
     let near = flux_density_circular_filament_finite_radius_scalar_near(rzifil, wire_radius, rzobs);
-    // Calculate blending parameter and weights for near and far-field for blending
-    let t = (s2 - NEAR_FIELD_LIMIT_SQUARED) / (FAR_FIELD_LIMIT_SQUARED - NEAR_FIELD_LIMIT_SQUARED);
-    let w = t * t * t * (10.0 + t * (-15.0 + 6.0 * t));
+    let w = far_field_blend_weight(s2);
     // Blend the near-field and far-field solutions
     (
         w.mul_add(far.0 - near.0, near.0),
@@ -1353,9 +1367,7 @@ pub fn vector_potential_circular_filament_finite_thickness_scalar(
 ) -> f64 {
     let wire_radius = wire_radius.abs();
 
-    let u = (rzobs.0.abs() - rzifil.0.abs()) / wire_radius;
-    let v = (rzobs.1 - rzifil.1) / wire_radius;
-    let s2 = u.mul_add(u, v * v);
+    let s2 = normalized_centerline_distance_squared(rzifil, wire_radius, rzobs);
     if s2 <= NEAR_FIELD_LIMIT_SQUARED {
         return vector_potential_circular_filament_finite_thickness_scalar_near(
             rzifil,
@@ -1369,8 +1381,7 @@ pub fn vector_potential_circular_filament_finite_thickness_scalar(
     }
     let near =
         vector_potential_circular_filament_finite_thickness_scalar_near(rzifil, wire_radius, rzobs);
-    let t = (s2 - NEAR_FIELD_LIMIT_SQUARED) / (FAR_FIELD_LIMIT_SQUARED - NEAR_FIELD_LIMIT_SQUARED);
-    let w = t * t * t * (10.0 + t * (-15.0 + 6.0 * t));
+    let w = far_field_blend_weight(s2);
     w.mul_add(far - near, near)
 }
 

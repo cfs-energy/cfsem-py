@@ -623,8 +623,9 @@ pub fn flux_density_circular_filament_finite_radius_scalar(
 /// \qquad m = \frac{4a^2}{Q}.$$
 ///
 /// The complementary parameter $1-m = b^2/(\sqrt{e}Q)$ is computed directly
-/// to avoid rounding $m$ to one for very thin conductors. The elliptic integrals
-/// use the same approximations as [crate::math::ellipk] and [crate::math::ellipe].
+/// to avoid rounding $m$ to one for very thin conductors. Evaluate the elliptic
+/// difference as $K(m)-E(m)=mD(m)$ using [crate::math::ellipd], replacing two
+/// separate elliptic evaluations and their subtraction with one direct fit.
 ///
 /// In the local frame of the paper, $\mathbf{e}_2=-\mathbf{e}_R$,
 /// $\mathbf{e}_3=\mathbf{e}_Z$, and curvature is $1/a$. Writing
@@ -670,8 +671,7 @@ pub fn flux_density_circular_filament_finite_radius_scalar_near(
     let q = 4.0 + core2; // [nondim], Q / rfil^2
     let complement = core2 / q; // [nondim], 1 - m without cancellation
     let loop_scale = MU0_OVER_4PI * ifil / rfil; // [T]
-    let bz_reg = 2.0 * loop_scale / q.sqrt()
-        * (ellipk_complement(complement) - ellipe_complement(complement)); // [T]
+    let bz_reg = 2.0 * loop_scale / q.sqrt() * ((4.0 / q) * ellipd_complement(complement)); // [T], K-E = mD
     let cylinder_scale = 2.0 * MU0_OVER_4PI * ifil / wire_radius; // [T]
     let curvature_scale = 0.5 * loop_scale; // [T]
 

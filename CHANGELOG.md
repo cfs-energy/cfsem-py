@@ -20,6 +20,7 @@ and expands domain of circular filament functions to include the left half plane
     * Support negative filament radius and negative observation point radius for circular filaments
         * Combined with the elimination of singularities, this expands the circular filament methods to an unbounded and singularity-free domain when wire radius is nonzero.
     * Implement ellipd function for stable evaluation of the normalized elliptic difference `(K-E)/m`
+    * Reformulate circular filament A-field and B-field functions to use `ellipd` for improved performance and numerics
 * Python
     * Add `vector_potential_circular_filament_cartesian` with the same pose inputs and optional wire radius as the Cartesian B-field API
     * !Replace `zfil` with required `loc` and `normal` component arrays in Cartesian circular-filament B-field and body-force functions

@@ -9,6 +9,7 @@ use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyComplexMethods, PyDict, PyTuple};
+use std::borrow::Cow;
 use std::ffi::CString;
 use std::fmt::Debug;
 
@@ -30,6 +31,17 @@ impl From<PyInteropError> for PyErr {
             PyInteropError::DimensionalityError { msg } => DimensionalityError::new_err(msg),
             PyInteropError::ValueError { msg } => exceptions::PyValueError::new_err(msg),
         }
+    }
+}
+
+/// Borrow supplied wire radii, or allocate one zero radius per source for `None`.
+fn read_wire_radius<'a>(
+    wire_radius: Option<&'a PyReadonlyArray1<'_, f64>>,
+    source_count: usize,
+) -> PyResult<Cow<'a, [f64]>> {
+    match wire_radius {
+        Some(radius) => Ok(Cow::Borrowed(radius.as_slice()?)),
+        None => Ok(Cow::Owned(vec![0.0; source_count])),
     }
 }
 
@@ -2649,14 +2661,8 @@ fn flux_circular_filament(
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
 
-    let default_wire_radius;
-    let wire_radius = match wire_radius.as_ref() {
-        Some(radius) => radius.as_slice()?,
-        None => {
-            default_wire_radius = vec![0.0; rzifil.0.len()];
-            &default_wire_radius
-        }
-    };
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), rzifil.0.len())?;
+    let wire_radius = wire_radius.as_ref();
 
     // Initialize output
     let mut psi = vec![0.0; obs.0.len()];
@@ -2700,14 +2706,8 @@ fn vector_potential_circular_filament(
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
 
-    let default_wire_radius;
-    let wire_radius = match wire_radius.as_ref() {
-        Some(radius) => radius.as_slice()?,
-        None => {
-            default_wire_radius = vec![0.0; rzifil.0.len()];
-            &default_wire_radius
-        }
-    };
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), rzifil.0.len())?;
+    let wire_radius = wire_radius.as_ref();
 
     // Initialize output
     let mut out = vec![0.0; obs.0.len()];
@@ -2751,14 +2751,8 @@ fn flux_density_circular_filament(
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
 
-    let default_wire_radius;
-    let wire_radius = match wire_radius.as_ref() {
-        Some(radius) => radius.as_slice()?,
-        None => {
-            default_wire_radius = vec![0.0; rzifil.0.len()];
-            &default_wire_radius
-        }
-    };
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), rzifil.0.len())?;
+    let wire_radius = wire_radius.as_ref();
 
     // Initialize output
     let n = obs.0.len();
@@ -3586,14 +3580,8 @@ fn flux_density_circular_filament_cartesian(
     let current = current.as_slice()?;
     _3tup_slice_ro!(loc);
     _3tup_slice_ro!(normal);
-    let default_wire_radius;
-    let wire_radius = match wire_radius.as_ref() {
-        Some(radius) => radius.as_slice()?,
-        None => {
-            default_wire_radius = vec![0.0; current.len()];
-            &default_wire_radius
-        }
-    };
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), current.len())?;
+    let wire_radius = wire_radius.as_ref();
     _3tup_slice_ro!(xyzobs);
 
     // Initialize output
@@ -3654,14 +3642,8 @@ fn vector_potential_circular_filament_cartesian(
     let current = current.as_slice()?;
     _3tup_slice_ro!(loc);
     _3tup_slice_ro!(normal);
-    let default_wire_radius;
-    let wire_radius = match wire_radius.as_ref() {
-        Some(radius) => radius.as_slice()?,
-        None => {
-            default_wire_radius = vec![0.0; current.len()];
-            &default_wire_radius
-        }
-    };
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), current.len())?;
+    let wire_radius = wire_radius.as_ref();
     _3tup_slice_ro!(xyzobs);
 
     // Initialize output
@@ -3874,14 +3856,8 @@ fn body_force_density_circular_filament_cartesian(
     let current = current.as_slice()?;
     _3tup_slice_ro!(loc);
     _3tup_slice_ro!(normal);
-    let default_wire_radius;
-    let wire_radius = match wire_radius.as_ref() {
-        Some(radius) => radius.as_slice()?,
-        None => {
-            default_wire_radius = vec![0.0; current.len()];
-            &default_wire_radius
-        }
-    };
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), current.len())?;
+    let wire_radius = wire_radius.as_ref();
     _3tup_slice_ro!(obs);
     _3tup_slice_ro!(j);
 

@@ -117,16 +117,18 @@ const ELLIPE_B: [f64; 5] = [
 ///    \[1\] M. Abramowitz and I. A. Stegun, *Handbook of mathematical functions: with formulas, graphs, and mathematical tables*. 1970.
 #[inline]
 pub fn ellipk(m: f64) -> f64 {
-    let mut ellip: f64 = 0.0;
-    let c: f64 = 1.0 - m;
-    let logterm = c.powi(-1).ln();
+    ellipk_complement(1.0 - m)
+}
 
-    // NOTE: This loop is unrolled at compile-time automatically,
-    // and the repeated calls to `powi` are de-duplicated by the compiler.
-    for i in 0..5 {
-        ellip = logterm
-            .mul_add(ELLIPK_B[i], ELLIPK_A[i])
-            .mul_add(c.powi(i as i32), ellip);
+/// Evaluate [ellipk] from `c = 1 - m`, preserving small complementary parameters.
+#[inline]
+pub(crate) fn ellipk_complement(c: f64) -> f64 {
+    // Avoid a reciprocal, which can overflow for subnormal complements.
+    let logterm = -c.ln();
+    let mut ellip = logterm.mul_add(ELLIPK_B[4], ELLIPK_A[4]);
+    // Horner's rule avoids explicit powers of the complementary parameter.
+    for i in (0..4).rev() {
+        ellip = ellip.mul_add(c, logterm.mul_add(ELLIPK_B[i], ELLIPK_A[i]));
     }
 
     ellip
@@ -144,19 +146,91 @@ pub fn ellipk(m: f64) -> f64 {
 ///   \[1\] M. Abramowitz and I. A. Stegun, *Handbook of mathematical functions: with formulas, graphs, and mathematical tables*. 1970.
 #[inline]
 pub fn ellipe(m: f64) -> f64 {
-    let mut ellip: f64 = 0.0;
-    let c: f64 = 1.0 - m;
-    let logterm = c.powi(-1).ln();
+    ellipe_complement(1.0 - m)
+}
 
-    // NOTE: This loop is unrolled at compile-time automatically,
-    // and the repeated calls to `powi` are de-duplicated by the compiler.
-    for i in 0..5 {
-        ellip = logterm
-            .mul_add(ELLIPE_B[i], ELLIPE_A[i])
-            .mul_add(c.powi(i as i32), ellip);
+/// Evaluate [ellipe] from `c = 1 - m`, preserving small complementary parameters.
+#[inline]
+pub(crate) fn ellipe_complement(c: f64) -> f64 {
+    // Avoid a reciprocal, which can overflow for subnormal complements.
+    let logterm = -c.ln();
+    let mut ellip = logterm.mul_add(ELLIPE_B[4], ELLIPE_A[4]);
+    // Horner's rule avoids explicit powers of the complementary parameter.
+    for i in (0..4).rev() {
+        ellip = ellip.mul_add(c, logterm.mul_add(ELLIPE_B[i], ELLIPE_A[i]));
     }
 
     ellip
+}
+
+/// Complete elliptic integral D, evaluated without subtracting K and E.
+///
+/// Uses the parameter `m = k^2`, not the modulus `k` used by NIST:
+/// $D(m) = (K(m)-E(m))/m = R_D(0,1-m,1)/3$ \[1\]. At `m = 0`,
+/// $D(0) = \pi/4$ \[2\]; at `m = 1`, it diverges to positive infinity.
+/// The approximation covers `0 <= m <= 1`. Its polynomial-plus-log fit has
+/// measured maximum relative error below `4e-9` on the validation grid in
+/// `scripts/generate_ellipd.py`; this is not a rigorous error bound.
+///
+/// # Eliminating cancellation in circular-loop fields
+///
+/// The vector-potential factor $F(m) = ((2-m)K(m)-2E(m))/m$ suffers
+/// cancellation as `m` approaches zero (near the axis or in the far field).
+/// Even computing `K-E` directly leaves cancellation in `2*(K-E)/m-K`.
+/// The descending Landen transformation \[3\], with
+/// $t = m/(1+\sqrt{1-m})^2$, gives
+///
+/// $$K(m) = (1+t)K(t^2), \qquad
+/// E(m) = \frac{2E(t^2)-(1-t^2)K(t^2)}{1+t}.$$
+///
+/// Substituting and using $m = 4t/(1+t)^2$ eliminates both subtractions:
+///
+/// $$F(m) = t(1+t)D(t^2).$$
+///
+/// The explicit `t` factor preserves the linear axis limit. Near the filament,
+/// retain `c = 1-m` directly from geometry and evaluate D with complementary
+/// parameter $1-t^2 = 4\sqrt{c}/(1+\sqrt{c})^2$, avoiding cancellation at
+/// the other endpoint as well.
+///
+/// # References
+///
+/// 1. NIST DLMF, [19.25.1](https://dlmf.nist.gov/19.25.E1): D and Carlson R_D.
+/// 2. NIST DLMF, [19.5.3](https://dlmf.nist.gov/19.5.E3): D's series and axis limit.
+/// 3. NIST DLMF, [19.8.11](https://dlmf.nist.gov/19.8.E11) and
+///    [19.8.12](https://dlmf.nist.gov/19.8.E12): descending Landen transformation.
+#[inline]
+pub fn ellipd(m: f64) -> f64 {
+    ellipd_complement(1.0 - m)
+}
+
+/// Evaluate [ellipd] from `c = 1 - m`, preserving small complementary parameters.
+#[inline]
+pub(crate) fn ellipd_complement(c: f64) -> f64 {
+    // D(1-c) = P(c) - ln(c)*Q(c). Fit directly to R_D(0,c,1)/3;
+    // scripts/generate_ellipd.py reproduces the coefficients and validation.
+    // Enforce P(1)=pi/4, P(0)=ln(4)-1, Q(0)=1/2 for the endpoint limits.
+    const P: [f64; 6] = [
+        0.3862943611198906,
+        0.039820059339637615,
+        0.023143243480788278,
+        0.10581232253071937,
+        0.18354381178582851,
+        0.04678436514058394,
+    ];
+    const Q: [f64; 6] = [
+        0.5,
+        0.3749851669046751,
+        0.3491343345691977,
+        0.29559542236586234,
+        0.13359632141363195,
+        0.012853758255618934,
+    ];
+    let (mut p, mut q) = (P[5], Q[5]);
+    for i in (0..5).rev() {
+        p = p.mul_add(c, P[i]);
+        q = q.mul_add(c, Q[i]);
+    }
+    (-c.ln()).mul_add(q, p)
 }
 
 /// 3D $(x^2 + y^2 + z^2)^{1/2}$ using `mul_add` to reduce roundoff error.
@@ -406,4 +480,45 @@ pub fn switch_float(left: f64, right: f64, cond: bool) -> f64 {
     let right_part = right * right_factor;
 
     clip_nan(left_part, 0.0) + clip_nan(right_part, 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ellipd, ellipd_complement, ellipe_complement, ellipk_complement};
+
+    #[test]
+    fn elliptic_d() {
+        // Independent mpmath R_D(0,c,1)/3 references at 80 decimal digits.
+        for (c, expected) in [
+            (1.0, core::f64::consts::FRAC_PI_4),
+            (0.9, 0.816837118224562),
+            (0.5, 1.0068615925073928),
+            (0.1, 1.6370193118267776),
+            (0.01, 2.706710927237021),
+            (1e-4, 4.99181393947028),
+            (1e-12, 14.201804919094566),
+            (1e-100, 115.51554901082218),
+        ] {
+            assert!((ellipd_complement(c) / expected - 1.0).abs() < 4e-9);
+            if c >= 1e-4 {
+                assert!((ellipd(1.0 - c) / expected - 1.0).abs() < 4e-9);
+            }
+        }
+        assert!((ellipd(0.0) - core::f64::consts::FRAC_PI_4).abs() < 2e-16);
+        assert_eq!(ellipd(1.0), f64::INFINITY);
+        assert!(ellipd(f64::NAN).is_nan());
+        assert!(ellipd(1.1).is_nan());
+    }
+
+    #[test]
+    fn elliptic_integrals_tiny_complement() {
+        for c in [1e-20, 1e-100, 1e-310, f64::from_bits(1)] {
+            // At these complements, the leading asymptotic limits are accurate
+            // well beyond the polynomial fits' 2e-8 absolute error bound.
+            let k = 4.0_f64.ln() - 0.5 * c.ln();
+            assert!((ellipk_complement(c) - k).abs() < 2e-8);
+            assert!((ellipe_complement(c) - 1.0).abs() < 2e-8);
+            assert!((ellipd_complement(c) - (k - 1.0)).abs() < 2e-13);
+        }
+    }
 }

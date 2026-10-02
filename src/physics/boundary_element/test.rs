@@ -33,8 +33,7 @@ use super::{
 use crate::math::{cartesian_to_cylindrical, cross3, dot3};
 use crate::mesh::TriangleMeshView;
 use crate::physics::circular_filament::{
-    flux_circular_filament_scalar, flux_density_circular_filament_cartesian_scalar,
-    vector_potential_circular_filament_scalar,
+    flux_density_circular_filament_cartesian_scalar, vector_potential_circular_filament_scalar,
 };
 use crate::physics::linear_filament::vector_potential_linear_filament_scalar;
 use crate::physics::point_source::current_element::{
@@ -1773,7 +1772,10 @@ fn test_triangle_strip_mutual_inductance_against_circular_filament() {
 
     let m_strip = strip_mutual_inductance(&strip_src, &strip_tgt);
     let m_strip_reverse = strip_mutual_inductance(&strip_tgt, &strip_src);
-    let m_loop = flux_circular_filament_scalar((radius, z_src, 1.0), (radius, z_tgt));
+    let m_loop = 2.0
+        * PI
+        * radius
+        * vector_potential_circular_filament_scalar((radius, z_src, 1.0), (radius, z_tgt));
 
     assert!(
         approx(m_loop, m_strip, 1e-3, 1e-12),
@@ -2609,7 +2611,10 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_far_field
     for point in obs {
         b_strip.push(strip_flux_density(&strip, point));
         let b_ref = flux_density_circular_filament_cartesian_scalar(
-            (radius, 0.0, loop_current),
+            (radius, loop_current),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
+            0.0,
             (point[0], point[1], point[2]),
         );
         b_loop.push([b_ref.0, b_ref.1, b_ref.2]);
@@ -2713,7 +2718,10 @@ fn test_flux_density_triangle_circular_strip_matches_circular_filament_near_axis
     for (i, point) in obs.iter().copied().enumerate() {
         let b_strip = strip_flux_density(&strip, point);
         let b_ref = flux_density_circular_filament_cartesian_scalar(
-            (radius, 0.0, loop_current),
+            (radius, loop_current),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
+            0.0,
             (point[0], point[1], point[2]),
         );
         let b_loop = [b_ref.0, b_ref.1, b_ref.2];

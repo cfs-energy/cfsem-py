@@ -86,6 +86,9 @@ from .cfsem import (
     vector_potential_circular_filament as em_vector_potential_circular_filament,
 )
 from .cfsem import (
+    vector_potential_circular_filament_cartesian as em_vector_potential_circular_filament_cartesian,
+)
+from .cfsem import (
     vector_potential_linear_filament as em_vector_potential_linear_filament,
 )
 from .cfsem import vector_potential_linear_filament_hierarchical
@@ -160,20 +163,20 @@ def flux_circular_filament(
     rprime: NDArray[float64],
     zprime: NDArray[float64],
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> NDArray[float64]:
     """
-    Flux contributions from some circular filaments to some observation points,
-    which happens to be the Green's function for the Grad-Shafranov solve.
+    Poloidal flux from circular conductors, calculated as 2*pi*rprime*A_phi.
+    Source radii use their magnitudes; flux is even in signed observation radius.
 
-    This represents the integral of $\\vec{B} \\cdot \\hat{n} \\, dA$ from the z-axis to each
-    (`rprime`, `zprime`) observation location with $\\hat{n}$ oriented parallel to the z-axis.
+    For zero wire radii, this is the ideal-filament Green's function for the
+    Grad-Shafranov solve, and unit-current values give the mutual inductance
+    between source and observation loops.
 
-    A convenient interpretation of the flux is as the mutual inductance
-    between a circular filament at (`rfil`, `zfil`) and a second circular
-    filament at (`rprime`, `zprime`); this can be used to get the mutual inductance
-    between two filamentized coils as the sum of flux contributions between each coil's filaments.
-    Because mutual inductance is reflexive, the order of the coils can be reversed and
-    the same result is obtained.
+    Positive wire radii use the same uniform-current, thin-conductor approximation
+    as vector_potential_circular_filament near each conductor, blending to the
+    ideal-filament potential between 1.5 and 3 wire radii from the centerline.
+    Finite-section mutual inductance still requires averaging over the receiver.
 
     Args:
         ifil: [A] filament current
@@ -182,13 +185,18 @@ def flux_circular_filament(
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular conductor-section radius per source, same length
+            as ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [Wb] or [T-m^2] or [V-s] psi, poloidal flux at each observation point
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
+    psi = em_flux_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return psi  # [Wb] or [T-m^2] or [V-s]
 
 
@@ -199,22 +207,27 @@ def vector_potential_circular_filament(
     rprime: NDArray[float64],
     zprime: NDArray[float64],
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> NDArray[float64]:
     """
-    Vector potential contributions from some circular filaments to some observation points.
-    Off-axis A_phi component for a circular current filament in vacuum.
+    Azimuthal vector potential from circular conductors in vacuum.
+    Source radii use their magnitudes; current determines orientation. In a fixed
+    meridional plane, A_phi is odd in signed observation radius.
 
-    The vector potential of a loop has zero r- and z- components due to symmetry,
-    and does not vary in the phi-direction.
+    Positive radii
+    use the Hurwitz uniform-current, circular-section approximation near conductors,
+    blending to the ideal-filament potential between 1.5 and 3 wire radii from the
+    centerline. Requires wire radius small relative to loop radius. Finite-section
+    corrections are neglected in the far field. A_phi is zero on the symmetry axis.
 
-    Note that to recover the B-field as the curl of A, the curl operator for cylindrical
-    coordinates must be used with the output of this function incorporated into a full
-    3D A-field like [A_r, A_phi, A_z].
+    Only A_phi is nonzero. Its curl includes a derivative of the blending weight,
+    so it differs from the separately blended B-field kernel.
 
-    References:
-        [1] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-            “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-            Jan. 01, 2001. Accessed: Sep. 06, 2022. [Online]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+    For formulas and references, see the Rust [finite-thickness scalar][finite_scalar]
+    and [ideal-filament scalar][thin_scalar] implementations.
+
+    [finite_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.vector_potential_circular_filament_finite_thickness_scalar.html
+    [thin_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.vector_potential_circular_filament_scalar.html
 
     Args:
         ifil: [A] filament current
@@ -223,13 +236,18 @@ def vector_potential_circular_filament(
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular conductor-section radius per source, same length
+            as ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [Wb/m] or [V-s/m] a_phi, vector potential in the toroidal direction
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
+    a_phi = em_vector_potential_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return a_phi  # [Wb/m] or [V-s/m]
 
 
@@ -240,30 +258,25 @@ def flux_density_circular_filament(
     rprime: NDArray[float64],
     zprime: NDArray[float64],
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """
-    Off-axis Br,Bz components for a circular current filament in vacuum.
+    Br,Bz components from circular conductors in vacuum.
+    Source radii use their magnitudes; current determines orientation. In a fixed
+    meridional plane, Br is odd and Bz is even in signed observation radius.
 
-    Near-exact formula (except numerically-evaluated elliptic integrals)
-    See eqns. 12, 13 pg. 34 in [1], eqn 9.8.7 in [2], and all of [3].
+    Positive wire radii use the Hurwitz uniform-current, circular-section model
+    near the conductor, smoothly blending to the ideal-filament field between
+    1.5 and 3 wire radii from its centerline. Requires wire radius small relative
+    to loop radius. This direct B blend need not be divergence-free in the band;
+    it is not the curl of the separately blended vector potential.
 
-    Note the formula for Br as given by [1] is incorrect and does not satisfy the
-    constraints of the calculation without correcting by a factor of ($z / r$).
+    For field formulas, numerical treatment, and references, see the Rust
+    [finite-radius scalar implementation][finite_radius_scalar] and the
+    [ideal-filament scalar implementation][cylindrical_scalar].
 
-    References:
-        [1] D. B. Montgomery and J. Terrell,
-            “Some Useful Information For The Design Of Aircore Solenoids,
-            Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
-            And Current Density. Part II. Homogeneous Magnetic Fields,”
-            Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
-            Nov. 1961. Accessed: May 18, 2021. [Online].
-            Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
-
-        [2] 8.02 Course Notes. Available:
-        <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
-
-        [3] Eric Dennyson, "Magnet Formulas". Available:
-        <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
+    [finite_radius_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_finite_radius_scalar.html
+    [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_scalar.html
 
     Args:
         ifil: [A] filament current
@@ -272,13 +285,18 @@ def flux_density_circular_filament(
         rprime: [m] Observation point R-coord
         zprime: [m] Observation point Z-coord
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular conductor-section radius per source, same length
+            as ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [T] (Br, Bz) flux density components
     """
     ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
     rprime, zprime = _2tup_contig((rprime, zprime))
-    br, bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par)
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
+    br, bz = em_flux_density_circular_filament(ifil, rfil, zfil, rprime, zprime, par, wire_radius)
     return br, bz  # [T]
 
 
@@ -1294,29 +1312,103 @@ def rotate_filaments_about_path(path: Array3xN, angle_offset: float, fils: Array
 def flux_density_circular_filament_cartesian(
     ifil: NDArray[float64],
     rfil: NDArray[float64],
-    zfil: NDArray[float64],
+    loc: Array3xN,
+    normal: Array3xN,
     xyzp: Array3xN,
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
     """
     Flux density of a circular filament in cartesian form
     at a set of locations given in cartesian coordinates.
 
+    See the Rust [Cartesian scalar implementation][cartesian_scalar] for coordinate
+    conversion and the [finite-radius scalar implementation][cylindrical_scalar] for
+    field formulas and references.
+
+    [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_cartesian_scalar.html
+    [cylindrical_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.flux_density_circular_filament_finite_radius_scalar.html
+
+    Observation coordinates and returned vectors use the world Cartesian frame.
+    Each loop has its own center and normal.
+
+    Positive wire radii use the uniform-current circular-section approximation
+    near the conductor and blend to the ideal-filament field between 1.5 and 3
+    wire radii from its centerline. Requires wire radius small relative to loop radius.
+    Zero radii use the ideal-filament field, including its on-axis treatment.
+
+    Invalid geometry propagates as NaNs; inconsistent array lengths raise an error.
+
     Args:
         ifil: [A] filament current
-        rfil: [m] filament R-coord
-        zfil: [m] filament Z-coord
+        rfil: [m] loop major radius
+        loc: [m] loop centers as (x, y, z) arrays, one entry per source
+        normal: Loop normals as (nx, ny, nz) arrays, one entry per source.
+            Finite nonzero vectors are normalized internally. Positive current
+            follows the right-hand rule about the normal.
         xyzp: [m] x,y,z coords of observation points
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular cross-section radius per source, same length as
+            ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [T] flux density
     """
-    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    ifil, rfil = _2tup_contig((ifil, rfil))
+    loc = _3tup_contig(loc)
+    normal = _3tup_contig(normal)
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
     xyzp = _3tup_contig(xyzp)
-    bx, by, bz = em_flux_density_circular_filament_cartesian(ifil, rfil, zfil, xyzp, par)  # [T]
+    bx, by, bz = em_flux_density_circular_filament_cartesian(
+        ifil, rfil, loc, normal, xyzp, par, wire_radius
+    )  # [T]
 
     return bx, by, bz
+
+
+def vector_potential_circular_filament_cartesian(
+    ifil: NDArray[float64],
+    rfil: NDArray[float64],
+    loc: Array3xN,
+    normal: Array3xN,
+    xyzp: Array3xN,
+    par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
+) -> Array3xN:
+    """Vector potential from independently located and oriented circular conductors.
+
+    Observation coordinates and returned vectors use the world Cartesian frame.
+    See [vector_potential_circular_filament][cfsem.vector_potential_circular_filament]
+    for the near/far blend, validity limits, and references, and the Rust
+    [Cartesian scalar implementation][cartesian_scalar] for coordinate conversion.
+    The potential is zero on the loop axis. Invalid geometry propagates as NaNs;
+    inconsistent array lengths raise an error.
+
+    [cartesian_scalar]: https://docs.rs/cfsem/latest/cfsem/physics/circular_filament/fn.vector_potential_circular_filament_cartesian_scalar.html
+
+    Args:
+        ifil: [A] current per source
+        rfil: [m] loop major radius per source, interpreted by magnitude
+        loc: [m] loop centers as (x, y, z) arrays, one entry per source
+        normal: Finite nonzero loop normals as (nx, ny, nz) arrays, normalized
+            internally. Positive current follows the right-hand rule.
+        xyzp: [m] observation coordinates as (x, y, z) arrays
+        par: Whether to use CPU parallelism
+        wire_radius: [m] circular cross-section radius per source, interpreted by
+            magnitude. None defaults to zero radii for ideal filaments.
+
+    Returns:
+        (Ax, Ay, Az) arrays in [Wb/m] or [V-s/m].
+    """
+    ifil, rfil = _2tup_contig((ifil, rfil))
+    loc = _3tup_contig(loc)
+    normal = _3tup_contig(normal)
+    xyzp = _3tup_contig(xyzp)
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
+    return em_vector_potential_circular_filament_cartesian(ifil, rfil, loc, normal, xyzp, par, wire_radius)
 
 
 def mutual_inductance_circular_to_linear(
@@ -1417,31 +1509,53 @@ def vector_potential_dipole(
 def body_force_density_circular_filament_cartesian(
     ifil: NDArray[float64],
     rfil: NDArray[float64],
-    zfil: NDArray[float64],
+    loc: Array3xN,
+    normal: Array3xN,
     obs: Array3xN,
     j: Array3xN,
     par: bool = True,
+    wire_radius: NDArray[float64] | None = None,
 ) -> Array3xN:
     """
     JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
     filament segment at an observation point in cartesian form with some current density (per area).
 
+    Observation coordinates, current densities (when supplied), and returned
+    vectors use the world Cartesian frame. Each loop has its own center and normal.
+
+    Positive wire radii use the uniform-current circular-section approximation
+    near the conductor and blend to the ideal-filament field between 1.5 and 3
+    wire radii from its centerline. Requires wire radius small relative to loop radius.
+    Zero radii use the ideal-filament field, including its on-axis treatment.
+
+    Invalid geometry propagates as NaNs; inconsistent array lengths raise an error.
+
     Args:
         ifil: [A] filament current
-        rfil: [m] filament R-coord
-        zfil: [m] filament Z-coord
+        rfil: [m] loop major radius
+        loc: [m] loop centers as (x, y, z) arrays, one entry per source
+        normal: Loop normals as (nx, ny, nz) arrays, one entry per source.
+            Finite nonzero vectors are normalized internally. Positive current
+            follows the right-hand rule about the normal.
         obs: [m] x,y,z coords of observation locations
         j: [A/m^2] current density vector at observation locations
         par: Whether to use CPU parallelism
+        wire_radius: [m] circular cross-section radius per source, same length as
+            ifil. None allocates zero radii, preserving ideal-filament behavior.
+            Wire radius is interpreted by magnitude.
 
     Returns:
         [N/m^3] body force density
     """
-    ifil, rfil, zfil = _3tup_contig((ifil, rfil, zfil))
+    ifil, rfil = _2tup_contig((ifil, rfil))
+    loc = _3tup_contig(loc)
+    normal = _3tup_contig(normal)
+    if wire_radius is not None:
+        wire_radius = ascontiguousarray(wire_radius, dtype=float64).ravel()
     obs = _3tup_contig(obs)
     j = _3tup_contig(j)
     jxbx, jxby, jxbz = em_body_force_density_circular_filament_cartesian(
-        ifil, rfil, zfil, obs, j, par
+        ifil, rfil, loc, normal, obs, j, par, wire_radius
     )  # [N/m^3]
 
     return jxbx, jxby, jxbz

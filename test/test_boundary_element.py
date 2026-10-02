@@ -258,7 +258,16 @@ def test_triangle_mesh_far_field_against_circular_filament(par):
         cfsem.flux_density_circular_filament_cartesian(
             np.array([loop_current], dtype=np.float64),
             np.array([radius], dtype=np.float64),
-            np.array([0.0], dtype=np.float64),
+            (
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.array([0.0], dtype=np.float64),
+            ),
+            (
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.zeros_like(np.array([0.0], dtype=np.float64)),
+                np.ones_like(np.array([0.0], dtype=np.float64)),
+            ),
             (obs[:, 0], obs[:, 1], obs[:, 2]),
             par,
         )
@@ -649,6 +658,42 @@ def test_triangle_mesh_self_force_mapping_shapes_and_serial_parallel_agree(par, 
 
 
 @mark.parametrize("par", [True, False])
+@mark.parametrize("quad", TRIANGLE_QUADRATURES)
+@mark.parametrize("offset", [0.0, 1e-5])
+def test_circular_force_mapping_axis_and_quadrants(par, quad, offset):
+    # The first centroid is exactly on axis at offset=0; other points span quadrants.
+    nodes = np.array([[0.0, 0.0, 0.5], [-0.375, -0.375, 0.14], [0.375, 0.375, 0.14], [0.375, -0.375, 0.14]])
+    nodes[:, 0] += offset
+    triangles = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.uint64)
+    stream = nodes[:, 1].copy()
+    radii = np.array([0.4, 0.9])
+    heights = np.array([-0.2, 0.3])
+    current = np.array([0.8, -1.1])
+    actual = _contract_force_mapping(
+        *cfsem.triangle_mesh_force_mapping_from_circular_filaments(
+            radii, heights, nodes, triangles, stream, par=par, quad=quad
+        ),
+        current,
+    )
+    points, weights = cfsem.triangle_mesh_quadrature_points(nodes, triangles, quad=quad)
+    if quad == "dunavant1" and offset == 0.0:
+        np.testing.assert_array_equal(points[0, 0, :2], 0.0)
+    jobs = cfsem.triangle_mesh_current_density(nodes, triangles, stream)
+    b = np.column_stack(
+        cfsem.flux_density_circular_filament_cartesian(
+            current,
+            radii,
+            (np.zeros(2), np.zeros(2), heights),
+            (np.zeros(2), np.zeros(2), np.ones(2)),
+            tuple(points[..., k].ravel() for k in range(3)),
+            par=False,
+        )
+    ).reshape(points.shape)
+    expected = _force_from_bfield_on_target(points, weights, jobs, b)
+    np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=1e-18)
+
+
+@mark.parametrize("par", [True, False])
 def test_triangle_mesh_force_mappings_from_other_source_models(par):
     """Check filament and dipole force mappings against direct target quadrature."""
     radius = 0.58
@@ -698,7 +743,8 @@ def test_triangle_mesh_force_mappings_from_other_source_models(par):
         cfsem.flux_density_circular_filament_cartesian(
             icirc,
             rfil,
-            zfil,
+            (np.zeros_like(zfil), np.zeros_like(zfil), zfil),
+            (np.zeros_like(zfil), np.zeros_like(zfil), np.ones_like(zfil)),
             xyzp,
             False,
         )

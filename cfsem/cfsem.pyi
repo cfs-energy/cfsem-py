@@ -199,10 +199,12 @@ class SolenoidStress2dModelF32:
 def body_force_density_circular_filament_cartesian(
     current: FloatArray,
     rfil: FloatArray,
-    zfil: FloatArray,
+    loc: ArrayTriple,
+    normal: ArrayTriple,
     obs: ArrayTriple,
     j: ArrayTriple,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> ArrayTriple: ...
 def body_force_density_linear_filament(
     xyzfil: ArrayTriple,
@@ -239,6 +241,7 @@ def flux_circular_filament(
     rprime: FloatArray,
     zprime: FloatArray,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> FloatArray: ...
 def vector_potential_circular_filament(
     current: FloatArray,
@@ -247,6 +250,7 @@ def vector_potential_circular_filament(
     rprime: FloatArray,
     zprime: FloatArray,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> FloatArray: ...
 def flux_density_circular_filament(
     current: FloatArray,
@@ -255,13 +259,25 @@ def flux_density_circular_filament(
     rprime: FloatArray,
     zprime: FloatArray,
     par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> ArrayPair: ...
 def flux_density_circular_filament_cartesian(
     current: FloatArray,
     rfil: FloatArray,
-    zfil: FloatArray,
+    loc: ArrayTriple,
+    normal: ArrayTriple,
     xyzobs: ArrayTriple,
     par: bool,
+    wire_radius: FloatArray | None = None,
+) -> ArrayTriple: ...
+def vector_potential_circular_filament_cartesian(
+    current: FloatArray,
+    rfil: FloatArray,
+    loc: ArrayTriple,
+    normal: ArrayTriple,
+    xyzobs: ArrayTriple,
+    par: bool,
+    wire_radius: FloatArray | None = None,
 ) -> ArrayTriple: ...
 def mutual_inductance_circular_to_linear(
     rfil: FloatArray,

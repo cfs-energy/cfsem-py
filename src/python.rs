@@ -9,6 +9,7 @@ use pyo3::create_exception;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyComplexMethods, PyDict, PyTuple};
+use std::borrow::Cow;
 use std::ffi::CString;
 use std::fmt::Debug;
 
@@ -30,6 +31,17 @@ impl From<PyInteropError> for PyErr {
             PyInteropError::DimensionalityError { msg } => DimensionalityError::new_err(msg),
             PyInteropError::ValueError { msg } => exceptions::PyValueError::new_err(msg),
         }
+    }
+}
+
+/// Borrow supplied wire radii, or allocate one zero radius per source for `None`.
+fn read_wire_radius<'a>(
+    wire_radius: Option<&'a PyReadonlyArray1<'_, f64>>,
+    source_count: usize,
+) -> PyResult<Cow<'a, [f64]>> {
+    match wire_radius {
+        Some(radius) => Ok(Cow::Borrowed(radius.as_slice()?)),
+        None => Ok(Cow::Owned(vec![0.0; source_count])),
     }
 }
 
@@ -2632,7 +2644,7 @@ fn rotate_filaments_about_path(
 }
 
 /// Python bindings for cfsemrs::physics::flux_circular_filament
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, rprime, zprime, par, wire_radius=None))]
 fn flux_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -2640,6 +2652,7 @@ fn flux_circular_filament(
     rprime: PyReadonlyArray1<f64>,
     zprime: PyReadonlyArray1<f64>,
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<Py<PyArray1<f64>>> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
@@ -2647,6 +2660,9 @@ fn flux_circular_filament(
     _3tup_slice_ro!(rzifil);
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
+
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), rzifil.0.len())?;
+    let wire_radius = wire_radius.as_ref();
 
     // Initialize output
     let mut psi = vec![0.0; obs.0.len()];
@@ -2658,7 +2674,7 @@ fn flux_circular_filament(
     };
 
     // Do calculations
-    match func(rzifil, obs, &mut psi[..]) {
+    match func(rzifil, wire_radius, obs, &mut psi[..]) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -2673,7 +2689,7 @@ fn flux_circular_filament(
 }
 
 /// Python bindings for cfsemrs::physics::circular_filament::vector_potential_circular_filament
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, rprime, zprime, par, wire_radius=None))]
 fn vector_potential_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -2681,6 +2697,7 @@ fn vector_potential_circular_filament(
     rprime: PyReadonlyArray1<f64>,
     zprime: PyReadonlyArray1<f64>,
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<Py<PyArray1<f64>>> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
@@ -2688,6 +2705,9 @@ fn vector_potential_circular_filament(
     _3tup_slice_ro!(rzifil);
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
+
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), rzifil.0.len())?;
+    let wire_radius = wire_radius.as_ref();
 
     // Initialize output
     let mut out = vec![0.0; obs.0.len()];
@@ -2699,7 +2719,7 @@ fn vector_potential_circular_filament(
     };
 
     // Do calculations
-    match func(rzifil, obs, &mut out[..]) {
+    match func(rzifil, wire_radius, obs, &mut out[..]) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -2714,7 +2734,7 @@ fn vector_potential_circular_filament(
 }
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, zfil, rprime, zprime, par, wire_radius=None))]
 fn flux_density_circular_filament(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
@@ -2722,6 +2742,7 @@ fn flux_density_circular_filament(
     rprime: PyReadonlyArray1<f64>,
     zprime: PyReadonlyArray1<f64>,
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
@@ -2729,6 +2750,9 @@ fn flux_density_circular_filament(
     _3tup_slice_ro!(rzifil);
     let obs = (rprime, zprime);
     _2tup_slice_ro!(obs);
+
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), rzifil.0.len())?;
+    let wire_radius = wire_radius.as_ref();
 
     // Initialize output
     let n = obs.0.len();
@@ -2741,7 +2765,7 @@ fn flux_density_circular_filament(
     };
 
     // Do calculations
-    match func(rzifil, obs, (&mut br, &mut bz)) {
+    match func(rzifil, wire_radius, obs, (&mut br, &mut bz)) {
         Ok(_) => {}
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -3528,23 +3552,36 @@ fn hyp2f1(
 }
 
 /// Python bindings for cfsemrs::physics::flux_density_circular_filament_cartesian
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, loc, normal, xyzobs, par, wire_radius=None))]
 fn flux_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
-    zfil: PyReadonlyArray1<f64>,
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    normal: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
     xyzobs: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
     ), // [m] Observation point coords
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
-    let rzifil = (rfil, zfil, current);
-    _3tup_slice_ro!(rzifil);
-    let (rfil, zfil, current) = rzifil;
+    let rfil = rfil.as_slice()?;
+    let current = current.as_slice()?;
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(normal);
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), current.len())?;
+    let wire_radius = wire_radius.as_ref();
     _3tup_slice_ro!(xyzobs);
 
     // Initialize output
@@ -3559,7 +3596,10 @@ fn flux_density_circular_filament_cartesian(
 
     // Do calculations
     match func(
-        (&rfil, &zfil, &current),
+        (rfil, current),
+        loc,
+        normal,
+        wire_radius,
         xyzobs,
         (&mut bx, &mut by, &mut bz),
     ) {
@@ -3571,6 +3611,68 @@ fn flux_density_circular_filament_cartesian(
     }
 
     _3tup_ret!((bx, f64), (by, f64), (bz, f64))
+}
+
+/// Python bindings for cfsemrs::physics::vector_potential_circular_filament_cartesian
+#[pyfunction(signature = (current, rfil, loc, normal, xyzobs, par, wire_radius=None))]
+fn vector_potential_circular_filament_cartesian(
+    current: PyReadonlyArray1<f64>,
+    rfil: PyReadonlyArray1<f64>,
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    normal: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    xyzobs: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ), // [m] Observation point coords
+    par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    // Get references to contiguous data as slice
+    // or error if data is not contiguous
+    let rfil = rfil.as_slice()?;
+    let current = current.as_slice()?;
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(normal);
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), current.len())?;
+    let wire_radius = wire_radius.as_ref();
+    _3tup_slice_ro!(xyzobs);
+
+    // Initialize output
+    let n = xyzobs.0.len();
+    let (mut ax, mut ay, mut az) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+
+    // Select variant
+    let func = match par {
+        true => physics::circular_filament::vector_potential_circular_filament_cartesian_par,
+        false => physics::circular_filament::vector_potential_circular_filament_cartesian,
+    };
+
+    // Do calculations
+    match func(
+        (rfil, current),
+        loc,
+        normal,
+        wire_radius,
+        xyzobs,
+        (&mut ax, &mut ay, &mut az),
+    ) {
+        Ok(_) => {}
+        Err(x) => {
+            let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
+            return Err(err);
+        }
+    }
+
+    _3tup_ret!((ax, f64), (ay, f64), (az, f64))
 }
 
 /// Python bindings for cfsemrs::physics::mutual_inductance_circular_to_linear
@@ -3721,11 +3823,20 @@ fn vector_potential_dipole(
 }
 
 /// Python bindings for cfsemrs::physics::body_force_density_circular_filament_cartesian
-#[pyfunction]
+#[pyfunction(signature = (current, rfil, loc, normal, obs, j, par, wire_radius=None))]
 fn body_force_density_circular_filament_cartesian(
     current: PyReadonlyArray1<f64>,
     rfil: PyReadonlyArray1<f64>,
-    zfil: PyReadonlyArray1<f64>,
+    loc: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
+    normal: (
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+        PyReadonlyArray1<f64>,
+    ),
     obs: (
         PyReadonlyArray1<f64>,
         PyReadonlyArray1<f64>,
@@ -3737,12 +3848,16 @@ fn body_force_density_circular_filament_cartesian(
         PyReadonlyArray1<f64>,
     ), // [A/m^2] current density at observation points
     par: bool,
+    wire_radius: Option<PyReadonlyArray1<f64>>,
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
     // Get references to contiguous data as slice
     // or error if data is not contiguous
-    let rzifil = (rfil, zfil, current);
-    _3tup_slice_ro!(rzifil);
-    let (rfil, zfil, current) = rzifil;
+    let rfil = rfil.as_slice()?;
+    let current = current.as_slice()?;
+    _3tup_slice_ro!(loc);
+    _3tup_slice_ro!(normal);
+    let wire_radius = read_wire_radius(wire_radius.as_ref(), current.len())?;
+    let wire_radius = wire_radius.as_ref();
     _3tup_slice_ro!(obs);
     _3tup_slice_ro!(j);
 
@@ -3757,7 +3872,7 @@ fn body_force_density_circular_filament_cartesian(
     let (mut outx, mut outy, mut outz) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     let out = (&mut outx[..], &mut outy[..], &mut outz[..]);
 
-    match func((&rfil, &zfil, &current), obs, j, out) {
+    match func((rfil, current), loc, normal, wire_radius, obs, j, out) {
         Ok(_) => (),
         Err(x) => {
             let err: PyErr = PyInteropError::DimensionalityError { msg: x.to_string() }.into();
@@ -4536,6 +4651,10 @@ fn _cfsem<'py>(_py: Python, m: Bound<'py, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         vector_potential_circular_filament,
+        m.clone()
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        vector_potential_circular_filament_cartesian,
         m.clone()
     )?)?;
     m.add_function(wrap_pyfunction!(

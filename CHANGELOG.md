@@ -1,5 +1,34 @@
 # Changelog
 
+## 14.0.0 2026-09-28
+
+Upgrade circular filament calcs to be faster, more robust, and increase functionality.
+Adds finite-wire-radius circular filament calcs, resolves on-axis singularity,
+supports arbitrary location and orientation for circular filament cartesian-frame calcs,
+and expands domain of circular filament functions to include the left half plane.
+
+* Rust
+    * Add scalar, vector, and parallel Cartesian circular-filament vector potential with per-source centers, normals, and wire radii
+    * !Cartesian circular-filament B-field and body-force calculations now take per-source Cartesian centers and normals
+    * !Require per-source `wire_radius` in circular-filament calcs
+        * Both polar and cartesian variants; flux, vector potential, flux density, body force density
+    * Add _finite_radius near-field circular filament calc variants using Hurwitz formula
+    * Blend circular fields to the ideal-loop field between 1.5 and 3 wire radii from the centerline
+    * Resolve on-axis singularity for circular filament B-field
+        * Use a Landen-transformed elliptic formula on and off the axis, retaining the small radial field without a cutoff
+        * Expose the scalar `flux_density_circular_filament_on_axis` calculation
+    * Support negative filament radius and negative observation point radius for circular filaments
+        * Combined with the elimination of singularities, this expands the circular filament methods to an unbounded and singularity-free domain when wire radius is nonzero.
+    * Implement ellipd function for stable evaluation of the normalized elliptic difference `(K-E)/m`
+    * Reformulate circular filament A-field and B-field functions to use `ellipd` for improved performance and numerics
+* Python
+    * Add `vector_potential_circular_filament_cartesian` with the same pose inputs and optional wire radius as the Cartesian B-field API
+    * !Replace `zfil` with required `loc` and `normal` component arrays in Cartesian circular-filament B-field and body-force functions
+        * Normals are normalized internally; positive current follows the right-hand rule
+    * Add optional per-source `wire_radius` to circular filament calcs; `None` defaults to zero radius
+        * Include Cartesian B-field and circular-filament body force density; append the input after `par`
+        * Non-breaking change; existing calls produce the same or better result
+
 ## 13.1.0 2026-08-27
 
 * Python

@@ -14,14 +14,14 @@ DATA = Path(__file__).parent / "data"
 
 def test_ellipe():
     # 64-bit version
-    xs = np.linspace(0.0, 1.0 - 1e-7, 100)
-    assert np.allclose(ellipe(xs), np.array([cfsem.ellipe(x) for x in xs]))
+    xs = np.r_[np.linspace(0.0, 1.0 - 1e-7, 1001), 1.0 - np.geomspace(1e-16, 1.0, 101)]
+    np.testing.assert_allclose(ellipe(xs), [cfsem.ellipe(x) for x in xs], rtol=0.0, atol=2e-8)
 
 
 def test_ellipk():
     # 64-bit version
-    xs = np.linspace(0.0, 1.0 - 1e-7, 100)
-    assert np.allclose(ellipk(xs), np.array([cfsem.ellipk(x) for x in xs]))
+    xs = np.r_[np.linspace(0.0, 1.0 - 1e-7, 1001), 1.0 - np.geomspace(1e-16, 1.0, 101)]
+    np.testing.assert_allclose(ellipk(xs), [cfsem.ellipk(x) for x in xs], rtol=0.0, atol=2e-8)
 
 
 def test_hyp2f1_complex128_binding():

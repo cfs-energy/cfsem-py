@@ -1,5 +1,7 @@
 //! Magnetics calculations for circular current filaments.
 
+use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
+
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
@@ -8,97 +10,125 @@ use rayon::{
 use crate::{
     chunksize,
     macros::{check_length, check_length_3tup, mut_par_chunks_3tup, par_chunks_3tup},
-    math::{cross3, dot3, ellipe, ellipk, norm3},
+    math::{dot3, ellipd_complement, ellipe_complement, norm3},
 };
 
 use crate::{MU_0, MU0_OVER_4PI};
 
-/// Flux contributions from some circular filaments to some observation points, which happens to be
-/// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.
-/// This variant of the function is parallelized over chunks of observation points.
+#[cfg(test)]
+use crate::math::{ellipe, ellipk};
+
+/// Observation-radius / filament-radius taper for the local near-field model.
+const NEAR_FIELD_AXIS_TAPER_RATIO: f64 = 1e-4;
+
+/// Squared centerline-distance / wire-radius limits for the exterior B and A blends.
+const NEAR_FIELD_LIMIT_SQUARED: f64 = 1.5 * 1.5;
+const FAR_FIELD_LIMIT: f64 = 3.0;
+const FAR_FIELD_LIMIT_SQUARED: f64 = FAR_FIELD_LIMIT * FAR_FIELD_LIMIT;
+
+/// Squared centerline distance normalized by the nonzero wire-radius magnitude.
+#[inline]
+fn normalized_centerline_distance_squared(
+    source: (f64, f64, f64),
+    wire_radius: f64,
+    obs: (f64, f64),
+) -> f64 {
+    let u = (obs.0.abs() - source.0.abs()) / wire_radius;
+    let v = (obs.1 - source.1) / wire_radius;
+    u.mul_add(u, v * v)
+}
+
+/// Quintic far-field weight for a normalized squared distance inside the blend band.
+#[inline]
+fn far_field_blend_weight(s2: f64) -> f64 {
+    let t = (s2 - NEAR_FIELD_LIMIT_SQUARED) / (FAR_FIELD_LIMIT_SQUARED - NEAR_FIELD_LIMIT_SQUARED);
+    t * t * t * (10.0 + t * (-15.0 + 6.0 * t))
+}
+
+/// Poloidal flux from circular conductors with per-source circular cross-section radii.
+/// Parallelized over chunks of observation points.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
-/// * `out`:     (Wb), poloidal flux at observation location, length `n`
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (Wb) poloidal flux at each observation, length `n`
 ///
-/// # Commentary
-///
-/// Represents contribution from a current at (R, Z) to an observation point at (Rprime, Zprime)
-///
-/// Note Jardin's 4.61-4.66 presents it with a different definition of
-/// the elliptic integrals from what is used here and in scipy.
-///
-/// # References
-///
-///   \[1\] D. Kaltsas, A. Kuiroukidis, and G. Throumoulopoulos, “A tokamak pertinent analytic equilibrium with plasma flow of arbitrary direction,”
-///         Physics of Plasmas, vol. 26, p. 124501, Dec. 2019,
-///         doi: [10.1063/1.5120341](https://doi.org/10.1063/1.5120341).
-///
-///   \[2\] S. Jardin, *Computational Methods in Plasma Physics*, 1st ed. USA: CRC Press, Inc., 2010.
-///
-///   \[3\] J. Huang and J. Menard, “Development of an Auto-Convergent Free-Boundary Axisymmetric Equilibrium Solver,”
-///         Journal of Undergraduate Research, vol. 6, Jan. 2006, Accessed: May 05, 2021. \[Online\].
-///         Available: <https://www.osti.gov/biblio/1051805-development-auto-convergent-free-boundary-axisymmetric-equilibrium-solver>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius blended near/far approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
+/// Flux is $2\pi R_\mathrm{obs} A_\phi$.
 pub fn flux_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
 ) -> Result<(), &'static str> {
-    // Unpack
     let (rprime, zprime) = rzobs;
+    check_length_3tup!(rzifil.2.len(), &rzifil);
+    check_length!(rzifil.2.len(), wire_radius);
+    check_length!(rprime.len(), zprime, out);
 
-    // Chunk inputs
     let n = chunksize(rprime.len());
-    let rprimec = rprime.par_chunks(n);
-    let zprimec = zprime.par_chunks(n);
-    let outc = out.par_chunks_mut(n);
-
-    // Run calcs
-    (outc, rprimec, zprimec)
+    (
+        out.par_chunks_mut(n),
+        rprime.par_chunks(n),
+        zprime.par_chunks(n),
+    )
         .into_par_iter()
-        .try_for_each(|(outc, rc, zc)| flux_circular_filament(rzifil, (rc, zc), outc))?;
-
-    Ok(())
+        .try_for_each(|(outc, rc, zc)| flux_circular_filament(rzifil, wire_radius, (rc, zc), outc))
 }
 
-/// Flux contributions from some circular filaments to some observation points, which happens to be
-/// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.
+/// Poloidal flux from circular conductors with per-source circular cross-section radii.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
-/// * `out`:     (Wb), poloidal flux at observation location, length `n`
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (Wb) poloidal flux at each observation, length `n`
 ///
-/// # Commentary
-///
-/// Represents contribution from a current at (R, Z) to an observation point at (Rprime, Zprime)
-///
-/// Note Jardin's 4.61-4.66 presents it with a different definition of
-/// the elliptic integrals from what is used here and in scipy.
-///
-/// # References
-///
-///   \[1\] D. Kaltsas, A. Kuiroukidis, and G. Throumoulopoulos, “A tokamak pertinent analytic equilibrium with plasma flow of arbitrary direction,”
-///         Physics of Plasmas, vol. 26, p. 124501, Dec. 2019,
-///         doi: [10.1063/1.5120341](https://doi.org/10.1063/1.5120341).
-///
-///   \[2\] S. Jardin, *Computational Methods in Plasma Physics*, 1st ed. USA: CRC Press, Inc., 2010.
-///
-///   \[3\] J. Huang and J. Menard, “Development of an Auto-Convergent Free-Boundary Axisymmetric Equilibrium Solver,”
-///         Journal of Undergraduate Research, vol. 6, Jan. 2006, Accessed: May 05, 2021. \[Online\].
-///         Available: <https://www.osti.gov/biblio/1051805-development-auto-convergent-free-boundary-axisymmetric-equilibrium-solver>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius blended near/far approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
+/// Flux is $2\pi R_\mathrm{obs} A_\phi$.
 pub fn flux_circular_filament(
+    rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    rzobs: (&[f64], &[f64]),
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    vector_potential_circular_filament(rzifil, wire_radius, rzobs, out)?;
+    // Radius depends only on the observation, so scale once after summing sources.
+    for (flux, r) in out.iter_mut().zip(rzobs.0) {
+        *flux *= 2.0 * core::f64::consts::PI * r;
+    }
+    Ok(())
+}
+
+/// Poloidal flux (Wb) from one circular conductor at one observation point.
+///
+/// Arguments are `(major radius, z, current)` in (m, m, A-turns), the circular
+/// cross-section `wire_radius` in m, and cylindrical `(R, Z)` observation coordinates in m.
+/// Uses $\Psi=2\pi R_\mathrm{obs} A_\phi$, with the model and validity limits of
+/// [vector_potential_circular_filament_finite_thickness_scalar]. Requires nonzero
+/// wire radius; for an ideal filament, scale [vector_potential_circular_filament_scalar]
+/// by the same `2*pi*R` factor, or use [flux_circular_filament].
+#[inline]
+pub fn flux_circular_filament_scalar(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> f64 {
+    2.0 * core::f64::consts::PI
+        * rzobs.0
+        * vector_potential_circular_filament_finite_thickness_scalar(rzifil, wire_radius, rzobs)
+}
+
+// Original thin-filament kernels retained independently for regression tests.
+#[cfg(test)]
+fn flux_circular_filament_thin(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
@@ -121,50 +151,18 @@ pub fn flux_circular_filament(
         for j in 0..m {
             // The inner function is inlined, so values that are reused between iterations
             // can be pulled to the outer scope by the compiler and do not affect performance
-            out[i] +=
-                flux_circular_filament_scalar((rfil[j], zfil[j], ifil[j]), (rprime[i], zprime[i]));
+            out[i] += flux_circular_filament_thin_scalar(
+                (rfil[j], zfil[j], ifil[j]),
+                (rprime[i], zprime[i]),
+            );
         }
     }
 
     Ok(())
 }
 
-/// Flux contributions from some circular filaments to some observation points, which happens to be
-/// the Green's function for the Grad-Shafranov elliptic operator, $\Delta^{\*}$.
-///
-/// # Arguments
-///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of filament
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation point
-///
-/// # Returns
-///
-/// * `psi`: (Wb) or (H-A) or (T-m^2) or (V-s), poloidal flux at observation location
-///
-/// # Commentary
-///
-/// Represents contribution from a current at (R, Z) to an observation point at (Rprime, Zprime)
-///
-/// Note Jardin's 4.61-4.66 presents it with a different definition of
-/// the elliptic integrals from what is used here and in scipy.
-///
-/// # References
-///
-///   \[1\] D. Kaltsas, A. Kuiroukidis, and G. Throumoulopoulos, “A tokamak pertinent analytic equilibrium with plasma flow of arbitrary direction,”
-///         Physics of Plasmas, vol. 26, p. 124501, Dec. 2019,
-///         doi: [10.1063/1.5120341](https://doi.org/10.1063/1.5120341).
-///
-///   \[2\] S. Jardin, *Computational Methods in Plasma Physics*, 1st ed. USA: CRC Press, Inc., 2010.
-///
-///   \[3\] J. Huang and J. Menard, “Development of an Auto-Convergent Free-Boundary Axisymmetric Equilibrium Solver,”
-///         Journal of Undergraduate Research, vol. 6, Jan. 2006, Accessed: May 05, 2021. \[Online\].
-///         Available: <https://www.osti.gov/biblio/1051805-development-auto-convergent-free-boundary-axisymmetric-equilibrium-solver>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
-#[inline]
-pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
+#[cfg(test)]
+fn flux_circular_filament_thin_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64)) -> f64 {
     // Unpack
     let (rfil, zfil, ifil) = rzifil;
     let (rprime, zprime) = rzobs;
@@ -177,48 +175,33 @@ pub fn flux_circular_filament_scalar(rzifil: (f64, f64, f64), rzobs: (f64, f64))
     MU_0 * ifil * (rrprime / k2).sqrt() * ((2.0 - k2) * ellipk(k2) - 2.0 * ellipe(k2))
 }
 
-/// Off-axis Br,Bz components for a circular current filament in vacuum.
+/// Br,Bz from circular conductors with per-source circular cross-section radii.
 /// This variant of the function is parallelized over chunks of observation points.
 ///
 /// # Arguments
 ///
 /// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
+/// * `wire_radius`: (m) circular conductor-section radius per source, length `m`; zero for thin filaments
 /// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
 /// * `out`:     (T, T), r- and z-components of magnetic flux density at observation location, length `n`
 ///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// See eqns. 12,13 pg. 34 in \[1\], eqn 9.8.7 in \[2\], and all of \[3\].
-///
-/// Note the formula for Br as given by \[1\] is incorrect and does not satisfy the
-/// constraints of the calculation without correcting by a factor of (z / r).
-///
-/// # References
-///
-///   \[1\] D. B. Montgomery and J. Terrell,
-///         “Some Useful Information For The Design Of Aircore Solenoids,
-///         Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
-///         And Current Density. Part II. Homogeneous Magnetic Fields,”
-///         Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
-///         Nov. 1961. Accessed: May 18, 2021. \[Online\].
-///         Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
-///
-///   \[2\] 8.02 Course Notes. Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
-///
-///   \[3\] Eric Dennyson, "Magnet Formulas". Available: <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// For field formulas, numerical treatment, and references, see
+/// [flux_density_circular_filament_finite_radius_scalar] for positive-radius
+/// blended near/far fields and [flux_density_circular_filament_scalar]
+/// for the zero-radius ideal-filament field.
 pub fn flux_density_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     rzobs: (&[f64], &[f64]),
     out: (&mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
     // Unpack
     let (rprime, zprime) = rzobs;
     let (out_r, out_z) = out;
+
+    check_length_3tup!(rzifil.2.len(), &rzifil);
+    check_length!(rzifil.2.len(), wire_radius);
+    check_length!(rprime.len(), zprime, out_r, out_z);
 
     // Chunk inputs
     let n = chunksize(rprime.len());
@@ -233,46 +216,111 @@ pub fn flux_density_circular_filament_par(
     (outrc, outzc, rprimec, zprimec)
         .into_par_iter()
         .try_for_each(|(orc, ozc, rc, zc)| {
-            flux_density_circular_filament(rzifil, (rc, zc), (orc, ozc))
+            flux_density_circular_filament(rzifil, wire_radius, (rc, zc), (orc, ozc))
         })?;
 
     Ok(())
 }
 
-/// Off-axis Br,Bz components for a circular current filament in vacuum.
+/// Br,Bz from circular conductors with per-source circular cross-section radii.
 ///
 /// # Arguments
 ///
 /// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
+/// * `wire_radius`: (m) circular conductor-section radius per source, length `m`; zero for thin filaments
 /// * `rzobs`:   (m, m) r-coord, and z-coord of each observation point, length `n`
 /// * `out`:     (T, T), r- and z-components of magnetic flux density at observation location, length `n`
 ///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// See eqns. 12,13 pg. 34 in \[1\], eqn 9.8.7 in \[2\], and all of \[3\].
-///
-/// Note the formula for Br as given by \[1\] is incorrect and does not satisfy the
-/// constraints of the calculation without correcting by a factor of (z / r).
-///
-/// # References
-///
-///   \[1\] D. B. Montgomery and J. Terrell,
-///         “Some Useful Information For The Design Of Aircore Solenoids,
-///         Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
-///         And Current Density. Part II. Homogeneous Magnetic Fields,”
-///         Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
-///         Nov. 1961. Accessed: May 18, 2021. \[Online\].
-///         Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
-///
-///   \[2\] 8.02 Course Notes. Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
-///
-///   \[3\] Eric Dennyson, "Magnet Formulas". Available: <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// For field formulas, numerical treatment, and references, see
+/// [flux_density_circular_filament_finite_radius_scalar] for positive-radius
+/// blended near/far fields and [flux_density_circular_filament_scalar]
+/// for the zero-radius ideal-filament field.
 pub fn flux_density_circular_filament(
+    rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    rzobs: (&[f64], &[f64]),
+    out: (&mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    let (rfil, zfil, ifil) = rzifil;
+    let (rprime, zprime) = rzobs;
+    let (out_r, out_z) = out;
+
+    check_length_3tup!(ifil.len(), &rzifil);
+    check_length!(ifil.len(), wire_radius);
+    check_length!(rprime.len(), zprime, &out_r, &out_z);
+    out_r.fill(0.0);
+    out_z.fill(0.0);
+
+    for i in 0..ifil.len() {
+        let source = (rfil[i], zfil[i], ifil[i]);
+        // Thin sources need no near/far classification.
+        if wire_radius[i] == 0.0 {
+            for j in 0..rprime.len() {
+                let (br, bz) =
+                    flux_density_circular_filament_scalar(source, (rprime[j], zprime[j]));
+                out_r[j] += br;
+                out_z[j] += bz;
+            }
+        } else {
+            for (range, far) in circular_field_chunks(source, wire_radius[i], rzobs) {
+                if far {
+                    for j in range {
+                        let (br, bz) =
+                            flux_density_circular_filament_scalar(source, (rprime[j], zprime[j]));
+                        out_r[j] += br;
+                        out_z[j] += bz;
+                    }
+                } else {
+                    for j in range {
+                        let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+                            source,
+                            wire_radius[i],
+                            (rprime[j], zprime[j]),
+                        );
+                        out_r[j] += br;
+                        out_z[j] += bz;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// Group contiguous observations by the same far-field test used by the scalar
+// kernels. The coordinates live in separate slices, so scan indices rather than
+// allocating coordinate pairs for slice::chunk_by. Near points split only their
+// local run, leaving the remaining far-field loops free to vectorize.
+#[inline]
+fn circular_field_chunks<'a>(
+    source: (f64, f64, f64),
+    wire_radius: f64,
+    obs: (&'a [f64], &'a [f64]),
+) -> impl Iterator<Item = (std::ops::Range<usize>, bool)> + 'a {
+    let wire_radius = wire_radius.abs();
+    let is_far = move |i: usize| {
+        normalized_centerline_distance_squared(source, wire_radius, (obs.0[i], obs.1[i]))
+            >= FAR_FIELD_LIMIT_SQUARED
+    };
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        if start == obs.0.len() {
+            return None;
+        }
+        let far = is_far(start);
+        let end = (start + 1..obs.0.len())
+            .find(|&i| is_far(i) != far)
+            .unwrap_or(obs.0.len());
+        let range = start..end;
+        start = end;
+        Some((range, far))
+    })
+}
+
+// Original off-axis kernels from 4639769, independent of production dispatch and helpers.
+// The intentional on-axis change is covered separately by analytic-axis tests.
+#[cfg(test)]
+fn flux_density_circular_filament_thin(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
     out: (&mut [f64], &mut [f64]),
@@ -302,7 +350,7 @@ pub fn flux_density_circular_filament(
         for j in 0..m {
             // The inner function is inlined, so values that are reused between iterations
             // can be pulled to the outer scope by the compiler and do not affect performance
-            let (br, bz) = flux_density_circular_filament_scalar(
+            let (br, bz) = flux_density_circular_filament_thin_scalar(
                 (rfil[i], zfil[i], ifil[i]),
                 (rprime[j], zprime[j]),
             );
@@ -314,44 +362,8 @@ pub fn flux_density_circular_filament(
     Ok(())
 }
 
-/// Off-axis Br,Bz components for a circular current filament in vacuum.
-///
-/// # Arguments
-///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation point, length `n`
-///
-/// # Returns
-///
-/// * `(br, bz)`:   (T, T), r- and z-component of magnetic flux density at observation location
-///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// See eqns. 12,13 pg. 34 in \[1\], eqn 9.8.7 in \[2\], and all of \[3\].
-///
-/// Note the formula for Br as given by \[1\] is incorrect and does not satisfy the
-/// constraints of the calculation without correcting by a factor of (z / r).
-///
-/// # References
-///
-///   \[1\] D. B. Montgomery and J. Terrell,
-///         “Some Useful Information For The Design Of Aircore Solenoids,
-///         Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
-///         And Current Density. Part II. Homogeneous Magnetic Fields,”
-///         Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
-///         Nov. 1961. Accessed: May 18, 2021. \[Online\].
-///         Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
-///
-///   \[2\] 8.02 Course Notes. Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
-///
-///   \[3\] Eric Dennyson, "Magnet Formulas". Available: <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
-///
-///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
-#[inline]
-pub fn flux_density_circular_filament_scalar(
+#[cfg(test)]
+fn flux_density_circular_filament_thin_scalar(
     rzifil: (f64, f64, f64),
     rzobs: (f64, f64),
 ) -> (f64, f64) {
@@ -390,166 +402,775 @@ pub fn flux_density_circular_filament_scalar(
     (br, bz)
 }
 
-/// Flux density of a circular filament in cartesian form
-/// at a location given in cartesian coordinates.
+/// Br,Bz components for a circular current filament in vacuum, including on the axis.
 ///
-/// For additional documentation and commentary, see [flux_density_circular_filament_scalar].
-#[inline]
-pub fn flux_density_circular_filament_cartesian_scalar(
-    rzifil: (f64, f64, f64),
-    xyzobs: (f64, f64, f64),
-) -> (f64, f64, f64) {
-    // Unpack
-    let (x, y, z) = xyzobs;
-    // Convert cartesian point to cylindrical
-    let [robs, phiobs, zobs] = crate::math::cartesian_to_cylindrical([x, y, z]);
-    // Get axisymmetric B-field
-    let (br, bz) = flux_density_circular_filament_scalar(rzifil, (robs, zobs));
-    // Convert axisymmetric B-field to cartesian
-    let (bx, by, bz) = (br * libm::cos(phiobs), br * libm::sin(phiobs), bz);
-    (bx, by, bz)
-}
-
-/// Flux density of a circular filament in cartesian form
-/// at a set of locations given in cartesian coordinates.
-///
-/// For additional documentation and commentary, see [flux_density_circular_filament_scalar].
-pub fn flux_density_circular_filament_cartesian(
-    rzifil: (&[f64], &[f64], &[f64]),
-    xyzobs: (&[f64], &[f64], &[f64]),
-    bxyz_out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), &'static str> {
-    // Unpack
-    let (rfil, zfil, ifil) = rzifil;
-    let (x, y, z) = xyzobs;
-    let (bx, by, bz) = bxyz_out;
-
-    // Check lengths
-    let n = ifil.len();
-    check_length_3tup!(n, &rzifil);
-
-    let m = x.len();
-    check_length_3tup!(m, &xyzobs);
-    check_length!(m, bx, by, bz);
-
-    // Zero output
-    bx.fill(0.0);
-    by.fill(0.0);
-    bz.fill(0.0);
-
-    // Do calcs
-    // Because we will parallelize over chunks of output points to avoid mutexes,
-    // the inner loop is over the circular filaments s.t. performance remains viable
-    // when examining the contribution of a large number of filaments to a small
-    // number of observation points.
-    for j in 0..m {
-        for i in 0..n {
-            // The inner function is inlined, so values that are reused between iterations
-            // can be pulled to the outer scope by the compiler and do not affect performance
-            let rzifil_i = (rfil[i], zfil[i], ifil[i]);
-            let xyzobs_j = (x[j], y[j], z[j]);
-            let (bxo, byo, bzo) =
-                flux_density_circular_filament_cartesian_scalar(rzifil_i, xyzobs_j);
-            bx[j] += bxo;
-            by[j] += byo;
-            bz[j] += bzo;
-        }
-    }
-
-    Ok(())
-}
-
-/// Flux density of a circular filament in cartesian form
-/// at a set of locations given in cartesian coordinates.
-/// Parallelized over chunks of observation points.
-///
-/// For additional documentation and commentary, see [flux_density_circular_filament_scalar].
-pub fn flux_density_circular_filament_cartesian_par(
-    rzifil: (&[f64], &[f64], &[f64]),
-    xyzobs: (&[f64], &[f64], &[f64]),
-    bxyz_out: (&mut [f64], &mut [f64], &mut [f64]),
-) -> Result<(), &'static str> {
-    // Chunk
-    let n = chunksize(xyzobs.0.len());
-    let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
-    let (outbxc, outbyc, outbzc) = mut_par_chunks_3tup!(bxyz_out, n);
-
-    // Evaluate
-    (xc, yc, zc, outbxc, outbyc, outbzc)
-        .into_par_iter()
-        .try_for_each(|(xci, yci, zci, bxci, byci, bzci)| {
-            let xyzobs_i = (xci, yci, zci);
-            let bxyz_out_i = (bxci, byci, bzci);
-            flux_density_circular_filament_cartesian(rzifil, xyzobs_i, bxyz_out_i)
-        })?;
-
-    Ok(())
-}
-
-/// Off-axis A_phi component for a circular current filament in vacuum.
-/// This variant of the function is parallelized over chunks of observation points.
+/// The ideal filament remains singular at the source location.
+/// Source radius is interpreted by magnitude; current determines orientation.
+/// Signed observation radii describe a fixed meridional plane: Br is odd in R
+/// and Bz is even. Geometry uses absolute radii.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation points, length `n`
-/// * `out`: (V-s/m), phi-component of magnetic vector potential at observation locations, length `n`
+/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of filament
+/// * `rzobs`:   (m, m) r-coord and z-coord of observation point
 ///
-/// # Commentary
+/// # Returns
+///
+/// * `(br, bz)`:   (T, T), r- and z-component of magnetic flux density at observation location
+///
+/// # Stable field calculation
+///
+/// The same expression covers the axis and off-axis observations, retaining
+/// the small radial field without clipping. On the axis it reduces to
+/// [flux_density_circular_filament_on_axis], up to the elliptic fit's error.
+///
+/// With $a=|R_\mathrm{fil}|$, $R=|R_\mathrm{obs}|$, and $z=Z_\mathrm{obs}-Z_\mathrm{fil}$,
+/// define $Q=(a+R)^2+z^2$, $\Delta=(a-R)^2+z^2$, $u=\sqrt Q$,
+/// $v=\sqrt\Delta$, and $h=1/(u+v)$. The descending Landen transformation
+/// has parameter $t=4aRh^2$ and complement $c_1=1-t^2=4(uh)(vh)$.
+/// With $E_1=E(t^2)$ and $D_1=D(t^2)$, define
+///
+/// $$N=(a-R)(a+R)+z^2,\qquad M=(R-a)(R+a)+z^2,$$
+/// $$H=2(Rh)^2c_1(uv+M),\qquad P=\frac{2\mu_0 I a^2h}{\pi\Delta}.$$
+///
+/// Eliminating the intermediate normalization and the reconstruction of E(m)
+/// gives the field directly in terms of the transformed elliptic integrals:
+///
+/// $$B_R=P\frac{2Rz}{Q}\left(E_1-\frac{c_1D_1}{2}\right),\qquad
+/// B_Z=P\frac{NE_1+HD_1}{Q}.$$
+///
+/// Apply the observation-radius sign to $B_R$. As $t\to0$, the radial
+/// elliptic factor tends to $3\pi/8$, avoiding cancellation near the axis
+/// and far from the loop. The factored N and M retain near-wire accuracy.
+/// Compute $c_1$ directly from the distances to preserve very small complements.
+/// E and D share the same argument and logarithm; the radial elliptic factor
+/// and axial sum use fused multiply-adds. The geometry uses three divisions
+/// and two independent square roots, with no axis branch.
+/// See [crate::math::ellipd] and NIST DLMF
+/// [19.8.11–12](https://dlmf.nist.gov/19.8.E11) for the transformation.
+///
+/// # Off-axis field
 ///
 /// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// The vector potential of a loop has zero r- and z- components due to symmetry,
-/// and does not vary in the phi-direction.
+/// See eqns. 12,13 pg. 34 in \[1\], eqn 9.8.7 in \[2\], and all of \[3\].
+///
+/// Note the formula for Br as given by \[1\] is incorrect and does not satisfy the
+/// constraints of the calculation without correcting by a factor of (z / r).
 ///
 /// # References
 ///
-///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
+///   \[1\] D. B. Montgomery and J. Terrell,
+///         “Some Useful Information For The Design Of Aircore Solenoids,
+///         Part I. Relationships Between Magnetic Field, Power, Ampere-Turns
+///         And Current Density. Part II. Homogeneous Magnetic Fields,”
+///         Massachusetts Inst. Of Tech. Francis Bitter National Magnet Lab, Cambridge, MA,
+///         Nov. 1961. Accessed: May 18, 2021. \[Online\].
+///         Available: <https://apps.dtic.mil/sti/citations/tr/AD0269073>
+///
+///   \[2\] MIT, *8.02 Course Notes*, Chapter 9, “Sources of Magnetic Fields,”
+///         Example 9.2, eqs. 9.1.13–9.1.15 (on-axis), and Appendix 1, eq. 9.8.7 (off-axis).
+///         Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
+///
+///   \[3\] Eric Dennyson, "Magnet Formulas". Available: <https://tiggerntatie.github.io/emagnet-py/offaxis/off_axis_loop.html>
+///
+///   \[4\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
 ///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
 ///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+#[inline]
+pub fn flux_density_circular_filament_scalar(
+    rzifil: (f64, f64, f64),
+    rzobs: (f64, f64),
+) -> (f64, f64) {
+    let (a, r, z) = (rzifil.0.abs(), rzobs.0.abs(), rzobs.1 - rzifil.1);
+    let z2 = z * z;
+    let sum = a + r;
+    let difference = a - r;
+    let q = sum.mul_add(sum, z2);
+    let distance_squared = difference.mul_add(difference, z2);
+    let u = q.sqrt();
+    let v = distance_squared.sqrt();
+    let h = (u + v).recip();
+    let inv_q = q.recip();
+
+    // Direct Landen complement; E and D share a logarithm after inlining.
+    let transformed_complement = 4.0 * (u * h) * (v * h);
+    let e = ellipe_complement(transformed_complement);
+    let d = ellipd_complement(transformed_complement);
+    let radial_factor = (-0.5 * transformed_complement).mul_add(d, e);
+
+    // Factored numerators retain the small axial terms near the conductor.
+    let n = difference.mul_add(sum, z2);
+    let m = (-difference).mul_add(sum, z2);
+    let axial_d = 2.0 * (r * h).powi(2) * transformed_complement * u.mul_add(v, m);
+    let scale = 8.0 * MU0_OVER_4PI * rzifil.2 * h * (a * a / distance_squared);
+    // Normalize before scaling to avoid large products of squared distances.
+    // Signed R makes Br odd and gives zero on the axis without a branch.
+    let br = scale * (2.0 * z * rzobs.0 * inv_q) * radial_factor;
+    let bz = scale * (n * inv_q).mul_add(e, axial_d * inv_q * d);
+    (br, bz)
+}
+
+/// Br,Bz from a finite circular conductor, blending local and far-field models.
+///
+/// Arguments are `(major radius a, z, current)` in (m, m, A-turns), conductor
+/// cross-section radius `b = wire_radius` in m, and observation `(R, Z)` in m.
+/// Requires `b/|a| << 1`. Returns the field in T. Wire radius is taken by magnitude;
+/// requires nonzero wire radius. Use [flux_density_circular_filament_scalar] for
+/// an ideal filament; the vector wrappers dispatch zero radii automatically.
+/// Signed major and observation radii follow that function's convention.
+///
+/// Let `s` be distance from the conductor centerline. For `s <= 1.5b`, use
+/// [flux_density_circular_filament_finite_radius_scalar_near]. For `s >= 3b`,
+/// use the ideal-filament field. Only the intervening band evaluates both kernels:
+///
+/// $$t = \frac{(s/b)^2 - 1.5^2}{3^2 - 1.5^2},\qquad
+/// w = t^3(10-15t+6t^2),\qquad
+/// \mathbf B = (1-w)\mathbf B_{near} + w\mathbf B_{thin}.$$
+///
+/// The 1.5b–3b band was chosen to keep relative vector-field error below 0.1%
+/// at `b/a = 0.01`, measured as `||B - B_ref|| / ||B_ref||` against numerical
+/// integration over a circular cross-section with uniform current density.
+/// A sweep of 33 distances and 32 cross-section angles within the band found a
+/// maximum error of approximately 0.086%; this is sampled validation, not a
+/// rigorous bound or a guarantee for other aspect ratios.
+///
+/// The weight has zero first and second derivatives at either end, so the blend
+/// matches the adjoining kernels through second derivatives. This adds no new
+/// transition at the conductor surface; the ideal kernel is regular on the axis.
+/// If a thick conductor brings the axis into the near/blend region, the near
+/// kernel's radial taper removes its axis jump; thick-loop accuracy is not implied.
+/// The far field neglects finite-section corrections. This direct B blend need
+/// not be divergence-free in the transition band and is not the curl of the
+/// separately blended finite-thickness vector potential.
+#[inline]
+pub fn flux_density_circular_filament_finite_radius_scalar(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> (f64, f64) {
+    // Handle erroneous inputs in a sensible way
+    let wire_radius = wire_radius.abs();
+
+    // Check whether we are in the near-field
+    let s2 = normalized_centerline_distance_squared(rzifil, wire_radius, rzobs);
+
+    // Calculate near-field kernel if we are concretely near-field
+    if s2 <= NEAR_FIELD_LIMIT_SQUARED {
+        return flux_density_circular_filament_finite_radius_scalar_near(
+            rzifil,
+            wire_radius,
+            rzobs,
+        );
+    }
+
+    // Calculate far-field kernel
+    let far = flux_density_circular_filament_scalar(rzifil, rzobs);
+
+    // Far-field branch
+    if s2 >= FAR_FIELD_LIMIT_SQUARED {
+        return far;
+    }
+
+    // Blending branch
+    // Calculate near-field approximation
+    let near = flux_density_circular_filament_finite_radius_scalar_near(rzifil, wire_radius, rzobs);
+    let w = far_field_blend_weight(s2);
+    // Blend the near-field and far-field solutions
+    (
+        w.mul_add(far.0 - near.0, near.0),
+        w.mul_add(far.1 - near.1, near.1),
+    )
+}
+
+/// Br,Bz inside and near a circular loop with a finite circular conductor section.
+/// Signed radii follow [flux_density_circular_filament_scalar]; formulas below
+/// use the magnitudes of the major and observation radii.
+///
+/// Implements the thin-conductor model of Hurwitz et al. \[1\], equations 16–19,
+/// for uniform azimuthal current density `I / (pi * wire_radius^2)` in vacuum.
+/// For positive wire radius, requires `wire_radius < |rfil|`; accuracy requires
+/// `wire_radius / |rfil| << 1` and distance from the conductor centerline comparable
+/// to the wire radius.
+/// This is a local approximation, including the just-outside field, not a
+/// far-field calculation or an exact solution for a thick torus.
+/// Requires positive wire radius. For zero radius use
+/// [flux_density_circular_filament_scalar], including its on-axis treatment.
+///
+/// Outside this local model's observation regime, regularize the radial field
+/// near the axis by replacing its sign factor with `R / max(|R|, 1e-4 |a|)`.
+/// This leaves the local field unchanged and makes `Br` tend continuously to
+/// zero at the axis, including for thick loops whose blend band reaches it.
+/// This is numerical regularization, not an accurate thick-torus model; `Bz`
+/// is unchanged and the taper has a slope change at the cutoff.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) loop major radius, z-coord, and total current
+/// * `wire_radius`: (m) positive radius of the circular conductor cross-section
+/// * `rzobs`: (m, m) cylindrical observation coordinates
+///
+/// # Returns
+///
+/// * `(br, bz)`: (T, T) radial and axial magnetic flux density
+///
+/// # Formula
+///
+/// The field is the sum of a regularized centerline field, the local straight
+/// cylinder field, and a curvature correction (equations 17, 18, and 19).
+/// With major radius $a$, wire radius $b$, and $Q = 4a^2 + b^2/\sqrt{e}$,
+/// the centerline integral in equation 17 reduces to
+///
+/// $$B_{\mathrm{reg},Z} = \frac{\mu_0 I}{2\pi\sqrt{Q}}[K(m)-E(m)],
+/// \qquad m = \frac{4a^2}{Q}.$$
+///
+/// The complementary parameter $1-m = b^2/(\sqrt{e}Q)$ is computed directly
+/// to avoid rounding $m$ to one for very thin conductors. Evaluate the elliptic
+/// difference as $K(m)-E(m)=mD(m)$ using [crate::math::ellipd], replacing two
+/// separate elliptic evaluations and their subtraction with one direct fit.
+///
+/// In the local frame of the paper, $\mathbf{e}_2=-\mathbf{e}_R$,
+/// $\mathbf{e}_3=\mathbf{e}_Z$, and curvature is $1/a$. Writing
+/// $u=(R-a)/b$ and $v=(Z-Z_\mathrm{fil})/b$, the interior correction is
+///
+/// $$\mathbf{B}^{<} = \frac{\mu_0 I}{8\pi a}
+/// \left[-uv\,\mathbf{e}_R + \left(\frac32-\frac{u^2+3v^2}{2}\right)
+/// \mathbf{e}_Z\right].$$
+///
+/// The interior branch includes the surface; equation 19b supplies the
+/// continuous near-exterior correction. At the conductor centerline, the
+/// radial field vanishes and the axial field is finite:
+/// $B_Z=B_{\mathrm{reg},Z}+3\mu_0 I/(16\pi a)$, approaching
+/// $\mu_0 I\ln(8a/b)/(4\pi a)$ for $b/a\to0$.
+///
+/// Negative wire radii return NaNs.
+///
+/// # References
+///
+/// \[1\] S. Hurwitz, M. Landreman, and T. M. Antonsen Jr.,
+/// “Efficient calculation of the self magnetic field, self-force, and
+/// self-inductance for electromagnetic coils,” 2023, equations 16–19.
+/// Available: <https://arxiv.org/abs/2310.09313>.
+#[inline]
+pub fn flux_density_circular_filament_finite_radius_scalar_near(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> (f64, f64) {
+    if wire_radius < 0.0 {
+        return (f64::NAN, f64::NAN);
+    }
+
+    let (rfil, zfil, ifil) = rzifil;
+    let rfil = rfil.abs();
+    let radial_sign = rzobs.0 / rzobs.0.abs().max(NEAR_FIELD_AXIS_TAPER_RATIO * rfil);
+    let u = (rzobs.0.abs() - rfil) / wire_radius; // [nondim], outward from centerline
+    let v = (rzobs.1 - zfil) / wire_radius; // [nondim], axial offset
+    let s2 = u.mul_add(u, v * v); // [nondim], squared distance / wire_radius^2
+
+    let aspect = wire_radius / rfil; // [nondim]
+    let core2 = aspect * aspect / core::f64::consts::E.sqrt(); // [nondim]
+    let q = 4.0 + core2; // [nondim], Q / rfil^2
+    let complement = core2 / q; // [nondim], 1 - m without cancellation
+    let loop_scale = MU0_OVER_4PI * ifil / rfil; // [T]
+    let bz_reg = 2.0 * loop_scale / q.sqrt() * ((4.0 / q) * ellipd_complement(complement)); // [T], K-E = mD
+    let cylinder_scale = 2.0 * MU0_OVER_4PI * ifil / wire_radius; // [T]
+    let curvature_scale = 0.5 * loop_scale; // [T]
+
+    if s2 <= 1.0 {
+        // Equations 18 and 19a, with no divisions by distance at the centerline.
+        let br = cylinder_scale * v - curvature_scale * u * v;
+        let bz =
+            bz_reg - cylinder_scale * u + curvature_scale * (1.5 - 0.5 * u.mul_add(u, 3.0 * v * v));
+        (radial_sign * br, bz)
+    } else {
+        // Equations 18 and 19b; cos(2 theta) = (u^2 - v^2) / s2.
+        let inv_s2 = s2.recip();
+        let cos_2theta = (u * u - v * v) * inv_s2;
+        let br = cylinder_scale * v * inv_s2 + curvature_scale * u * v * inv_s2 * (inv_s2 - 2.0);
+        let bz = bz_reg - cylinder_scale * u * inv_s2
+            + curvature_scale * (0.5 - s2.ln() + cos_2theta * (1.0 - 0.5 * inv_s2));
+        (radial_sign * br, bz)
+    }
+}
+
+/// Br,Bz components on the symmetry axis of a circular current filament in vacuum.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) signed radius (magnitude used), z-coord, and current
+/// * `zobs`: (m) z-coord of the observation point on the axis
+///
+/// # Returns
+///
+/// * `(br, bz)`: (T, T) magnetic flux density, with `br = 0`
+///
+/// # Formula
+///
+/// For a loop of radius $a = r_\mathrm{fil} > 0$, current $I = i_\mathrm{fil}$,
+/// and axial separation $\Delta z = z_\mathrm{obs} - z_\mathrm{fil}$, symmetry gives
+/// $B_R = 0$ on the axis. Integrating the Biot-Savart law gives
+///
+/// $$B_Z = \frac{\mu_0 I a^2}{2(a^2 + \Delta z^2)^{3/2}}.$$
+///
+/// See \[1\], Example 9.2, eqs. 9.1.13–9.1.15. At the loop center this reduces
+/// to $B_Z = \mu_0 I/(2a)$; the sign follows the current's right-hand rule.
+///
+/// This analytic expression avoids the removable division by `R` in the
+/// off-axis radial field and cancellation
+/// in the axial field far from the loop. It requires no elliptic integrals.
+/// With $d^2 = a^2 + \Delta z^2$, the calculation uses
+/// $(\mu_0 I/2)(a^2/d^2)/\sqrt{d^2}$ to avoid forming a cubed distance.
+///
+/// # References
+///
+/// \[1\] MIT, *8.02 Course Notes*, Chapter 9, “Sources of Magnetic Fields,”
+/// Example 9.2, eqs. 9.1.13–9.1.15.
+/// Available: <https://web.mit.edu/8.02t/www/802TEAL3D/visualizations/coursenotes/modules/guide09.pdf>
+#[inline]
+pub fn flux_density_circular_filament_on_axis(rzifil: (f64, f64, f64), zobs: f64) -> (f64, f64) {
+    let (rfil, zfil, ifil) = rzifil;
+    let z = zobs - zfil; // [m]
+    let d2 = rfil.mul_add(rfil, z * z); // [m^2]
+    let bz = 0.5 * MU_0 * ifil * (rfil * rfil / d2) / d2.sqrt(); // [T]
+    (0.0, bz)
+}
+
+/// Cartesian field of one translated and oriented circular conductor.
+///
+/// `rifil` is (major radius in m, current in A-turns), `loc` is the loop
+/// center in m, and `normal` is a finite nonzero Cartesian normal (normalized
+/// internally). Positive current follows the right-hand rule about this normal.
+/// `wire_radius` is the circular conductor-section radius in m; zero selects
+/// an ideal filament. `xyzobs` and the returned field (T) use world coordinates.
+///
+/// A nalgebra isometry maps the observation into the loop's local xy plane;
+/// the local field is rotated back without translating the vector. See
+/// [flux_density_circular_filament_finite_radius_scalar] for the positive-radius
+/// near/far blend and [flux_density_circular_filament_scalar]
+/// for the ideal-filament formula and on-axis treatment.
+///
+/// Invalid geometry propagates through floating-point arithmetic as NaNs.
+#[inline]
+pub fn flux_density_circular_filament_cartesian_scalar(
+    rifil: (f64, f64),
+    loc: (f64, f64, f64),
+    normal: (f64, f64, f64),
+    wire_radius: f64,
+    xyzobs: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let local_to_world = circular_filament_pose(loc, normal);
+    flux_density_circular_filament_cartesian_kernel(&local_to_world, xyzobs, |obs| {
+        if wire_radius == 0.0 {
+            flux_density_circular_filament_scalar((rifil.0, 0.0, rifil.1), obs)
+        } else {
+            flux_density_circular_filament_finite_radius_scalar(
+                (rifil.0, 0.0, rifil.1),
+                wire_radius,
+                obs,
+            )
+        }
+    })
+}
+
+// Monomorphized for each field kernel so source-level dispatch stays outside the hot loop.
+#[inline]
+fn accumulate_cartesian_field(
+    obs: (&[f64], &[f64], &[f64]),
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+    field: impl Fn((f64, f64, f64)) -> (f64, f64, f64),
+) {
+    for j in 0..obs.0.len() {
+        let (x, y, z) = field((obs.0[j], obs.1[j], obs.2[j]));
+        out.0[j] += x;
+        out.1[j] += y;
+        out.2[j] += z;
+    }
+}
+
+#[inline]
+fn circular_filament_pose(loc: (f64, f64, f64), normal: (f64, f64, f64)) -> Isometry3<f64> {
+    let center = Vector3::new(loc.0, loc.1, loc.2);
+    let normal = Vector3::new(normal.0, normal.1, normal.2);
+    // Scale before normalizing to avoid overflow/underflow for non-unit inputs.
+    let normal = (normal / normal.amax()).normalize();
+    // Roll about the normal is immaterial. Choose a nonparallel up vector.
+    let up = if normal.y.abs() < 0.9 {
+        Vector3::y()
+    } else {
+        Vector3::x()
+    };
+    let rotation = UnitQuaternion::face_towards(&normal, &up);
+    Isometry3::from_parts(Translation3::from(center), rotation)
+}
+
+#[inline]
+fn flux_density_circular_filament_cartesian_kernel(
+    local_to_world: &Isometry3<f64>,
+    xyzobs: (f64, f64, f64),
+    field: impl FnOnce((f64, f64)) -> (f64, f64),
+) -> (f64, f64, f64) {
+    let local = local_to_world.inverse_transform_point(&Point3::new(xyzobs.0, xyzobs.1, xyzobs.2));
+    let radial = Vector3::new(local.x, local.y, 0.0);
+    let r = radial.norm();
+    let (br, bz) = field((r, local.z));
+    let mut b = Vector3::new(0.0, 0.0, bz);
+    if r != 0.0 {
+        b += (radial / r) * br;
+    }
+    let b = local_to_world.transform_vector(&b);
+    (b.x, b.y, b.z)
+}
+
+/// Cartesian fields from independently located and oriented circular conductors.
+///
+/// `rifil` contains (major radii, currents); `loc` contains loop centers and
+/// `normal` contains loop normals as (x, y, z) component slices. All source
+/// slices, including `wire_radius`, have the same length. `xyzobs` and
+/// `bxyz_out` have one entry per observation, in world coordinates (m and T).
+/// Uses stack temporaries and caller-provided output buffers; no heap allocation.
+/// Each source pose is constructed once outside the observation loop.
+/// See [flux_density_circular_filament_cartesian_scalar] for conventions,
+/// field formulas, validity limits, and NaN propagation for invalid geometry.
+pub fn flux_density_circular_filament_cartesian(
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    xyzobs: (&[f64], &[f64], &[f64]),
+    bxyz_out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &bxyz_out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+    bxyz_out.0.fill(0.0);
+    bxyz_out.1.fill(0.0);
+    bxyz_out.2.fill(0.0);
+    for i in 0..n {
+        // FUTURE: The compiler should hoist this pose construction automatically,
+        // but currently does not. Investigate the missed optimization in rustc/LLVM
+        // and upstream a fix.
+        let local_to_world = circular_filament_pose(
+            (loc.0[i], loc.1[i], loc.2[i]),
+            (normal.0[i], normal.1[i], normal.2[i]),
+        );
+        let source = (rifil.0[i], 0.0, rifil.1[i]);
+        if wire_radius[i] == 0.0 {
+            accumulate_cartesian_field(
+                xyzobs,
+                (&mut *bxyz_out.0, &mut *bxyz_out.1, &mut *bxyz_out.2),
+                |obs| {
+                    flux_density_circular_filament_cartesian_kernel(&local_to_world, obs, |rz| {
+                        flux_density_circular_filament_scalar(source, rz)
+                    })
+                },
+            );
+        } else {
+            accumulate_cartesian_field(
+                xyzobs,
+                (&mut *bxyz_out.0, &mut *bxyz_out.1, &mut *bxyz_out.2),
+                |obs| {
+                    flux_density_circular_filament_cartesian_kernel(&local_to_world, obs, |rz| {
+                        flux_density_circular_filament_finite_radius_scalar(
+                            source,
+                            wire_radius[i],
+                            rz,
+                        )
+                    })
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Parallel version of [flux_density_circular_filament_cartesian].
+/// Uses the same per-source centers, normals, radii, and world-coordinate outputs.
+/// The kernel allocates no buffers; Rayon may allocate when scheduling work.
+pub fn flux_density_circular_filament_cartesian_par(
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    xyzobs: (&[f64], &[f64], &[f64]),
+    bxyz_out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &bxyz_out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+    let n = chunksize(xyzobs.0.len());
+    let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
+    let (bx, by, bz) = mut_par_chunks_3tup!(bxyz_out, n);
+    (xc, yc, zc, bx, by, bz)
+        .into_par_iter()
+        .try_for_each(|(x, y, z, bx, by, bz)| {
+            flux_density_circular_filament_cartesian(
+                rifil,
+                loc,
+                normal,
+                wire_radius,
+                (x, y, z),
+                (bx, by, bz),
+            )
+        })?;
+    Ok(())
+}
+
+/// Cartesian vector potential of one translated and oriented circular conductor.
+///
+/// Source location, normal, current orientation, and NaN propagation follow
+/// [flux_density_circular_filament_cartesian_scalar]. The returned `(Ax, Ay, Az)`
+/// is in Wb/m in the world frame. In the local frame, `A = A_phi * e_phi`, with
+/// `e_phi = (-y/R, x/R, 0)` away from the axis and A = 0 on the axis.
+///
+/// See [vector_potential_circular_filament_finite_thickness_scalar] and
+/// [vector_potential_circular_filament_scalar] for the finite-radius blend,
+/// ideal-filament formula, validity limits, and references. The curl of the
+/// blended potential differs from the separately blended B field in the band.
+#[inline]
+pub fn vector_potential_circular_filament_cartesian_scalar(
+    rifil: (f64, f64),
+    loc: (f64, f64, f64),
+    normal: (f64, f64, f64),
+    wire_radius: f64,
+    xyzobs: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let local_to_world = circular_filament_pose(loc, normal);
+    vector_potential_circular_filament_cartesian_kernel(&local_to_world, xyzobs, |obs| {
+        if wire_radius == 0.0 {
+            vector_potential_circular_filament_scalar((rifil.0, 0.0, rifil.1), obs)
+        } else {
+            vector_potential_circular_filament_finite_thickness_scalar(
+                (rifil.0, 0.0, rifil.1),
+                wire_radius,
+                obs,
+            )
+        }
+    })
+}
+
+#[inline]
+fn vector_potential_circular_filament_cartesian_kernel(
+    local_to_world: &Isometry3<f64>,
+    xyzobs: (f64, f64, f64),
+    field: impl FnOnce((f64, f64)) -> f64,
+) -> (f64, f64, f64) {
+    let local = local_to_world.inverse_transform_point(&Point3::new(xyzobs.0, xyzobs.1, xyzobs.2));
+    let azimuthal = Vector3::new(-local.y, local.x, 0.0);
+    let r = azimuthal.norm();
+    let a_phi = field((r, local.z));
+    let direction = if r == 0.0 {
+        Vector3::zeros()
+    } else {
+        azimuthal / r
+    };
+    // Multiplying by A_phi also preserves NaNs from invalid inputs on the axis.
+    let a = local_to_world.transform_vector(&(direction * a_phi));
+    (a.x, a.y, a.z)
+}
+
+/// Cartesian vector potentials from independently located and oriented circular conductors.
+///
+/// Arguments follow [flux_density_circular_filament_cartesian]; `axyz_out` holds
+/// world-frame `(Ax, Ay, Az)` components in Wb/m, one entry per observation.
+/// Each source pose is constructed once outside the observation loop using
+/// stack storage and caller-provided output buffers; no heap allocation.
+/// See [vector_potential_circular_filament_cartesian_scalar] for field details.
+pub fn vector_potential_circular_filament_cartesian(
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    xyzobs: (&[f64], &[f64], &[f64]),
+    axyz_out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &axyz_out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+    axyz_out.0.fill(0.0);
+    axyz_out.1.fill(0.0);
+    axyz_out.2.fill(0.0);
+    for i in 0..n {
+        // FUTURE: The compiler should hoist this pose construction automatically,
+        // but currently does not. Investigate the missed optimization in rustc/LLVM
+        // and upstream a fix.
+        let local_to_world = circular_filament_pose(
+            (loc.0[i], loc.1[i], loc.2[i]),
+            (normal.0[i], normal.1[i], normal.2[i]),
+        );
+        let source = (rifil.0[i], 0.0, rifil.1[i]);
+        if wire_radius[i] == 0.0 {
+            accumulate_cartesian_field(
+                xyzobs,
+                (&mut *axyz_out.0, &mut *axyz_out.1, &mut *axyz_out.2),
+                |obs| {
+                    vector_potential_circular_filament_cartesian_kernel(
+                        &local_to_world,
+                        obs,
+                        |rz| vector_potential_circular_filament_scalar(source, rz),
+                    )
+                },
+            );
+        } else {
+            accumulate_cartesian_field(
+                xyzobs,
+                (&mut *axyz_out.0, &mut *axyz_out.1, &mut *axyz_out.2),
+                |obs| {
+                    vector_potential_circular_filament_cartesian_kernel(
+                        &local_to_world,
+                        obs,
+                        |rz| {
+                            vector_potential_circular_filament_finite_thickness_scalar(
+                                source,
+                                wire_radius[i],
+                                rz,
+                            )
+                        },
+                    )
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Parallel version of [vector_potential_circular_filament_cartesian].
+/// The kernel allocates no buffers; Rayon may allocate when scheduling work.
+pub fn vector_potential_circular_filament_cartesian_par(
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    xyzobs: (&[f64], &[f64], &[f64]),
+    axyz_out: (&mut [f64], &mut [f64], &mut [f64]),
+) -> Result<(), &'static str> {
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &axyz_out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+    let n = chunksize(xyzobs.0.len());
+    let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
+    let (ax, ay, az) = mut_par_chunks_3tup!(axyz_out, n);
+    (xc, yc, zc, ax, ay, az)
+        .into_par_iter()
+        .try_for_each(|(x, y, z, ax, ay, az)| {
+            vector_potential_circular_filament_cartesian(
+                rifil,
+                loc,
+                normal,
+                wire_radius,
+                (x, y, z),
+                (ax, ay, az),
+            )
+        })?;
+    Ok(())
+}
+
+/// A_phi from circular conductors with per-source circular cross-section radii.
+/// Parallelized over chunks of observation points.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (V-s/m) azimuthal vector potential at each observation, length `n`
+///
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius blended near/far approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 pub fn vector_potential_circular_filament_par(
     rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
 ) -> Result<(), &'static str> {
-    // Unpack
     let (rprime, zprime) = rzobs;
+    check_length_3tup!(rzifil.2.len(), &rzifil);
+    check_length!(rzifil.2.len(), wire_radius);
+    check_length!(rprime.len(), zprime, out);
 
-    // Chunk inputs
     let n = chunksize(rprime.len());
-    let rprimec = rprime.par_chunks(n);
-    let zprimec = zprime.par_chunks(n);
-    let outc = out.par_chunks_mut(n);
-
-    // Run calcs
-    (outc, rprimec, zprimec)
+    (
+        out.par_chunks_mut(n),
+        rprime.par_chunks(n),
+        zprime.par_chunks(n),
+    )
         .into_par_iter()
         .try_for_each(|(outc, rc, zc)| {
-            vector_potential_circular_filament(rzifil, (rc, zc), outc)
-        })?;
-
-    Ok(())
+            vector_potential_circular_filament(rzifil, wire_radius, (rc, zc), outc)
+        })
 }
 
-/// Off-axis A_phi component for a circular current filament in vacuum.
+/// A_phi from circular conductors with per-source circular cross-section radii.
 ///
 /// # Arguments
 ///
-/// * `rzifil`:  (m, m, A-turns) r-coord, z-coord, and current of each filament, length `m`
-/// * `rzobs`:   (m, m) r-coord, and z-coord of observation points, length `n`
-/// * `out`: (V-s/m), phi-component of magnetic vector potential at observation locations, length `n`
+/// * `rzifil`: (m, m, A-turns) major radius, z-coord, and current per source, length `m`
+/// * `wire_radius`: (m) circular cross-section radius per source, length `m`; zero for thin filaments
+/// * `rzobs`: (m, m) cylindrical observation coordinates, length `n`
+/// * `out`: (V-s/m) azimuthal vector potential at each observation, length `n`
 ///
-/// # Commentary
-///
-/// Near-exact formula (except numerically-evaluated elliptic integrals).
-/// The vector potential of a loop has zero r- and z- components due to symmetry,
-/// and does not vary in the phi-direction.
-///
-/// # References
-///
-///   \[1\] J. C. Simpson, J. E. Lane, C. D. Immer, R. C. Youngquist, and T. Steinrock,
-///         “Simple Analytic Expressions for the Magnetic Field of a Circular Current Loop,”
-///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
+/// See [vector_potential_circular_filament_finite_thickness_scalar] for the
+/// positive-radius blended near/far approximation, and
+/// [vector_potential_circular_filament_scalar] for the ideal-filament formula.
 pub fn vector_potential_circular_filament(
+    rzifil: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
+    rzobs: (&[f64], &[f64]),
+    out: &mut [f64],
+) -> Result<(), &'static str> {
+    let (rfil, zfil, ifil) = rzifil;
+    let (rprime, zprime) = rzobs;
+    check_length_3tup!(ifil.len(), &rzifil);
+    check_length!(ifil.len(), wire_radius);
+    check_length!(rprime.len(), zprime, out);
+    out.fill(0.0);
+
+    for i in 0..ifil.len() {
+        let source = (rfil[i], zfil[i], ifil[i]);
+        // Thin sources need no near/far classification.
+        if wire_radius[i] == 0.0 {
+            for j in 0..rprime.len() {
+                out[j] += vector_potential_circular_filament_scalar(source, (rprime[j], zprime[j]));
+            }
+        } else {
+            for (range, far) in circular_field_chunks(source, wire_radius[i], rzobs) {
+                if far {
+                    for j in range {
+                        out[j] += vector_potential_circular_filament_scalar(
+                            source,
+                            (rprime[j], zprime[j]),
+                        );
+                    }
+                } else {
+                    for j in range {
+                        out[j] += vector_potential_circular_filament_finite_thickness_scalar(
+                            source,
+                            wire_radius[i],
+                            (rprime[j], zprime[j]),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// Original thin-filament vector kernel retained for regression tests.
+#[cfg(test)]
+fn vector_potential_circular_filament_thin(
     rzifil: (&[f64], &[f64], &[f64]),
     rzobs: (&[f64], &[f64]),
     out: &mut [f64],
@@ -571,7 +1192,7 @@ pub fn vector_potential_circular_filament(
         for j in 0..m {
             // The inner function is inlined, so values that are reused between iterations
             // can be pulled to the outer scope by the compiler and do not affect performance
-            out[j] += vector_potential_circular_filament_scalar(
+            out[j] += vector_potential_circular_filament_thin_scalar(
                 (rfil[i], zfil[i], ifil[i]),
                 (rprime[j], zprime[j]),
             );
@@ -581,7 +1202,10 @@ pub fn vector_potential_circular_filament(
     Ok(())
 }
 
-/// Off-axis A_phi component for a circular current filament in vacuum.
+/// A_phi component for a circular current filament in vacuum, including on the axis.
+/// Source radius is interpreted by magnitude; current determines orientation.
+/// A_phi is odd in signed observation radius in a fixed meridional plane,
+/// so the linked flux `2*pi*R*A_phi` is even.
 ///
 /// # Arguments
 ///
@@ -595,7 +1219,13 @@ pub fn vector_potential_circular_filament(
 ///
 /// Near-exact formula (except numerically-evaluated elliptic integrals).
 /// The vector potential of a loop has zero r- and z- components due to symmetry,
-/// and does not vary in the phi-direction.
+/// and does not vary in the phi-direction. On the symmetry axis A_phi is zero.
+/// The elliptic complement is computed directly as `((a-R)^2 + z^2) / Q`,
+/// where `Q = (a+R)^2 + z^2`, to avoid rounding the elliptic parameter to one
+/// near the filament. The descending Landen transformation rewrites the
+/// subtractive elliptic factor as `t*(1+t)*D(t^2)`, avoiding cancellation near
+/// the axis and in the far field. See [crate::math::ellipd] for the derivation
+/// and NIST references. The ideal filament remains singular at the source.
 ///
 /// # References
 ///
@@ -604,6 +1234,25 @@ pub fn vector_potential_circular_filament(
 ///         Jan. 01, 2001. Accessed: Sep. 06, 2022. \[Online\]. Available: <https://ntrs.nasa.gov/citations/20010038494>
 #[inline]
 pub fn vector_potential_circular_filament_scalar(
+    rzifil: (f64, f64, f64),
+    rzobs: (f64, f64),
+) -> f64 {
+    let (a, r, z) = (rzifil.0.abs(), rzobs.0.abs(), rzobs.1 - rzifil.1);
+    let q = (a + r).mul_add(a + r, z * z);
+    let complement = (a - r).mul_add(a - r, z * z) / q;
+    let m = 4.0 * a * r / q;
+    let root_complement = complement.sqrt();
+    let denominator = (1.0 + root_complement).powi(2);
+    let t = m / denominator;
+    let transformed_complement = 4.0 * root_complement / denominator;
+    let c0 = t * (1.0 + t) * ellipd_complement(transformed_complement);
+    rzobs.0.signum() * (c0 * (MU0_OVER_4PI * rzifil.2 * 4.0 * a / q.sqrt()))
+}
+
+// Original ideal-filament formula retained independently for regression tests.
+#[cfg(test)]
+#[inline]
+fn vector_potential_circular_filament_thin_scalar(
     rzifil: (f64, f64, f64),
     rzobs: (f64, f64),
 ) -> f64 {
@@ -632,6 +1281,124 @@ pub fn vector_potential_circular_filament_scalar(
 
     // [V-s/m] phi-component of vector potential
     c0 * c1 // Other components are zero
+}
+
+/// A_phi from a finite circular conductor, blending local and far-field models.
+///
+/// Arguments are `(major radius a, z, current)` in (m, m, A-turns), conductor
+/// cross-section radius `b = wire_radius` in m, and observation `(R, Z)` in m.
+/// Requires `b/|a| << 1`. Returns A_phi in V-s/m. Wire radius is taken by magnitude;
+/// requires nonzero wire radius. Use [vector_potential_circular_filament_scalar]
+/// for an ideal filament; the vector wrappers dispatch zero radii automatically.
+/// Signed radii follow that function's convention.
+///
+/// At centerline distance `s <= 1.5b`, use
+/// [vector_potential_circular_filament_finite_thickness_scalar_near]. At `s >= 3b`,
+/// use the ideal-filament potential, with its analytic value zero on the axis.
+/// Only the intervening band evaluates both kernels, using the same quintic
+/// weight in squared distance as [flux_density_circular_filament_finite_radius_scalar].
+/// The blend matches values and first and second derivatives at both endpoints.
+/// The band's 0.1% validation applies to B at `b/|a| = 0.01`, not to A_phi.
+///
+/// The far field neglects finite-section corrections. The curl of this blended
+/// potential includes a derivative-of-weight term, so it is not the separately
+/// blended B-field kernel. Flux uses this potential through `2*pi*R*A_phi`.
+#[inline]
+pub fn vector_potential_circular_filament_finite_thickness_scalar(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> f64 {
+    let wire_radius = wire_radius.abs();
+
+    let s2 = normalized_centerline_distance_squared(rzifil, wire_radius, rzobs);
+    if s2 <= NEAR_FIELD_LIMIT_SQUARED {
+        return vector_potential_circular_filament_finite_thickness_scalar_near(
+            rzifil,
+            wire_radius,
+            rzobs,
+        );
+    }
+    let far = vector_potential_circular_filament_scalar(rzifil, rzobs);
+    if s2 >= FAR_FIELD_LIMIT_SQUARED {
+        return far;
+    }
+    let near =
+        vector_potential_circular_filament_finite_thickness_scalar_near(rzifil, wire_radius, rzobs);
+    let w = far_field_blend_weight(s2);
+    w.mul_add(far - near, near)
+}
+
+/// A_phi inside and near a circular loop with a finite circular conductor section.
+/// Signed radii follow [vector_potential_circular_filament_scalar]; formulas below
+/// use the magnitudes of the major and observation radii.
+///
+/// Assumes uniform azimuthal current density in vacuum, `0 < wire_radius < |rfil|`,
+/// `wire_radius / |rfil| << 1`, and observation distance comparable to the wire radius.
+/// Positive radii use the Hurwitz near-conductor approximation throughout; this
+/// is not a global thick-torus solution. For zero radius use
+/// [vector_potential_circular_filament_scalar], including its ideal source singularity.
+///
+/// # Arguments
+///
+/// * `rzifil`: (m, m, A-turns) loop major radius, z-coord, and total current
+/// * `wire_radius`: (m) positive circular cross-section radius
+/// * `rzobs`: (m, m) cylindrical observation coordinates
+///
+/// # Returns
+///
+/// * `a_phi`: (V-s/m) azimuthal magnetic vector potential
+///
+/// # Formula
+///
+/// With major radius $a$, wire radius $b$, $x=R-a$, $s^2=x^2+(Z-Z_\mathrm{fil})^2$,
+/// $q=x/a$, and $t=s^2/b^2$, specializing equations 35 and 53 of \[1\] gives
+///
+/// $$A_\phi=\frac{\mu_0 I}{4\pi}\begin{cases}
+/// (2-q)[\ln(8a/b)-2]+1+q-t(1-q/4), & s\le b,\\
+/// (2-q)[\ln(8a/s)-2]+q+q/(4t), & s>b.
+/// \end{cases}$$
+///
+/// The far integral contributes $(2-q)[\ln(4/\phi_0)-2]$; its cutoff cancels
+/// the $\ln(2\phi_0)$ in equation 53. The exterior uses $\ln(a/s)$ from
+/// equation 53b (the summary equation 30 instead prints $\ln(a/b)$).
+/// Both branches and their first derivatives agree at the surface. At the
+/// centerline, $A_\phi=\mu_0 I[2\ln(8a/b)-3]/(4\pi)$ is finite.
+///
+/// Negative wire radii return NaNs.
+///
+/// # References
+///
+/// \[1\] S. Hurwitz, M. Landreman, and T. M. Antonsen Jr.,
+/// “Efficient calculation of the self magnetic field, self-force, and
+/// self-inductance for electromagnetic coils,” 2023, Appendix A, equations 35 and 53.
+/// Available: <https://arxiv.org/abs/2310.09313>.
+#[inline]
+pub fn vector_potential_circular_filament_finite_thickness_scalar_near(
+    rzifil: (f64, f64, f64),
+    wire_radius: f64,
+    rzobs: (f64, f64),
+) -> f64 {
+    if wire_radius < 0.0 {
+        return f64::NAN;
+    }
+
+    let (rfil, zfil, ifil) = rzifil;
+    let rfil = rfil.abs();
+    let x = rzobs.0.abs() - rfil; // [m], outward from centerline
+    let u = x / wire_radius;
+    let v = (rzobs.1 - zfil) / wire_radius;
+    let t = u.mul_add(u, v * v); // [nondim], s^2 / wire_radius^2
+    let q = x / rfil; // [nondim], negative of kappa*s*cos(theta) in the paper
+    let log_radius = (8.0 * (rfil / wire_radius)).ln();
+
+    let potential = if t <= 1.0 {
+        (2.0 - q) * (log_radius - 2.0) + 1.0 + q - t * (1.0 - 0.25 * q)
+    } else {
+        // ln(8a/s) = ln(8a/b) - ln(t)/2, retaining the exterior thickness term.
+        (2.0 - q) * (log_radius - 0.5 * t.ln() - 2.0) + q + 0.25 * q / t
+    };
+    rzobs.0.signum() * (MU0_OVER_4PI * ifil * potential) // [V-s/m]
 }
 
 /// Mutual inductance between a circular filament and a linear filament.
@@ -825,120 +1592,99 @@ pub fn mutual_inductance_circular_to_linear_par(
     Ok(mutual_inductance)
 }
 
-/// JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
-/// filament segment at an observation point in cartesian form with some current density (per area).
+/// Lorentz body force density (N/m^3) from one oriented circular conductor.
 ///
-/// # Arguments
-///
-/// * `rzifil`:    (m, m, A-turns) r-coord, z-coord, and current of filament
-/// * `xyzobs`:    (m) Observation point coords
-/// * `jobs`:      (A/m^2) Current density vector at observation point
-///
-/// # Returns
-///
-/// * `jxb`:        (N/m^3) Body force density in cartesian form
+/// Source arguments and NaN propagation follow [flux_density_circular_filament_cartesian_scalar].
+/// `xyzobs` (m), `jobs` (A/m^2), and the returned JxB vector use world coordinates.
 pub fn body_force_density_circular_filament_cartesian_scalar(
-    rzifil: (f64, f64, f64),
+    rifil: (f64, f64),
+    loc: (f64, f64, f64),
+    normal: (f64, f64, f64),
+    wire_radius: f64,
     xyzobs: (f64, f64, f64),
     jobs: (f64, f64, f64),
 ) -> (f64, f64, f64) {
-    // Get flux density in cartesian coordinates
-    let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(rzifil, xyzobs);
-
-    // Take JxB Lorentz force
-    let out = cross3([jobs.0, jobs.1, jobs.2], [bx, by, bz]); // [N/m^3]
-    (out[0], out[1], out[2])
+    let b =
+        flux_density_circular_filament_cartesian_scalar(rifil, loc, normal, wire_radius, xyzobs);
+    let force = Vector3::new(jobs.0, jobs.1, jobs.2).cross(&Vector3::new(b.0, b.1, b.2));
+    (force.x, force.y, force.z)
 }
 
-/// JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
-/// filament segment at an observation point in cartesian form with some current density (per area).
+/// Lorentz body force densities from independently oriented circular conductors.
 ///
-/// # Arguments
-///
-/// * `rzifil`:    (m, m, A-turns) r-coord, z-coord, and current of filament, each length `m`
-/// * `xyzobs`:    (m) Observation point coords, each length `n`
-/// * `jobs`:      (A/m^2) Current density vector at observation point, each length `n`
-///
-/// # Returns
-///
-/// * `jxb`:        (N/m^3) Body force density in cartesian form
+/// Source arguments follow [flux_density_circular_filament_cartesian]. Observation
+/// coordinates (m), current densities `jobs` (A/m^2), and outputs (N/m^3) are
+/// component slices in world coordinates, with one entry per observation.
 pub fn body_force_density_circular_filament_cartesian(
-    rzifil: (&[f64], &[f64], &[f64]),
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    // Unpack
-    let (rfil, zfil, ifil) = rzifil;
-    let (x, y, z) = xyzobs;
-    let (jx, jy, jz) = jobs;
-    let (outx, outy, outz) = out;
-
-    // Check lengths
-    let n = ifil.len();
-    check_length!(n, rfil, zfil);
-    let m = x.len();
-    check_length!(m, x, y, z, jx, jy, jz, outx, outy, outz);
-
-    // Zero output
-    outx.fill(0.0);
-    outy.fill(0.0);
-    outz.fill(0.0);
-
-    // Do calcs
-    for j in 0..m {
-        for i in 0..n {
-            // The inner function is inlined, so values that are reused between iterations
-            // can be pulled to the outer scope by the compiler and do not affect performance
-            let rzifil_i = (rfil[i], zfil[i], ifil[i]);
-            let xyzobs_j = (x[j], y[j], z[j]);
-            let jj = (jx[j], jy[j], jz[j]);
-            let (jxbx, jxby, jxbz) =
-                body_force_density_circular_filament_cartesian_scalar(rzifil_i, xyzobs_j, jj);
-            outx[j] += jxbx;
-            outy[j] += jxby;
-            outz[j] += jxbz;
-        }
-    }
-
+    check_length_3tup!(xyzobs.0.len(), &jobs);
+    flux_density_circular_filament_cartesian(
+        rifil,
+        loc,
+        normal,
+        wire_radius,
+        xyzobs,
+        (&mut *out.0, &mut *out.1, &mut *out.2),
+    )?;
+    cartesian_lorentz_force(jobs, out);
     Ok(())
 }
 
-/// JxB (Lorentz) body force density (per volume) in cartesian form due to a circular current
-/// filament segment at an observation point in cartesian form with some current density (per area).
-/// This variant is parallelized over chunks of observation points.
-///
-/// # Arguments
-///
-/// * `rzifil`:    (m, m, A-turns) r-coord, z-coord, and current of filament, each length `m`
-/// * `xyzobs`:    (m) Observation point coords, each length `n`
-/// * `jobs`:      (A/m^2) Current density vector at observation point, each length `n`
-/// * `out`:        (N/m^3) Body force density in cartesian form, each length `n`
+/// Parallel version of [body_force_density_circular_filament_cartesian].
 pub fn body_force_density_circular_filament_cartesian_par(
-    rzifil: (&[f64], &[f64], &[f64]),
+    rifil: (&[f64], &[f64]),
+    loc: (&[f64], &[f64], &[f64]),
+    normal: (&[f64], &[f64], &[f64]),
+    wire_radius: &[f64],
     xyzobs: (&[f64], &[f64], &[f64]),
     jobs: (&[f64], &[f64], &[f64]),
     out: (&mut [f64], &mut [f64], &mut [f64]),
 ) -> Result<(), &'static str> {
-    // Chunk inputs
+    check_length_3tup!(xyzobs.0.len(), &jobs);
+    check_length_3tup!(xyzobs.0.len(), &xyzobs);
+    check_length_3tup!(xyzobs.0.len(), &out);
+    let n = rifil.0.len();
+    check_length!(n, rifil.1, wire_radius);
+    check_length_3tup!(n, &loc);
+    check_length_3tup!(n, &normal);
+
     let n = chunksize(xyzobs.0.len());
-    let (xpc, ypc, zpc) = par_chunks_3tup!(xyzobs, n);
-    let (jxc, jyc, jzc) = par_chunks_3tup!(jobs, n);
-    let (outxc, outyc, outzc) = mut_par_chunks_3tup!(out, n);
-
-    // Run calcs
-    (outxc, outyc, outzc, xpc, ypc, zpc, jxc, jyc, jzc)
+    let (xc, yc, zc) = par_chunks_3tup!(xyzobs, n);
+    let (jx, jy, jz) = par_chunks_3tup!(jobs, n);
+    let (fx, fy, fz) = mut_par_chunks_3tup!(out, n);
+    (xc, yc, zc, jx, jy, jz, fx, fy, fz)
         .into_par_iter()
-        .try_for_each(|(outx, outy, outz, xp, yp, zp, jx, jy, jz)| {
+        .try_for_each(|(x, y, z, jx, jy, jz, fx, fy, fz)| {
             body_force_density_circular_filament_cartesian(
-                rzifil,
-                (xp, yp, zp),
+                rifil,
+                loc,
+                normal,
+                wire_radius,
+                (x, y, z),
                 (jx, jy, jz),
-                (outx, outy, outz),
+                (fx, fy, fz),
             )
-        })?;
+        })
+}
 
-    Ok(())
+fn cartesian_lorentz_force(
+    jobs: (&[f64], &[f64], &[f64]),
+    out: (&mut [f64], &mut [f64], &mut [f64]),
+) {
+    for j in 0..jobs.0.len() {
+        let force = Vector3::new(jobs.0[j], jobs.1[j], jobs.2[j])
+            .cross(&Vector3::new(out.0[j], out.1[j], out.2[j]));
+        out.0[j] = force.x;
+        out.1[j] = force.y;
+        out.2[j] = force.z;
+    }
 }
 
 #[cfg(test)]
@@ -947,6 +1693,969 @@ mod test {
 
     use super::*;
     use crate::{physics::linear_filament::body_force_density_linear_filament, testing::*};
+
+    fn vector_from_tuple(v: (f64, f64, f64)) -> Vector3<f64> {
+        Vector3::new(v.0, v.1, v.2)
+    }
+
+    #[test]
+    fn test_cartesian_pose_covariance() {
+        use nalgebra::Rotation3;
+        let center = Vector3::new(0.7, -0.4, 1.3);
+        for rotation in [
+            Rotation3::identity(),
+            Rotation3::from_axis_angle(&Vector3::x_axis(), PI),
+            Rotation3::from_axis_angle(&Vector3::x_axis(), PI - 1e-9),
+            Rotation3::from_axis_angle(&Vector3::x_axis(), 1e-9),
+            Rotation3::from_axis_angle(&Vector3::y_axis(), PI / 2.0),
+            Rotation3::from_euler_angles(0.4, -0.7, 1.2),
+        ] {
+            let normal = rotation * Vector3::z();
+            for wire_radius in [0.0, 0.01] {
+                for local in [
+                    Vector3::new(1.003, 0.0, 0.004),
+                    Vector3::new(0.998, 0.004, -0.003),
+                ] {
+                    let world = center + rotation * local;
+                    let r = local.x.hypot(local.y);
+                    let (br, bz) = if wire_radius == 0.0 {
+                        flux_density_circular_filament_scalar((1.0, 0.0, 2.0), (r, local.z))
+                    } else {
+                        flux_density_circular_filament_finite_radius_scalar(
+                            (1.0, 0.0, 2.0),
+                            wire_radius,
+                            (r, local.z),
+                        )
+                    };
+                    let local_b = Vector3::new(br * local.x / r, br * local.y / r, bz);
+                    let a_phi = if wire_radius == 0.0 {
+                        vector_potential_circular_filament_scalar((1.0, 0.0, 2.0), (r, local.z))
+                    } else {
+                        vector_potential_circular_filament_finite_thickness_scalar(
+                            (1.0, 0.0, 2.0),
+                            wire_radius,
+                            (r, local.z),
+                        )
+                    };
+                    let expected_a =
+                        rotation * Vector3::new(-a_phi * local.y / r, a_phi * local.x / r, 0.0);
+                    let actual_a = vector_potential_circular_filament_cartesian_scalar(
+                        (1.0, 2.0),
+                        (center.x, center.y, center.z),
+                        (normal.x, normal.y, normal.z),
+                        wire_radius,
+                        (world.x, world.y, world.z),
+                    );
+                    assert!(
+                        (vector_from_tuple(actual_a) - expected_a).norm()
+                            < 2e-10 * expected_a.norm()
+                    );
+                    let expected = rotation * local_b;
+                    let local_j = Vector3::new(1.0, -2.0, 0.3);
+                    let world_j = rotation * local_j;
+                    let expected_force = rotation * local_j.cross(&local_b);
+                    let actual = flux_density_circular_filament_cartesian_scalar(
+                        (1.0, 2.0),
+                        (center.x, center.y, center.z),
+                        (normal.x, normal.y, normal.z),
+                        wire_radius,
+                        (world.x, world.y, world.z),
+                    );
+                    let force = body_force_density_circular_filament_cartesian_scalar(
+                        (1.0, 2.0),
+                        (center.x, center.y, center.z),
+                        (normal.x, normal.y, normal.z),
+                        wire_radius,
+                        (world.x, world.y, world.z),
+                        (world_j.x, world_j.y, world_j.z),
+                    );
+                    assert!(
+                        (vector_from_tuple(actual) - expected).norm() < 2e-10 * expected.norm()
+                    );
+                    assert!(
+                        (vector_from_tuple(force) - expected_force).norm()
+                            < 2e-10 * expected_force.norm()
+                    );
+                }
+            }
+            // Loop-center field independently fixes the orientation and current sign.
+            for scale in [1e-300, 1.0, 1e300] {
+                let n = scale * normal;
+                let actual = flux_density_circular_filament_cartesian_scalar(
+                    (1.0, 2.0),
+                    (center.x, center.y, center.z),
+                    (n.x, n.y, n.z),
+                    0.0,
+                    (center.x, center.y, center.z),
+                );
+                // The general field kernel inherits E(0)'s small fit error.
+                assert!((vector_from_tuple(actual) - MU_0 * normal).norm() < 1e-11 * MU_0);
+                for wire_radius in [0.0, 0.01] {
+                    let a = vector_potential_circular_filament_cartesian_scalar(
+                        (1.0, 2.0),
+                        (center.x, center.y, center.z),
+                        (n.x, n.y, n.z),
+                        wire_radius,
+                        (center.x, center.y, center.z),
+                    );
+                    assert_eq!(a, (0.0, 0.0, 0.0));
+                }
+            }
+            let world = center + rotation * Vector3::new(1.0, 0.0, 0.0);
+            let b = flux_density_circular_filament_cartesian_scalar(
+                (1.0, 2.0),
+                (center.x, center.y, center.z),
+                (normal.x, normal.y, normal.z),
+                0.01,
+                (world.x, world.y, world.z),
+            );
+            assert!([b.0, b.1, b.2].iter().all(|v| v.is_finite()));
+        }
+    }
+
+    #[test]
+    fn test_cartesian_pose_shape_validation() {
+        let good = (&[0.0, 0.0][..], &[0.0, 0.0][..], &[1.0, 1.0][..]);
+        let bad_length = (&[0.0][..], good.1, good.2);
+        for n in [0, 2] {
+            let obs = (&[0.0, 0.0][..n], &[0.0, 0.0][..n], &[0.0, 0.0][..n]);
+            for (centers, normals, wire) in [
+                (bad_length, good, &[0.0, 0.01][..]),
+                (good, bad_length, &[0.0, 0.01][..]),
+                (good, good, &[0.0][..]),
+            ] {
+                for calc in [
+                    flux_density_circular_filament_cartesian,
+                    flux_density_circular_filament_cartesian_par,
+                    vector_potential_circular_filament_cartesian,
+                    vector_potential_circular_filament_cartesian_par,
+                ] {
+                    let (mut x, mut y, mut z) = (vec![99.0; n], vec![99.0; n], vec![99.0; n]);
+                    assert!(
+                        calc(
+                            (&[1.0; 2], &[1.0; 2]),
+                            centers,
+                            normals,
+                            wire,
+                            obs,
+                            (&mut x, &mut y, &mut z)
+                        )
+                        .is_err()
+                    );
+                    assert!(x.iter().chain(&y).chain(&z).all(|v| *v == 99.0));
+                }
+                for calc in [
+                    body_force_density_circular_filament_cartesian,
+                    body_force_density_circular_filament_cartesian_par,
+                ] {
+                    let (mut x, mut y, mut z) = (vec![99.0; n], vec![99.0; n], vec![99.0; n]);
+                    assert!(
+                        calc(
+                            (&[1.0; 2], &[1.0; 2]),
+                            centers,
+                            normals,
+                            wire,
+                            obs,
+                            obs,
+                            (&mut x, &mut y, &mut z)
+                        )
+                        .is_err()
+                    );
+                    assert!(x.iter().chain(&y).chain(&z).all(|v| *v == 99.0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_potential_landen_against_high_precision() {
+        // Original K/E expression evaluated by mpmath at 80 decimal digits,
+        // with a=I=1 and A normalized by mu0/(4*pi).
+        let cases = [
+            (0.0, 0.1, 0.0),
+            (1e-10, 0.1, 3.095051016645873e-10),
+            (1e-6, 0.1, 3.095051016646965e-6),
+            (0.1, 0.1, 0.310603543909276),
+            (1.0, 0.1, 4.779226072276121),
+            (2.0, 0.1, 0.8681173469220067),
+            (100.0, 0.1, 0.00031417057574111584),
+            (1.0, 1e6, 3.1415926535803685e-18),
+        ];
+        for ((r, z, expected), sf, so) in itertools::iproduct!(cases, [-1.0, 1.0], [-1.0, 1.0]) {
+            for scale in [1e-6, 1.0, 1e6] {
+                let actual = vector_potential_circular_filament_scalar(
+                    (sf * scale, 0.0, 1.0),
+                    (so * r * scale, z * scale),
+                ) / MU0_OVER_4PI;
+                assert!(
+                    (actual - so * expected).abs() <= 4e-9 * expected,
+                    "r={r}, z={z}, actual={actual}, expected={expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_potential_and_flux_zero_radius_against_preserved_kernels() {
+        // The old independent K/E fits differ from high-precision references by
+        // up to 2.1e-6 relatively in these cases. The Landen accuracy is tested
+        // separately against high-precision values, including near the axis.
+        let rtol = 3e-6;
+        for scale in [1e-6, 1.0, 1e6] {
+            let rfil = [-0.5 * scale, scale, -2.0 * scale];
+            let zfil = [-0.2 * scale, 0.3 * scale, 0.8 * scale];
+            let current = [2.0, -3.0, 0.7];
+            let robs = [0.0, -0.2 * scale, 1.003 * scale, -2.5 * scale];
+            let zobs = [0.5 * scale, -0.7 * scale, 0.305 * scale, 4.0 * scale];
+            for nfils in [0, 1, 3] {
+                let source = (&rfil[..nfils], &zfil[..nfils], &current[..nfils]);
+                for nobs in [0, 1, 4] {
+                    let obs = (&robs[..nobs], &zobs[..nobs]);
+                    let mut old_a = vec![99.0; nobs];
+                    let mut old_flux = vec![99.0; nobs];
+                    let abs_rfil = rfil.map(f64::abs);
+                    let abs_robs = robs.map(f64::abs);
+                    let reference_source = (&abs_rfil[..nfils], source.1, source.2);
+                    let reference_obs = (&abs_robs[..nobs], obs.1);
+                    vector_potential_circular_filament_thin(
+                        reference_source,
+                        reference_obs,
+                        &mut old_a,
+                    )
+                    .unwrap();
+                    flux_circular_filament_thin(reference_source, reference_obs, &mut old_flux)
+                        .unwrap();
+                    for radius in [0.0, -0.0] {
+                        let radii = vec![radius; nfils];
+                        for calc in [
+                            vector_potential_circular_filament,
+                            vector_potential_circular_filament_par,
+                        ] {
+                            let mut actual = vec![99.0; nobs];
+                            calc(source, &radii, obs, &mut actual).unwrap();
+                            for ((a, old), r) in actual.iter().zip(&old_a).zip(&robs) {
+                                let expected = if *r == 0.0 { 0.0 } else { *old * r.signum() };
+                                assert!(approx(expected, *a, rtol, 1e-18));
+                            }
+                        }
+                        for calc in [flux_circular_filament, flux_circular_filament_par] {
+                            let mut actual = vec![99.0; nobs];
+                            calc(source, &radii, obs, &mut actual).unwrap();
+                            for ((flux, old), r) in actual.iter().zip(&old_flux).zip(&robs) {
+                                // The preserved formula is singular on the axis.
+                                let expected = if *r == 0.0 { 0.0 } else { *old };
+                                assert!(approx(expected, *flux, rtol, 1e-18 * scale));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_potential_and_flux_length_validation() {
+        for calc in [
+            vector_potential_circular_filament,
+            vector_potential_circular_filament_par,
+            flux_circular_filament,
+            flux_circular_filament_par,
+        ] {
+            for nobs in [0, 2] {
+                for radii in [&[][..], &[0.01][..], &[0.01, 0.02, 0.03][..]] {
+                    let mut out = vec![99.0; nobs];
+                    assert!(
+                        calc(
+                            (&[1.0; 2], &[0.0; 2], &[1.0; 2]),
+                            radii,
+                            (&vec![1.0; nobs], &vec![0.0; nobs]),
+                            &mut out
+                        )
+                        .is_err()
+                    );
+                    assert_eq!(out, vec![99.0; nobs]);
+                }
+                let mut out = vec![99.0; nobs];
+                assert!(
+                    calc(
+                        (&[1.0], &[0.0; 2], &[1.0; 2]),
+                        &[0.0; 2],
+                        (&vec![1.0; nobs], &vec![0.0; nobs]),
+                        &mut out
+                    )
+                    .is_err()
+                );
+                assert_eq!(out, vec![99.0; nobs]);
+            }
+            for (robs, zobs, nout) in [
+                (&[1.0][..], &[][..], 1),
+                (&[][..], &[0.0][..], 1),
+                (&[1.0][..], &[0.0][..], 2),
+            ] {
+                let mut out = vec![99.0; nout];
+                assert!(calc((&[1.0], &[0.0], &[1.0]), &[0.01], (robs, zobs), &mut out).is_err());
+                assert_eq!(out, vec![99.0; nout]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_against_cross_section_integral() {
+        // Uniform-J disk average of exact unit-current loop potentials, a=I=1,
+        // normalized by mu0*I/(4*pi). SciPy ellipkm1(d2/Q), ellipe(1-d2/Q),
+        // 256-point Gauss-Legendre radial quadrature, 1024 midpoint angles.
+        // Interior quadrature uses observation-centered polar coordinates to
+        // integrate the logarithmic singularity; exterior uses disk-centered
+        // coordinates. Doubling orders from 128/512 changes results by <1e-7.
+        let cases = [
+            (0.01, 0.0, 0.0, 10.3693163884398),
+            (0.01, 0.3, 0.4, 10.1085274488821),
+            (0.01, -0.5, 0.5, 9.88728781974263),
+            (0.01, 0.0, 1.0, 9.36953373854208),
+            (0.01, 0.9, 1.2, 8.53051493483393),
+            (0.01, 1.2, 0.0, 8.96535750309147),
+            (0.1, 0.0, 0.0, 5.77046965840007),
+            (0.1, 0.3, 0.4, 5.48459527448686),
+            (0.1, -0.5, 0.5, 5.34282513259251),
+            (0.1, 0.0, 1.0, 4.78355172239662),
+            (0.1, 0.9, 1.2, 3.90920314136678),
+            (0.1, 1.2, 0.0, 4.30512798795341),
+        ];
+        for ((b, u, v, expected), sf, so) in itertools::iproduct!(cases, [-1.0, 1.0], [-1.0, 1.0]) {
+            let actual = vector_potential_circular_filament_finite_thickness_scalar(
+                (sf, 0.0, 1.0),
+                b,
+                (so * (1.0 + b * u), b * v),
+            ) / MU0_OVER_4PI;
+            // O((b/a)^2) model error: 0.01% at b/a=.01, 1% at b/a=.1.
+            assert!(
+                (actual - so * expected).abs() < b * b * expected,
+                "b={b}, u={u}, v={v}, actual={actual}, expected={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_very_thin_wire() {
+        // Direct complement remains finite even when the usual m rounds to one.
+        for (b, finite) in itertools::iproduct!([1e-8, 1e-12], [false, true]) {
+            for s in [2.0, 4.0] {
+                let a = if finite {
+                    vector_potential_circular_filament_finite_thickness_scalar(
+                        (1.0, 0.0, 1.0),
+                        b,
+                        (1.0, s * b),
+                    )
+                } else {
+                    vector_potential_circular_filament_scalar((1.0, 0.0, 1.0), (1.0, s * b))
+                };
+                let leading = MU0_OVER_4PI * (2.0 * (8.0 / (s * b)).ln() - 4.0);
+                assert!(approx(leading, a, 1e-9, 0.0));
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_blend_boundary_derivatives() {
+        let b = 0.01;
+        for theta in [0.0_f64, 0.7, 2.3, PI, 4.5] {
+            let potential = |s: f64| {
+                vector_potential_circular_filament_finite_thickness_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0 + s * theta.cos(), s * theta.sin()),
+                )
+            };
+            for boundary in [1.5 * b, 3.0 * b] {
+                let h = b * 1e-4;
+                let (fm, f0, fp) = (
+                    potential(boundary - h),
+                    potential(boundary),
+                    potential(boundary + h),
+                );
+                assert!((fp - fm).abs() < 1e-4 * f0.abs());
+                let left = (3.0 * f0 - 4.0 * fm + potential(boundary - 2.0 * h)) / (2.0 * h);
+                let right = (-3.0 * f0 + 4.0 * fp - potential(boundary + 2.0 * h)) / (2.0 * h);
+                assert!((left - right).abs() < 1e-7 * f0.abs() / b);
+                let left2 = (f0 - 2.0 * fm + potential(boundary - 2.0 * h)) / (h * h);
+                let right2 = (potential(boundary + 2.0 * h) - 2.0 * fp + f0) / (h * h);
+                assert!((left2 - right2).abs() < 5e-4 * f0.abs() / (b * b));
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_surface_continuity() {
+        let b = 0.01;
+        let h = b * 1e-5;
+        for i in 0..16 {
+            let theta = 2.0 * PI * i as f64 / 16.0;
+            let potential = |s: f64| {
+                vector_potential_circular_filament_finite_thickness_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0 + s * theta.cos(), s * theta.sin()),
+                )
+            };
+            let (inside, surface, outside) = (potential(b - h), potential(b), potential(b + h));
+            assert!((inside - surface).abs() < 3e-5 * MU0_OVER_4PI);
+            assert!((outside - surface).abs() < 3e-5 * MU0_OVER_4PI);
+            let derivative_inside = (surface - inside) / h;
+            let derivative_outside = (outside - surface) / h;
+            assert!((derivative_inside - derivative_outside).abs() < 1e-4 * MU0_OVER_4PI / b);
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_curl_matches_field_to_retained_order() {
+        for b in [0.01_f64, 0.001] {
+            let h = b * 1e-4;
+            for (u, v) in [(0.0, 0.0), (0.3, 0.4), (-0.5, 0.5), (0.9, 1.2)] {
+                let (r, z) = (1.0 + b * u, b * v);
+                let potential = |r, z| {
+                    vector_potential_circular_filament_finite_thickness_scalar_near(
+                        (1.0, 0.0, 1.0),
+                        b,
+                        (r, z),
+                    )
+                };
+                let br = -(potential(r, z + h) - potential(r, z - h)) / (2.0 * h);
+                let bz =
+                    ((r + h) * potential(r + h, z) - (r - h) * potential(r - h, z)) / (2.0 * h * r);
+                let expected = flux_density_circular_filament_finite_radius_scalar_near(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (r, z),
+                );
+                // The two asymptotic models retain different higher-order
+                // terms. Their curl agreement is O(b*ln(8/b)) in these units,
+                // or O(b^2*ln(8/b)) relative to the local cylinder field.
+                let tol = 2.0 * MU0_OVER_4PI * b * (8.0 / b).ln();
+                assert!((br - expected.0).hypot(bz - expected.1) < tol);
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_thickness_potential_centerline_and_scaling() {
+        for b in [0.01, 1e-8, 1e-12] {
+            let centerline = vector_potential_circular_filament_finite_thickness_scalar(
+                (1.0, 0.0, 1.0),
+                b,
+                (1.0, 0.0),
+            );
+            assert!(centerline.is_finite());
+            assert!((centerline / MU0_OVER_4PI - (2.0 * (8.0 / b).ln() - 3.0)).abs() < 1e-13);
+        }
+        for (u, v) in [(0.0, 0.0), (0.3, 0.4), (-0.9, 1.2)] {
+            let base = vector_potential_circular_filament_finite_thickness_scalar(
+                (1.0, 0.0, 1.0),
+                0.01,
+                (1.0 + 0.01 * u, 0.01 * v),
+            );
+            for scale in [1e-6, 1.0, 1e6] {
+                for current in [-3.0, 0.0, 2.0] {
+                    // A is invariant under uniform geometric scaling and
+                    // even under reflection about the loop plane.
+                    let actual = vector_potential_circular_filament_finite_thickness_scalar(
+                        (scale, 0.7 * scale, current),
+                        0.01 * scale,
+                        ((1.0 + 0.01 * u) * scale, (0.7 - 0.01 * v) * scale),
+                    );
+                    assert!((actual - current * base).abs() < 1e-12 * base.abs());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_zero_radius_off_axis_vectors_against_preserved_thin_kernel() {
+        for scale in [1e-6, 1.0, 1e6] {
+            let rfil = [-0.5 * scale, scale, -2.0 * scale];
+            let zfil = [0.0, scale, -0.5 * scale];
+            let current = [2.0, -3.0, 0.7];
+            let radii = [0.0; 3];
+            // The preserved kernel is singular on axis and loses precision near it.
+            let robs =
+                [-2.5, -1.0, -0.1, -3e-4, 3e-4, 0.01, 0.1, 0.3, 0.6, 1.0, 2.5].map(|r| r * scale);
+            let zobs = [0.25 * scale; 11];
+            for nsrc in [0, 1, 3] {
+                for nobs in [0, 1, 11] {
+                    let source = (&rfil[..nsrc], &zfil[..nsrc], &current[..nsrc]);
+                    let obs = (&robs[..nobs], &zobs[..nobs]);
+                    let (mut expected_r, mut expected_z) = (vec![1.0; nobs], vec![2.0; nobs]);
+                    flux_density_circular_filament_thin(
+                        (&rfil.map(f64::abs)[..nsrc], source.1, source.2),
+                        (&robs.map(f64::abs)[..nobs], obs.1),
+                        (&mut expected_r, &mut expected_z),
+                    )
+                    .unwrap();
+                    for (br, r) in expected_r.iter_mut().zip(&robs) {
+                        *br *= r.signum();
+                    }
+                    for calc in [
+                        flux_density_circular_filament,
+                        flux_density_circular_filament_par,
+                    ] {
+                        let (mut br, mut bz) = (vec![3.0; nobs], vec![4.0; nobs]);
+                        calc(source, &radii[..nsrc], obs, (&mut br, &mut bz)).unwrap();
+                        // The old K/E fits have up to 1.2e-7 vector error in these cases;
+                        // the new formulation has separate high-precision coverage.
+                        for j in 0..nobs {
+                            let error = (br[j] - expected_r[j]).hypot(bz[j] - expected_z[j]);
+                            assert!(
+                                error <= 2e-7 * expected_r[j].hypot(expected_z[j]),
+                                "r={}, error={error}",
+                                robs[j]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_chunk_nan_propagation() {
+        for zfil in [0.0, f64::NAN] {
+            // NaNs must use scalar dispatch even beside far-field observations on the axis.
+            for zobs in [[f64::NAN, 10.0], [10.0, f64::NAN], [10.0; 2]] {
+                for calc in [
+                    flux_density_circular_filament,
+                    flux_density_circular_filament_par,
+                ] {
+                    let (mut br, mut bz) = ([0.0; 2], [0.0; 2]);
+                    calc(
+                        (&[1.0], &[zfil], &[1.0]),
+                        &[0.01],
+                        (&[0.0; 2], &zobs),
+                        (&mut br, &mut bz),
+                    )
+                    .unwrap();
+                    for j in 0..2 {
+                        let expected = flux_density_circular_filament_finite_radius_scalar(
+                            (1.0, zfil, 1.0),
+                            0.01,
+                            (0.0, zobs[j]),
+                        );
+                        for (actual, expected) in [(br[j], expected.0), (bz[j], expected.1)] {
+                            assert!(actual == expected || (actual.is_nan() && expected.is_nan()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_vector_length_validation() {
+        for calc in [
+            flux_density_circular_filament,
+            flux_density_circular_filament_par,
+        ] {
+            let source = (&[1.0][..], &[0.0][..], &[2.0][..]);
+            let (mut br, mut bz) = ([3.0; 2], [4.0; 2]);
+            // Validate before modifying outputs, including in the parallel wrapper.
+            assert!(calc(source, &[], (&[0.0; 2], &[0.0; 2]), (&mut br, &mut bz)).is_err());
+            assert!(calc(source, &[0.01], (&[0.0; 2], &[0.0]), (&mut br, &mut bz)).is_err());
+            assert!(calc(source, &[0.01], (&[0.0], &[0.0]), (&mut br, &mut bz)).is_err());
+            assert!(
+                calc(
+                    (&[], &[0.0], &[2.0]),
+                    &[0.01],
+                    (&[0.0; 2], &[0.0; 2]),
+                    (&mut br, &mut bz)
+                )
+                .is_err()
+            );
+            assert_eq!(br, [3.0; 2]);
+            assert_eq!(bz, [4.0; 2]);
+            // Empty observation arrays must not bypass source/radius validation.
+            assert!(calc(source, &[], (&[], &[]), (&mut [], &mut [])).is_err());
+        }
+    }
+
+    #[test]
+    fn test_negative_wire_radius_scalar() {
+        let source = (1.0, 0.0, 1.0);
+        for radius in [-0.01, -1e-300, f64::NEG_INFINITY, f64::NAN] {
+            for obs in [(0.0, 1.0), (1.0, 0.0), (1.003, 0.004), (1.02, 0.01)] {
+                let b = flux_density_circular_filament_finite_radius_scalar(source, radius, obs);
+                let expected =
+                    flux_density_circular_filament_finite_radius_scalar(source, radius.abs(), obs);
+                for (actual, expected) in [(b.0, expected.0), (b.1, expected.1)] {
+                    assert!((actual.is_nan() && expected.is_nan()) || actual == expected);
+                }
+                for calc in [
+                    vector_potential_circular_filament_finite_thickness_scalar,
+                    flux_circular_filament_scalar,
+                ] {
+                    let actual = calc(source, radius, obs);
+                    let expected = calc(source, radius.abs(), obs);
+                    assert!((actual.is_nan() && expected.is_nan()) || actual == expected);
+                }
+                let xyz = (obs.0, 0.0, obs.1);
+                let loc = (0.0, 0.0, 0.0);
+                let normal = (0.0, 0.0, 1.0);
+                let b = flux_density_circular_filament_cartesian_scalar(
+                    (1.0, 1.0),
+                    loc,
+                    normal,
+                    radius,
+                    xyz,
+                );
+                let f = body_force_density_circular_filament_cartesian_scalar(
+                    (1.0, 1.0),
+                    loc,
+                    normal,
+                    radius,
+                    xyz,
+                    (1.0, 2.0, 3.0),
+                );
+                if !radius.is_finite() {
+                    assert!([b.0, b.1, b.2, f.0, f.1, f.2].iter().all(|v| v.is_nan()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_against_hurwitz_equations() {
+        let (a, zfil, current) = (2.0, -0.4, 3.0);
+        for aspect in [0.02, 0.1] {
+            let b = aspect * a;
+            // Direct periodic quadrature of equation 17, independent of the
+            // closed elliptic-integral reduction used by the scalar kernel.
+            let n = 65536;
+            let dphi = 2.0 * PI / n as f64;
+            let bz_reg = MU0_OVER_4PI
+                * current
+                * dphi
+                * (0..n)
+                    .map(|i| {
+                        let phi = (i as f64 + 0.5) * dphi;
+                        let numerator = a * a * (1.0 - phi.cos());
+                        numerator
+                            / (2.0 * numerator + b * b / core::f64::consts::E.sqrt()).powf(1.5)
+                    })
+                    .sum::<f64>();
+            for distance in [0.0, 0.3, 0.999, 1.0, 1.2, 2.0] {
+                let s = distance * b;
+                for theta in [0.0_f64, 0.7, 2.3, PI, 4.5] {
+                    // Paper's normal points inward: e2 = -eR, e3 = eZ.
+                    let obs = (a - s * theta.cos(), zfil + s * theta.sin());
+                    let cylinder =
+                        2.0 * MU0_OVER_4PI * current * if s <= b { s / (b * b) } else { 1.0 / s };
+                    let curvature = MU0_OVER_4PI * current / (2.0 * a);
+                    let (b2, b3) = if s <= b {
+                        (
+                            -s * s * (2.0 * theta).sin() / (2.0 * b * b),
+                            1.5 + s * s / (b * b) * ((2.0 * theta).cos() / 2.0 - 1.0),
+                        )
+                    } else {
+                        (
+                            (b * b / (2.0 * s * s) - 1.0) * (2.0 * theta).sin(),
+                            0.5 - 2.0 * (s / b).ln()
+                                + (1.0 - b * b / (2.0 * s * s)) * (2.0 * theta).cos(),
+                        )
+                    };
+                    let expected = (
+                        cylinder * theta.sin() - curvature * b2,
+                        bz_reg + cylinder * theta.cos() + curvature * b3,
+                    );
+                    let actual = flux_density_circular_filament_finite_radius_scalar_near(
+                        (a, zfil, current),
+                        b,
+                        obs,
+                    );
+                    // Absolute tolerance accounts for the elliptic-integral fits.
+                    let tol = 8e-8 * MU0_OVER_4PI * current / a;
+                    assert!((actual.0 - expected.0).abs() < tol);
+                    assert!((actual.1 - expected.1).abs() < tol);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_against_cross_section_integral() {
+        // Independent uniform-J disk integration of unit-current circular loops
+        // (a = I = 1), normalized by mu0*I/(4*pi*a). Observation-centered polar
+        // coordinates remove the 1/distance singularity via the area Jacobian.
+        // Reference: SciPy ellipkm1(d2/q), ellipe(1-d2/q), 256-point Gauss–Legendre
+        // radial quadrature and 1024 midpoint angles. Doubling both orders from
+        // 128/512 changed these vectors by less than 4e-10 relatively.
+        let cases = [
+            (0.01, 0.0, 0.0, 0.0, 6.68459083826242),
+            (0.01, 0.5, 0.0, 0.0, -93.3998252276275),
+            (0.01, 0.0, 0.5, 99.9780058466979, 6.49706713001394),
+            (0.01, 0.5, 0.5, 99.853938832051, -93.586570635344),
+            (0.01, -0.5, 0.5, 100.103633652062, 106.455855446888),
+            (0.1, 0.0, 0.0, 0.0, 4.38065660604968),
+            (0.1, 0.5, 0.0, 0.0, -5.81090160130197),
+            (0.1, 0.0, 0.5, 9.86653941687754, 4.19186834520168),
+            (0.1, 0.5, 0.5, 9.7576610149033, -5.99207737754346),
+            (0.1, -0.5, 0.5, 9.99007518217192, 14.2593819318384),
+        ];
+        for ((b, u, v, br, bz), sf, so) in itertools::iproduct!(cases, [-1.0, 1.0], [-1.0, 1.0]) {
+            let actual = flux_density_circular_filament_finite_radius_scalar(
+                (sf, 0.0, 1.0),
+                b,
+                (so * (1.0 + b * u), b * v),
+            );
+            let error = (actual.0 / MU0_OVER_4PI - so * br).hypot(actual.1 / MU0_OVER_4PI - bz);
+            // Model truncation, rather than quadrature or floating-point error,
+            // sets these tolerances: 0.03% at b/a=.01 and 3% at b/a=.1.
+            let rtol = if b == 0.01 { 3e-4 } else { 0.03 };
+            assert!(error < rtol * br.hypot(bz), "b={b}, u={u}, v={v}");
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_blend_boundary_derivatives() {
+        let b = 0.01;
+        for theta in [0.0_f64, 0.7, 2.3, PI, 4.5] {
+            let field = |s: f64| {
+                let bfield = flux_density_circular_filament_finite_radius_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0 + s * theta.cos(), s * theta.sin()),
+                );
+                nalgebra::Vector2::new(bfield.0, bfield.1)
+            };
+            for boundary in [1.5 * b, 3.0 * b] {
+                let f0 = field(boundary);
+                let h = b * 1e-4;
+                let fm = field(boundary - h);
+                let fp = field(boundary + h);
+                assert!((fp - fm).norm() < 2e-4 * f0.norm());
+                let left = (3.0 * f0 - 4.0 * fm + field(boundary - 2.0 * h)) / (2.0 * h);
+                let right = (-3.0 * f0 + 4.0 * fp - field(boundary + 2.0 * h)) / (2.0 * h);
+                assert!((left - right).norm() < 1e-6 * f0.norm() / b);
+                let left2 = (f0 - 2.0 * fm + field(boundary - 2.0 * h)) / (h * h);
+                let right2 = (field(boundary + 2.0 * h) - 2.0 * fp + f0) / (h * h);
+                assert!((left2 - right2).norm() < 5e-4 * f0.norm() / (b * b));
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_blend_cross_section_reference() {
+        // Uniform-J disk average of exact loop fields, normalized by mu0*I/(4*pi),
+        // a=I=1. SciPy ellipkm1(d2/q), ellipe(1-d2/q), Gauss-Legendre radial
+        // quadrature and midpoint angles. 64/256 and 96/384 orders agree to 1e-9.
+        // The b/a=.01 cases are covered by the Python vector/binding test.
+        let cases = [
+            (0.001, 0.0, 1.5, 1333.32470589469, 7.69283957723844),
+            (0.001, -1.2, 1.6, 800.411477286625, 607.677702849409),
+            (0.001, 2.0, 0.0, 0.0, -991.779560751434),
+            (0.001, 0.0, 2.5, 799.986480897578, 7.11089801984998),
+            (0.001, -1.8, 2.4, 533.774592569754, 407.265034216284),
+            (0.001, 4.0, 0.0, 0.0, -492.434936716417),
+        ];
+        for ((b, u, v, br, bz), sf, so) in itertools::iproduct!(cases, [-1.0, 1.0], [-1.0, 1.0]) {
+            let actual = flux_density_circular_filament_finite_radius_scalar(
+                (sf, 0.0, 1.0),
+                b,
+                (so * (1.0 + b * u), b * v),
+            );
+            let error = (actual.0 / MU0_OVER_4PI - so * br).hypot(actual.1 / MU0_OVER_4PI - bz);
+            let rtol = 5e-5;
+            assert!(
+                error < rtol * br.hypot(bz),
+                "b={b}, u={u}, v={v}, error={error}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_blend_very_thin_wire() {
+        for (b, finite) in itertools::iproduct!([1e-8, 1e-12], [false, true]) {
+            for distance in [1.4, 1.5, 2.0, 3.0, 4.0] {
+                let (br, bz) = if finite {
+                    flux_density_circular_filament_finite_radius_scalar(
+                        (1.0, 0.0, 1.0),
+                        b,
+                        (1.0, distance * b),
+                    )
+                } else {
+                    flux_density_circular_filament_scalar((1.0, 0.0, 1.0), (1.0, distance * b))
+                };
+                let cylinder = 2.0 * MU0_OVER_4PI / (distance * b);
+                assert!(
+                    br.is_finite() && bz.is_finite(),
+                    "b={b}, distance={distance}"
+                );
+                assert!((br / cylinder - 1.0).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_surface_continuity() {
+        let b = 0.01;
+        for i in 0..16 {
+            let theta = 2.0 * PI * i as f64 / 16.0;
+            let field = |s: f64| {
+                flux_density_circular_filament_finite_radius_scalar(
+                    (1.0, 0.0, 1.0),
+                    b,
+                    (1.0 + s * theta.cos(), s * theta.sin()),
+                )
+            };
+            let surface = field(b);
+            for s in [b * (1.0 - 1e-8), b * (1.0 + 1e-8)] {
+                let nearby = field(s);
+                assert!(
+                    (nearby.0 - surface.0).hypot(nearby.1 - surface.1)
+                        < 1e-7 * surface.0.hypot(surface.1)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_centerline_and_straight_wire_limit() {
+        // These aspect ratios round m to 1 if the complement is not retained.
+        for b in [1e-8, 1e-12] {
+            for current in [-3.0, 0.0, 2.0] {
+                let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+                    (1.0, 0.7, current),
+                    b,
+                    (1.0, 0.7),
+                );
+                let expected = MU0_OVER_4PI * current * (8.0 / b).ln();
+                assert_eq!(br, 0.0);
+                assert!((bz - expected).abs() <= 1e-12 * expected.abs());
+            }
+        }
+        let (br, bz) = flux_density_circular_filament_finite_radius_scalar(
+            (1e10, 0.0, 1.0),
+            0.1,
+            (1e10, 0.03),
+        );
+        let cylinder = 2.0 * MU0_OVER_4PI * 0.03 / 0.1_f64.powi(2);
+        assert!((br - cylinder).abs() < 1e-14 * cylinder);
+        assert!(bz.abs() < 1e-9 * cylinder);
+    }
+
+    #[test]
+    fn test_finite_radius_symmetry_and_scaling() {
+        for (u, v) in [(0.3, 0.4), (-0.8, 0.9), (1.2, 1.6), (-4.0, 3.0)] {
+            let base = flux_density_circular_filament_finite_radius_scalar(
+                (1.0, 0.0, 1.0),
+                0.01,
+                (1.0 + 0.01 * u, 0.01 * v),
+            );
+            for scale in [1e-6, 1.0, 1e6] {
+                for current in [-3.0, 0.0, 2.0] {
+                    // Include a z-translation and reflection about the loop plane.
+                    let actual = flux_density_circular_filament_finite_radius_scalar(
+                        (scale, 0.7 * scale, current),
+                        0.01 * scale,
+                        ((1.0 + 0.01 * u) * scale, (0.7 - 0.01 * v) * scale),
+                    );
+                    let expected = (-base.0 * current / scale, base.1 * current / scale);
+                    let tol = 1e-12 * expected.0.hypot(expected.1);
+                    assert!((actual.0 - expected.0).hypot(actual.1 - expected.1) <= tol);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_flux_density_on_axis() {
+        for radius in [-1e6_f64, -2.0, -0.3, -1e-6, 1e-6, 0.3, 2.0, 1e6] {
+            let zfil = 0.7 * radius;
+            for current in [-3.0, 0.0, 2.0] {
+                for offset in [-1e4, -2.0, 0.0, 2.0, 1e4] {
+                    let zobs = zfil + offset * radius;
+                    let dz = zobs - zfil;
+                    let expected = MU_0 * current * radius * radius
+                        / (2.0 * (radius * radius + dz * dz).powf(1.5));
+                    let on_axis =
+                        flux_density_circular_filament_on_axis((radius, zfil, current), zobs);
+                    assert!((on_axis.1 - expected).abs() <= 2e-15 * expected.abs());
+                    for robs in [0.0, -0.0] {
+                        let (br, bz) = flux_density_circular_filament_scalar(
+                            (radius, zfil, current),
+                            (robs, zobs),
+                        );
+                        assert_eq!(br, 0.0);
+                        assert!(
+                            (bz - expected).abs() <= 1e-11 * expected.abs(),
+                            "{bz} != {expected}"
+                        );
+                        let (bx, by, bz) = flux_density_circular_filament_cartesian_scalar(
+                            (radius, current),
+                            (0.0, 0.0, zfil),
+                            (0.0, 0.0, 1.0),
+                            0.0,
+                            (robs, robs, zobs),
+                        );
+                        assert_eq!(bx, 0.0);
+                        assert_eq!(by, 0.0);
+                        assert!((bz - expected).abs() <= 1e-11 * expected.abs());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finite_radius_radial_axis_limit() {
+        // Thick, non-overlapping loops can bring the axis into the blend band.
+        // Check regularity only: the local model is not accurate for thick loops.
+        for calc in [
+            flux_density_circular_filament_finite_radius_scalar_near,
+            flux_density_circular_filament_finite_radius_scalar,
+        ] {
+            for (a, b) in itertools::iproduct!([-1.0, 1.0], [0.01, 0.4, 0.8]) {
+                for r in [0.0, -0.0, 1e-12, -1e-12, 1e-8, -1e-8] {
+                    let (br, bz) = calc((a, 0.0, 1.0), b, (r, 0.1));
+                    assert!(br.is_finite() && bz.is_finite());
+                    assert_eq!(calc((a, 0.0, 1.0), b, (-r, 0.1)), (-br, bz));
+                    if r == 0.0 {
+                        assert_eq!(br, 0.0);
+                    } else {
+                        let half = calc((a, 0.0, 1.0), b, (0.5 * r, 0.1));
+                        assert!((2.0 * half.0 - br).abs() <= 1e-6 * br.abs());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_flux_density_landen_against_high_precision() {
+        // Original K/E expression evaluated by mpmath at 90 decimal digits,
+        // using the exact f64 coordinates, a=I=1, B normalized by mu0/(4*pi).
+        // Cover the removed axis cutoff, far-field decay, and near-wire behavior.
+        let cases = [
+            (0.0, 0.1, 0.0, 6.190102033291746),
+            (1e-10, 0.1, 9.193220841522396e-11, 6.190102033291746),
+            (1e-6, 0.1, 9.193220841539067e-7, 6.190102033296115),
+            (1e-4, 0.1, 9.193221008245843e-5, 6.190102076982301),
+            (0.5, 0.2, 1.343142703162336, 6.904221985351054),
+            (1.0, 1e-12, 2e12, 28.710462657608385),
+            (1.000000000001, 1e-12, 999911103368.8158, -999999996019.8307),
+            (1.0, 1e6, 9.424777960722256e-24, 6.283185307151312e-18),
+            (1e6, 1e6, 1.6660811018091271e-18, 5.553603672704726e-19),
+        ];
+        for ((r, z, br, bz), sf, so) in itertools::iproduct!(cases, [-1.0, 1.0], [-1.0, 1.0]) {
+            let actual = flux_density_circular_filament_scalar((sf, 0.0, 1.0), (so * r, z));
+            // Check each component, including very small radial fields.
+            for (value, expected) in [(actual.0, so * br), (actual.1, bz)] {
+                assert!(
+                    (value / MU0_OVER_4PI - expected).abs() <= 5e-8 * expected.abs(),
+                    "r={r}, z={z}, actual={}, expected={expected}",
+                    value / MU0_OVER_4PI
+                );
+            }
+        }
+        let source_field = flux_density_circular_filament_scalar((1.0, 0.0, 1.0), (1.0, 0.0));
+        assert!(!source_field.0.is_finite() || !source_field.1.is_finite());
+    }
 
     /// Make sure that force between a circular filament and a piecewise linear filament
     /// is equal and opposite
@@ -991,8 +2700,21 @@ mod test {
             &mut x.clone()[..n - 1],
             &mut x.clone()[..n - 1],
         );
-        body_force_density_circular_filament_cartesian(rzifil, xyzobs, j_vec, (outx, outy, outz))
-            .unwrap();
+        {
+            let (r, z, current) = rzifil;
+            let zero = vec![0.0; r.len()];
+            let one = vec![1.0; r.len()];
+            body_force_density_circular_filament_cartesian(
+                (r, current),
+                (&zero, &zero, z),
+                (&zero, &zero, &one),
+                &vec![0.0; rzifil.2.len()],
+                xyzobs,
+                j_vec,
+                (outx, outy, outz),
+            )
+        }
+        .unwrap();
         let out_sum: (f64, f64, f64) = (outx.iter().sum(), outy.iter().sum(), outz.iter().sum());
 
         // Calculate force from helix to circular filaments
@@ -1066,10 +2788,36 @@ mod test {
 
         // Do calcs
         let (bx0, by0, bz0) = (&mut x.clone()[..], &mut x.clone()[..], &mut x.clone()[..]);
-        flux_density_circular_filament_cartesian(rzifil, xyzobs, (bx0, by0, bz0)).unwrap();
+        {
+            let (r, z, current) = rzifil;
+            let zero = vec![0.0; r.len()];
+            let one = vec![1.0; r.len()];
+            flux_density_circular_filament_cartesian(
+                (r, current),
+                (&zero, &zero, z),
+                (&zero, &zero, &one),
+                &vec![0.0; rzifil.2.len()],
+                xyzobs,
+                (bx0, by0, bz0),
+            )
+        }
+        .unwrap();
 
         let (bx1, by1, bz1) = (&mut x.clone()[..], &mut x.clone()[..], &mut x.clone()[..]);
-        flux_density_circular_filament_cartesian_par(rzifil, xyzobs, (bx1, by1, bz1)).unwrap();
+        {
+            let (r, z, current) = rzifil;
+            let zero = vec![0.0; r.len()];
+            let one = vec![1.0; r.len()];
+            flux_density_circular_filament_cartesian_par(
+                (r, current),
+                (&zero, &zero, z),
+                (&zero, &zero, &one),
+                &vec![0.0; rzifil.2.len()],
+                xyzobs,
+                (bx1, by1, bz1),
+            )
+        }
+        .unwrap();
 
         let (bx2, by2, bz2) = (&mut x.clone()[..], &mut x.clone()[..], &mut x.clone()[..]);
         bx2.fill(0.0);
@@ -1210,14 +2958,19 @@ mod test {
         let vp = |r: f64, z: f64| {
             let mut out = [0.0];
 
-            vector_potential_circular_filament((&[rfil], &[zfil], &[1.0]), (&[r], &[z]), &mut out)
-                .unwrap();
+            vector_potential_circular_filament(
+                (&[rfil], &[zfil], &[1.0]),
+                &[0.0],
+                (&[r], &[z]),
+                &mut out,
+            )
+            .unwrap();
 
             out[0]
         };
 
         let zvals = [0.25, 0.5, 2.5, 10.0, 0.0, -10.0, -2.5, -0.5, -0.25];
-        let rvals = [0.25, 0.5, 2.5, 10.0];
+        let rvals = [-10.0, -2.5, -0.5, -0.25, 0.25, 0.5, 2.5, 10.0];
         // finite diff delta needs to be small enough to be accurate
         // but large enough that we can tell the difference between adjacent points
         // that are very far from the origin
@@ -1241,6 +2994,7 @@ mod test {
                 let mut bz = [0.0];
                 flux_density_circular_filament(
                     (&[rfil], &[zfil], &[1.0]),
+                    &[0.0],
                     (&[*r], &[*z]),
                     (&mut br, &mut bz),
                 )
@@ -1253,8 +3007,13 @@ mod test {
                 // psi = integral(dot(A, dL)) =  2pi * r * a
                 let psi_from_a = 2.0 * PI * *r * vp(*r, *z);
                 let mut psi = [0.0];
-                flux_circular_filament((&[rfil], &[zfil], &[1.0]), (&[*r], &[*z]), &mut psi)
-                    .unwrap();
+                flux_circular_filament(
+                    (&[rfil], &[zfil], &[1.0]),
+                    &[0.0],
+                    (&[*r], &[*z]),
+                    &mut psi,
+                )
+                .unwrap();
                 println!("{psi:?}, {psi_from_a}");
                 assert!(approx(psi_from_a, psi[0], 1e-10, 0.0)); // Should be very close to float roundoff
             }
@@ -1275,9 +3034,17 @@ mod test {
             .collect();
         let ifil: Vec<f64> = (0..NFIL).map(|i| i as f64).collect();
 
+        let wire_radius: Vec<f64> = (0..NFIL).map(|i| 0.001 * (i % 3) as f64).collect();
+
         // Build a scattering of observation locations
-        let rprime: Vec<f64> = (0..NOBS).map(|i| 2.0 * (i as f64).sin() + 2.1).collect();
-        let zprime: Vec<f64> = (0..NOBS).map(|i| 4.0 * (2.0 * i as f64).cos()).collect();
+        let mut rprime: Vec<f64> = (0..NOBS).map(|i| 2.0 * (i as f64).sin() + 2.1).collect();
+        let mut zprime: Vec<f64> = (0..NOBS).map(|i| 4.0 * (2.0 * i as f64).cos()).collect();
+
+        // Include a conductor centerline and its blend/far regions in the same batch.
+        for (j, distance) in [0.0, 2.0, 4.0].into_iter().enumerate() {
+            rprime[j] = rfil[1];
+            zprime[j] = zfil[1] + distance * wire_radius[1];
+        }
 
         // Some output storage
         // Initialize with different values for each buffer to test zeroing
@@ -1287,17 +3054,39 @@ mod test {
         let out3 = &mut [3.0; NOBS];
 
         // Flux
-        flux_circular_filament((&rfil, &zfil, &ifil), (&rprime, &zprime), out0).unwrap();
-        flux_circular_filament_par((&rfil, &zfil, &ifil), (&rprime, &zprime), out1).unwrap();
+        flux_circular_filament(
+            (&rfil, &zfil, &ifil),
+            &wire_radius,
+            (&rprime, &zprime),
+            out0,
+        )
+        .unwrap();
+        flux_circular_filament_par(
+            (&rfil, &zfil, &ifil),
+            &wire_radius,
+            (&rprime, &zprime),
+            out1,
+        )
+        .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out1[i]);
         }
 
         // Flux density
-        flux_density_circular_filament((&rfil, &zfil, &ifil), (&rprime, &zprime), (out0, out1))
-            .unwrap();
-        flux_density_circular_filament_par((&rfil, &zfil, &ifil), (&rprime, &zprime), (out2, out3))
-            .unwrap();
+        flux_density_circular_filament(
+            (&rfil, &zfil, &ifil),
+            &wire_radius,
+            (&rprime, &zprime),
+            (out0, out1),
+        )
+        .unwrap();
+        flux_density_circular_filament_par(
+            (&rfil, &zfil, &ifil),
+            &wire_radius,
+            (&rprime, &zprime),
+            (out2, out3),
+        )
+        .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out2[i]);
             assert_eq!(out1[i], out3[i]);
@@ -1306,10 +3095,20 @@ mod test {
         // Vector potential
         let out0 = &mut [0.0; NOBS]; // Reinit with different values to test zeroing
         let out1 = &mut [1.0; NOBS];
-        vector_potential_circular_filament((&rfil, &zfil, &ifil), (&rprime, &zprime), out0)
-            .unwrap();
-        vector_potential_circular_filament_par((&rfil, &zfil, &ifil), (&rprime, &zprime), out1)
-            .unwrap();
+        vector_potential_circular_filament(
+            (&rfil, &zfil, &ifil),
+            &wire_radius,
+            (&rprime, &zprime),
+            out0,
+        )
+        .unwrap();
+        vector_potential_circular_filament_par(
+            (&rfil, &zfil, &ifil),
+            &wire_radius,
+            (&rprime, &zprime),
+            out1,
+        )
+        .unwrap();
         for i in 0..NOBS {
             assert_eq!(out0[i], out1[i]);
         }

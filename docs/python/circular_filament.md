@@ -8,6 +8,8 @@
 
 ::: cfsem.vector_potential_circular_filament
 
+::: cfsem.vector_potential_circular_filament_cartesian
+
 ## Force
 
 ::: cfsem.body_force_density_circular_filament_cartesian

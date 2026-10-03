@@ -1,5 +1,10 @@
 # Changelog
 
+## 14.0.1 — 2026-09-03
+
+* Extend Python compatibility to 3.14 and include it in the test matrix.
+* Build ABI3 wheels with Python 3.14; retain the 14.0.0 numerical implementation.
+
 ## 14.0.0 2026-09-28
 
 Upgrade circular filament calcs to be faster, more robust, and increase functionality.

@@ -31,23 +31,22 @@ pub use convenience::{
     vector_potential_triangle_mesh_hierarchical_with_skip,
 };
 
-pub(crate) use crate::math::Scalar;
-pub(crate) use aabb::Aabb;
+pub use crate::math::Scalar;
+pub use aabb::Aabb;
+pub use convenience::one_shot_vec3;
 #[cfg(test)]
 pub(crate) use evaluator::eval_dense;
-pub(crate) use evaluator::{
-    EvaluationScratch, SourceNodeSummaries, scratch_len, scratch_len_par, update_summaries,
-};
 pub use evaluator::{
-    NearFieldInteractionMap, TraversalDiagnostics, eval, eval_par, traversal_diagnostics,
-    traversal_diagnostics_par,
+    EvaluationScratch, NearFieldInteractionMap, SourceNodeSummaries, TraversalDiagnostics, eval,
+    eval_par, scratch_len, scratch_len_par, traversal_diagnostics, traversal_diagnostics_par,
+    update_summaries,
 };
 pub use kernel::Skip;
-pub(crate) use kernel::{
+pub use kernel::{
     BoundedGeometry, BoundedGeometryCollection, HierarchicalError, HierarchicalKernel,
     SourceCollection, SourceMomentCollection, TargetCollection, geometric_accept_far,
 };
-pub(crate) use tree::{BuildMethod, ClusterTree, ClusterTreeView};
+pub use tree::{BuildMethod, ClusterTree, ClusterTreeView};
 
 #[cfg(test)]
 mod tests;

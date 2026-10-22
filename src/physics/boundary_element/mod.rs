@@ -31,6 +31,8 @@ mod vector_potential;
 #[cfg(test)]
 mod test;
 
+pub use triangle_potential::UniformTriangle;
+
 pub use flux_density::{
     flux_density_triangle, flux_density_triangle_mesh, flux_density_triangle_mesh_mapping,
     flux_density_triangle_mesh_mapping_par, flux_density_triangle_mesh_par,

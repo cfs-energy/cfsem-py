@@ -609,7 +609,28 @@ pub fn vector_potential_triangle_mesh_hierarchical_with_skip(
 }
 
 /// Build trees, evaluate a vector-valued hierarchical solve, and return diagnostics.
-pub(crate) fn one_shot_vec3<K, T, S, M, C>(
+///
+/// One-shot driver shared by the public convenience functions: validates
+/// lengths, builds the source tree, computes summaries from `moments`, and
+/// evaluates every target into `out`.
+///
+/// Args:
+///     kernel: Hierarchical kernel with a three-component output.
+///     sources: Source geometry collection.
+///     moments: Source moments, one per source.
+///     targets: Target collection.
+///     construction_method: Source-tree construction method.
+///     theta: Barnes-Hut acceptance angle (dimensionless).
+///     par: Whether to evaluate targets in parallel.
+///     skip: Optional near-field self-interaction skip rule.
+///     extra_diagnostics: Whether to collect traversal diagnostics.
+///     out: Output component buffers `(x, y, z)`, one entry per target, in the
+///         kernel's output units.
+///
+/// Returns:
+///     Tree and traversal diagnostics, or a [`HierarchicalError`] on length
+///     mismatch or tree-construction failure.
+pub fn one_shot_vec3<K, T, S, M, C>(
     kernel: K,
     sources: S,
     moments: M,

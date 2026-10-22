@@ -10,8 +10,15 @@ use crate::mesh::elements::tri::tri3::closest_point;
 const SURFACE_EPSILON_FACTOR: f64 = 64.0;
 
 /// Cached geometry for exact potential evaluation on a nondegenerate triangle.
+///
+/// The triangle carries a uniform unit source density. [`Self::scalar_potential`]
+/// returns `∫ dS' / |r - r'|` over the triangle and
+/// [`Self::scalar_potential_gradient`] its observation-point gradient, both in
+/// closed form and finite at every observation point except the gradient on
+/// the triangle's own edges. Multiplying by `μ0/4π` and a constant surface
+/// current density gives the triangle's vector potential.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct UniformTriangle<T: Scalar> {
+pub struct UniformTriangle<T: Scalar> {
     nodes: [[T; 3]; 3],
     normal: [T; 3],
     edge_tangent: [[T; 3]; 3],
@@ -22,8 +29,18 @@ pub(crate) struct UniformTriangle<T: Scalar> {
 
 impl<T: Scalar> UniformTriangle<T> {
     /// Construct cached geometry for a nondegenerate, oriented triangle.
+    ///
+    /// Args:
+    ///     n0: Vertex 0 coordinates `[x, y, z]` (m).
+    ///     n1: Vertex 1 coordinates `[x, y, z]` (m).
+    ///     n2: Vertex 2 coordinates `[x, y, z]` (m).
+    ///
+    /// Returns:
+    ///     Cached edge frames, unit normal `(n1 - n0) x (n2 - n0)` normalized,
+    ///     and edge lengths. A degenerate triangle trips a debug assertion and
+    ///     yields non-finite geometry in release builds.
     #[inline]
-    pub(crate) fn new(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> Self {
+    pub fn new(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> Self {
         let nodes = [n0, n1, n2];
         let raw_normal = cross3(sub3(n1, n0), sub3(n2, n0));
         let twice_area = norm3(raw_normal);
@@ -56,26 +73,54 @@ impl<T: Scalar> UniformTriangle<T> {
         }
     }
 
+    /// Triangle vertices `[n0, n1, n2]` (m).
     #[inline]
-    pub(crate) fn nodes(&self) -> [[T; 3]; 3] {
+    pub fn nodes(&self) -> [[T; 3]; 3] {
         self.nodes
     }
 
-    /// Return the exact scalar potential, in metres.
+    /// Unit normal from the vertex orientation (dimensionless).
+    ///
+    /// Right-handed with respect to `n0 -> n1 -> n2`.
+    #[inline]
+    pub fn normal(&self) -> [T; 3] {
+        self.normal
+    }
+
+    /// Return the exact scalar potential `∫ dS' / |r - r'|` (m).
+    ///
+    /// Finite and continuous everywhere, including on the triangle, its edges
+    /// and its vertices.
+    ///
+    /// Args:
+    ///     obs: Observation point `[x, y, z]` (m).
+    ///
+    /// Returns:
+    ///     The potential of a unit uniform source density on the triangle (m).
     ///
     /// References:
     /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), including limiting cases.
     #[inline]
-    pub(crate) fn scalar_potential(&self, obs: [T; 3]) -> T {
+    pub fn scalar_potential(&self, obs: [T; 3]) -> T {
         let d = dot3(sub3(obs, self.nodes[0]), self.normal);
         let mut value = T::ZERO;
+        let d2 = d * d;
         for edge in 0..3 {
-            let h = dot3(sub3(self.nodes[edge], obs), self.edge_outward[edge]);
+            let rel = sub3(self.nodes[edge], obs);
+            let h = dot3(rel, self.edge_outward[edge]);
             // Apply the analytic h log(h) -> 0 limit on an edge or vertex.
             if h == T::ZERO && d == T::ZERO {
                 continue;
             }
-            value = value + h * self.edge_integral(edge, obs, d);
+            let along_start = dot3(rel, self.edge_tangent[edge]);
+            let along_end = along_start + self.edge_length[edge];
+            let transverse = h.mul_add(h, d2).sqrt();
+            let integral = if transverse > T::ZERO {
+                asinh_difference(along_end / transverse, along_start / transverse)
+            } else {
+                self.edge_integral(edge, obs, d)
+            };
+            value = value + h * integral;
         }
         value - d * self.signed_solid_angle(obs)
     }
@@ -85,10 +130,17 @@ impl<T: Scalar> UniformTriangle<T> {
     /// The caller chooses a convention on the source triangle, where the
     /// normal component is discontinuous.
     ///
+    /// Args:
+    ///     obs: Observation point `[x, y, z]` (m).
+    ///
+    /// Returns:
+    ///     `∇_obs ∫ dS' / |r - r'|` (dimensionless); non-finite on the
+    ///     triangle's edges.
+    ///
     /// References:
     /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), including limiting cases.
     #[inline]
-    pub(crate) fn scalar_potential_gradient(&self, obs: [T; 3]) -> [T; 3] {
+    pub fn scalar_potential_gradient(&self, obs: [T; 3]) -> [T; 3] {
         let d = dot3(sub3(obs, self.nodes[0]), self.normal);
         let mut gradient = [T::ZERO; 3];
         for edge in 0..3 {
@@ -105,8 +157,18 @@ impl<T: Scalar> UniformTriangle<T> {
     }
 
     /// Return true only when the point is represented on the finite triangle.
+    ///
+    /// The tolerance is a fixed multiple of machine epsilon times the larger
+    /// of the point's coordinate magnitude and the longest edge, so recomputed
+    /// mesh points (centroids, quadrature points) are classified on-surface.
+    ///
+    /// Args:
+    ///     obs: Observation point `[x, y, z]` (m).
+    ///
+    /// Returns:
+    ///     Whether `obs` lies on the closed triangle to that tolerance.
     #[inline]
-    pub(crate) fn contains_on_surface(&self, obs: [T; 3]) -> bool {
+    pub fn contains_on_surface(&self, obs: [T; 3]) -> bool {
         let closest = closest_point(obs, self.nodes[0], self.nodes[1], self.nodes[2]);
         let delta = sub3(obs, closest);
         let factor = crate::math::cast::<T>(SURFACE_EPSILON_FACTOR);
@@ -163,9 +225,91 @@ impl<T: Scalar> UniformTriangle<T> {
     }
 }
 
+/// `asinh(a) - asinh(b)` with one logarithm instead of two (dimensionless).
+///
+/// With `p(x) = |x| + sqrt(x² + 1)` and `asinh(x) = sign(x)·ln p(x)`, the
+/// difference is `ln(p(a)^{±1} / p(b)^{±1})`. It is evaluated as `ln_1p` of
+/// an argument built from `q(x) = p(x) - 1 = |x| + x² / (sqrt(x² + 1) + 1)`,
+/// which keeps full relative precision when both arguments are small (the
+/// far-field regime, where the two `asinh` values nearly cancel).
+#[inline]
+fn asinh_difference<T: Scalar>(a: T, b: T) -> T {
+    #[inline]
+    fn q<T: Scalar>(x: T) -> T {
+        let root = x.mul_add(x, T::ONE).sqrt();
+        x.abs() + x * x / (root + T::ONE)
+    }
+    let (qa, qb) = (q(a), q(b));
+    match (a >= T::ZERO, b >= T::ZERO) {
+        // ln(pa / pb)
+        (true, true) => ((qa - qb) / (T::ONE + qb)).ln_1p(),
+        // ln(pa · pb)
+        (true, false) => qa.mul_add(qb, qa + qb).ln_1p(),
+        // -ln(pa · pb)
+        (false, true) => T::ZERO - qa.mul_add(qb, qa + qb).ln_1p(),
+        // ln(pb / pa)
+        (false, false) => ((qb - qa) / (T::ONE + qa)).ln_1p(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::UniformTriangle;
+    use super::{UniformTriangle, asinh_difference};
+
+    #[test]
+    fn asinh_difference_matches_libm() {
+        for (a, b) in [
+            (3.0_f64, 1.0_f64),
+            (-3.0, -1.0),
+            (3.0, -1.0),
+            (-0.2, 0.7),
+            (1e6, 1e6 - 3.0),
+            (-1e6, -1e6 + 2.0),
+            (1e-9, -1e-9),
+            (0.0, 2.0),
+        ] {
+            let exact = a.asinh() - b.asinh();
+            let fast = asinh_difference(a, b);
+            // libm's difference itself carries the rounding of two large asinh values.
+            let tolerance = 8.0 * f64::EPSILON * (a.asinh().abs() + b.asinh().abs() + exact.abs());
+            assert!(
+                (fast - exact).abs() <= tolerance,
+                "a={a} b={b}: {fast} vs {exact}"
+            );
+        }
+    }
+
+    #[test]
+    fn potential_matches_vector_potential_triangle() {
+        // The public vector potential is MU0/4π · J · Φ with J the unit
+        // basis current density.
+        use crate::physics::boundary_element::{
+            triangle_basis_current_densities, vector_potential_triangle,
+        };
+        let n = [[0.0, 0.0, 0.0], [0.04, 0.0, 0.0], [0.006, 0.03, 0.0]];
+        let tri = UniformTriangle::new(n[0], n[1], n[2]);
+        for obs in [[0.01, 0.01, 0.0], [0.01, 0.01, 0.003], [0.2, -0.1, 0.05]] {
+            let a = vector_potential_triangle(n[0], n[1], n[2], [1.0, 0.0, 0.0], obs);
+            let j = triangle_basis_current_densities(n[0], n[1], n[2])[0];
+            let expected = crate::MU0_OVER_4PI * tri.scalar_potential(obs);
+            for axis in 0..3 {
+                assert!(
+                    approx(a[axis], expected * j[axis], 1e-13, 1e-20),
+                    "obs={obs:?} axis={axis} vector_potential={} potential={}",
+                    a[axis],
+                    expected * j[axis]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn normal_is_right_handed_unit() {
+        let tri = UniformTriangle::new([0.0_f64, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 3.0, 0.0]);
+        assert_eq!(tri.normal(), [0.0, 0.0, 1.0]);
+        let flipped = UniformTriangle::new([0.0_f64, 0.0, 0.0], [0.0, 3.0, 0.0], [2.0, 0.0, 0.0]);
+        assert_eq!(flipped.normal(), [0.0, 0.0, -1.0]);
+    }
 
     fn approx(a: f64, b: f64, rel: f64, abs: f64) -> bool {
         (a - b).abs() <= abs.max(rel * a.abs().max(b.abs()))

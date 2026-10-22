@@ -201,7 +201,18 @@ where
 
 #[inline]
 /// Combine boundary-element child summaries into a parent source summary.
-pub(super) fn combine_source_summaries<T: Scalar>(
+///
+/// The parent origin is the current-weight average of the child origins;
+/// current elements add; dipole moments add after translation to the parent
+/// origin.
+///
+/// Args:
+///     children: Child summaries.
+///     out: Parent summary, overwritten.
+///
+/// Returns:
+///     [`HierarchicalError::Ok`].
+pub fn combine_source_summaries<T: Scalar>(
     children: &[BoundaryElementSummary<T>],
     out: &mut BoundaryElementSummary<T>,
 ) -> HierarchicalError {
@@ -237,7 +248,17 @@ pub(super) fn combine_source_summaries<T: Scalar>(
 
 #[inline]
 /// Accumulate one boundary-element source and current into a summary.
-fn add_source_to_summary<T: Scalar>(
+///
+/// Adds the triangle's current element `K A` (A m), its current-weighted
+/// centroid and its dipole moment about the coordinate origin. Triangles with
+/// zero area or zero current are skipped. Call
+/// [`finalize_leaf_source_summary`] once after the last source of a leaf.
+///
+/// Args:
+///     source: Source triangle (m).
+///     moment: Nodal stream-function values `[s0, s1, s2]` (A).
+///     out: Summary accumulator, started from `BoundaryElementSummary::default()`.
+pub fn add_source_to_summary<T: Scalar>(
     source: &BoundaryElementTriangle<T>,
     moment: [T; 3],
     out: &mut BoundaryElementSummary<T>,
@@ -273,7 +294,13 @@ fn add_source_to_summary<T: Scalar>(
 
 #[inline]
 /// Normalize accumulated boundary-element centroid fields after leaf accumulation.
-fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<T>) {
+///
+/// Divides the accumulated origin by the current weight and moves the dipole
+/// moment from the coordinate origin to the summary origin.
+///
+/// Args:
+///     summary: Summary built by [`add_source_to_summary`], updated in place.
+pub fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<T>) {
     if summary.weight > T::ZERO {
         summary.origin = scale3(summary.origin, T::ONE / summary.weight);
     }
@@ -289,13 +316,31 @@ fn finalize_leaf_source_summary<T: Scalar>(summary: &mut BoundaryElementSummary<
 
 #[inline]
 /// Return whether a boundary-element summary carries nonzero current.
-pub(super) fn has_current<T: Scalar>(summary: &BoundaryElementSummary<T>) -> bool {
+///
+/// Args:
+///     summary: Source summary.
+///
+/// Returns:
+///     `true` when the net current element is nonzero.
+pub fn has_current<T: Scalar>(summary: &BoundaryElementSummary<T>) -> bool {
     norm3(summary.current_element) > T::ZERO
 }
 
 /// Apply the BEM current-closure guard and geometric acceptance test.
-#[inline]
-pub(super) fn boundary_element_accept_far<T: Scalar>(
+///
+/// Rejects summaries whose closure ratio `|Σ K A| / Σ |K A|` lies between the
+/// closed-loop and open-patch regimes (neither the dipole nor the current
+/// element term dominates), then applies [`geometric_accept_far`].
+///
+/// Args:
+///     target_aabb: Bounding box of the target cluster (m).
+///     source_aabb: Bounding box of the source cluster (m).
+///     source: Source summary.
+///     theta: Acceptance angle (dimensionless).
+///
+/// Returns:
+///     Whether the source cluster may be evaluated through its summary.
+pub fn boundary_element_accept_far<T: Scalar>(
     target_aabb: Aabb<T>,
     source_aabb: Aabb<T>,
     source: &BoundaryElementSummary<T>,

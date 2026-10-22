@@ -12,7 +12,8 @@ mod linear_filament_vector_potential;
 
 pub use boundary_element::{
     BoundaryElementNodalValues, BoundaryElementSummary, BoundaryElementTriangle,
-    BoundaryElementTriangles,
+    BoundaryElementTriangles, add_source_to_summary, boundary_element_accept_far,
+    combine_source_summaries, finalize_leaf_source_summary, has_current,
 };
 pub use boundary_element_flux_density::BoundaryElementFluxDensityKernel;
 pub use boundary_element_vector_potential::BoundaryElementVectorPotentialKernel;

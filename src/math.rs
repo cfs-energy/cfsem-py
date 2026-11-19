@@ -448,6 +448,27 @@ pub(crate) fn point_line_distance_with_endpoints<T: Scalar>(
     }
 }
 
+/// `asinh(a) - asinh(b)` with one logarithm instead of two (dimensionless).
+///
+/// With `p(x) = |x| + sqrt(x² + 1)` and `asinh(x) = sign(x)·ln p(x)`, the
+/// difference is `ln(p(a)^{±1} · p(b)^{∓1})`, evaluated as `ln_1p` of an
+/// argument built from `q(x) = p(x) - 1 = |x| + x² / (sqrt(x² + 1) + 1)` so
+/// that nearly cancelling far-field values keep full relative precision.
+#[inline]
+pub fn asinh_difference<T: Scalar>(a: T, b: T) -> T {
+    #[inline]
+    fn q<T: Scalar>(x: T) -> T {
+        x.abs() + x * x / (x.mul_add(x, T::ONE).sqrt() + T::ONE)
+    }
+    let (qa, qb) = (q(a), q(b));
+    match (a >= T::ZERO, b >= T::ZERO) {
+        (true, true) => ((qa - qb) / (T::ONE + qb)).ln_1p(),
+        (false, false) => ((qb - qa) / (T::ONE + qa)).ln_1p(),
+        (true, false) => qa.mul_add(qb, qa + qb).ln_1p(),
+        (false, true) => T::ZERO - qa.mul_add(qb, qa + qb).ln_1p(),
+    }
+}
+
 /// Clip NaN values to the provided value.
 /// This is carefully organized to avoid producing any `jmp`
 /// instructions on modern-as-of-2025 systems.
@@ -484,7 +505,30 @@ pub fn switch_float(left: f64, right: f64, cond: bool) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ellipd, ellipd_complement, ellipe_complement, ellipk_complement};
+    use super::{
+        asinh_difference, ellipd, ellipd_complement, ellipe_complement, ellipk_complement,
+    };
+
+    #[test]
+    fn asinh_difference_matches_two_asinh() {
+        // Sign cases, a nearly cancelling far-field pair, and the largest magnitude
+        // the triangle edge integral's fast path accepts.
+        for (a, b) in [
+            (3.0_f64, 1.0_f64),
+            (-3.0, -1.0),
+            (3.0, -1.0),
+            (-0.2, 0.7),
+            (1e6, 1e6 - 3.0),
+            (1e150, -2e150),
+        ] {
+            let exact = a.asinh() - b.asinh();
+            let tolerance = 8.0 * f64::EPSILON * (a.asinh().abs() + b.asinh().abs());
+            assert!(
+                (asinh_difference(a, b) - exact).abs() <= tolerance,
+                "a={a} b={b}"
+            );
+        }
+    }
 
     #[test]
     fn elliptic_d() {

@@ -141,15 +141,9 @@ impl<T: Scalar> UniformTriangle<T> {
         if transverse > T::ZERO {
             let a = along_end / transverse;
             let b = along_start / transverse;
-            // The single-log form squares its arguments and, for mixed signs,
-            // multiplies q(a)·q(b) ≈ 4|a||b|, so it overflows once |a|, |b|
-            // approach sqrt(max)/2. Accuracy is not at stake (both forms are
-            // exact to rounding at any magnitude), so the cutoff only has to sit
-            // below that point: sqrt(max)/1e4 keeps four decades of headroom
-            // (about 1e150 in f64, 2e15 in f32). Expressing it through
-            // T::max_value() rather than a literal keeps it nonzero in f32. The
-            // regime is unreachable for mesh points, which are either exactly on
-            // an edge line (transverse == 0, handled above) or many epsilons off.
+            // Fast path that works when the observation point is not close to the edge.
+            // asinh_difference overflows for points too close to the edge. The cutoff is
+            // 1e4 below sqrt(T::MAX), where its squared arguments start to overflow.
             let limit = crate::math::cast::<T>(1e4) / T::max_value().sqrt();
             if transverse > limit * along_start.abs().max(along_end.abs()) {
                 return asinh_difference(a, b);

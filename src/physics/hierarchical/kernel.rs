@@ -443,7 +443,7 @@ pub trait HierarchicalKernel: Sized {
 /// This helper is shared by the default kernel implementation and kernel-specific
 /// acceptance hooks that first modify the effective `theta` value.
 #[inline]
-pub(crate) fn geometric_accept_far<T: Scalar>(
+pub fn geometric_accept_far<T: Scalar>(
     target_aabb: Aabb<T>,
     source_aabb: Aabb<T>,
     theta: T,

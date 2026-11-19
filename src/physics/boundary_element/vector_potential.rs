@@ -19,7 +19,7 @@ use crate::mesh::TriangleMeshView;
 /// References:
 /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
 #[inline]
-fn triangle_vector_potential_exact<T: Scalar>(
+pub fn triangle_vector_potential_exact<T: Scalar>(
     triangle: &UniformTriangle<T>,
     current_density: [T; 3],
     obs: [T; 3],
@@ -35,7 +35,7 @@ fn triangle_vector_potential_exact<T: Scalar>(
 /// References:
 /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21).
 #[inline]
-fn triangle_vector_potential_bases_exact<T: Scalar>(
+pub fn triangle_vector_potential_bases_exact<T: Scalar>(
     triangle: &UniformTriangle<T>,
     obs: [T; 3],
 ) -> [[T; 3]; 3] {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 14.1.0 2026-11-19
+
+* Rust
+    * Publish the building blocks for downstream `HierarchicalKernel` implementations: `UniformTriangle` (exact uniform-triangle potential, with a new `normal()` accessor) and the cached-triangle field helpers `triangle_{vector_potential,flux_density}_exact` and `_bases_exact` from `boundary_element`, and `one_shot_vec3`, `geometric_accept_far`, the tree, evaluator and kernel-trait items re-exported from `hierarchical`
+    * Evaluate each uniform-triangle edge integral `asinh(a) - asinh(b)` with a single `ln_1p`; the exact triangle potential and its gradient evaluate 30 to 40 percent faster, and boundary-element vector potential, flux density and inductance change by a few rounding units
+
 ## 14.0.1 — 2026-09-03
 
 * Extend Python compatibility to 3.14 and include it in the test matrix.

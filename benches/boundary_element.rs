@@ -3,7 +3,7 @@
 use cfsem::MU0_OVER_4PI;
 use cfsem::mesh::TriangleMeshView;
 use cfsem::physics::boundary_element::{
-    QuadratureKind, flux_density_triangle, triangle_geometric_coupling,
+    QuadratureKind, UniformTriangle, flux_density_triangle, triangle_geometric_coupling,
     triangle_geometric_coupling_regular, triangle_mesh_inductance_matrix_par,
     vector_potential_triangle,
 };
@@ -406,11 +406,28 @@ fn bench_triangle_vector_potential(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_uniform_triangle_potential(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Uniform triangle potential");
+    group.sample_size(20);
+    group.measurement_time(Duration::from_secs(3));
+    let tri = UniformTriangle::new([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    for (label, obs) in [("near", [0.25, 0.25, 0.1]), ("far", [0.25, 0.25, 10.0])] {
+        group.bench_function(BenchmarkId::new("scalar_potential", label), |b| {
+            b.iter(|| black_box(tri).scalar_potential(black_box(obs)))
+        });
+        group.bench_function(BenchmarkId::new("scalar_potential_gradient", label), |b| {
+            b.iter(|| black_box(tri).scalar_potential_gradient(black_box(obs)))
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_triangle_coupling,
     bench_inductance_assembly,
     bench_triangle_flux_density,
-    bench_triangle_vector_potential
+    bench_triangle_vector_potential,
+    bench_uniform_triangle_potential
 );
 criterion_main!(benches);

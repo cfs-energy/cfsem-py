@@ -11,7 +11,7 @@ const SURFACE_EPSILON_FACTOR: f64 = 64.0;
 
 /// Cached geometry for exact potential evaluation on a nondegenerate triangle.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct UniformTriangle<T: Scalar> {
+pub struct UniformTriangle<T: Scalar> {
     nodes: [[T; 3]; 3],
     normal: [T; 3],
     edge_tangent: [[T; 3]; 3],
@@ -23,7 +23,7 @@ pub(crate) struct UniformTriangle<T: Scalar> {
 impl<T: Scalar> UniformTriangle<T> {
     /// Construct cached geometry for a nondegenerate, oriented triangle.
     #[inline]
-    pub(crate) fn new(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> Self {
+    pub fn new(n0: [T; 3], n1: [T; 3], n2: [T; 3]) -> Self {
         let nodes = [n0, n1, n2];
         let raw_normal = cross3(sub3(n1, n0), sub3(n2, n0));
         let twice_area = norm3(raw_normal);
@@ -56,9 +56,16 @@ impl<T: Scalar> UniformTriangle<T> {
         }
     }
 
+    /// Triangle vertices `[n0, n1, n2]` (m).
     #[inline]
-    pub(crate) fn nodes(&self) -> [[T; 3]; 3] {
+    pub fn nodes(&self) -> [[T; 3]; 3] {
         self.nodes
+    }
+
+    /// Unit normal, right-handed with respect to `n0 -> n1 -> n2` (dimensionless).
+    #[inline]
+    pub fn normal(&self) -> [T; 3] {
+        self.normal
     }
 
     /// Return the exact scalar potential, in metres.
@@ -66,7 +73,7 @@ impl<T: Scalar> UniformTriangle<T> {
     /// References:
     /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), including limiting cases.
     #[inline]
-    pub(crate) fn scalar_potential(&self, obs: [T; 3]) -> T {
+    pub fn scalar_potential(&self, obs: [T; 3]) -> T {
         let d = dot3(sub3(obs, self.nodes[0]), self.normal);
         let mut value = T::ZERO;
         for edge in 0..3 {
@@ -88,7 +95,7 @@ impl<T: Scalar> UniformTriangle<T> {
     /// References:
     /// - \[8\], Eqs. (5)-(9), (15), and (19)-(21), including limiting cases.
     #[inline]
-    pub(crate) fn scalar_potential_gradient(&self, obs: [T; 3]) -> [T; 3] {
+    pub fn scalar_potential_gradient(&self, obs: [T; 3]) -> [T; 3] {
         let d = dot3(sub3(obs, self.nodes[0]), self.normal);
         let mut gradient = [T::ZERO; 3];
         for edge in 0..3 {
@@ -106,7 +113,7 @@ impl<T: Scalar> UniformTriangle<T> {
 
     /// Return true only when the point is represented on the finite triangle.
     #[inline]
-    pub(crate) fn contains_on_surface(&self, obs: [T; 3]) -> bool {
+    pub fn contains_on_surface(&self, obs: [T; 3]) -> bool {
         let closest = closest_point(obs, self.nodes[0], self.nodes[1], self.nodes[2]);
         let delta = sub3(obs, closest);
         let factor = crate::math::cast::<T>(SURFACE_EPSILON_FACTOR);
@@ -132,7 +139,16 @@ impl<T: Scalar> UniformTriangle<T> {
         let transverse = h.mul_add(h, d * d).sqrt();
 
         if transverse > T::ZERO {
-            return (along_end / transverse).asinh() - (along_start / transverse).asinh();
+            let a = along_end / transverse;
+            let b = along_start / transverse;
+            // Fast path that works when the observation point is not close to the edge.
+            // asinh_difference overflows for points too close to the edge. The cutoff is
+            // 1e4 below sqrt(T::MAX), where its squared arguments start to overflow.
+            let limit = crate::math::cast::<T>(1e4) / T::max_value().sqrt();
+            if transverse > limit * along_start.abs().max(along_end.abs()) {
+                return asinh_difference(a, b);
+            }
+            return a.asinh() - b.asinh();
         }
 
         // Coplanar and on the edge line, but outside the finite segment.
@@ -163,9 +179,62 @@ impl<T: Scalar> UniformTriangle<T> {
     }
 }
 
+/// `asinh(a) - asinh(b)` with one logarithm instead of two (dimensionless).
+///
+/// With `p(x) = |x| + sqrt(x² + 1)` and `asinh(x) = sign(x)·ln p(x)`, the
+/// difference is `ln(p(a)^{±1} · p(b)^{∓1})`, evaluated as `ln_1p` of an
+/// argument built from `q(x) = p(x) - 1 = |x| + x² / (sqrt(x² + 1) + 1)` so
+/// that nearly cancelling far-field values keep full relative precision.
+#[inline]
+fn asinh_difference<T: Scalar>(a: T, b: T) -> T {
+    #[inline]
+    fn q<T: Scalar>(x: T) -> T {
+        x.abs() + x * x / (x.mul_add(x, T::ONE).sqrt() + T::ONE)
+    }
+    let (qa, qb) = (q(a), q(b));
+    match (a >= T::ZERO, b >= T::ZERO) {
+        (true, true) => ((qa - qb) / (T::ONE + qb)).ln_1p(),
+        (false, false) => ((qb - qa) / (T::ONE + qa)).ln_1p(),
+        (true, false) => qa.mul_add(qb, qa + qb).ln_1p(),
+        (false, true) => T::ZERO - qa.mul_add(qb, qa + qb).ln_1p(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::UniformTriangle;
+    use super::{UniformTriangle, asinh_difference};
+
+    #[test]
+    fn single_log_edge_integral_matches_two_asinh() {
+        // Sign cases, a nearly cancelling far-field pair, and the largest magnitude
+        // the fast path accepts.
+        for (a, b) in [
+            (3.0_f64, 1.0_f64),
+            (-3.0, -1.0),
+            (3.0, -1.0),
+            (-0.2, 0.7),
+            (1e6, 1e6 - 3.0),
+            (1e150, -2e150),
+        ] {
+            let exact = a.asinh() - b.asinh();
+            let tolerance = 8.0 * f64::EPSILON * (a.asinh().abs() + b.asinh().abs());
+            assert!(
+                (asinh_difference(a, b) - exact).abs() <= tolerance,
+                "a={a} b={b}"
+            );
+        }
+        // Beyond that ratio (here 2e155, where x² overflows) the exact fallback
+        // keeps the potential finite and continuous with the on-line value.
+        let tri = UniformTriangle::new([0.0_f64, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let (near, on) = (
+            tri.scalar_potential([2.0, -1e-155, 0.0]),
+            tri.scalar_potential([2.0, 0.0, 0.0]),
+        );
+        assert!(
+            near.is_finite() && approx(near, on, 1e-14, 0.0),
+            "{near} vs {on}"
+        );
+    }
 
     fn approx(a: f64, b: f64, rel: f64, abs: f64) -> bool {
         (a - b).abs() <= abs.max(rel * a.abs().max(b.abs()))
